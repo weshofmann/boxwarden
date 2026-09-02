@@ -95,6 +95,8 @@ required_files=(
   "${repo_root}/scripts/spike/finalize-clone.sh"
   "${repo_root}/guest/ubuntu-24.04-arm64/autoinstall/user-data"
   "${repo_root}/guest/ubuntu-24.04-arm64/autoinstall/meta-data"
+  "${repo_root}/guest/ubuntu-24.04-arm64/artifacts.lock.json"
+  "${repo_root}/guest/ubuntu-24.04-arm64/artifacts/boxwarden-guest-bootstrap"
   "${evidence_file}"
 )
 
@@ -150,6 +152,12 @@ if [[ -f "${user_data}" ]]; then
     fail "autoinstall does not point SSH CA trust at the future active bootstrap tree"
   grep -Fq 'AuthorizedPrincipalsFile /etc/ssh/boxwarden/active/authorized_principals/%u' "${user_data}" || \
     fail "autoinstall does not point SSH principals at the future active bootstrap tree"
+  grep -Fq 'PermitUserRC no' "${user_data}" || \
+    fail "autoinstall does not prohibit user rc execution for management SSH"
+  grep -Fq '/usr/local/libexec/boxwarden-guest-bootstrap' "${user_data}" || \
+    fail "autoinstall does not install the fixed guest bootstrap helper"
+  grep -Fq '/cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap' "${user_data}" || \
+    fail "autoinstall does not verify the explicitly remastered helper input"
   require_absent '/target/etc/ssh/boxwarden/active' "${user_data}" \
     "autoinstall precreates the active SSH bootstrap tree in the generic golden"
   require_absent '__BOXWARDEN_SSH_CA_PUBLIC_KEY__' "${user_data}" \
@@ -197,6 +205,12 @@ fi
 if [[ -f "${repo_root}/scripts/spike/bootstrap-tart.sh" ]]; then
   bash -n "${repo_root}/scripts/spike/bootstrap-tart.sh" || fail "bootstrap-tart.sh has invalid shell syntax"
   require_executable "${repo_root}/scripts/spike/bootstrap-tart.sh"
+  grep -Fq -- '-map "${guest_helper}" /boxwarden-artifacts/boxwarden-guest-bootstrap' \
+    "${repo_root}/scripts/spike/bootstrap-tart.sh" || \
+    fail "remaster does not map the verified guest helper as an explicit ISO input"
+  grep -Fq 'remaster-iso requires SOURCE.iso USER_DATA GUEST_HELPER OUTPUT.iso' \
+    "${repo_root}/scripts/spike/bootstrap-tart.sh" || \
+    fail "remaster CLI does not require an explicit verified guest helper"
 
   zoneinfo_root="${test_tmp}/zoneinfo"
   localtime_path="${test_tmp}/localtime"

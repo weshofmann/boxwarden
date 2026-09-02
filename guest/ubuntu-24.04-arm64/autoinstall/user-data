@@ -68,7 +68,11 @@ autoinstall:
       X11Forwarding no
       PermitTunnel no
       PermitUserEnvironment no
+      PermitUserRC no
       EOF
+    - install -d -o root -g root -m 0755 /target/usr/local/libexec
+    - "printf '%s  %s\\n' 'be717811b68097588564cad619c3c1fc6a2ca4f2ad5679fe91e16fb059ae9bb8' '/cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap' | sha256sum -c -"
+    - install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap /target/usr/local/libexec/boxwarden-guest-bootstrap
     - "printf '%s\\n' '__BOXWARDEN_RUN_ID__' > /target/etc/boxwarden-task0-spike"
     - chmod 0644 /target/etc/boxwarden-task0-spike
     - curtin in-target -- install -d -o boxwarden -g boxwarden -m 0700 /home/boxwarden/.config

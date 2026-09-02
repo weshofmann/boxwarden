@@ -23,7 +23,7 @@ Usage:
   bootstrap-tart.sh host-timezone
   bootstrap-tart.sh render-seed RUN_ID PASSWORD_HASH TIMEZONE OUTPUT_DIR
   bootstrap-tart.sh rewrite-grub INPUT.cfg OUTPUT.cfg
-  bootstrap-tart.sh remaster-iso SOURCE.iso USER_DATA OUTPUT.iso
+  bootstrap-tart.sh remaster-iso SOURCE.iso USER_DATA GUEST_HELPER OUTPUT.iso
   bootstrap-tart.sh create VM
   bootstrap-tart.sh run-install VM INSTALL.iso SERIAL_DIR
   bootstrap-tart.sh run VM SERIAL_DIR
@@ -241,13 +241,15 @@ rewrite_grub() {
 remaster_iso() {
   local source_iso="$1"
   local user_data="$2"
-  local output_iso="$3"
+  local guest_helper="$3"
+  local output_iso="$4"
   local work_dir
   local grub_cfg
 
   require_command xorriso
   [[ -f "${source_iso}" ]] || die "missing source ISO: ${source_iso}"
   [[ -f "${user_data}" ]] || die "missing rendered user-data: ${user_data}"
+  [[ -f "${guest_helper}" ]] || die "missing verified guest helper: ${guest_helper}"
   [[ ! -e "${output_iso}" ]] || die "refusing to overwrite ISO: ${output_iso}"
   require_free_space
 
@@ -263,6 +265,7 @@ remaster_iso() {
     -outdev "${output_iso}" \
     -boot_image any replay \
     -map "${user_data}" /autoinstall.yaml \
+    -map "${guest_helper}" /boxwarden-artifacts/boxwarden-guest-bootstrap \
     -map "${work_dir}/grub.autoinstall.cfg" /boot/grub/grub.cfg \
     -commit \
     -end
@@ -552,7 +555,7 @@ case "${command_name}" in
     rewrite_grub "$@"
     ;;
   remaster-iso)
-    (( $# == 3 )) || die "remaster-iso requires SOURCE.iso USER_DATA OUTPUT.iso"
+    (( $# == 4 )) || die "remaster-iso requires SOURCE.iso USER_DATA GUEST_HELPER OUTPUT.iso"
     remaster_iso "$@"
     ;;
   create)
