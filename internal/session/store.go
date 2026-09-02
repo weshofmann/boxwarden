@@ -107,10 +107,11 @@ func saveRecord(stateRoot string, expectedDomain domain.ID, record Record, hook 
 }
 
 // upgradeRecordForStore performs the one-way V1 compatibility migration after
-// strict validation. Reads never invoke it, so read-only operations do not
-// alter durable state.
+// strict validation when the legacy record contains the immutable golden
+// revision required by V2. Reads never invoke it, so read-only operations do
+// not alter durable state.
 func upgradeRecordForStore(record Record) Record {
-	if record.Version != recordVersionV1 {
+	if record.Version != recordVersionV1 || record.GoldenRevision == "" {
 		return record
 	}
 	record.Version = recordVersion

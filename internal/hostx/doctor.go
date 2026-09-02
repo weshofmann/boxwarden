@@ -219,7 +219,7 @@ func (s SystemDoctor) Doctor(_ context.Context, request Request) Report {
 	}
 
 	for _, tool := range []struct{ code, path string }{{"ssh", "/usr/bin/ssh"}, {"ssh-keygen", "/usr/bin/ssh-keygen"}} {
-		checkTool(inspector, &report, tool.code, tool.path, "", 0, -1, -1)
+		checkTool(inspector, &report, tool.code, tool.path, "", 0o755, 0, 0)
 	}
 	screenFact, screenInspectable := checkTool(inspector, &report, "screen", ScreenPath, ScreenExecutableSHA256, 0o755, 0, 0)
 	screenOK := screenInspectable && exactToolFact(screenFact, ScreenExecutableSHA256, 0o755, 0, 0)

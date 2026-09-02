@@ -88,6 +88,31 @@ func TestDoctorTartAdmissionRequiresExactSafeExecutableMetadata(t *testing.T) {
 	}
 }
 
+func TestDoctorSSHToolsRequireQualifiedSystemExecutableMetadata(t *testing.T) {
+	for name, mutate := range map[string]func(*PathFact){
+		"not executable": func(fact *PathFact) { fact.Mode = 0o644 },
+		"setuid":         func(fact *PathFact) { fact.Mode = 0o4755 },
+		"setgid":         func(fact *PathFact) { fact.Mode = 0o2755 },
+		"not root owned": func(fact *PathFact) { fact.UID = 501 },
+		"hardlink":       func(fact *PathFact) { fact.Links = 2 },
+		"extended ACL":   func(fact *PathFact) { fact.ExtendedACL = true },
+	} {
+		for _, path := range []string{"/usr/bin/ssh", "/usr/bin/ssh-keygen"} {
+			t.Run(path+"/"+name, func(t *testing.T) {
+				inspector, request := healthyDoctorFixture(t)
+				fact := inspector.paths[path]
+				mutate(&fact)
+				inspector.paths[path] = fact
+
+				report := (SystemService{inspector: inspector}).Doctor(t.Context(), request)
+				if report.Status != Drifted {
+					t.Fatalf("Doctor() status = %q, want unsafe %s drift", report.Status, path)
+				}
+			})
+		}
+	}
+}
+
 func TestDoctorClassifiesExistingUnverifiableAncestorAndTartHomeAsDrifted(t *testing.T) {
 	for code, path := range map[string]string{
 		"softnet.ancestor.Library.Boxwarden": "/Library/Boxwarden",

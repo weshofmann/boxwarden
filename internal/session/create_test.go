@@ -350,6 +350,30 @@ func TestCreateIsIdempotentForConsistentStoppedRecord(t *testing.T) {
 	}
 }
 
+func TestCreateRetryPreservesStoppedVersion1RecordWithoutGoldenRevision(t *testing.T) {
+	domainConfig, backendFake, service := createFixture(t)
+	if err := os.Mkdir(filepath.Join(domainConfig.StateRoot, "sessions"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeRecord(t, domainConfig.StateRoot, "dev", `{"version":1,"domain":"work","name":"dev","id":"00000000-0000-4000-8000-000000000001","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-00112233445546778899aabbccddeeff"}}`)
+	backendFake.SetObservation(backend.Observation{ObjectID: testObjectID, Exists: true, State: backend.ObjectStopped})
+
+	record, err := service.Create(context.Background(), "dev", ModeClean)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if record.Version != recordVersionV1 || record.GoldenRevision != "" {
+		t.Fatalf("Create() record = %#v, want retained V1 record without golden revision", record)
+	}
+	stored, err := LoadRecord(domainConfig.StateRoot, "work", "dev")
+	if err != nil {
+		t.Fatalf("LoadRecord() error = %v", err)
+	}
+	if stored != record || stored.Version != recordVersionV1 || stored.GoldenRevision != "" {
+		t.Fatalf("stored record = %#v, want retryable V1 record without golden revision", stored)
+	}
+}
+
 func TestCreateRejectsModeChangeAndBackendDrift(t *testing.T) {
 	for name, test := range map[string]struct {
 		mutate func(*fake.Backend)
