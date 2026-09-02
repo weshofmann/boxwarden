@@ -1,9 +1,9 @@
 {
   "version": 2,
   "host": {
-    "tart_path": "/absolute/canonical/path/to/qualified/tart",
+    "tart_executable": "/absolute/canonical/path/to/qualified/tart",
     "tart_home": "/absolute/canonical/path/to/boxwarden/tart-home",
-    "softnet_path": "/absolute/canonical/path/to/qualified/softnet-source"
+    "softnet_source": "/absolute/canonical/path/to/qualified/softnet-source"
   },
   "domains": {
     "work": {

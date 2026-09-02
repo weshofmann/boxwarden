@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"syscall"
 
 	"github.com/weshofmann/boxwarden/internal/domain"
 )
@@ -20,13 +22,12 @@ type Config struct {
 	host    *Host
 }
 
-// Host contains declared, unprivileged input locations. Their existence and
-// identities are deliberately validated by hostx doctor/init, not trusted at
-// configuration-load time.
+// Host contains declared, unprivileged input locations. Their qualified
+// identities are validated by hostx doctor/init after configuration admission.
 type Host struct {
-	TartPath    string
-	TartHome    string
-	SoftnetPath string
+	TartExecutable string
+	TartHome       string
+	SoftnetSource  string
 }
 
 type Domain struct {
@@ -69,6 +70,16 @@ func (c Config) Domain(raw string) (Domain, error) {
 		return Domain{}, fmt.Errorf("unknown domain %q", raw)
 	}
 	return resolved, nil
+}
+
+// Domains returns a deterministic snapshot of the configured domains.
+func (c Config) Domains() []Domain {
+	domains := make([]Domain, 0, len(c.domains))
+	for _, configured := range c.domains {
+		domains = append(domains, configured)
+	}
+	sort.Slice(domains, func(i, j int) bool { return domains[i].ID < domains[j].ID })
+	return domains
 }
 
 // Host returns the V3 host prerequisite declaration. Version-1 configuration
@@ -140,6 +151,11 @@ func decodeConfig(decoder *json.Decoder) (Config, error) {
 	if parsedVersion == legacyVersion && gotHost {
 		return Config{}, fmt.Errorf("configuration version 1 does not support host prerequisites")
 	}
+	if parsedVersion == version {
+		if err := rejectHostDomainOverlap(host, domains); err != nil {
+			return Config{}, err
+		}
+	}
 	loaded := Config{domains: domains}
 	if gotHost {
 		loaded.host = &host
@@ -153,6 +169,9 @@ func decodeHost(decoder *json.Decoder) (Host, error) {
 	}
 	seen := map[string]bool{}
 	var host Host
+	var gotTartExecutable bool
+	var gotTartHome bool
+	var gotSoftnetSource bool
 	for decoder.More() {
 		name, err := objectField(decoder, seen)
 		if err != nil {
@@ -160,12 +179,15 @@ func decodeHost(decoder *json.Decoder) (Host, error) {
 		}
 		var target *string
 		switch name {
-		case "tart_path":
-			target = &host.TartPath
+		case "tart_executable":
+			target = &host.TartExecutable
+			gotTartExecutable = true
 		case "tart_home":
 			target = &host.TartHome
-		case "softnet_path":
-			target = &host.SoftnetPath
+			gotTartHome = true
+		case "softnet_source":
+			target = &host.SoftnetSource
+			gotSoftnetSource = true
 		default:
 			return Host{}, fmt.Errorf("host: unknown field %q", name)
 		}
@@ -176,10 +198,21 @@ func decodeHost(decoder *json.Decoder) (Host, error) {
 	if err := requireObjectEnd(decoder); err != nil {
 		return Host{}, fmt.Errorf("host: %w", err)
 	}
-	for name, path := range map[string]string{"tart_path": host.TartPath, "tart_home": host.TartHome, "softnet_path": host.SoftnetPath} {
-		if !filepath.IsAbs(path) || filepath.Clean(path) != path || path == "/" {
-			return Host{}, fmt.Errorf("host %s must be canonical and absolute", name)
-		}
+	if !gotTartExecutable || !gotTartHome || !gotSoftnetSource {
+		return Host{}, fmt.Errorf("host requires tart_executable, tart_home, and softnet_source")
+	}
+	var err error
+	host.TartExecutable, err = canonicalRegularFile(host.TartExecutable)
+	if err != nil {
+		return Host{}, fmt.Errorf("host tart_executable: %w", err)
+	}
+	host.TartHome, err = canonicalPrivateOperatorDirectory(host.TartHome)
+	if err != nil {
+		return Host{}, fmt.Errorf("host tart_home: %w", err)
+	}
+	host.SoftnetSource, err = canonicalRegularFile(host.SoftnetSource)
+	if err != nil {
+		return Host{}, fmt.Errorf("host softnet_source: %w", err)
 	}
 	return host, nil
 }
@@ -258,23 +291,9 @@ func requireRegularFile(path string) error {
 }
 
 func canonicalPrivateDirectory(raw string) (string, error) {
-	if !filepath.IsAbs(raw) {
-		return "", fmt.Errorf("must be absolute")
-	}
-	clean := filepath.Clean(raw)
-	if clean != raw {
-		return "", fmt.Errorf("must be canonical")
-	}
-	canonical, err := filepath.EvalSymlinks(clean)
+	canonical, info, err := canonicalExistingPath(raw)
 	if err != nil {
-		return "", fmt.Errorf("resolve: %w", err)
-	}
-	if canonical != clean {
-		return "", fmt.Errorf("must not contain a symlink")
-	}
-	info, err := os.Stat(canonical)
-	if err != nil {
-		return "", fmt.Errorf("inspect: %w", err)
+		return "", err
 	}
 	if !info.IsDir() {
 		return "", fmt.Errorf("must be a directory")
@@ -283,6 +302,58 @@ func canonicalPrivateDirectory(raw string) (string, error) {
 		return "", fmt.Errorf("must have mode 0700")
 	}
 	return canonical, nil
+}
+
+func canonicalPrivateOperatorDirectory(raw string) (string, error) {
+	canonical, err := canonicalPrivateDirectory(raw)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(canonical)
+	if err != nil {
+		return "", fmt.Errorf("inspect: %w", err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || int(stat.Uid) != os.Getuid() {
+		return "", fmt.Errorf("must be owned by the current operator")
+	}
+	return canonical, nil
+}
+
+func canonicalRegularFile(raw string) (string, error) {
+	canonical, info, err := canonicalExistingPath(raw)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("must be a regular file")
+	}
+	return canonical, nil
+}
+
+func canonicalExistingPath(raw string) (string, os.FileInfo, error) {
+	if !filepath.IsAbs(raw) {
+		return "", nil, fmt.Errorf("must be absolute")
+	}
+	clean := filepath.Clean(raw)
+	if clean != raw || clean == "/" {
+		return "", nil, fmt.Errorf("must be canonical")
+	}
+	canonical, err := filepath.EvalSymlinks(clean)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve: %w", err)
+	}
+	if canonical != clean {
+		return "", nil, fmt.Errorf("must not contain a symlink")
+	}
+	info, err := os.Lstat(canonical)
+	if err != nil {
+		return "", nil, fmt.Errorf("inspect: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", nil, fmt.Errorf("must not contain a symlink")
+	}
+	return canonical, info, nil
 }
 
 func rejectOverlappingRoots(domains map[domain.ID]Domain) error {
@@ -303,6 +374,31 @@ func rejectOverlappingRoots(domains map[domain.ID]Domain) error {
 			}
 			if overlap {
 				return fmt.Errorf("domain roots %q and %q overlap", firstID, secondID)
+			}
+		}
+	}
+	return nil
+}
+
+func rejectHostDomainOverlap(host Host, domains map[domain.ID]Domain) error {
+	for id, configured := range domains {
+		for name, path := range map[string]string{
+			"tart_executable": host.TartExecutable,
+			"tart_home":       host.TartHome,
+			"softnet_source":  host.SoftnetSource,
+		} {
+			overlap, err := isSameOrPhysicalDescendant(configured.StateRoot, path)
+			if err != nil {
+				return fmt.Errorf("compare domain root %q and host %s: %w", id, name, err)
+			}
+			if !overlap {
+				overlap, err = isSameOrPhysicalDescendant(path, configured.StateRoot)
+				if err != nil {
+					return fmt.Errorf("compare host %s and domain root %q: %w", name, id, err)
+				}
+			}
+			if overlap {
+				return fmt.Errorf("host %s overlaps domain root %q", name, id)
 			}
 		}
 	}

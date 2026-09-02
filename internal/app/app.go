@@ -64,7 +64,7 @@ func Run(ctx context.Context, args []string, options Options) error {
 		if err != nil {
 			return err
 		}
-		hostRequest = hostx.Request{Domain: command.domain, StateRoot: selectedDomain.StateRoot, TartPath: host.TartPath, TartHome: host.TartHome, SoftnetPath: host.SoftnetPath}
+		hostRequest = hostx.Request{Domain: command.domain, StateRoot: selectedDomain.StateRoot, TartPath: host.TartExecutable, TartHome: host.TartHome, SoftnetPath: host.SoftnetSource}
 		if options.Host == nil {
 			return errors.New("host prerequisite service is required")
 		}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -307,11 +308,23 @@ func writeDomainFixture(t *testing.T, rawDomain string) (string, config.Domain) 
 func writeV2DomainFixture(t *testing.T, rawDomain string) (string, config.Domain) {
 	t.Helper()
 	path, selected := writeDomainFixture(t, rawDomain)
-	contents, err := os.ReadFile(path)
+	hostBase, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	contents = []byte(strings.Replace(string(contents), `"version":1,`, `"version":2,"host":{"tart_path":"/opt/qualified/tart","tart_home":"/tmp/boxwarden-tart","softnet_path":"/opt/qualified/softnet"},`, 1))
+	tartExecutable := filepath.Join(hostBase, "tart")
+	softnetSource := filepath.Join(hostBase, "softnet")
+	tartHome := filepath.Join(hostBase, "tart-home")
+	if err := os.WriteFile(tartExecutable, []byte("tart fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(softnetSource, []byte("softnet fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(tartHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	contents := []byte(fmt.Sprintf(`{"version":2,"host":{"tart_executable":%q,"tart_home":%q,"softnet_source":%q},"domains":{"%s":{"state_root":%q}}}`, tartExecutable, tartHome, softnetSource, rawDomain, selected.StateRoot))
 	if err := os.WriteFile(path, contents, 0o600); err != nil {
 		t.Fatal(err)
 	}
