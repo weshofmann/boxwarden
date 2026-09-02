@@ -781,6 +781,7 @@ probe, and status snapshot publication, and applies this exact matrix:
 |---|---|---|---|
 | stopped | stopped | none owned | persist `starting` + fresh generation + non-ready, fsync, then launch |
 | starting | running | exact live same generation | reconnect and resume that generation |
+| starting | stopped | exact live same generation in prelaunch/launch | reconnect, wait for its bounded phase transition, then resume that generation or complete proven owned cleanup; never clear while it is live |
 | starting | stopped | no live owned runtime | persist `stopped` + clear generation, fsync, then retry from stopped |
 | running | running | exact live same generation | idempotently ensure/reprobe/reconverge that generation |
 | any | running | absent, stale, mismatched, or unverifiable | report DRIFT/NON-READY; no durable/backend/runtime mutation or adoption |
