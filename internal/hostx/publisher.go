@@ -314,7 +314,7 @@ func (p RootedPublisher) publishManifest(r InstallRequest, c Caller, g Group, to
 		now = p.Now().UTC()
 	}
 	m := Manifest{
-		Version: 1, Platform: QualifiedPlatform, MacOS: QualifiedMacOS, Tart: r.Tart,
+		Version: ManifestVersion, Platform: QualifiedPlatform, MacOS: QualifiedMacOS, MacOSBuild: QualifiedMacOSBuild, Tart: r.Tart,
 		Softnet: ToolIdentity{Path: QualifiedSoftnetPath, Version: SoftnetVersion, ExecutableSHA256: SoftnetExecutableSHA256, ArchiveSHA256: SoftnetArchiveSHA256},
 		RootUID: 0, Group: g, Operator: Operator{UID: c.UID, Name: c.Name, Home: c.Home},
 		TartHome: r.TartHome, SoftnetMode: SoftnetMode, InstalledAt: now,

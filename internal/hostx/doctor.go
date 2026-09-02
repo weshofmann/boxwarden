@@ -90,7 +90,7 @@ type DoctorInspector interface {
 	HomebrewSoftnet() ([]HomebrewSoftnet, error)
 }
 
-type PlatformFact struct{ OS, Arch, Release string }
+type PlatformFact struct{ OS, Arch, Release, Build string }
 type PathFact struct {
 	Exists, Regular, Directory bool
 	Mode                       uint32
@@ -134,6 +134,9 @@ func (s SystemDoctor) Doctor(_ context.Context, request Request) Report {
 	if platform.Release != QualifiedMacOS {
 		add("platform.release", Unsupported, publicValue(platform.Release), QualifiedMacOS, "use the exact qualified macOS release")
 	}
+	if platform.Build != QualifiedMacOSBuild {
+		add("platform.build", Unsupported, publicValue(platform.Build), QualifiedMacOSBuild, "use the exact qualified macOS build")
+	}
 	if err := validateHostPathOverlaps(request); err != nil {
 		switch {
 		case errors.Is(err, errMissingConfiguredStateRoots):
@@ -159,7 +162,11 @@ func (s SystemDoctor) Doctor(_ context.Context, request Request) Report {
 	if manifestOK {
 		parsed, err := ParseManifest(manifestFact.Data)
 		if err != nil {
-			add("manifest.invalid", Drifted, "manifest failed strict validation", "exact versioned host manifest", "inspect the installed digest tree manually")
+			if errors.Is(err, ErrUnsupportedManifestVersion) {
+				add("manifest.unsupported", Unsupported, "unsupported manifest schema", "manifest schema v2", "perform attended reinitialization; do not migrate the installed manifest")
+			} else {
+				add("manifest.invalid", Drifted, "manifest failed strict validation", "exact versioned host manifest", "inspect the installed digest tree manually")
+			}
 		} else {
 			manifest = parsed
 		}
@@ -187,7 +194,7 @@ func (s SystemDoctor) Doctor(_ context.Context, request Request) Report {
 		add("softnet.current", Drifted, "mutable current pointer exists", "no mutable current pointer", "remove only after attended manual inspection")
 	}
 	softnetFact, softnetOK := checkTool(inspector, &report, "softnet", QualifiedSoftnetPath, SoftnetExecutableSHA256, SoftnetMode, 0, -1)
-	if softnetOK && manifest.Version == 1 {
+	if softnetOK && manifest.Version == ManifestVersion {
 		if softnetFact.GID != manifest.Group.ID {
 			add("softnet.group", Drifted, fmt.Sprintf("gid %d", softnetFact.GID), fmt.Sprintf("manifested gid %d", manifest.Group.ID), "inspect the installed tree manually")
 		}
@@ -214,7 +221,7 @@ func (s SystemDoctor) Doctor(_ context.Context, request Request) Report {
 		add("tart-home.unsafe", Drifted, "existing path safety inspection failed", "operator-owned private directory without ACL", "inspect tart_home manually")
 	} else if !fact.Exists {
 		add("tart-home.missing", Missing, "missing or unreadable", "private operator directory", "create and explicitly initialize tart_home")
-	} else if !fact.Directory || fact.Mode&0o077 != 0 || fact.ExtendedACL || (manifest.Version == 1 && fact.UID != manifest.Operator.UID) {
+	} else if !fact.Directory || fact.Mode&0o077 != 0 || fact.ExtendedACL || (manifest.Version == ManifestVersion && fact.UID != manifest.Operator.UID) {
 		add("tart-home.unsafe", Drifted, "unsafe type, owner, mode, or ACL", "operator-owned private directory without ACL", "inspect tart_home manually")
 	}
 

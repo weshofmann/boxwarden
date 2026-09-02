@@ -5,9 +5,12 @@ package hostx
 import "path/filepath"
 
 const (
-	QualifiedPlatform = "darwin"
-	QualifiedMacOS    = "26.6.2"
-	QualifiedArch     = "arm64"
+	QualifiedPlatform     = "darwin"
+	QualifiedMacOS        = "26.6.2"
+	QualifiedMacOSBuild   = "25G83"
+	QualifiedArch         = "arm64"
+	ManifestVersion       = 2
+	InstallRequestVersion = 1
 
 	TartVersion          = "2.32.1"
 	TartExecutableSHA256 = "05b65d5c14e8b41e8e44b6d9fd1278de4bedbc8b735d9b99f3c748f76f75862d"
@@ -29,6 +32,10 @@ type ToolIdentity struct {
 	Version          string `json:"version"`
 	ExecutableSHA256 string `json:"executable_sha256"`
 	ArchiveSHA256    string `json:"archive_sha256"`
+}
+
+func qualifiedPlatformFact(platform PlatformFact) bool {
+	return platform.OS == QualifiedPlatform && platform.Arch == QualifiedArch && platform.Release == QualifiedMacOS && platform.Build == QualifiedMacOSBuild
 }
 
 func qualifiedTart(identity ToolIdentity) bool {

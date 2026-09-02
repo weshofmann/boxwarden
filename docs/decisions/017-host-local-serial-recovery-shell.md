@@ -65,7 +65,7 @@ both masters. Tart opens only the Tart slave. Exact `/usr/bin/screen -D -m`
 4.00.03 (FAU, 23-Oct-06), executable SHA-256
 `07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add`,
 root:wheel `0755`, one link, is a direct waitable supervisor child and remains
-the operator slave's sole reader on qualified macOS 26.6.2.
+the operator slave's sole reader on qualified macOS 26.6.2 build 25G83.
 
 The broker is the sole forwarding reader. Tart-master output enters a bounded
 Screen-output queue and, only in automation mode, a fixed-memory raw frame

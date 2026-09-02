@@ -5,9 +5,11 @@ package hostx
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/user"
 	pathpkg "path"
 	"path/filepath"
@@ -48,6 +50,10 @@ func (i *osDoctorInspector) Platform() PlatformFact {
 	result, err := i.runner.Run(ctx, execx.Command{Path: "/usr/bin/sw_vers", Args: []string{"-productVersion"}, Env: []string{"LC_ALL=C", "LANG=C"}})
 	if err == nil && !result.Truncated {
 		fact.Release = strings.TrimSpace(result.Stdout)
+	}
+	result, err = i.runner.Run(ctx, execx.Command{Path: "/usr/bin/sw_vers", Args: []string{"-buildVersion"}, Env: []string{"LC_ALL=C", "LANG=C"}})
+	if err == nil && !result.Truncated {
+		fact.Build = strings.TrimSpace(result.Stdout)
 	}
 	return fact
 }
@@ -131,14 +137,29 @@ func (i *osDoctorInspector) CommandOutput(path string, args ...string) (string, 
 	ctx, cancel := i.commandContext()
 	defer cancel()
 	result, err := i.runner.Run(ctx, execx.Command{Path: path, Args: append([]string(nil), args...), Env: []string{"LC_ALL=C", "LANG=C"}})
-	if err != nil || result.Truncated {
+	if result.Truncated {
+		return "", fmt.Errorf("bounded command inspection failed")
+	}
+	if err != nil && !knownScreenVersionStatusOne(path, args, result, err) {
 		return "", fmt.Errorf("bounded command inspection failed")
 	}
 	output := result.Stdout
 	if strings.TrimSpace(output) == "" {
 		output = result.Stderr
 	}
-	return strings.TrimSpace(output), nil
+	output = strings.TrimSpace(output)
+	return output, nil
+}
+
+// macOS's system Screen prints its stable version string but exits 1 for this
+// exact probe. This exception is intentionally limited to that qualified
+// binary, argument vector, output, and status; other failed probes stay errors.
+func knownScreenVersionStatusOne(path string, args []string, result execx.Result, err error) bool {
+	if path != ScreenPath || len(args) != 1 || args[0] != "--version" || strings.TrimSpace(result.Stdout) != ScreenVersionOutput || strings.TrimSpace(result.Stderr) != "" {
+		return false
+	}
+	var exitError *exec.ExitError
+	return errors.As(err, &exitError) && exitError.ExitCode() == 1
 }
 
 func (i *osDoctorInspector) HomebrewSoftnet() ([]HomebrewSoftnet, error) {
@@ -213,7 +234,7 @@ func (i *osDoctorInspector) passwordlessRoot(target string) (bool, error) {
 	ctx, cancel := i.commandContext()
 	defer cancel()
 	result, err := i.runner.Run(ctx, execx.Command{
-		Path: "/usr/bin/sudo", Args: []string{"-n", "-l", "--", target},
+		Path: "/usr/bin/sudo", Args: []string{"-n", "-ll"},
 		Env: []string{"LC_ALL=C", "LANG=C", "PATH=/usr/bin:/bin:/usr/sbin:/sbin"},
 	})
 	combined := result.Stdout + result.Stderr
@@ -230,23 +251,267 @@ func (i *osDoctorInspector) passwordlessRoot(target string) (bool, error) {
 		// therefore fail closed rather than depending on sudo timestamp state.
 		return false, fmt.Errorf("sudo policy inspection failed")
 	}
-	return detectPasswordlessRule(combined, target), nil
+	passwordless, parseErr := parseVerboseSudoPasswordlessRule(combined, target)
+	if parseErr != nil {
+		return false, fmt.Errorf("sudo policy inspection could not be parsed")
+	}
+	return passwordless, nil
 }
 
 func detectPasswordlessRule(output, target string) bool {
+	matched, err := parseVerboseSudoPasswordlessRule(output, target)
+	return err == nil && matched
+}
+
+type sudoVerboseStanza struct {
+	noAuthenticate bool
+	commands       []string
+}
+
+// parseVerboseSudoPasswordlessRule accepts only the stanza structure emitted by
+// `sudo -ll`. A target-filtered `sudo -l` omits the authentication option, so
+// it cannot prove whether a matching mutable Homebrew command is passwordless.
+func parseVerboseSudoPasswordlessRule(output, target string) (bool, error) {
+	inheritedNoAuthenticate, err := validateVerboseSudoDefaults(output)
+	if err != nil {
+		return false, err
+	}
+	var stanzas []sudoVerboseStanza
+	var current *sudoVerboseStanza
+	commandsStarted := false
+
+	finish := func() error {
+		if current == nil {
+			return nil
+		}
+		if !commandsStarted || len(current.commands) == 0 {
+			return fmt.Errorf("incomplete sudoers entry")
+		}
+		stanzas = append(stanzas, *current)
+		return nil
+	}
+
 	for _, line := range strings.Split(output, "\n") {
-		if !strings.Contains(line, "NOPASSWD:") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if line == "" {
 			continue
 		}
-		fields := strings.Fields(strings.TrimSpace(strings.SplitN(line, "NOPASSWD:", 2)[1]))
-		if len(fields) == 0 {
+		if verboseSudoersEntryHeader(line) {
+			if err := finish(); err != nil {
+				return false, err
+			}
+			current = &sudoVerboseStanza{noAuthenticate: inheritedNoAuthenticate}
+			commandsStarted = false
 			continue
 		}
-		command := strings.TrimSuffix(fields[0], ",")
-		matched, _ := pathpkg.Match(command, target)
-		if command == "ALL" || command == target || (strings.HasPrefix(command, "/opt/homebrew/") || strings.HasPrefix(command, "/usr/local/")) && matched {
-			return true
+		if current == nil {
+			continue
+		}
+
+		switch {
+		case strings.HasPrefix(line, "Options:"):
+			if commandsStarted {
+				return false, fmt.Errorf("sudoers options after commands")
+			}
+			noAuthenticate, authenticationSet, optionErr := sudoOptionsAuthentication(strings.TrimSpace(strings.TrimPrefix(line, "Options:")))
+			if optionErr != nil {
+				return false, optionErr
+			}
+			if authenticationSet {
+				current.noAuthenticate = noAuthenticate
+			}
+		case line == "Commands:":
+			if commandsStarted {
+				return false, fmt.Errorf("multiple sudoers command blocks")
+			}
+			commandsStarted = true
+		case commandsStarted:
+			if strings.HasSuffix(line, ",") || strings.Contains(line, ",") {
+				return false, fmt.Errorf("ambiguous sudoers command list")
+			}
+			current.commands = append(current.commands, line)
+		case strings.Contains(line, ":"):
+			// Other verbose stanza attributes (for example RunAsUsers) do not
+			// change command authentication and are deliberately ignored.
+		default:
+			return false, fmt.Errorf("unrecognized sudoers entry content")
 		}
 	}
-	return false
+	if err := finish(); err != nil {
+		return false, err
+	}
+	if len(stanzas) == 0 {
+		return false, fmt.Errorf("verbose sudoers entries absent")
+	}
+	for _, stanza := range stanzas {
+		if !stanza.noAuthenticate {
+			continue
+		}
+		for _, command := range stanza.commands {
+			matched, err := sudoCommandMatchesTarget(command, target)
+			if err != nil {
+				return false, err
+			}
+			if matched {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// validateVerboseSudoDefaults intentionally recognizes only the two Defaults
+// settings that make a noninteractive list unable to establish authentication
+// for this operator. It does not attempt to interpret the sudoers language.
+func validateVerboseSudoDefaults(output string) (bool, error) {
+	inDefaults := false
+	commandSpecificDefaults := false
+	inheritedNoAuthenticate := false
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if verboseSudoersEntryHeader(line) {
+			break
+		}
+		if strings.HasPrefix(line, "Matching Defaults entries for ") {
+			inDefaults = true
+			commandSpecificDefaults = false
+			continue
+		}
+		if strings.HasPrefix(line, "Runas and Command-specific defaults for ") {
+			inDefaults = true
+			commandSpecificDefaults = true
+			continue
+		}
+		if !inDefaults || line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "User ") {
+			inDefaults = false
+			continue
+		}
+		noAuthenticate, authenticationSet, optionErr := sudoOptionsAuthentication(line)
+		if optionErr != nil {
+			return false, optionErr
+		}
+		if authenticationSet {
+			if commandSpecificDefaults {
+				return false, fmt.Errorf("sudo command-specific Defaults affect authentication")
+			}
+			inheritedNoAuthenticate = noAuthenticate
+		}
+		for _, option := range strings.Split(line, ",") {
+			option = strings.TrimSpace(option)
+			if strings.Contains(option, "exempt_group") && option != "!exempt_group" {
+				return false, fmt.Errorf("sudo Defaults exempt group is enabled or ambiguous")
+			}
+		}
+	}
+	return inheritedNoAuthenticate, nil
+}
+
+func verboseSudoersEntryHeader(line string) bool {
+	const prefix = "Sudoers entry:"
+	if line == prefix {
+		return true
+	}
+	suffix, found := strings.CutPrefix(line, prefix)
+	return found && len(suffix) > 0 && (suffix[0] == ' ' || suffix[0] == '\t') && strings.TrimSpace(suffix) != ""
+}
+
+func sudoOptionsAuthentication(options string) (bool, bool, error) {
+	set := false
+	noAuthenticate := false
+	tokens, err := sudoOptionTokens(options)
+	if err != nil {
+		return false, false, err
+	}
+	for _, option := range tokens {
+		if option == "!authenticate" {
+			set, noAuthenticate = true, true
+		}
+		if option == "authenticate" {
+			set, noAuthenticate = true, false
+		}
+	}
+	return noAuthenticate, set, nil
+}
+
+func sudoOptionTokens(options string) ([]string, error) {
+	var tokens []string
+	var token strings.Builder
+	var quote rune
+	escaped := false
+	for _, r := range options {
+		if escaped {
+			token.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+			} else {
+				token.WriteRune(r)
+			}
+			continue
+		}
+		if r == '\'' || r == '"' {
+			quote = r
+			continue
+		}
+		if r == ',' || r == ' ' || r == '\t' {
+			if token.Len() > 0 {
+				tokens = append(tokens, token.String())
+				token.Reset()
+			}
+			continue
+		}
+		token.WriteRune(r)
+	}
+	if escaped || quote != 0 {
+		return nil, fmt.Errorf("malformed sudoers options")
+	}
+	if token.Len() > 0 {
+		tokens = append(tokens, token.String())
+	}
+	return tokens, nil
+}
+
+func sudoCommandMatchesTarget(specification, target string) (bool, error) {
+	fields := strings.Fields(specification)
+	if len(fields) == 0 {
+		return false, fmt.Errorf("empty sudoers command")
+	}
+	command := fields[0]
+	for _, argument := range fields[1:] {
+		if strings.ContainsAny(argument, "'\\\"") {
+			return false, fmt.Errorf("unsupported sudoers command arguments")
+		}
+	}
+	if command == "ALL" {
+		if len(fields) != 1 {
+			return false, fmt.Errorf("ambiguous ALL sudoers command")
+		}
+		return true, nil
+	}
+	if !strings.HasPrefix(command, "/") {
+		return false, fmt.Errorf("unrecognized sudoers command")
+	}
+	if strings.ContainsAny(command, "*?[]!^$\\") {
+		return false, fmt.Errorf("unsupported sudoers command pattern")
+	}
+	if command == target {
+		return true, nil
+	}
+	if strings.HasSuffix(command, "/") {
+		if len(fields) != 1 {
+			return false, fmt.Errorf("sudoers command directory has arguments")
+		}
+		return pathpkg.Dir(target) == strings.TrimSuffix(command, "/"), nil
+	}
+	return false, nil
 }

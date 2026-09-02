@@ -55,7 +55,7 @@ privileged installation.
 
 Production V4 also binds `/usr/bin/screen` 4.00.03 (FAU, 23-Oct-06), executable
 SHA-256 `07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add`,
-root:wheel mode `0755`, one link, on qualified macOS 26.6.2. Doctor/runtime
+root:wheel mode `0755`, one link, on qualified macOS 26.6.2 build 25G83. Doctor/runtime
 verify that exact identity. Its PTY/broker behavior and the direct `04550`
 Softnet execution—including argument/environment/dependency use, privilege drop,
 signals, file writes, and absence of sudo—remain explicit attended gates.

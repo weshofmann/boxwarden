@@ -21,9 +21,17 @@ explicit `--domain`, emits a stable status:
 observed/expected facts plus an attended remedy. Doctor never calls init,
 requests interactive authorization, mutates directory-service state, executes
 Tart or Softnet, or invokes a session operation. Its mutable-Homebrew safety
-check uses only non-interactive `/usr/bin/sudo -n -l -- <exact-path>` policy
-inspection; inability to prove that an unsafe passwordless rule is absent is a
-fail-closed diagnostic, never an authorization attempt or repair.
+check uses only non-interactive `/usr/bin/sudo -n -ll` policy inspection. It
+parses the verbose sudoers stanzas to bind `Options: !authenticate` to the
+corresponding `Commands` block; inability to parse the list or prove that an
+unsafe passwordless rule is absent is a fail-closed diagnostic, never an
+authorization attempt or repair.
+
+The qualified host identity is the exact macOS release `26.6.2` and build
+`25G83`, observed with absolute `/usr/bin/sw_vers` probes. Root-published
+toolchain manifests use schema version 2 and record `macos_build`; version-1
+manifests are unsupported/unqualified and must never be migrated or overwritten
+in place.
 
 Linux and every unqualified platform return `unsupported/unqualified`; this is
 intentional so CI can compile and exercise policy without accidentally treating

@@ -62,6 +62,7 @@ func TestSystemInitRefusesUnsafeHomebrewOrUnsupportedPlatformWithoutPrivilege(t 
 			inspector.homebrew = []HomebrewSoftnet{{Path: "/opt/homebrew/bin/softnet", Privilege: "setuid"}}
 		},
 		"unsupported platform": func(inspector *doctorInspectorFake) { inspector.platform.OS = "linux" },
+		"unqualified build":    func(inspector *doctorInspectorFake) { inspector.platform.Build = "25G84" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			inspector, request := healthyDoctorFixture(t)

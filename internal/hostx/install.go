@@ -22,7 +22,7 @@ type InstallRequest struct {
 }
 
 func (r InstallRequest) Validate() error {
-	if r.Version != 1 || !canonicalAbsolute(r.SoftnetSource) || !qualifiedTart(r.Tart) || !canonicalAbsolute(r.Tart.Path) {
+	if r.Version != InstallRequestVersion || !canonicalAbsolute(r.SoftnetSource) || !qualifiedTart(r.Tart) || !canonicalAbsolute(r.Tart.Path) {
 		return fmt.Errorf("invalid qualified install request")
 	}
 	if !canonicalAbsolute(r.TartHome) {

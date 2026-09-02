@@ -33,6 +33,27 @@ func TestDoctorReportsHealthyOnlyWhenEveryHostPrerequisiteMatches(t *testing.T) 
 	}
 }
 
+func TestDoctorReportsUnqualifiedBuildAndUnsupportedManifestSchema(t *testing.T) {
+	inspector, request := healthyDoctorFixture(t)
+	inspector.platform.Build = "25G84"
+	report := (SystemService{inspector: inspector}).Doctor(t.Context(), request)
+	if report.Status != Unsupported || !hasFinding(report, "platform.build") {
+		t.Fatalf("Doctor() findings = %#v, want unsupported build", report.Findings)
+	}
+
+	inspector, request = healthyDoctorFixture(t)
+	manifestPath := filepath.Join(filepath.Dir(QualifiedSoftnetPath), "manifest.json")
+	fact := inspector.paths[manifestPath]
+	legacy := strings.Replace(string(fact.Data), `"version":2`, `"version":1`, 1)
+	legacy = strings.Replace(legacy, `"macos_build":"25G83",`, ``, 1)
+	fact.Data = []byte(legacy)
+	inspector.paths[manifestPath] = fact
+	report = (SystemService{inspector: inspector}).Doctor(t.Context(), request)
+	if report.Status != Unsupported || !hasFinding(report, "manifest.unsupported") {
+		t.Fatalf("Doctor() findings = %#v, want unsupported manifest schema", report.Findings)
+	}
+}
+
 func TestDoctorNeverExecutesConfiguredTartAndGatesScreenVersionOnExactIdentity(t *testing.T) {
 	inspector, request := healthyDoctorFixture(t)
 	if report := (SystemService{inspector: inspector}).Doctor(t.Context(), request); report.Status != Healthy {
@@ -329,7 +350,7 @@ func healthyDoctorFixture(t *testing.T) (*doctorInspectorFake, Request) {
 	group := Group{ID: 20, Name: OperatorGroupName, Members: []int{501}}
 	operator := Operator{UID: 501, Name: "wes", Home: "/Users/wes"}
 	manifest := Manifest{
-		Version: 1, Platform: QualifiedPlatform, MacOS: QualifiedMacOS,
+		Version: ManifestVersion, Platform: QualifiedPlatform, MacOS: QualifiedMacOS, MacOSBuild: QualifiedMacOSBuild,
 		Tart:    ToolIdentity{Path: request.TartPath, Version: TartVersion, ExecutableSHA256: TartExecutableSHA256, ArchiveSHA256: TartArchiveSHA256},
 		Softnet: ToolIdentity{Path: QualifiedSoftnetPath, Version: SoftnetVersion, ExecutableSHA256: SoftnetExecutableSHA256, ArchiveSHA256: SoftnetArchiveSHA256},
 		RootUID: 0, Group: group, Operator: operator, TartHome: request.TartHome,
@@ -351,7 +372,7 @@ func healthyDoctorFixture(t *testing.T) (*doctorInspectorFake, Request) {
 	paths["/usr/bin/ssh-keygen"] = PathFact{Exists: true, Regular: true, Mode: 0o755, UID: 0, GID: 0, Links: 1}
 	paths[ScreenPath] = PathFact{Exists: true, Regular: true, Mode: 0o755, UID: 0, GID: 0, Links: 1, SHA256: ScreenExecutableSHA256}
 	return &doctorInspectorFake{
-		platform:        PlatformFact{OS: QualifiedPlatform, Arch: QualifiedArch, Release: QualifiedMacOS},
+		platform:        PlatformFact{OS: QualifiedPlatform, Arch: QualifiedArch, Release: QualifiedMacOS, Build: QualifiedMacOSBuild},
 		paths:           paths,
 		operator:        operator,
 		group:           group,

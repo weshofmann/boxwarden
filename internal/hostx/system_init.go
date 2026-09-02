@@ -28,7 +28,7 @@ func (s SystemInitializer) Init(ctx context.Context, request Request) (InitResul
 		inspector = NewOSDoctorInspector()
 	}
 	platform := inspector.Platform()
-	if platform.OS != QualifiedPlatform || platform.Arch != QualifiedArch || platform.Release != QualifiedMacOS {
+	if !qualifiedPlatformFact(platform) {
 		return InitResult{}, ErrUnsupportedPlatform
 	}
 	if !canonicalAbsolute(request.TartPath) || !canonicalAbsolute(request.TartHome) || !canonicalAbsolute(request.SoftnetPath) {
@@ -76,7 +76,7 @@ func (s SystemInitializer) Init(ctx context.Context, request Request) (InitResul
 		return InitResult{}, fmt.Errorf("privilege runner is required")
 	}
 	rootResult, err := InvokeRootInstall(ctx, s.privilege, executable, InstallRequest{
-		Version: 1, SoftnetSource: request.SoftnetPath,
+		Version: InstallRequestVersion, SoftnetSource: request.SoftnetPath,
 		Tart:     ToolIdentity{Path: request.TartPath, Version: TartVersion, ExecutableSHA256: TartExecutableSHA256, ArchiveSHA256: TartArchiveSHA256},
 		TartHome: request.TartHome,
 	})

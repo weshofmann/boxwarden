@@ -106,7 +106,7 @@ func (u RootedUninstaller) validateExactTree(caller Caller, group Group, digest 
 	if manifest.Operator != (Operator{UID: caller.UID, Name: caller.Name, Home: caller.Home}) || !sameGroup(manifest.Group, group) {
 		return fileIdentity{}, fmt.Errorf("manifest does not bind exact caller and group")
 	}
-	request := InstallRequest{Version: 1, Tart: manifest.Tart, TartHome: manifest.TartHome}
+	request := InstallRequest{Version: InstallRequestVersion, Tart: manifest.Tart, TartHome: manifest.TartHome}
 	if err := publisher.validatePairedInputs(request, caller); err != nil {
 		return fileIdentity{}, err
 	}

@@ -325,7 +325,7 @@ or re-authorizes the host toolchain.
 - Modify `config/boxwarden.example.json`
 
 Define constants for the exact versions and four approved digests above. The
-qualified macOS release is the Task 0 M1A `26.6.2` identity. The
+qualified macOS release/build is the Task 0 M1A `26.6.2` / `25G83` identity. The
 root-owned manifest lives at
 `/Library/Boxwarden/toolchains/softnet/0.19.0/ab333619fc8bd7277837545e49a771baa994c01c3e8c14904ae4cc4c1f37269e/manifest.json`
 beside `softnet`. It records schema version, platform, qualified macOS identity,
@@ -515,7 +515,7 @@ and group ID/name/directory membership; current-process supplementary group;
 canonical `tart_home`; ssh/ssh-keygen availability; and exact `/usr/bin/screen` 4.00.03 (FAU,
 23-Oct-06), SHA-256
 `07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add`,
-root:wheel `0755`, one link, on macOS 26.6.2. Any setuid/setgid or
+root:wheel `0755`, one link, on qualified macOS 26.6.2 build 25G83. Any setuid/setgid or
 passwordless-root Softnet under mutable Homebrew state is `drifted/unsafe`,
 makes doctor nonzero, and blocks init/start even if the staged copy is healthy.
 Each finding has stable code, category, observed fact, expected fact, and remedy
@@ -665,7 +665,7 @@ mode-`0600` Tart slave. Exact `/usr/bin/screen -D -m` is a direct waitable child
 on the mode-`0600` operator slave and remains its sole reader. Its required
 identity is system Screen 4.00.03 (FAU, 23-Oct-06), SHA-256
 `07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add`,
-root:wheel `0755`, one link, on macOS 26.6.2. Production has no socat dependency.
+root:wheel `0755`, one link, on qualified macOS 26.6.2 build 25G83. Production has no socat dependency.
 
 The broker is the sole forwarding reader. Tart-master output goes to a fixed
 256-KiB Screen-output queue and, only while automation is armed, a separate

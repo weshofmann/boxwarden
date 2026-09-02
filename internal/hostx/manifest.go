@@ -3,6 +3,7 @@ package hostx
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 )
 
 const maxManifestBytes = 64 << 10
+
+var ErrUnsupportedManifestVersion = errors.New("unsupported manifest version")
 
 type Group struct {
 	ID      int    `json:"id"`
@@ -31,6 +34,7 @@ type Manifest struct {
 	Version     int          `json:"version"`
 	Platform    string       `json:"platform"`
 	MacOS       string       `json:"macos"`
+	MacOSBuild  string       `json:"macos_build"`
 	Tart        ToolIdentity `json:"tart"`
 	Softnet     ToolIdentity `json:"softnet"`
 	RootUID     int          `json:"root_uid"`
@@ -126,11 +130,11 @@ func consumeJSONValue(decoder *json.Decoder) error {
 }
 
 func (m Manifest) Validate() error {
-	if m.Version != 1 {
-		return fmt.Errorf("unsupported manifest version %d", m.Version)
+	if m.Version != ManifestVersion {
+		return fmt.Errorf("%w %d", ErrUnsupportedManifestVersion, m.Version)
 	}
-	if m.Platform != QualifiedPlatform || m.MacOS != QualifiedMacOS {
-		return fmt.Errorf("manifest has unqualified platform %q macOS %q", m.Platform, m.MacOS)
+	if m.Platform != QualifiedPlatform || m.MacOS != QualifiedMacOS || m.MacOSBuild != QualifiedMacOSBuild {
+		return fmt.Errorf("manifest has unqualified platform %q macOS %q build %q", m.Platform, m.MacOS, m.MacOSBuild)
 	}
 	if !qualifiedTart(m.Tart) || !canonicalAbsolute(m.Tart.Path) {
 		return fmt.Errorf("manifest has unqualified Tart identity")

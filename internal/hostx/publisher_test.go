@@ -80,6 +80,47 @@ func TestRootedPublisherManifestFailureLeavesFailClosedPartialFinalTree(t *testi
 	}
 }
 
+func TestRootedPublisherDoesNotAdoptCompleteLookingV1Manifest(t *testing.T) {
+	root, source, digest := publisherFixture(t)
+	p := testPublisher(root, digest)
+	request := publisherRequest(source)
+	caller := Caller{UID: os.Getuid(), Name: "operator", Home: filepath.Join(root, "home")}
+	group := Group{ID: os.Getgid(), Name: OperatorGroupName, Members: []int{caller.UID}}
+	if err := p.Publish(context.Background(), request, caller, group); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	manifestPath := filepath.Join(p.finalDir(), "manifest.json")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(manifestPath, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	legacy := strings.Replace(string(data), `"version":2`, `"version":1`, 1)
+	legacy = strings.Replace(legacy, `"macos_build":"25G83",`, ``, 1)
+	v1Data := []byte(legacy)
+	if err := os.WriteFile(manifestPath, v1Data, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(manifestPath, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(manifestPath)
+	if err != nil || unixMode(info) != 0o400 {
+		t.Fatalf("manifest mode = %04o, %v; want 0400", unixMode(info), err)
+	}
+	if got, err := os.ReadFile(manifestPath); err != nil || string(got) != string(v1Data) {
+		t.Fatalf("manifest bytes = %q, %v; want unchanged v1 bytes", got, err)
+	}
+	if state, err := p.Preflight(context.Background(), request, caller); err != nil || state != publicationUnexpected {
+		t.Fatalf("Preflight(v1 manifest) = %v, %v; want unexpected", state, err)
+	}
+	if state, err := p.State(context.Background(), request, caller, group); err != nil || state != publicationUnexpected {
+		t.Fatalf("State(v1 manifest) = %v, %v; want unexpected", state, err)
+	}
+}
+
 func TestRootedPublisherCopiesFromValidatedFDWhenSourcePathIsReplaced(t *testing.T) {
 	root, source, digest := publisherFixture(t)
 	p := testPublisher(root, digest)

@@ -18,7 +18,7 @@ const productionToolchainRoot = "/Library/Boxwarden"
 // bounded stdin/stdout verbatim.
 func RunRootHostInstall(ctx context.Context, input []byte) ([]byte, error) {
 	platform := NewOSDoctorInspector().Platform()
-	if platform.OS != QualifiedPlatform || platform.Arch != QualifiedArch || platform.Release != QualifiedMacOS {
+	if !qualifiedPlatformFact(platform) {
 		return nil, ErrUnsupportedPlatform
 	}
 	request, err := DecodeInstallRequest(input)
