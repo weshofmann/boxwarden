@@ -118,41 +118,8 @@ func (*osDoctorInspector) LookupOperator(uid int) (Operator, error) {
 	return Operator{UID: resolvedUID, Name: entry.Username, Home: entry.HomeDir}, nil
 }
 
-func (i *osDoctorInspector) LookupGroup(name string) (Group, error) {
-	if name != OperatorGroupName {
-		return Group{}, fmt.Errorf("unexpected group name")
-	}
-	entry, err := user.LookupGroup(name)
-	if err != nil {
-		return Group{}, err
-	}
-	gid, err := strconv.Atoi(entry.Gid)
-	if err != nil || gid < 0 {
-		return Group{}, fmt.Errorf("invalid group id")
-	}
-	members, err := lookupDirectGroupMembers(i.runner, name)
-	if err != nil {
-		return Group{}, err
-	}
-	return Group{ID: gid, Name: name, Members: members}, nil
-}
-
-func (*osDoctorInspector) IsMember(operator Operator, group Group) (bool, error) {
-	entry, err := user.LookupId(strconv.Itoa(operator.UID))
-	if err != nil {
-		return false, err
-	}
-	groups, err := entry.GroupIds()
-	if err != nil {
-		return false, err
-	}
-	for _, raw := range groups {
-		gid, err := strconv.Atoi(raw)
-		if err == nil && gid == group.ID {
-			return containsInt(group.Members, operator.UID), nil
-		}
-	}
-	return false, nil
+func (i *osDoctorInspector) ExactOperatorGroup(operator Operator, name string) (Group, error) {
+	return inspectExactLocalOperatorGroup(i.runner, operator, name, false)
 }
 
 func (*osDoctorInspector) EffectiveGroups() ([]int, error) { return os.Getgroups() }

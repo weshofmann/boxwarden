@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 func (s SystemService) Init(ctx context.Context, request Request) (InitResult, error) {
@@ -33,11 +32,8 @@ func (s SystemService) Init(ctx context.Context, request Request) (InitResult, e
 		}
 	}
 	tart, err := inspector.InspectPath(request.TartPath)
-	if err != nil || !tart.Exists || !tart.Regular || tart.Links != 1 || tart.ExtendedACL || tart.SHA256 != TartExecutableSHA256 {
+	if err != nil || !qualifiedTartFact(tart) {
 		return InitResult{}, fmt.Errorf("configured Tart executable does not match qualified identity")
-	}
-	if output, err := inspector.CommandOutput(request.TartPath, "--version"); err != nil || !strings.Contains(output, TartVersion) {
-		return InitResult{}, fmt.Errorf("configured Tart version does not match qualified identity")
 	}
 	tartHome, err := inspector.InspectPath(request.TartHome)
 	if err != nil || !tartHome.Exists || !tartHome.Directory || tartHome.Mode&0o077 != 0 || tartHome.ExtendedACL {

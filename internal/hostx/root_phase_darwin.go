@@ -6,8 +6,6 @@ import (
 	"context"
 	"fmt"
 	"os/user"
-	"sort"
-	"strconv"
 	"time"
 
 	"github.com/weshofmann/boxwarden/internal/execx"
@@ -41,14 +39,21 @@ func RunRootHostInstall(ctx context.Context, input []byte) ([]byte, error) {
 	return EncodeRootInstallResult(result)
 }
 
-type darwinGroupManager struct{ runner execx.Runner }
+type darwinGroupManager struct {
+	runner      execx.Runner
+	lookupGroup func(string) (*user.Group, error)
+}
 
 func (m darwinGroupManager) Ensure(caller Caller, name string) (Group, bool, error) {
 	if name != OperatorGroupName || caller.UID <= 0 || caller.Name == "" {
 		return Group{}, false, fmt.Errorf("invalid operator group request")
 	}
 	changed := false
-	entry, lookupErr := user.LookupGroup(name)
+	lookupGroup := m.lookupGroup
+	if lookupGroup == nil {
+		lookupGroup = user.LookupGroup
+	}
+	_, lookupErr := lookupGroup(name)
 	if lookupErr != nil {
 		if _, ok := lookupErr.(user.UnknownGroupError); !ok {
 			return Group{}, false, lookupErr
@@ -57,37 +62,29 @@ func (m darwinGroupManager) Ensure(caller Caller, name string) (Group, bool, err
 			return Group{}, false, fmt.Errorf("create dedicated operator group: %w", err)
 		}
 		changed = true
-		entry, lookupErr = user.LookupGroup(name)
+		_, lookupErr = lookupGroup(name)
 		if lookupErr != nil {
 			return Group{}, false, fmt.Errorf("lookup newly created operator group: %w", lookupErr)
 		}
 	}
-	gid, err := strconv.Atoi(entry.Gid)
-	if err != nil || gid < 0 {
-		return Group{}, false, fmt.Errorf("operator group has invalid gid")
-	}
-	members, err := lookupDirectGroupMembers(m.runner, name)
+	group, err := inspectExactLocalOperatorGroup(m.runner, Operator{UID: caller.UID, Name: caller.Name, Home: caller.Home}, name, true)
 	if err != nil {
 		return Group{}, false, err
 	}
-	if len(members) > 1 || len(members) == 1 && members[0] != caller.UID {
-		return Group{}, false, fmt.Errorf("existing operator group has unexpected membership")
-	}
-	if len(members) == 0 {
-		if err := m.run("/usr/sbin/dseditgroup", "-o", "edit", "-a", caller.Name, "-t", "user", name); err != nil {
+	if len(group.Members) == 0 {
+		if err := m.run("/usr/sbin/dseditgroup", "-o", "edit", "-n", "/Local/Default", "-a", caller.Name, "-t", "user", name); err != nil {
 			return Group{}, false, fmt.Errorf("add exact trusted operator: %w", err)
 		}
 		changed = true
-		members, err = lookupDirectGroupMembers(m.runner, name)
+		group, err = inspectExactLocalOperatorGroup(m.runner, Operator{UID: caller.UID, Name: caller.Name, Home: caller.Home}, name, false)
 		if err != nil {
 			return Group{}, false, err
 		}
 	}
-	sort.Ints(members)
-	if len(members) != 1 || members[0] != caller.UID {
+	if len(group.Members) != 1 || group.Members[0] != caller.UID {
 		return Group{}, false, fmt.Errorf("operator group membership did not converge exactly")
 	}
-	return Group{ID: gid, Name: name, Members: members}, changed, nil
+	return group, changed, nil
 }
 
 func (m darwinGroupManager) run(path string, args ...string) error {

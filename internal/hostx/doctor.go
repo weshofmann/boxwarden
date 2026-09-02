@@ -88,8 +88,7 @@ type DoctorInspector interface {
 	Platform() PlatformFact
 	InspectPath(string) (PathFact, error)
 	LookupOperator(int) (Operator, error)
-	LookupGroup(string) (Group, error)
-	IsMember(Operator, Group) (bool, error)
+	ExactOperatorGroup(Operator, string) (Group, error)
 	EffectiveGroups() ([]int, error)
 	CommandOutput(string, ...string) (string, error)
 	HomebrewSoftnet() ([]HomebrewSoftnet, error)
@@ -150,11 +149,8 @@ func (s SystemService) Doctor(_ context.Context, request Request) Report {
 		add("tart.path", Drifted, "noncanonical configured path", "canonical absolute Tart path", "correct version-2 host configuration")
 	} else {
 		tartFact, _ := checkTool(inspector, &report, "tart", request.TartPath, TartExecutableSHA256, 0, -1, -1)
-		if tartFact.Exists && tartFact.Mode&0o111 == 0 {
-			add("tart.mode", Drifted, fmt.Sprintf("%04o", tartFact.Mode), "executable", "install the exact qualified Tart executable")
-		}
-		if output, err := inspector.CommandOutput(request.TartPath, "--version"); err != nil || !strings.Contains(output, TartVersion) {
-			add("tart.version", Drifted, "version did not match", TartVersion, "install the exact qualified Tart executable")
+		if tartFact.Exists && !safeUnprivilegedExecutableMode(tartFact.Mode) {
+			add("tart.mode", Drifted, fmt.Sprintf("%04o", tartFact.Mode), "executable without setuid or setgid", "install the exact qualified Tart executable")
 		}
 	}
 
@@ -171,7 +167,11 @@ func (s SystemService) Doctor(_ context.Context, request Request) Report {
 	}
 	for _, directory := range trustedSoftnetDirectories() {
 		fact, err := inspector.InspectPath(directory)
-		if err != nil || !fact.Exists {
+		if err != nil {
+			add("softnet.ancestor."+stablePathCode(directory), Drifted, "existing path safety inspection failed", "root-owned direct directory", "inspect the installed tree manually")
+			continue
+		}
+		if !fact.Exists {
 			add("softnet.ancestor."+stablePathCode(directory), Missing, "missing or unreadable", "root-owned direct directory", "run explicit attended init")
 			continue
 		}
@@ -199,11 +199,9 @@ func (s SystemService) Doctor(_ context.Context, request Request) Report {
 		if operatorErr != nil || operator != manifest.Operator {
 			add("operator.identity", Drifted, "directory identity mismatch", "exact manifested UID/name/home", "inspect operator account state manually")
 		}
-		group, groupErr := inspector.LookupGroup(OperatorGroupName)
+		group, groupErr := inspector.ExactOperatorGroup(operator, OperatorGroupName)
 		if groupErr != nil || group.ID != manifest.Group.ID || group.Name != manifest.Group.Name || fmt.Sprint(group.Members) != fmt.Sprint(manifest.Group.Members) {
 			add("group.identity", Drifted, "directory group mismatch", "exact manifested group ID/name/membership", "inspect directory-service state manually")
-		} else if member, err := inspector.IsMember(operator, group); err != nil || !member {
-			add("group.membership", Drifted, "operator is not a directory member", "exact manifested membership", "inspect directory-service state manually")
 		}
 		effective, err := inspector.EffectiveGroups()
 		if err != nil || !containsInt(effective, manifest.Group.ID) {
@@ -213,7 +211,9 @@ func (s SystemService) Doctor(_ context.Context, request Request) Report {
 
 	if !canonicalAbsolute(request.TartHome) {
 		add("tart-home.path", Drifted, "noncanonical configured path", "canonical absolute private directory", "correct version-2 host configuration")
-	} else if fact, err := inspector.InspectPath(request.TartHome); err != nil || !fact.Exists {
+	} else if fact, err := inspector.InspectPath(request.TartHome); err != nil {
+		add("tart-home.unsafe", Drifted, "existing path safety inspection failed", "operator-owned private directory without ACL", "inspect tart_home manually")
+	} else if !fact.Exists {
 		add("tart-home.missing", Missing, "missing or unreadable", "private operator directory", "create and explicitly initialize tart_home")
 	} else if !fact.Directory || fact.Mode&0o077 != 0 || fact.ExtendedACL || (manifest.Version == 1 && fact.UID != manifest.Operator.UID) {
 		add("tart-home.unsafe", Drifted, "unsafe type, owner, mode, or ACL", "operator-owned private directory without ACL", "inspect tart_home manually")
@@ -222,9 +222,12 @@ func (s SystemService) Doctor(_ context.Context, request Request) Report {
 	for _, tool := range []struct{ code, path string }{{"ssh", "/usr/bin/ssh"}, {"ssh-keygen", "/usr/bin/ssh-keygen"}} {
 		checkTool(inspector, &report, tool.code, tool.path, "", 0, -1, -1)
 	}
-	checkTool(inspector, &report, "screen", ScreenPath, ScreenExecutableSHA256, 0o755, 0, 0)
-	if output, err := inspector.CommandOutput(ScreenPath, "--version"); err != nil || strings.TrimSpace(output) != ScreenVersionOutput {
-		add("screen.version", Drifted, "version did not match", ScreenVersionOutput, "use the exact qualified system Screen")
+	screenFact, screenInspectable := checkTool(inspector, &report, "screen", ScreenPath, ScreenExecutableSHA256, 0o755, 0, 0)
+	screenOK := screenInspectable && exactToolFact(screenFact, ScreenExecutableSHA256, 0o755, 0, 0)
+	if screenOK {
+		if output, err := inspector.CommandOutput(ScreenPath, "--version"); err != nil || strings.TrimSpace(output) != ScreenVersionOutput {
+			add("screen.version", Drifted, "version did not match", ScreenVersionOutput, "use the exact qualified system Screen")
+		}
 	}
 	homebrew, err := inspector.HomebrewSoftnet()
 	if err != nil {
@@ -269,6 +272,18 @@ func checkTool(inspector DoctorInspector, report *Report, code, path, digest str
 		report.Findings = append(report.Findings, Finding{Code: code + ".digest", Category: Drifted, Observed: "digest mismatch", Expected: digest, Remedy: "install the exact qualified executable"})
 	}
 	return fact, true
+}
+
+func exactToolFact(fact PathFact, digest string, mode uint32, uid, gid int) bool {
+	return fact.Exists && fact.Regular && fact.Links == 1 && !fact.ExtendedACL && fact.SHA256 == digest && fact.Mode == mode && fact.UID == uid && fact.GID == gid
+}
+
+func safeUnprivilegedExecutableMode(mode uint32) bool {
+	return mode&0o111 != 0 && mode&0o6000 == 0
+}
+
+func qualifiedTartFact(fact PathFact) bool {
+	return fact.Exists && fact.Regular && fact.Links == 1 && !fact.ExtendedACL && fact.SHA256 == TartExecutableSHA256 && safeUnprivilegedExecutableMode(fact.Mode)
 }
 
 func trustedSoftnetDirectories() []string {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -22,6 +21,80 @@ func TestDoctorReportsHealthyOnlyWhenEveryHostPrerequisiteMatches(t *testing.T) 
 	}
 	if inspector.mutations != 0 {
 		t.Fatalf("doctor mutation count = %d, want zero", inspector.mutations)
+	}
+}
+
+func TestDoctorNeverExecutesConfiguredTartAndGatesScreenVersionOnExactIdentity(t *testing.T) {
+	inspector, request := healthyDoctorFixture(t)
+	if report := (SystemService{inspector: inspector}).Doctor(t.Context(), request); report.Status != Healthy {
+		t.Fatalf("healthy Doctor() = %#v", report)
+	}
+	if containsString(inspector.commands, commandKey(request.TartPath, "--version")) {
+		t.Fatalf("doctor executed configured Tart: %v", inspector.commands)
+	}
+	if !containsString(inspector.commands, commandKey(ScreenPath, "--version")) {
+		t.Fatalf("doctor did not verify safe Screen: %v", inspector.commands)
+	}
+
+	for name, mutate := range map[string]func(*PathFact){
+		"digest": func(fact *PathFact) { fact.SHA256 = strings.Repeat("0", 64) },
+		"owner":  func(fact *PathFact) { fact.UID = 501 },
+		"setuid": func(fact *PathFact) { fact.Mode = 0o4755 },
+		"links":  func(fact *PathFact) { fact.Links = 2 },
+	} {
+		t.Run("screen "+name, func(t *testing.T) {
+			inspector, request := healthyDoctorFixture(t)
+			fact := inspector.paths[ScreenPath]
+			mutate(&fact)
+			inspector.paths[ScreenPath] = fact
+			_ = (SystemService{inspector: inspector}).Doctor(t.Context(), request)
+			if containsString(inspector.commands, commandKey(ScreenPath, "--version")) {
+				t.Fatalf("doctor executed unsafe Screen after %s drift", name)
+			}
+		})
+	}
+}
+
+func TestDoctorTartAdmissionRequiresExactSafeExecutableMetadata(t *testing.T) {
+	for name, mutate := range map[string]func(*PathFact){
+		"not executable": func(fact *PathFact) { fact.Mode = 0o644 },
+		"setuid":         func(fact *PathFact) { fact.Mode = 0o4755 },
+		"setgid":         func(fact *PathFact) { fact.Mode = 0o2755 },
+		"digest":         func(fact *PathFact) { fact.SHA256 = strings.Repeat("0", 64) },
+		"hardlink":       func(fact *PathFact) { fact.Links = 2 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			inspector, request := healthyDoctorFixture(t)
+			fact := inspector.paths[request.TartPath]
+			mutate(&fact)
+			inspector.paths[request.TartPath] = fact
+			report := (SystemService{inspector: inspector}).Doctor(t.Context(), request)
+			if report.Status != Drifted {
+				t.Fatalf("Doctor() status = %q, want unsafe Tart drift", report.Status)
+			}
+			if containsString(inspector.commands, commandKey(request.TartPath, "--version")) {
+				t.Fatalf("doctor executed unsafe configured Tart: %v", inspector.commands)
+			}
+		})
+	}
+}
+
+func TestDoctorClassifiesExistingUnverifiableAncestorAndTartHomeAsDrifted(t *testing.T) {
+	for code, path := range map[string]string{
+		"softnet.ancestor.Library.Boxwarden": "/Library/Boxwarden",
+		"tart-home.unsafe":                   "/Users/wes/tart",
+	} {
+		t.Run(code, func(t *testing.T) {
+			inspector, request := healthyDoctorFixture(t)
+			inspector.failures[path] = errors.New("sensitive inspection detail")
+			report := (SystemService{inspector: inspector}).Doctor(t.Context(), request)
+			for _, finding := range report.Findings {
+				if finding.Code == code && finding.Category == Drifted && !strings.Contains(fmt.Sprint(finding), "sensitive") {
+					return
+				}
+			}
+			t.Fatalf("Doctor() findings = %#v, want redacted %s drift", report.Findings, code)
+		})
 	}
 }
 
@@ -204,6 +277,7 @@ type doctorInspectorFake struct {
 	outputs         map[string]string
 	homebrew        []HomebrewSoftnet
 	failures        map[string]error
+	commands        []string
 	mutations       int
 }
 
@@ -215,14 +289,17 @@ func (f *doctorInspectorFake) InspectPath(path string) (PathFact, error) {
 	return f.paths[path], nil
 }
 func (f *doctorInspectorFake) LookupOperator(int) (Operator, error) { return f.operator, nil }
-func (f *doctorInspectorFake) LookupGroup(string) (Group, error)    { return f.group, nil }
-func (f *doctorInspectorFake) IsMember(operator Operator, group Group) (bool, error) {
-	return reflect.DeepEqual(operator, f.operator) && reflect.DeepEqual(group, f.group), nil
+func (f *doctorInspectorFake) ExactOperatorGroup(operator Operator, _ string) (Group, error) {
+	if operator != f.operator {
+		return Group{}, errors.New("operator mismatch")
+	}
+	return f.group, nil
 }
 func (f *doctorInspectorFake) EffectiveGroups() ([]int, error) {
 	return append([]int(nil), f.effectiveGroups...), nil
 }
 func (f *doctorInspectorFake) CommandOutput(path string, args ...string) (string, error) {
+	f.commands = append(f.commands, commandKey(path, args...))
 	return f.outputs[commandKey(path, args...)], nil
 }
 func (f *doctorInspectorFake) HomebrewSoftnet() ([]HomebrewSoftnet, error) {

@@ -23,9 +23,8 @@ type FSInspector interface {
 }
 
 type GroupDB interface {
-	LookupGroup(string) (Group, error)
 	LookupOperator(int) (Operator, error)
-	IsMember(Operator, Group) (bool, error)
+	ExactOperatorGroup(Operator, string) (Group, error)
 }
 
 type ProcessInventory interface {
