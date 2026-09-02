@@ -13,7 +13,7 @@ import (
 func TestCAStoreRejectsDuplicateUnknownTrailingAndOversizedMetadata(t *testing.T) {
 	root := privateRoot(t)
 	work := testDomain(t, "work", root)
-	store := NewCAStore(CAStoreOptions{Runner: newKeygenRunner(t), Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() string { return testUUID }})
+	store := NewCAStore(CAStoreOptions{Runner: newKeygenRunner(t), Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() (string, error) { return testUUID, nil }})
 	if _, err := store.Init(context.Background(), work, []Domain{work}); err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestCAFreshStoreLoadsAndIssuesWithoutInit(t *testing.T) {
 	root := privateRoot(t)
 	work := testDomain(t, "work", root)
 	runner := newKeygenRunner(t)
-	initial := NewCAStore(CAStoreOptions{Runner: runner, Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() string { return testUUID }})
+	initial := NewCAStore(CAStoreOptions{Runner: runner, Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() (string, error) { return testUUID, nil }})
 	if _, err := initial.Init(context.Background(), work, []Domain{work}); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestCALoadRejectsChangedCreatingOperator(t *testing.T) {
 	root := privateRoot(t)
 	work := testDomain(t, "work", root)
 	runner := newKeygenRunner(t)
-	store := NewCAStore(CAStoreOptions{Runner: runner, Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() string { return testUUID }})
+	store := NewCAStore(CAStoreOptions{Runner: runner, Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() (string, error) { return testUUID, nil }})
 	if _, err := store.Init(context.Background(), work, []Domain{work}); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestCAAndPinStoresRejectUnexpectedStateFiles(t *testing.T) {
 	root := privateRoot(t)
 	work := testDomain(t, "work", root)
 	runner := newKeygenRunner(t)
-	caStore := NewCAStore(CAStoreOptions{Runner: runner, Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() string { return testUUID }})
+	caStore := NewCAStore(CAStoreOptions{Runner: runner, Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() (string, error) { return testUUID, nil }})
 	if _, err := caStore.Init(context.Background(), work, []Domain{work}); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestCertificateIssuerRejectsCrossDomainBindingWithoutSigning(t *testing.T) 
 	root := privateRoot(t)
 	work := testDomain(t, "work", root)
 	runner := newKeygenRunner(t)
-	store := NewCAStore(CAStoreOptions{Runner: runner, Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() string { return testUUID }})
+	store := NewCAStore(CAStoreOptions{Runner: runner, Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() (string, error) { return testUUID, nil }})
 	ca, err := store.Init(context.Background(), work, []Domain{work})
 	if err != nil {
 		t.Fatal(err)
@@ -264,7 +264,7 @@ func TestCAInitNormalizesSSHKeygenPublicMode(t *testing.T) {
 	root := privateRoot(t)
 	work := testDomain(t, "work", root)
 	runner := newKeygenRunner(t)
-	store := NewCAStore(CAStoreOptions{Runner: runner, Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() string { return testUUID }})
+	store := NewCAStore(CAStoreOptions{Runner: runner, Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() (string, error) { return testUUID, nil }})
 	if _, err := store.Init(context.Background(), work, []Domain{work}); err != nil {
 		t.Fatal(err)
 	}

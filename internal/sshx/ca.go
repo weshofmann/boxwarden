@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,10 @@ import (
 )
 
 const caMetadataVersion = 1
+
+// ErrCAMissing reports that the selected domain has no CA material. Callers
+// can distinguish an uninitialized domain from partial or unsafe CA state.
+var ErrCAMissing = errors.New("management CA is missing")
 
 // Command is one bounded argv-only trusted-host program invocation.
 type Command struct {
@@ -57,13 +62,13 @@ type Domain struct {
 type CAStoreOptions struct {
 	Runner        Runner
 	Identity      Identity
-	NewUUID       func() string
+	NewUUID       func() (string, error)
 	SSHKeygenPath string
 }
 type CAStore struct {
 	runner        Runner
 	identity      Identity
-	newUUID       func() string
+	newUUID       func() (string, error)
 	sshKeygenPath string
 }
 
@@ -98,6 +103,27 @@ func (s *CAStore) Init(ctx context.Context, current Domain, configured []Domain)
 	if s.runner == nil || s.identity == nil || s.newUUID == nil {
 		return CAIdentity{}, fmt.Errorf("CA store dependencies are required")
 	}
+	existing, err := s.Check(ctx, current, configured)
+	if err == nil {
+		return existing, nil
+	}
+	if !errors.Is(err, ErrCAMissing) {
+		return CAIdentity{}, err
+	}
+	operator, err := s.identity.Current(ctx)
+	if err != nil {
+		return CAIdentity{}, fmt.Errorf("resolve creating operator: %w", err)
+	}
+	if operator.UID < 0 || operator.Name == "" {
+		return CAIdentity{}, fmt.Errorf("creating operator is invalid")
+	}
+	creationUUID, err := s.newUUID()
+	if err != nil {
+		return CAIdentity{}, fmt.Errorf("generate CA creation UUID: %w", err)
+	}
+	if !validUUID(creationUUID) {
+		return CAIdentity{}, fmt.Errorf("creation UUID is invalid")
+	}
 	if err := ensurePrivateDirectory(current.StateRoot); err != nil {
 		return CAIdentity{}, fmt.Errorf("state root: %w", err)
 	}
@@ -107,14 +133,7 @@ func (s *CAStore) Init(ctx context.Context, current Domain, configured []Domain)
 		return CAIdentity{}, err
 	}
 	if state.complete {
-		identity, err := s.Load(ctx, current)
-		if err != nil {
-			return CAIdentity{}, err
-		}
-		if err := s.rejectConfiguredReuse(ctx, current, configured, identity.Fingerprint); err != nil {
-			return CAIdentity{}, err
-		}
-		return identity, nil
+		return s.Check(ctx, current, configured)
 	}
 	if state.any {
 		return CAIdentity{}, fmt.Errorf("management CA state is partial; explicit manual remediation is required")
@@ -140,14 +159,7 @@ func (s *CAStore) Init(ctx context.Context, current Domain, configured []Domain)
 	if err != nil {
 		return CAIdentity{}, err
 	}
-	operator, err := s.identity.Current(ctx)
-	if err != nil || operator.UID < 0 || operator.Name == "" {
-		return CAIdentity{}, fmt.Errorf("resolve creating operator: %w", err)
-	}
-	identity.CreationUUID = s.newUUID()
-	if !validUUID(identity.CreationUUID) {
-		return CAIdentity{}, fmt.Errorf("creation UUID is invalid")
-	}
+	identity.CreationUUID = creationUUID
 	identity.CreatorUID, identity.CreatorName = operator.UID, operator.Name
 	encoded, err := json.Marshal(identity)
 	if err != nil {
@@ -157,14 +169,18 @@ func (s *CAStore) Init(ctx context.Context, current Domain, configured []Domain)
 	if err := writePrivateNew(metadataPath, append(encoded, '\n')); err != nil {
 		return CAIdentity{}, fmt.Errorf("write CA metadata: %w", err)
 	}
-	loaded, err := s.Load(ctx, current)
-	if err != nil {
+	return s.Check(ctx, current, configured)
+}
+
+// Check validates the selected domain's existing CA without creating or
+// repairing state. A completely absent CA returns ErrCAMissing; any partial,
+// malformed, or unsafe state fails closed. Complete configured domains are
+// checked for CA fingerprint reuse without searching outside that set.
+func (s *CAStore) Check(ctx context.Context, current Domain, configured []Domain) (CAIdentity, error) {
+	if err := validDomain(current); err != nil {
 		return CAIdentity{}, err
 	}
-	if err := s.rejectConfiguredReuse(ctx, current, configured, loaded.Fingerprint); err != nil {
-		return CAIdentity{}, err
-	}
-	return loaded, nil
+	return s.checkConfigured(ctx, current, configured)
 }
 
 func (s *CAStore) Load(ctx context.Context, current Domain) (CAIdentity, error) {
@@ -259,43 +275,92 @@ func decodeCAIdentity(contents []byte) (CAIdentity, error) {
 	return value, nil
 }
 
-func (s *CAStore) rejectConfiguredReuse(ctx context.Context, current Domain, configured []Domain, fingerprint string) error {
-	seenCurrent := false
+// checkConfigured validates every supplied configured domain before returning
+// the selected identity. It never discovers or falls back to an undeclared
+// domain. ErrCAMissing is returned only after every configured root has been
+// checked and no configured CA state is partial, unsafe, or duplicated.
+func (s *CAStore) checkConfigured(ctx context.Context, current Domain, configured []Domain) (CAIdentity, error) {
+	seenDomains := make(map[domain.ID]string, len(configured))
+	fingerprints := make(map[string]domain.ID, len(configured))
+	var selected CAIdentity
+	selectedComplete := false
+	selectedConfigured := false
 	for _, candidate := range configured {
 		if err := validDomain(candidate); err != nil {
-			return fmt.Errorf("configured domain: %w", err)
+			return CAIdentity{}, fmt.Errorf("configured domain: %w", err)
 		}
+		if root, found := seenDomains[candidate.ID]; found {
+			return CAIdentity{}, fmt.Errorf("configured domain %q is declared more than once (%q and %q)", candidate.ID, root, candidate.StateRoot)
+		}
+		seenDomains[candidate.ID] = candidate.StateRoot
 		if candidate.ID == current.ID {
-			seenCurrent = true
-			continue
+			if candidate.StateRoot != current.StateRoot {
+				return CAIdentity{}, fmt.Errorf("configured selected domain %q state root does not match", current.ID)
+			}
+			selectedConfigured = true
 		}
-		state, err := caState(caDirectory(candidate.StateRoot))
+		state, err := checkCAState(candidate)
 		if err != nil {
-			return fmt.Errorf("inspect configured domain %q: %w", candidate.ID, err)
+			return CAIdentity{}, fmt.Errorf("inspect configured domain %q: %w", candidate.ID, err)
 		}
-		if state.any && !state.complete {
-			return fmt.Errorf("configured domain %q has partial CA state", candidate.ID)
+		if !state.any {
+			continue
 		}
 		if !state.complete {
-			continue
+			return CAIdentity{}, fmt.Errorf("configured domain %q has partial CA state", candidate.ID)
 		}
-		other, err := s.Load(ctx, candidate)
+		identity, err := s.Load(ctx, candidate)
 		if err != nil {
-			return fmt.Errorf("load configured domain %q: %w", candidate.ID, err)
+			return CAIdentity{}, fmt.Errorf("load configured domain %q: %w", candidate.ID, err)
 		}
-		if other.Fingerprint == fingerprint {
-			return fmt.Errorf("management CA fingerprint is reused by configured domain %q", candidate.ID)
+		if other, found := fingerprints[identity.Fingerprint]; found {
+			return CAIdentity{}, fmt.Errorf("management CA fingerprint is reused by configured domains %q and %q", other, candidate.ID)
+		}
+		fingerprints[identity.Fingerprint] = candidate.ID
+		if candidate.ID == current.ID {
+			selected, selectedComplete = identity, true
 		}
 	}
-	if !seenCurrent {
-		return fmt.Errorf("configured domains do not contain selected domain %q", current.ID)
+	if !selectedConfigured {
+		return CAIdentity{}, fmt.Errorf("configured domains do not contain selected domain %q", current.ID)
 	}
-	return nil
+	if !selectedComplete {
+		return CAIdentity{}, fmt.Errorf("selected domain %q: %w", current.ID, ErrCAMissing)
+	}
+	return selected, nil
 }
 
 type caStateResult struct {
 	any      bool
 	complete bool
+}
+
+// checkCAState establishes that the domain-root ancestry is safe before
+// treating missing CA material as an uninitialized state. It performs only
+// observations and never creates missing directories.
+func checkCAState(current Domain) (caStateResult, error) {
+	rootInfo, err := os.Lstat(current.StateRoot)
+	if os.IsNotExist(err) {
+		return caStateResult{}, nil
+	}
+	if err != nil {
+		return caStateResult{}, err
+	}
+	if err := requirePrivateDirectoryInfo(rootInfo); err != nil {
+		return caStateResult{}, fmt.Errorf("CA state root: %w", err)
+	}
+	identityRoot := filepath.Join(current.StateRoot, "identity")
+	identityInfo, err := os.Lstat(identityRoot)
+	if os.IsNotExist(err) {
+		return caStateResult{}, nil
+	}
+	if err != nil {
+		return caStateResult{}, err
+	}
+	if err := requirePrivateDirectoryInfo(identityInfo); err != nil {
+		return caStateResult{}, fmt.Errorf("CA identity directory: %w", err)
+	}
+	return caState(caDirectory(current.StateRoot))
 }
 
 func caState(dir string) (caStateResult, error) {

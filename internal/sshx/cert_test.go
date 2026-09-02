@@ -12,7 +12,7 @@ func TestCertificateIssuerUsesExactNoExtensionCertificateArguments(t *testing.T)
 	root := privateRoot(t)
 	work := testDomain(t, "work", root)
 	runner := newKeygenRunner(t)
-	store := NewCAStore(CAStoreOptions{Runner: runner, Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() string { return testUUID }})
+	store := NewCAStore(CAStoreOptions{Runner: runner, Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() (string, error) { return testUUID, nil }})
 	ca, err := store.Init(context.Background(), work, []Domain{work})
 	if err != nil {
 		t.Fatal(err)
