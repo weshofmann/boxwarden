@@ -61,6 +61,19 @@ func TestReconcileLeavesAmbiguousStateVisible(t *testing.T) {
 	}
 }
 
+func TestReconcileClassifiesCreatingAndMissingAsRetryableTransition(t *testing.T) {
+	got := Reconcile(session.StateCreating, backend.Observation{
+		ObjectID: "boxwarden-work-dev",
+		State:    backend.ObjectUnknown,
+	})
+	if got.Consistency != Indeterminate {
+		t.Fatalf("Consistency = %q, want %q", got.Consistency, Indeterminate)
+	}
+	if got.Diagnostic == "" {
+		t.Fatal("Diagnostic is empty, want create-reconciliation guidance")
+	}
+}
+
 func TestReconcileRejectsInvalidObservationState(t *testing.T) {
 	got := Reconcile(session.StateStopped, backend.Observation{
 		ObjectID: "boxwarden-work-dev",

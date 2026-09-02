@@ -76,6 +76,16 @@ func TestObserverUsesOnlyTartListJSON(t *testing.T) {
 	}
 }
 
+func TestObserverAddsDeadlineWhenCallerProvidesNone(t *testing.T) {
+	runner := &recordingRunner{result: execx.Result{Stdout: stoppedList}}
+	if _, err := New(runner, "/opt/homebrew/bin/tart").Observe(context.Background(), "boxwarden-work-dev"); err != nil {
+		t.Fatalf("Observe() error = %v", err)
+	}
+	if !runner.hasDeadline {
+		t.Fatal("runner context has no deadline, want bounded Tart observation")
+	}
+}
+
 func TestObserverRejectsTruncatedOutputAndCommandFailure(t *testing.T) {
 	for name, runner := range map[string]*recordingRunner{
 		"truncated output": {result: execx.Result{Truncated: true}},
@@ -90,13 +100,15 @@ func TestObserverRejectsTruncatedOutputAndCommandFailure(t *testing.T) {
 }
 
 type recordingRunner struct {
-	command execx.Command
-	result  execx.Result
-	err     error
+	command     execx.Command
+	hasDeadline bool
+	result      execx.Result
+	err         error
 }
 
-func (r *recordingRunner) Run(_ context.Context, command execx.Command) (execx.Result, error) {
+func (r *recordingRunner) Run(ctx context.Context, command execx.Command) (execx.Result, error) {
 	r.command = command
+	_, r.hasDeadline = ctx.Deadline()
 	return r.result, r.err
 }
 

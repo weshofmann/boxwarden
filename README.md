@@ -19,10 +19,13 @@ the tested network policy. It does not claim all environments or operational
 mechanisms are production-ready; see
 [the Task 0 summary](docs/evidence/m1a-task0-final-summary.md).
 
-The currently implemented V1 surface is deliberately narrow: read-only session
-status. It observes a named Tart session and reports persisted intent beside
-observed state. It does not create, start, stop, clone, delete, authenticate,
-or inject credentials into a workstation.
+The currently implemented V2 surface registers an existing qualified, stopped
+Tart object as one domain's golden, creates a stopped disposable clone with a
+new UUID-derived backend identity and randomized MAC, and reports persisted
+session intent beside observed state. Creation is intent-first and reconciles
+partial retries under domain/session locks. It does not yet start, stop, delete,
+authenticate, or inject credentials into a workstation. V2's attended real-host
+golden/clone gate remains pending.
 
 The broader v0.1 lifecycle and authentication work remains in progress. Its
 planned authentication targets are AWS, GCP, GitHub, Bitbucket, Jira /
@@ -67,9 +70,11 @@ Read [the security model](docs/security-model.md),
 summary](docs/evidence/m1a-task0-final-summary.md) before evaluating the
 project for sensitive work.
 
-## Current command
+## Current commands
 
 ```sh
+boxwarden --domain <id> golden register <qualified-tart-object>
+boxwarden --domain <id> session create [--mode clean|quarantine] <session>
 boxwarden --domain <id> session status <session>
 ```
 

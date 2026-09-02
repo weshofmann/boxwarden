@@ -11,9 +11,10 @@ import (
 )
 
 func main() {
-	observer := tart.New(execx.OSRunner{MaxOutputBytes: 1 << 20}, "tart")
+	backendAdapter := tart.New(execx.OSRunner{MaxOutputBytes: 1 << 20}, "tart")
 	if err := app.Run(context.Background(), os.Args[1:], app.Options{
-		Observer: observer,
+		Observer: backendAdapter,
+		Creator:  backendAdapter,
 		Output:   os.Stdout,
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "boxwarden: %v\n", err)

@@ -87,6 +87,40 @@ func TestLoadRecordRejectsMissingRecord(t *testing.T) {
 	}
 }
 
+func TestLoadRecordRejectsGroupAccessibleSessionDirectory(t *testing.T) {
+	root := sessionRoot(t)
+	if err := os.Chmod(filepath.Join(root, "sessions"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	writeRecord(t, root, "dev", `{"version":1,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-dev"}}`)
+
+	if _, err := LoadRecord(root, "work", "dev"); err == nil {
+		t.Fatal("LoadRecord() error = nil, want group-accessible directory rejection")
+	}
+}
+
+func TestLoadRecordRejectsGroupReadableSessionRecord(t *testing.T) {
+	root := sessionRoot(t)
+	writeRecord(t, root, "dev", `{"version":1,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-dev"}}`)
+	if err := os.Chmod(filepath.Join(root, "sessions", "dev.json"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadRecord(root, "work", "dev"); err == nil {
+		t.Fatal("LoadRecord() error = nil, want group-readable record rejection")
+	}
+}
+
+func TestLoadRecordRejectsOversizedJSONEvenWhenExcessIsWhitespace(t *testing.T) {
+	root := sessionRoot(t)
+	valid := `{"version":1,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-dev"}}`
+	writeRecord(t, root, "dev", valid+strings.Repeat(" ", (1<<20)-len(valid)+1))
+
+	if _, err := LoadRecord(root, "work", "dev"); err == nil {
+		t.Fatal("LoadRecord() error = nil, want file-size rejection")
+	}
+}
+
 func sessionRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())

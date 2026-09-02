@@ -25,6 +25,13 @@ type Reconciliation struct {
 // Reconcile classifies a session record against a backend observation. It is
 // intentionally pure: status inspection never changes backend or local state.
 func Reconcile(intended session.IntendedState, observed backend.Observation) Reconciliation {
+	expected, stable := expectedObservedState(intended)
+	if !stable {
+		return Reconciliation{
+			Consistency: Indeterminate,
+			Diagnostic:  fmt.Sprintf("persisted lifecycle intent %q is transitional and requires lifecycle reconciliation", intended),
+		}
+	}
 	if !observed.Exists {
 		return Reconciliation{
 			Consistency: Drift,
@@ -38,13 +45,6 @@ func Reconcile(intended session.IntendedState, observed backend.Observation) Rec
 		}
 	}
 
-	expected, stable := expectedObservedState(intended)
-	if !stable {
-		return Reconciliation{
-			Consistency: Indeterminate,
-			Diagnostic:  fmt.Sprintf("persisted lifecycle intent %q is transitional and requires lifecycle reconciliation", intended),
-		}
-	}
 	if observed.State != expected {
 		return Reconciliation{
 			Consistency: Drift,

@@ -1,11 +1,11 @@
 package session
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/weshofmann/boxwarden/internal/domain"
 )
@@ -56,30 +56,34 @@ func LoadRecord(stateRoot, expectedDomain, rawName string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
-	if err := requirePrivateDirectory(stateRoot); err != nil {
+	root, err := openSessionStateRoot(stateRoot)
+	if err != nil {
 		return Record{}, fmt.Errorf("state root: %w", err)
 	}
-	sessionsRoot := filepath.Join(stateRoot, "sessions")
-	if err := requirePrivateDirectory(sessionsRoot); err != nil {
+	defer root.Close()
+	sessions, err := openSessionChild(root, "sessions", false)
+	if err != nil {
 		return Record{}, fmt.Errorf("session directory: %w", err)
 	}
+	defer sessions.Close()
+	return loadRecordFromRoot(sessions, domainID, name)
+}
 
-	path := filepath.Join(sessionsRoot, string(name)+".json")
-	info, err := os.Lstat(path)
-	if err != nil {
-		return Record{}, fmt.Errorf("session record %q: %w", name, err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return Record{}, fmt.Errorf("session record %q must be a regular non-symlink file", name)
-	}
-
-	file, err := os.Open(path)
+func loadRecordFromRoot(sessions *os.Root, domainID domain.ID, name Name) (Record, error) {
+	file, err := openSessionPrivateRegular(sessions, string(name)+".json")
 	if err != nil {
 		return Record{}, fmt.Errorf("open session record %q: %w", name, err)
 	}
 	defer file.Close()
 
-	decoder := json.NewDecoder(io.LimitReader(file, 1<<20))
+	contents, err := io.ReadAll(io.LimitReader(file, (1<<20)+1))
+	if err != nil {
+		return Record{}, fmt.Errorf("read session record %q: %w", name, err)
+	}
+	if len(contents) > 1<<20 {
+		return Record{}, fmt.Errorf("session record %q exceeds 1 MiB", name)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(contents))
 	record, err := decodeRecord(decoder)
 	if err != nil {
 		return Record{}, err
@@ -205,20 +209,6 @@ func decodeBackend(decoder *json.Decoder) (BackendRef, error) {
 		return BackendRef{}, fmt.Errorf("invalid backend reference")
 	}
 	return backend, nil
-}
-
-func requirePrivateDirectory(path string) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return fmt.Errorf("must be a non-symlink directory")
-	}
-	if info.Mode().Perm()&0o007 != 0 {
-		return fmt.Errorf("must not be accessible to group or other users")
-	}
-	return nil
 }
 
 func validState(state IntendedState) bool {

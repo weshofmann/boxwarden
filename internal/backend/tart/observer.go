@@ -1,5 +1,5 @@
-// Package tart observes Tart VM state. It intentionally exposes no lifecycle
-// mutations: V0.1 uses Tart only as an observed source of truth.
+// Package tart observes Tart VM state and exposes narrowly scoped lifecycle
+// mutations through backend-neutral interfaces.
 package tart
 
 import (
@@ -13,6 +13,12 @@ import (
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/execx"
+)
+
+const (
+	observationCommandTimeout = 30 * time.Second
+	cloneCommandTimeout       = 10 * time.Minute
+	mutationCommandTimeout    = time.Minute
 )
 
 // Observer observes Tart objects through its supported JSON list interface.
@@ -36,7 +42,9 @@ func (o Observer) Observe(ctx context.Context, objectID string) (backend.Observa
 		return backend.Observation{}, fmt.Errorf("observe Tart object: executable is required")
 	}
 
-	result, err := o.runner.Run(ctx, execx.Command{
+	commandContext, cancel := context.WithTimeout(ctx, observationCommandTimeout)
+	defer cancel()
+	result, err := o.runner.Run(commandContext, execx.Command{
 		Path: o.executable,
 		Args: []string{"list", "--format", "json"},
 	})
