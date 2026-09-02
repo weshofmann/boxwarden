@@ -85,7 +85,7 @@ func TestSessionStatusReportsMissingCreatingSessionAsIndeterminate(t *testing.T)
 	if err := os.Mkdir(filepath.Join(domainConfig.StateRoot, "sessions"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	record := `{"version":1,"domain":"work","name":"dev","id":"00112233-4455-4677-8899-aabbccddeeff","mode":"clean","intended_state":"creating","backend":{"kind":"tart","object_id":"boxwarden-work-00112233445546778899aabbccddeeff"},"golden_revision":"golden-work-r1"}`
+	record := `{"version":2,"domain":"work","name":"dev","id":"00112233-4455-4677-8899-aabbccddeeff","mode":"clean","intended_state":"creating","backend":{"kind":"tart","object_id":"boxwarden-work-00112233445546778899aabbccddeeff"},"golden_revision":"golden-work-r1","readiness":{"status":"not_ready","diagnostic":""}}`
 	if err := os.WriteFile(filepath.Join(domainConfig.StateRoot, "sessions", "dev.json"), []byte(record), 0o600); err != nil {
 		t.Fatal(err)
 	}

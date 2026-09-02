@@ -45,7 +45,7 @@ func TestCreatePersistsIntentBeforeMutationAndReturnsStoppedClone(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	if record.ID != testSessionID || record.Backend.ObjectID != testObjectID || record.GoldenRevision != "golden-r1" || record.IntendedState != StateStopped {
+	if record.Version != recordVersion || record.ID != testSessionID || record.Backend.ObjectID != testObjectID || record.GoldenRevision != "golden-r1" || record.IntendedState != StateStopped || record.StartGeneration != "" || record.Readiness != (ReadinessRecord{Status: ReadinessNotReady}) {
 		t.Fatalf("Create() record = %#v, want stopped UUID-derived golden clone", record)
 	}
 	if got, want := backendFake.CloneCalls(), []fake.CloneCall{{SourceID: "golden-r1", TargetID: testObjectID}}; !equalCloneCalls(got, want) {
@@ -60,6 +60,30 @@ func TestCreatePersistsIntentBeforeMutationAndReturnsStoppedClone(t *testing.T) 
 	}
 	if loaded != record {
 		t.Fatalf("LoadRecord final = %#v, want %#v", loaded, record)
+	}
+}
+
+func TestCreateUpgradesStoppedVersion1RecordAndReturnsPersistedVersion2(t *testing.T) {
+	domainConfig, backendFake, service := createFixture(t)
+	if err := os.Mkdir(filepath.Join(domainConfig.StateRoot, "sessions"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeRecord(t, domainConfig.StateRoot, "dev", `{"version":1,"domain":"work","name":"dev","id":"00112233-4455-4677-8899-aabbccddeeff","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-00112233445546778899aabbccddeeff"},"golden_revision":"golden-r1"}`)
+	backendFake.SetObservation(backend.Observation{ObjectID: testObjectID, Exists: true, State: backend.ObjectStopped})
+
+	record, err := service.Create(context.Background(), "dev", ModeClean)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	loaded, err := LoadRecord(domainConfig.StateRoot, "work", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record != loaded || record.Version != recordVersion || record.Readiness != (ReadinessRecord{Status: ReadinessNotReady}) {
+		t.Fatalf("Create() record = %#v, persisted = %#v, want returned version 2 not-ready record", record, loaded)
+	}
+	if len(backendFake.CloneCalls()) != 0 || len(backendFake.RandomizeMACCalls()) != 0 {
+		t.Fatal("stopped version 1 retry repeated backend mutation")
 	}
 }
 
@@ -196,6 +220,7 @@ func TestCreateResyncsLoadedCreatingIntentBeforeBackendMutation(t *testing.T) {
 		IntendedState:  StateCreating,
 		Backend:        BackendRef{Kind: "tart", ObjectID: testObjectID},
 		GoldenRevision: "golden-r1",
+		Readiness:      ReadinessRecord{Status: ReadinessNotReady},
 	}
 	interruptedSync := errors.New("directory sync interrupted")
 	if err := saveRecord(domainConfig.StateRoot, domainConfig.ID, record, func(stage storeStage) error {
