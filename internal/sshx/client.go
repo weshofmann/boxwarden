@@ -20,13 +20,14 @@ const (
 )
 
 type Connection struct {
-	Address         string
-	Port            uint16
-	Binding         Binding
-	Pin             HostKeyPin
-	IdentityFile    string
-	CertificateFile string
-	KnownHostsFile  string
+	Address          string
+	Port             uint16
+	Binding          Binding
+	Pin              HostKeyPin
+	RuntimeDirectory string
+	IdentityFile     string
+	CertificateFile  string
+	KnownHostsFile   string
 }
 
 type Client struct{ runner Runner }
@@ -187,21 +188,18 @@ func validateConnection(connection Connection) error {
 	if err != nil || public != pin.PublicKey || fingerprint != pin.Fingerprint {
 		return fmt.Errorf("host-key pin is invalid")
 	}
-	for _, path := range []string{connection.IdentityFile, connection.CertificateFile, connection.KnownHostsFile} {
+	for _, path := range []string{connection.RuntimeDirectory, connection.IdentityFile, connection.CertificateFile, connection.KnownHostsFile} {
 		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 			return fmt.Errorf("SSH credential paths must be canonical and absolute")
 		}
-		if err := requirePrivateDirectory(filepath.Dir(path)); err != nil {
-			return fmt.Errorf("SSH credential directory: %w", err)
-		}
 	}
-	if _, err := requirePrivateFile(connection.IdentityFile); err != nil {
+	if _, err := requireRuntimeFile(connection.RuntimeDirectory, connection.IdentityFile, privateFileMode); err != nil {
 		return fmt.Errorf("SSH identity file: %w", err)
 	}
-	if _, err := requirePublicFile(connection.CertificateFile); err != nil {
+	if _, err := requireRuntimeFile(connection.RuntimeDirectory, connection.CertificateFile, publicFileMode); err != nil {
 		return fmt.Errorf("SSH certificate file: %w", err)
 	}
-	if _, err := requirePrivateFile(connection.KnownHostsFile); err != nil {
+	if _, err := requireRuntimeFile(connection.RuntimeDirectory, connection.KnownHostsFile, privateFileMode); err != nil {
 		return fmt.Errorf("SSH known-hosts file: %w", err)
 	}
 	return nil

@@ -72,7 +72,7 @@ func testConnection(t *testing.T) Connection {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return Connection{Address: "192.0.2.8", Port: 22, Binding: testBinding(t, testDomain(t, "work", root)), Pin: HostKeyPin{Version: 1, Domain: "work", SessionID: testUUID, BackendKind: "tart", BackendObject: "workstation", Algorithm: "ssh-ed25519", PublicKey: testPublicKey, Fingerprint: fingerprint}, IdentityFile: filepath.Join(root, "client"), CertificateFile: filepath.Join(root, "client-cert.pub"), KnownHostsFile: filepath.Join(root, "known_hosts")}
+	return Connection{Address: "192.0.2.8", Port: 22, Binding: testBinding(t, testDomain(t, "work", root)), Pin: HostKeyPin{Version: 1, Domain: "work", SessionID: testUUID, BackendKind: "tart", BackendObject: "workstation", Algorithm: "ssh-ed25519", PublicKey: testPublicKey, Fingerprint: fingerprint}, RuntimeDirectory: root, IdentityFile: filepath.Join(root, "client"), CertificateFile: filepath.Join(root, "client-cert.pub"), KnownHostsFile: filepath.Join(root, "known_hosts")}
 }
 
 func expectedSSHArgs(connection Connection) []string {

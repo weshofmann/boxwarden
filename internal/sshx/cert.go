@@ -2,7 +2,11 @@ package sshx
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -61,7 +65,7 @@ func NewCertificateIssuer(ca CAIdentity, runner Runner, identity Identity, now f
 }
 
 // Issue signs only the derived per-session principal with a fixed validity and no extensions.
-func (i *CertificateIssuer) Issue(ctx context.Context, binding Binding, clientKeyPath string) (Certificate, error) {
+func (i *CertificateIssuer) Issue(ctx context.Context, binding Binding, runtimeDirectory, clientKeyPath string) (Certificate, error) {
 	ctx, cancel := boundedCAContext(ctx)
 	defer cancel()
 	if i == nil || i.runner == nil || i.identity == nil || i.now == nil {
@@ -70,14 +74,13 @@ func (i *CertificateIssuer) Issue(ctx context.Context, binding Binding, clientKe
 	if err := binding.Validate(); err != nil {
 		return Certificate{}, err
 	}
-	if !filepath.IsAbs(clientKeyPath) || filepath.Clean(clientKeyPath) != clientKeyPath {
-		return Certificate{}, fmt.Errorf("client key path must be canonical and absolute")
-	}
-	if err := requirePrivateDirectory(filepath.Dir(clientKeyPath)); err != nil {
-		return Certificate{}, fmt.Errorf("validate client-key directory: %w", err)
-	}
-	if _, err := requirePrivateFile(clientKeyPath); err != nil {
+	if _, err := requireRuntimeFile(runtimeDirectory, clientKeyPath, privateFileMode); err != nil {
 		return Certificate{}, fmt.Errorf("validate client key: %w", err)
+	}
+	certificate := Certificate{Path: clientKeyPath + "-cert.pub", Identity: binding.CertificateIdentity(), Principal: binding.Principal()}
+	output, exists, err := admitCertificateOutput(runtimeDirectory, certificate.Path)
+	if err != nil {
+		return Certificate{}, fmt.Errorf("validate certificate output: %w", err)
 	}
 	if i.ca.Domain != binding.Domain || i.ca.StateRoot == "" {
 		return Certificate{}, fmt.Errorf("loaded CA domain does not match certificate binding")
@@ -88,27 +91,125 @@ func (i *CertificateIssuer) Issue(ctx context.Context, binding Binding, clientKe
 		return Certificate{}, err
 	}
 	now := i.now().UTC()
-	certificate := Certificate{Path: clientKeyPath + "-cert.pub", Identity: binding.CertificateIdentity(), Principal: binding.Principal(), NotBefore: now.Add(-renewalWindow), NotAfter: now.Add(certificateLifetime)}
+	certificate.NotBefore, certificate.NotAfter = now.Add(-renewalWindow), now.Add(certificateLifetime)
 	if ca.CreationUUID != i.ca.CreationUUID || ca.CreatorUID != i.ca.CreatorUID || ca.CreatorName != i.ca.CreatorName || ca.Fingerprint != i.ca.Fingerprint {
 		return Certificate{}, fmt.Errorf("loaded CA changed before issuance")
 	}
-	result, err := i.runner.Run(ctx, Command{Path: store.sshKeygenPath, Args: []string{"-s", ca.PrivateKeyPath, "-I", certificate.Identity, "-n", certificate.Principal, "-V", "-5m:+15m", "-O", "clear", clientKeyPath}})
+	temporaryKey, temporaryKeyInfo, err := makeTemporaryClientKey(runtimeDirectory, clientKeyPath)
+	if err != nil {
+		return Certificate{}, fmt.Errorf("prepare temporary certificate input: %w", err)
+	}
+	defer removeExactFile(temporaryKey, temporaryKeyInfo, privateFileMode)
+	temporaryCertificate := temporaryKey + "-cert.pub"
+	defer cleanupTemporaryCertificate(runtimeDirectory, temporaryCertificate)
+	result, err := i.runner.Run(ctx, Command{Path: store.sshKeygenPath, Args: []string{"-s", ca.PrivateKeyPath, "-I", certificate.Identity, "-n", certificate.Principal, "-V", "-5m:+15m", "-O", "clear", temporaryKey}})
 	if err != nil {
 		return Certificate{}, fmt.Errorf("issue management certificate: %w", err)
 	}
 	if result.Truncated {
 		return Certificate{}, fmt.Errorf("issue management certificate produced oversized output")
 	}
-	if err := normalizePublicFile(certificate.Path); err != nil {
+	if err := normalizePublicFile(temporaryCertificate); err != nil {
 		return Certificate{}, fmt.Errorf("validate issued management certificate: %w", err)
 	}
-	inspection, err := i.runner.Run(ctx, Command{Path: store.sshKeygenPath, Args: []string{"-L", "-f", certificate.Path}})
+	temporaryCertificateInfo, err := requireRuntimeFile(runtimeDirectory, temporaryCertificate, publicFileMode)
+	if err != nil {
+		return Certificate{}, fmt.Errorf("validate issued management certificate: %w", err)
+	}
+	if contents, err := readRuntimeFile(runtimeDirectory, temporaryCertificate, publicFileMode); err != nil || len(contents) == 0 {
+		return Certificate{}, fmt.Errorf("read issued management certificate")
+	}
+	inspection, err := i.runner.Run(ctx, Command{Path: store.sshKeygenPath, Args: []string{"-L", "-f", temporaryCertificate}})
 	actual, valid := parseCertificateInspection(inspection.Stdout)
 	if err != nil || inspection.Truncated || !valid || !certificateInspectionMatches(actual, certificate) {
 		return Certificate{}, fmt.Errorf("issued management certificate inspection failed")
 	}
+	if err := publishCertificate(runtimeDirectory, temporaryCertificate, temporaryCertificateInfo, certificate.Path, output, exists); err != nil {
+		return Certificate{}, fmt.Errorf("publish management certificate: %w", err)
+	}
 	certificate.NotBefore, certificate.NotAfter = actual.NotBefore, actual.NotAfter
 	return certificate, nil
+}
+
+func admitCertificateOutput(runtimeDirectory, path string) (os.FileInfo, bool, error) {
+	if err := requirePrivateTree(runtimeDirectory, filepath.Dir(path)); err != nil {
+		return nil, false, err
+	}
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if err := requireFileInfo(path, info, publicFileMode); err != nil {
+		return nil, false, err
+	}
+	return info, true, nil
+}
+
+func makeTemporaryClientKey(runtimeDirectory, clientKeyPath string) (string, os.FileInfo, error) {
+	contents, err := readRuntimeFile(runtimeDirectory, clientKeyPath, privateFileMode)
+	if err != nil {
+		return "", nil, err
+	}
+	directory := filepath.Dir(clientKeyPath)
+	for range 4 {
+		random := make([]byte, 16)
+		if _, err := rand.Read(random); err != nil {
+			return "", nil, err
+		}
+		path := filepath.Join(directory, ".boxwarden-cert-"+hex.EncodeToString(random))
+		if _, err := os.Lstat(path + "-cert.pub"); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return "", nil, err
+		}
+		if err := writePrivateNew(path, contents); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				continue
+			}
+			return "", nil, err
+		}
+		info, err := requireRuntimeFile(runtimeDirectory, path, privateFileMode)
+		if err != nil {
+			if exact, check := requirePrivateFile(path); check == nil {
+				_ = removeExactFile(path, exact, privateFileMode)
+			}
+			return "", nil, err
+		}
+		return path, info, nil
+	}
+	return "", nil, fmt.Errorf("temporary certificate input collisions")
+}
+
+func cleanupTemporaryCertificate(runtimeDirectory, path string) {
+	info, err := requireRuntimeFile(runtimeDirectory, path, publicFileMode)
+	if err == nil {
+		_ = removeExactFile(path, info, publicFileMode)
+	}
+}
+
+func publishCertificate(runtimeDirectory, temporary string, temporaryInfo os.FileInfo, destination string, destinationInfo os.FileInfo, destinationExists bool) error {
+	currentTemporary, err := requireRuntimeFile(runtimeDirectory, temporary, publicFileMode)
+	if err != nil || !os.SameFile(currentTemporary, temporaryInfo) {
+		if err == nil {
+			err = fmt.Errorf("temporary certificate changed before publication")
+		}
+		return err
+	}
+	current, exists, err := admitCertificateOutput(runtimeDirectory, destination)
+	if err != nil {
+		return err
+	}
+	if exists != destinationExists || (exists && !os.SameFile(current, destinationInfo)) {
+		return fmt.Errorf("certificate destination changed before publication")
+	}
+	if err := os.Rename(temporary, destination); err != nil {
+		return err
+	}
+	_, err = requireRuntimeFile(runtimeDirectory, destination, publicFileMode)
+	return err
 }
 
 func validCertificateInspection(output string, certificate Certificate) bool {

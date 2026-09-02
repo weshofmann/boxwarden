@@ -85,6 +85,10 @@ func validatePrivateDirectoryInfo(info os.FileInfo) error {
 // requirePrivateTree checks every component below the configured private root;
 // Lstat is used deliberately so an intermediate symlink cannot redirect state.
 func requirePrivateTree(root, path string) error {
+	return requirePrivateTreeWithACL(root, path, osPrivateACLInspector{})
+}
+
+func requirePrivateTreeWithACL(root, path string, acl privateACLInspector) error {
 	if !filepath.IsAbs(root) || filepath.Clean(root) != root || !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return fmt.Errorf("private path must be canonical and absolute")
 	}
@@ -96,7 +100,7 @@ func requirePrivateTree(root, path string) error {
 	if err != nil {
 		return err
 	}
-	if err := requirePrivateDirectoryInfo(root, info); err != nil {
+	if err := requirePrivateDirectoryInfoWithACL(root, info, acl); err != nil {
 		return err
 	}
 	current := root
@@ -109,11 +113,50 @@ func requirePrivateTree(root, path string) error {
 		if err != nil {
 			return err
 		}
-		if err := requirePrivateDirectoryInfo(current, info); err != nil {
+		if err := requirePrivateDirectoryInfoWithACL(current, info, acl); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func requireRuntimeFile(runtimeDirectory, path string, mode os.FileMode) (os.FileInfo, error) {
+	if !filepathIsCanonicalAbsolute(runtimeDirectory) || !filepathIsCanonicalAbsolute(path) {
+		return nil, fmt.Errorf("runtime path must be canonical and absolute")
+	}
+	if err := requirePrivateTree(runtimeDirectory, filepath.Dir(path)); err != nil {
+		return nil, err
+	}
+	return requireFileMode(path, mode)
+}
+
+func readRuntimeFile(runtimeDirectory, path string, mode os.FileMode) ([]byte, error) {
+	if _, err := requireRuntimeFile(runtimeDirectory, path, mode); err != nil {
+		return nil, err
+	}
+	return readFileMode(path, mode)
+}
+
+func removeExactFile(path string, expected os.FileInfo, mode os.FileMode) error {
+	if expected == nil {
+		return fmt.Errorf("expected file is required")
+	}
+	root, err := openVerifiedRoot(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	current, err := root.Lstat(filepath.Base(path))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil || !os.SameFile(expected, current) {
+		return fmt.Errorf("temporary file changed before cleanup")
+	}
+	if err := requireFileInfo(path, current, mode); err != nil {
+		return err
+	}
+	return root.Remove(filepath.Base(path))
 }
 
 func splitPath(path string) []string {

@@ -51,7 +51,7 @@ func TestCAFreshStoreLoadsAndIssuesWithoutInit(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustWrite(t, key, []byte("client-key"), 0o600)
-	if _, err := issuer.Issue(context.Background(), testBinding(t, work), key); err != nil {
+	if _, err := issuer.Issue(context.Background(), testBinding(t, work), filepath.Dir(key), key); err != nil {
 		t.Fatalf("Issue() error = %v", err)
 	}
 	for _, command := range runner.commands {
@@ -154,7 +154,7 @@ func TestCertificateIssuerRejectsCrossDomainBindingWithoutSigning(t *testing.T) 
 	mustWrite(t, key, []byte("client-key"), 0o600)
 	runner.commands = nil
 	personal := testDomain(t, "personal", privateRoot(t))
-	if _, err := NewCertificateIssuer(ca, runner, StaticIdentity{UID: 501, Name: "wes"}, time.Now).Issue(context.Background(), testBinding(t, personal), key); err == nil {
+	if _, err := NewCertificateIssuer(ca, runner, StaticIdentity{UID: 501, Name: "wes"}, time.Now).Issue(context.Background(), testBinding(t, personal), filepath.Dir(key), key); err == nil {
 		t.Fatal("Issue(cross-domain) error = nil")
 	}
 	if len(runner.commands) != 0 {

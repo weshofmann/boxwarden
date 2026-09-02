@@ -17,7 +17,7 @@ func WriteKnownHosts(runtimeDirectory string, pin HostKeyPin) (string, error) {
 	if err != nil || public != pin.PublicKey || fingerprint != pin.Fingerprint {
 		return "", fmt.Errorf("invalid pinned public key")
 	}
-	if err := ensurePrivateDirectory(runtimeDirectory); err != nil {
+	if err := requirePrivateTree(runtimeDirectory, runtimeDirectory); err != nil {
 		return "", err
 	}
 	path := filepath.Join(runtimeDirectory, "known_hosts")
