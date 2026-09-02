@@ -192,6 +192,61 @@ func TestBackendRandomizeMACRecordsSuccessfulCall(t *testing.T) {
 	}
 }
 
+func TestBackendStartOwnsStopAndWaitForOneExistingStoppedObject(t *testing.T) {
+	backendFake := fake.New(backend.Observation{ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectStopped})
+	request := backend.StartRequest{ObjectID: "boxwarden-work-dev", SerialDevice: "/dev/ttys004", GenerationDirectory: "/private/runtime/work/dev/generation-1"}
+	handle, err := backendFake.Start(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if got, want := backendFake.StartCalls(), []fake.StartCall{{Request: request}}; !sameStartCalls(got, want) {
+		t.Fatalf("StartCalls() = %#v, want %#v", got, want)
+	}
+	running, err := backendFake.Observe(context.Background(), request.ObjectID)
+	if err != nil || running.State != backend.ObjectRunning {
+		t.Fatalf("Observe() after Start = %#v, %v; want running", running, err)
+	}
+	if err := handle.Stop(context.Background()); err != nil {
+		t.Fatalf("owned Stop() error = %v", err)
+	}
+	if err := handle.Wait(context.Background()); err != nil {
+		t.Fatalf("owned Wait() error = %v", err)
+	}
+	stopped, err := backendFake.Observe(context.Background(), request.ObjectID)
+	if err != nil || stopped.State != backend.ObjectStopped {
+		t.Fatalf("Observe() after Stop = %#v, %v; want stopped", stopped, err)
+	}
+}
+
+func TestBackendStartAndAddressFaultsPreserveStateAndExposeFreshAddress(t *testing.T) {
+	startFailure := errors.New("start unavailable")
+	addressFailure := errors.New("dhcp unavailable")
+	backendFake := fake.New(backend.Observation{ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectStopped})
+	backendFake.SetStartError(startFailure)
+	request := backend.StartRequest{ObjectID: "boxwarden-work-dev", SerialDevice: "/dev/ttys004", GenerationDirectory: "/private/runtime/work/dev/generation-1"}
+	if _, err := backendFake.Start(context.Background(), request); !errors.Is(err, startFailure) {
+		t.Fatalf("Start() error = %v, want %v", err, startFailure)
+	}
+	observation, err := backendFake.Observe(context.Background(), request.ObjectID)
+	if err != nil || observation.State != backend.ObjectStopped {
+		t.Fatalf("Observe() after failed Start = %#v, %v; want stopped", observation, err)
+	}
+	backendFake.SetAddress(request.ObjectID, "192.0.2.10")
+	first, err := backendFake.Resolve(context.Background(), request.ObjectID)
+	if err != nil || first != "192.0.2.10" {
+		t.Fatalf("first Resolve() = %q, %v", first, err)
+	}
+	backendFake.SetAddress(request.ObjectID, "192.0.2.11")
+	second, err := backendFake.Resolve(context.Background(), request.ObjectID)
+	if err != nil || second != "192.0.2.11" {
+		t.Fatalf("second Resolve() = %q, %v", second, err)
+	}
+	backendFake.SetAddressError(addressFailure)
+	if _, err := backendFake.Resolve(context.Background(), request.ObjectID); !errors.Is(err, addressFailure) {
+		t.Fatalf("Resolve() error = %v, want %v", err, addressFailure)
+	}
+}
+
 func TestBackendConcurrentCloneCollisionPreservesOneTarget(t *testing.T) {
 	backendFake := fake.New(backend.Observation{ObjectID: "golden-work", Exists: true, State: backend.ObjectStopped})
 	const attempts = 32
@@ -292,6 +347,18 @@ func sameCloneCalls(got, want []fake.CloneCall) bool {
 	}
 	for index := range got {
 		if got[index] != want[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameStartCalls(got, want []fake.StartCall) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for index := range got {
+		if got[index].Request != want[index].Request {
 			return false
 		}
 	}

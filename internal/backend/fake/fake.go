@@ -20,6 +20,10 @@ type CloneFault func(context.Context, CloneCall) error
 // RandomizeMACFault injects a failure at the fake's MAC mutation boundary.
 type RandomizeMACFault func(context.Context, string) error
 
+// StartCall records one requested backend start without adding backend-specific
+// launch policy to the deterministic fake.
+type StartCall struct{ Request backend.StartRequest }
+
 // Backend is a concurrency-safe, stateful in-memory backend for lifecycle
 // tests. It models object collisions and mutation outcomes without emulating a
 // particular hypervisor.
@@ -29,21 +33,128 @@ type Backend struct {
 	observations          map[string]backend.Observation
 	cloneCalls            []CloneCall
 	randomizeMACCalls     []string
+	startCalls            []StartCall
+	addressCalls          []string
+	addresses             map[string]string
 	cloneError            error
 	clonePostError        error
 	randomizeMACError     error
 	randomizeMACPostError error
+	startError            error
+	addressError          error
 	cloneFault            CloneFault
 	randomizeMACFault     RandomizeMACFault
 }
 
 // New constructs a fake from deterministic initial observations.
 func New(observations ...backend.Observation) *Backend {
-	b := &Backend{observations: make(map[string]backend.Observation, len(observations))}
+	b := &Backend{observations: make(map[string]backend.Observation, len(observations)), addresses: make(map[string]string)}
 	for _, observation := range observations {
 		b.observations[observation.ObjectID] = observation
 	}
 	return b
+}
+
+// Start transitions exactly one existing stopped object to running and returns
+// the fake's owned stop/wait handle for that start.
+func (b *Backend) Start(ctx context.Context, request backend.StartRequest) (backend.Handle, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := backend.ValidateStartRequest(request); err != nil {
+		return nil, err
+	}
+	call := StartCall{Request: request}
+	b.mu.Lock()
+	b.startCalls = append(b.startCalls, call)
+	startError := b.startError
+	b.mu.Unlock()
+	if startError != nil {
+		return nil, startError
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	observation, found := b.observations[request.ObjectID]
+	if !found || !observation.Exists || observation.State != backend.ObjectStopped {
+		return nil, fmt.Errorf("cannot start object %q unless it exists and is stopped", request.ObjectID)
+	}
+	observation.State = backend.ObjectRunning
+	b.observations[request.ObjectID] = observation
+	return &ownedHandle{backend: b, objectID: request.ObjectID, done: make(chan struct{})}, nil
+}
+
+// Resolve reads the currently configured fake address on every call; it does
+// not cache the result because management addresses are not backend identity.
+func (b *Backend) Resolve(ctx context.Context, objectID string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := backend.ValidateObjectID(objectID); err != nil {
+		return "", err
+	}
+	b.mu.Lock()
+	b.addressCalls = append(b.addressCalls, objectID)
+	addressError := b.addressError
+	b.mu.Unlock()
+	if addressError != nil {
+		return "", addressError
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	address, found := b.addresses[objectID]
+	if !found {
+		return "", fmt.Errorf("no current address for object %q", objectID)
+	}
+	return address, nil
+}
+
+type ownedHandle struct {
+	backend  *Backend
+	objectID string
+	done     chan struct{}
+	once     sync.Once
+	err      error
+}
+
+func (h *ownedHandle) Stop(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if h == nil || h.backend == nil {
+		return fmt.Errorf("owned fake backend handle is unavailable")
+	}
+	h.once.Do(func() {
+		h.backend.mu.Lock()
+		defer h.backend.mu.Unlock()
+		observation, found := h.backend.observations[h.objectID]
+		if !found || !observation.Exists || observation.State != backend.ObjectRunning {
+			h.err = fmt.Errorf("cannot stop unowned object %q", h.objectID)
+			close(h.done)
+			return
+		}
+		observation.State = backend.ObjectStopped
+		h.backend.observations[h.objectID] = observation
+		close(h.done)
+	})
+	return h.err
+}
+
+func (h *ownedHandle) Wait(ctx context.Context) error {
+	if h == nil {
+		return fmt.Errorf("owned fake backend handle is unavailable")
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-h.done:
+		return h.err
+	}
 }
 
 func (b *Backend) Observe(ctx context.Context, objectID string) (backend.Observation, error) {
@@ -166,6 +277,20 @@ func (b *Backend) SetRandomizeMACPostEffectError(err error) {
 	b.randomizeMACPostError = err
 }
 
+// SetStartError configures a deterministic pre-effect start failure.
+func (b *Backend) SetStartError(err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.startError = err
+}
+
+// SetAddressError configures a deterministic address-resolution failure.
+func (b *Backend) SetAddressError(err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.addressError = err
+}
+
 // SetCloneFault configures a per-call clone fault hook.
 func (b *Backend) SetCloneFault(fault CloneFault) {
 	b.mu.Lock()
@@ -194,6 +319,28 @@ func (b *Backend) RandomizeMACCalls() []string {
 	return append([]string(nil), b.randomizeMACCalls...)
 }
 
+func (b *Backend) StartCalls() []StartCall {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]StartCall(nil), b.startCalls...)
+}
+
+func (b *Backend) AddressCalls() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.addressCalls...)
+}
+
+// SetAddress replaces the current non-durable fake management address.
+func (b *Backend) SetAddress(objectID, address string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.addresses == nil {
+		b.addresses = make(map[string]string)
+	}
+	b.addresses[objectID] = address
+}
+
 // SetObservation replaces the fake's observation for one object.
 func (b *Backend) SetObservation(observation backend.Observation) {
 	b.mu.Lock()
@@ -213,6 +360,8 @@ func (b *Backend) DeleteObservation(objectID string) {
 
 var _ backend.Observer = (*Backend)(nil)
 var _ backend.Creator = (*Backend)(nil)
+var _ backend.Starter = (*Backend)(nil)
+var _ backend.AddressResolver = (*Backend)(nil)
 
 type Observer struct {
 	Observations map[string]backend.Observation
