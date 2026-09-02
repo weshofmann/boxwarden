@@ -43,11 +43,11 @@ func inspectExactLocalOperatorGroup(runner execx.Runner, caller Operator, name s
 	if err != nil {
 		return Group{}, err
 	}
-	userName, nameOK := exactAttribute(userAttributes, "RecordName")
+	nameOK := hasUniqueCallerRecordName(userAttributes, caller.Name)
 	rawUID, uidOK := exactAttribute(userAttributes, "UniqueID")
 	generatedUID, guidOK := exactAttribute(userAttributes, "GeneratedUID")
 	uid, uidErr := strconv.Atoi(rawUID)
-	if !nameOK || !uidOK || !guidOK || userName != caller.Name || uidErr != nil || uid != caller.UID || generatedUID == "" {
+	if !nameOK || !uidOK || !guidOK || uidErr != nil || uid != caller.UID || generatedUID == "" {
 		return Group{}, fmt.Errorf("local operator record does not exactly bind caller")
 	}
 
@@ -165,6 +165,25 @@ func exactAttribute(attributes map[string][]string, key string) (string, bool) {
 		return returnValue, true
 	}
 	return "", false
+}
+
+func hasUniqueCallerRecordName(attributes map[string][]string, callerName string) bool {
+	values, present := attributes["RecordName"]
+	if !present || len(values) == 0 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(values))
+	callerCount := 0
+	for _, value := range values {
+		if _, duplicate := seen[value]; duplicate {
+			return false
+		}
+		seen[value] = struct{}{}
+		if value == callerName {
+			callerCount++
+		}
+	}
+	return callerCount == 1
 }
 
 func validDirectoryRecordName(name string) bool {

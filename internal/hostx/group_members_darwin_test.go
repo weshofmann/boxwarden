@@ -45,6 +45,57 @@ func TestInspectExactLocalOperatorGroupAcceptsOnlyExhaustiveCallerBinding(t *tes
 	}
 }
 
+func TestInspectExactLocalOperatorGroupAcceptsCallerAmongUniqueRecordNameAliases(t *testing.T) {
+	for name, recordNames := range map[string]string{
+		"observed primary name followed by Apple ID alias shape": "wes com.apple.idms.appleid.prd.example-local-alias",
+		"caller name not first":                                  "com.apple.idms.appleid.prd.example-local-alias wes",
+	} {
+		t.Run(name, func(t *testing.T) {
+			runner := exactGroupSnapshotRunner("")
+			runner.set(userReadArgs(), "GeneratedUID: CALLER-GUID\nRecordName: "+recordNames+"\nUniqueID: 501\n")
+			group, err := inspectExactLocalOperatorGroup(runner, Operator{UID: 501, Name: "wes", Home: "/Users/wes"}, OperatorGroupName, false)
+			if err != nil || !reflect.DeepEqual(group, Group{ID: 701, Name: OperatorGroupName, Members: []int{501}}) {
+				t.Fatalf("inspectExactLocalOperatorGroup() = %#v, %v", group, err)
+			}
+		})
+	}
+}
+
+func TestInspectExactLocalOperatorGroupRejectsAmbiguousCallerRecordNameEvidence(t *testing.T) {
+	for name, recordNames := range map[string]string{
+		"caller absent":         "other com.apple.idms.appleid.prd.example-local-alias",
+		"duplicate caller":      "wes wes",
+		"duplicate other alias": "wes alias alias",
+	} {
+		t.Run(name, func(t *testing.T) {
+			runner := exactGroupSnapshotRunner("")
+			runner.set(userReadArgs(), "GeneratedUID: CALLER-GUID\nRecordName: "+recordNames+"\nUniqueID: 501\n")
+			if _, err := inspectExactLocalOperatorGroup(runner, Operator{UID: 501, Name: "wes", Home: "/Users/wes"}, OperatorGroupName, false); err == nil {
+				t.Fatal("inspectExactLocalOperatorGroup() error = nil, want ambiguous caller record refusal")
+			}
+		})
+	}
+}
+
+func TestInspectExactLocalOperatorGroupRejectsNonExactCallerUIDAndGUIDEvidence(t *testing.T) {
+	for name, userRecord := range map[string]string{
+		"missing UID":    "GeneratedUID: CALLER-GUID\nRecordName: wes\n",
+		"multiple UIDs":  "GeneratedUID: CALLER-GUID\nRecordName: wes\nUniqueID: 501 502\n",
+		"wrong UID":      "GeneratedUID: CALLER-GUID\nRecordName: wes\nUniqueID: 502\n",
+		"missing GUID":   "RecordName: wes\nUniqueID: 501\n",
+		"multiple GUIDs": "GeneratedUID: CALLER-GUID OTHER-GUID\nRecordName: wes\nUniqueID: 501\n",
+		"empty GUID":     "GeneratedUID:\nRecordName: wes\nUniqueID: 501\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			runner := exactGroupSnapshotRunner("")
+			runner.set(userReadArgs(), userRecord)
+			if _, err := inspectExactLocalOperatorGroup(runner, Operator{UID: 501, Name: "wes", Home: "/Users/wes"}, OperatorGroupName, false); err == nil {
+				t.Fatal("inspectExactLocalOperatorGroup() error = nil, want non-exact caller UID/GUID refusal")
+			}
+		})
+	}
+}
+
 func TestInspectExactLocalOperatorGroupRejectsEveryAlternateMembershipPath(t *testing.T) {
 	for name, mutate := range map[string]func(*scriptedGroupRunner){
 		"extra named member": func(r *scriptedGroupRunner) {
@@ -175,6 +226,7 @@ func TestDarwinGroupManagerUsesExactSnapshotBeforeMutationAndRevalidatesAfter(t 
 
 	empty := exactGroupSnapshotRunner("")
 	empty.set(groupReadArgs(), "PrimaryGroupID: 701\nRecordName: boxwarden-operators\n")
+	empty.set(userReadArgs(), "GeneratedUID: CALLER-GUID\nRecordName: wes com.apple.idms.appleid.prd.example-local-alias\nUniqueID: 501\n")
 	empty.promoteOnEdit = true
 	group, changed, err := (darwinGroupManager{runner: empty, lookupGroup: lookup}).Ensure(caller, OperatorGroupName)
 	if err != nil || !changed || !reflect.DeepEqual(group, Group{ID: 701, Name: OperatorGroupName, Members: []int{501}}) {
