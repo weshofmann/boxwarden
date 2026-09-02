@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check shell syntax
+        shell: bash
+        run: |
+          while IFS= read -r -d '' script; do
+            bash -n "$script"
+          done < <(git ls-files -z -- '*.sh')
+
+      - name: Require a module for tracked Go source
+        shell: bash
+        run: |
+          if git ls-files -- '*.go' | grep -q . && [ ! -f go.mod ]; then
+            echo 'tracked Go source requires go.mod' >&2
+            exit 1
+          fi
+
+      - name: Set up Go
+        if: ${{ hashFiles('go.mod') != '' }}
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Verify gofmt
+        if: ${{ hashFiles('go.mod') != '' }}
+        run: test -z "$(gofmt -l $(git ls-files -- '*.go'))"
+
+      - name: Test
+        if: ${{ hashFiles('go.mod') != '' }}
+        run: go test ./...
+
+      - name: Test with race detector
+        if: ${{ hashFiles('go.mod') != '' }}
+        run: go test -race ./...
+
+      - name: Vet
+        if: ${{ hashFiles('go.mod') != '' }}
+        run: go vet ./...
+
+      - name: Build
+        if: ${{ hashFiles('go.mod') != '' }}
+        run: go build ./cmd/boxwarden

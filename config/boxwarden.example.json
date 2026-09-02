@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "domains": {
+    "work": {
+      "state_root": "/absolute/canonical/path/to/boxwarden/domains/work"
+    },
+    "personal": {
+      "state_root": "/absolute/canonical/path/to/boxwarden/domains/personal"
+    }
+  }
+}

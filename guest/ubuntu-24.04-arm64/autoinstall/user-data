@@ -1,0 +1,146 @@
+#cloud-config
+autoinstall:
+  version: 1
+  refresh-installer:
+    update: false
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  timezone: "__BOXWARDEN_TIMEZONE__"
+  network:
+    version: 2
+    renderer: NetworkManager
+    ethernets:
+      boxwarden-ethernet:
+        match:
+          name: "en*"
+        dhcp4: true
+  apt:
+    preserve_sources_list: false
+    mirror-selection:
+      primary:
+        - uri: http://ports.ubuntu.com/ubuntu-ports
+          arches: [arm64]
+    fallback: abort
+    geoip: false
+  source:
+    id: ubuntu-desktop
+    search_drivers: false
+  storage:
+    layout:
+      name: direct
+  identity:
+    realname: Boxwarden Task 0
+    hostname: boxwarden-task0-__BOXWARDEN_RUN_ID__
+    username: boxwarden
+    password: "__BOXWARDEN_PASSWORD_HASH__"
+  ssh:
+    install-server: true
+    allow-pw: false
+    authorized-keys: []
+  drivers:
+    install: false
+  codecs:
+    install: false
+  oem:
+    install: false
+  packages:
+    - curl
+    - dnsutils
+    - netcat-openbsd
+    - openssh-server
+    - x11-apps
+    - xwayland
+  late-commands:
+    - install -d -m 0755 /target/etc/ssh/sshd_config.d /target/etc/ssh/auth_principals
+    - "printf '%s\\n' '__BOXWARDEN_SSH_CA_PUBLIC_KEY__' > /target/etc/ssh/boxwarden_task0_user_ca.pub"
+    - chmod 0644 /target/etc/ssh/boxwarden_task0_user_ca.pub
+    - "printf '%s\\n' 'boxwarden-task0' > /target/etc/ssh/auth_principals/boxwarden"
+    - chmod 0644 /target/etc/ssh/auth_principals/boxwarden
+    - |
+      cat > /target/etc/ssh/sshd_config.d/60-boxwarden-task0.conf <<'EOF'
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin no
+      PubkeyAuthentication yes
+      TrustedUserCAKeys /etc/ssh/boxwarden_task0_user_ca.pub
+      AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u
+      AllowAgentForwarding no
+      AllowTcpForwarding no
+      AllowStreamLocalForwarding no
+      GatewayPorts no
+      X11Forwarding no
+      PermitTunnel no
+      PermitUserEnvironment no
+      EOF
+    - "printf '%s\\n' '__BOXWARDEN_RUN_ID__' > /target/etc/boxwarden-task0-spike"
+    - chmod 0644 /target/etc/boxwarden-task0-spike
+    - curtin in-target -- install -d -o boxwarden -g boxwarden -m 0700 /home/boxwarden/.config
+    - curtin in-target -- install -o boxwarden -g boxwarden -m 0600 /dev/null /home/boxwarden/.config/gnome-initial-setup-done
+    - sed -i 's/^#  AutomaticLoginEnable = true/AutomaticLoginEnable = true/' /target/etc/gdm3/custom.conf
+    - sed -i 's/^#  AutomaticLogin = user1/AutomaticLogin = boxwarden/' /target/etc/gdm3/custom.conf
+    - |
+      cat > /target/etc/sudoers.d/90-boxwarden <<'EOF'
+      boxwarden ALL=(ALL:ALL) NOPASSWD: ALL
+      EOF
+    - chmod 0440 /target/etc/sudoers.d/90-boxwarden
+    - curtin in-target -- visudo -cf /etc/sudoers.d/90-boxwarden
+    - install -d -m 0755 /target/etc/default/grub.d
+    - |
+      cat > /target/etc/default/grub.d/99-boxwarden-timeout.cfg <<'EOF'
+      GRUB_TIMEOUT=1
+      GRUB_RECORDFAIL_TIMEOUT=1
+      EOF
+    - chmod 0644 /target/etc/default/grub.d/99-boxwarden-timeout.cfg
+    - curtin in-target -- update-grub
+    - install -d -m 0755 /target/etc/systemd/system/serial-getty@hvc0.service.d
+    - |
+      cat > /target/etc/systemd/system/serial-getty@hvc0.service.d/10-boxwarden-autologin.conf <<'EOF'
+      [Unit]
+      After=boxwarden-task0-firstboot-identity.service
+
+      [Service]
+      ExecStart=
+      ExecStart=-/sbin/agetty --autologin boxwarden --noclear --keep-baud 115200,57600,38400,9600 - $TERM
+      EOF
+    - curtin in-target -- systemctl enable serial-getty@hvc0.service
+    - install -d -m 0755 /target/etc/dconf/profile /target/etc/dconf/db/local.d/locks
+    - |
+      cat > /target/etc/dconf/profile/user <<'EOF'
+      user-db:user
+      system-db:local
+      EOF
+    - |
+      cat > /target/etc/dconf/db/local.d/00-boxwarden-session <<'EOF'
+      [org/gnome/desktop/session]
+      idle-delay=uint32 0
+
+      [org/gnome/desktop/screensaver]
+      idle-activation-enabled=false
+      lock-enabled=false
+      ubuntu-lock-on-suspend=false
+
+      [org/gnome/settings-daemon/plugins/power]
+      sleep-inactive-ac-timeout=0
+      sleep-inactive-ac-type='nothing'
+      sleep-inactive-battery-timeout=0
+      sleep-inactive-battery-type='nothing'
+      EOF
+    - |
+      cat > /target/etc/dconf/db/local.d/locks/00-boxwarden-session <<'EOF'
+      /org/gnome/desktop/session/idle-delay
+      /org/gnome/desktop/screensaver/idle-activation-enabled
+      /org/gnome/desktop/screensaver/lock-enabled
+      /org/gnome/desktop/screensaver/ubuntu-lock-on-suspend
+      /org/gnome/settings-daemon/plugins/power/sleep-inactive-ac-timeout
+      /org/gnome/settings-daemon/plugins/power/sleep-inactive-ac-type
+      /org/gnome/settings-daemon/plugins/power/sleep-inactive-battery-timeout
+      /org/gnome/settings-daemon/plugins/power/sleep-inactive-battery-type
+      EOF
+    - curtin in-target -- dconf update
+    - curtin in-target -- systemctl enable ssh
+    - curtin in-target -- ufw default deny incoming
+    - curtin in-target -- ufw default allow outgoing
+    - curtin in-target -- ufw allow 22/tcp
+    - curtin in-target -- ufw --force enable
+  shutdown: reboot
