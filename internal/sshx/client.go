@@ -156,6 +156,9 @@ func (c *Client) run(ctx context.Context, connection Connection, request managem
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithDeadline(ctx, deadline)
 	defer cancel()
+	if err := verifyKnownHostsPin(connection); err != nil {
+		return nil, fmt.Errorf("SSH known-hosts file: %w", err)
+	}
 	result, err := c.runner.Run(ctx, Command{Path: sshPath, Args: sshArguments(connection), Stdin: encoded})
 	if err != nil {
 		return nil, fmt.Errorf("strict management SSH: %w", err)
@@ -201,6 +204,21 @@ func validateConnection(connection Connection) error {
 	}
 	if _, err := requireRuntimeFile(connection.RuntimeDirectory, connection.KnownHostsFile, privateFileMode); err != nil {
 		return fmt.Errorf("SSH known-hosts file: %w", err)
+	}
+	return nil
+}
+
+// verifyKnownHostsPin re-reads the supervisor-owned runtime file immediately
+// before ssh is invoked. File admission alone is insufficient: ssh would
+// otherwise accept any well-formed key stored at the expected private path.
+func verifyKnownHostsPin(connection Connection) error {
+	contents, err := readRuntimeFile(connection.RuntimeDirectory, connection.KnownHostsFile, privateFileMode)
+	if err != nil {
+		return err
+	}
+	want := HostKeyAlias(connection.Binding.SessionID) + " " + connection.Pin.PublicKey + "\n"
+	if string(contents) != want {
+		return fmt.Errorf("does not exactly match durable host-key pin")
 	}
 	return nil
 }

@@ -38,6 +38,20 @@ func TestClientProbeUsesCompleteStrictSSHPolicyAndFixedRemoteCommand(t *testing.
 	}
 }
 
+func TestClientRejectsKnownHostsContentThatDiffersFromDurablePin(t *testing.T) {
+	runner := &fakeRunner{onRun: func(Command) Result { return Result{Stdout: `{"version":1,"ok":true}`} }}
+	client := NewClient(runner)
+	connection := testConnection(t)
+	mustWrite(t, connection.KnownHostsFile, []byte(HostKeyAlias(connection.Binding.SessionID)+" "+changedPublicKey+"\n"), 0o600)
+
+	if _, err := client.Probe(context.Background(), connection, ProbeRequest{}); err == nil {
+		t.Fatal("Probe() accepted known_hosts content that differs from the durable pin")
+	}
+	if len(runner.commands) != 0 {
+		t.Fatalf("Probe() invoked SSH despite stale known_hosts content: %#v", runner.commands)
+	}
+}
+
 func TestClientOnlyAcceptsTypedBoundedRequests(t *testing.T) {
 	runner := &fakeRunner{onRun: func(command Command) Result {
 		if strings.Contains(string(command.Stdin), `"kind":"read_zone"`) {
@@ -67,7 +81,7 @@ func testConnection(t *testing.T) Connection {
 	root := privateRoot(t)
 	mustWrite(t, filepath.Join(root, "client"), []byte("client-key"), 0o600)
 	mustWrite(t, filepath.Join(root, "client-cert.pub"), []byte("certificate"), 0o644)
-	mustWrite(t, filepath.Join(root, "known_hosts"), []byte("known-host"), 0o600)
+	mustWrite(t, filepath.Join(root, "known_hosts"), []byte(HostKeyAlias(testUUID)+" "+testPublicKey+"\n"), 0o600)
 	_, _, fingerprint, err := parseEd25519PublicKey(testPublicKey)
 	if err != nil {
 		t.Fatal(err)

@@ -88,20 +88,58 @@ func TestCertificateInspectionAcceptsUTCValidityForNonUTCIssuerClock(t *testing.
 	}
 }
 
-func TestCertificateInspectionAllowsOnlySchedulingToleranceAroundFixedValidity(t *testing.T) {
-	certificate := Certificate{
+func TestCertificateInspectionAcceptsKeygenReferenceWithinSigningBracket(t *testing.T) {
+	requested := Certificate{
 		Identity:  "boxwarden:work:" + testUUID,
 		Principal: "boxwarden-session-" + testUUID,
 		NotBefore: time.Date(2026, 9, 1, 11, 55, 0, 0, time.UTC),
 		NotAfter:  time.Date(2026, 9, 1, 12, 15, 0, 0, time.UTC),
 	}
-	withinTolerance := certificateInspection(certificate, certificate.Principal, "(none)", "(none)", "2026-09-01T11:55:01 to 2026-09-01T12:15:01")
-	if !validCertificateInspection(withinTolerance, certificate) {
-		t.Fatal("validCertificateInspection() rejected one-second ssh-keygen scheduling delay")
+	actual := Certificate{
+		Identity:  requested.Identity,
+		Principal: requested.Principal,
+		NotBefore: time.Date(2026, 9, 1, 11, 55, 6, 0, time.UTC),
+		NotAfter:  time.Date(2026, 9, 1, 12, 15, 6, 0, time.UTC),
 	}
-	outsideTolerance := certificateInspection(certificate, certificate.Principal, "(none)", "(none)", "2026-09-01T11:55:03 to 2026-09-01T12:15:03")
-	if validCertificateInspection(outsideTolerance, certificate) {
-		t.Fatal("validCertificateInspection() accepted validity outside scheduling tolerance")
+	started := time.Date(2026, 9, 1, 12, 0, 0, 900_000_000, time.UTC)
+	finished := time.Date(2026, 9, 1, 12, 0, 7, 100_000_000, time.UTC)
+	if !certificateInspectionMatchesSigningBracket(actual, requested, started, finished) {
+		t.Fatal("certificate inspection rejected a keygen reference within the signing bracket")
+	}
+	if certificateInspectionMatchesSigningBracket(actual, requested, started, time.Date(2026, 9, 1, 12, 0, 5, 0, time.UTC)) {
+		t.Fatal("certificate inspection accepted a keygen reference after the signing bracket")
+	}
+	if certificateInspectionMatchesSigningBracket(actual, requested, time.Date(2026, 9, 1, 12, 0, 7, 0, time.UTC), time.Date(2026, 9, 1, 12, 0, 8, 0, time.UTC)) {
+		t.Fatal("certificate inspection accepted a keygen reference whose serialized second ends at the signing bracket")
+	}
+}
+
+func TestCertificateIssuerRejectsBackwardSigningClockBracket(t *testing.T) {
+	root := privateRoot(t)
+	work := testDomain(t, "work", root)
+	setup := NewCAStore(CAStoreOptions{Runner: newKeygenRunner(t), Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() (string, error) { return testUUID, nil }})
+	ca, err := setup.Init(context.Background(), work, []Domain{work})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := filepath.Join(root, "runtime")
+	if err := os.Mkdir(runtime, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	key := filepath.Join(runtime, "client")
+	mustWrite(t, key, []byte("client-key"), 0o600)
+	times := []time.Time{
+		time.Date(2026, 9, 1, 12, 0, 1, 0, time.UTC),
+		time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC),
+	}
+	next := 0
+	issuer := NewCertificateIssuer(ca.CAIdentity, newKeygenRunner(t), StaticIdentity{UID: 501, Name: "wes"}, func() time.Time {
+		value := times[next]
+		next++
+		return value
+	})
+	if _, err := issuer.Issue(context.Background(), testBinding(t, work), runtime, key); err == nil {
+		t.Fatal("Issue() accepted a backward signing clock bracket")
 	}
 }
 

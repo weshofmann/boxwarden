@@ -15,9 +15,8 @@ import (
 )
 
 const (
-	certificateLifetime            = 15 * time.Minute
-	renewalWindow                  = 5 * time.Minute
-	certificateSchedulingTolerance = 2 * time.Second
+	certificateLifetime = 15 * time.Minute
+	renewalWindow       = 5 * time.Minute
 )
 
 // Binding is the durable association that a certificate and host-key pin must match.
@@ -90,8 +89,6 @@ func (i *CertificateIssuer) Issue(ctx context.Context, binding Binding, runtimeD
 	if err != nil {
 		return Certificate{}, err
 	}
-	now := i.now().UTC()
-	certificate.NotBefore, certificate.NotAfter = now.Add(-renewalWindow), now.Add(certificateLifetime)
 	if ca.CreationUUID != i.ca.CreationUUID || ca.CreatorUID != i.ca.CreatorUID || ca.CreatorName != i.ca.CreatorName || ca.Fingerprint != i.ca.Fingerprint {
 		return Certificate{}, fmt.Errorf("loaded CA changed before issuance")
 	}
@@ -102,7 +99,13 @@ func (i *CertificateIssuer) Issue(ctx context.Context, binding Binding, runtimeD
 	defer removeExactFile(temporaryKey, temporaryKeyInfo, privateFileMode)
 	temporaryCertificate := temporaryKey + "-cert.pub"
 	defer cleanupTemporaryCertificate(runtimeDirectory, temporaryCertificate)
+	signingStarted := i.now().UTC()
+	certificate.NotBefore, certificate.NotAfter = signingStarted.Add(-renewalWindow), signingStarted.Add(certificateLifetime)
 	result, err := i.runner.Run(ctx, Command{Path: store.sshKeygenPath, Args: []string{"-s", ca.PrivateKeyPath, "-I", certificate.Identity, "-n", certificate.Principal, "-V", "-5m:+15m", "-O", "clear", temporaryKey}})
+	signingFinished := i.now().UTC()
+	if signingFinished.Before(signingStarted) {
+		return Certificate{}, fmt.Errorf("trusted clock moved backwards while signing management certificate")
+	}
 	if err != nil {
 		return Certificate{}, fmt.Errorf("issue management certificate: %w", err)
 	}
@@ -121,7 +124,7 @@ func (i *CertificateIssuer) Issue(ctx context.Context, binding Binding, runtimeD
 	}
 	inspection, err := i.runner.Run(ctx, Command{Path: store.sshKeygenPath, Args: []string{"-L", "-f", temporaryCertificate}})
 	actual, valid := parseCertificateInspection(inspection.Stdout)
-	if err != nil || inspection.Truncated || !valid || !certificateInspectionMatches(actual, certificate) {
+	if err != nil || inspection.Truncated || !valid || !certificateInspectionMatchesSigningBracket(actual, certificate, signingStarted, signingFinished) {
 		return Certificate{}, fmt.Errorf("issued management certificate inspection failed")
 	}
 	if err := publishCertificate(runtimeDirectory, temporaryCertificate, temporaryCertificateInfo, certificate.Path, output, exists); err != nil {
@@ -284,17 +287,25 @@ func parseCertificateInspection(output string) (Certificate, bool) {
 }
 
 func certificateInspectionMatches(actual, requested Certificate) bool {
-	if actual.Identity != requested.Identity || actual.Principal != requested.Principal || actual.NotAfter.Sub(actual.NotBefore) != certificateLifetime+renewalWindow {
+	if !certificateInspectionHasExpectedPolicy(actual, requested) {
 		return false
 	}
-	return durationWithin(actual.NotBefore.Sub(requested.NotBefore.UTC()), certificateSchedulingTolerance) && durationWithin(actual.NotAfter.Sub(requested.NotAfter.UTC()), certificateSchedulingTolerance)
+	return actual.NotBefore.Equal(requested.NotBefore.UTC()) && actual.NotAfter.Equal(requested.NotAfter.UTC())
 }
 
-func durationWithin(value, limit time.Duration) bool {
-	if value < 0 {
-		value = -value
+func certificateInspectionMatchesSigningBracket(actual, requested Certificate, started, finished time.Time) bool {
+	if !certificateInspectionHasExpectedPolicy(actual, requested) || finished.Before(started) {
+		return false
 	}
-	return value <= limit
+	// ssh-keygen serializes validity to whole seconds. The certificate's
+	// reference instant is therefore represented by [reference, reference+1s),
+	// which must overlap the trusted bracket around the signing subprocess.
+	reference := actual.NotBefore.UTC().Add(renewalWindow)
+	return !reference.After(finished.UTC()) && reference.Add(time.Second).After(started.UTC())
+}
+
+func certificateInspectionHasExpectedPolicy(actual, requested Certificate) bool {
+	return actual.Identity == requested.Identity && actual.Principal == requested.Principal && actual.NotAfter.Sub(actual.NotBefore) == certificateLifetime+renewalWindow
 }
 
 // RenewalRequired is pure policy: certificates are refreshed at or inside the fixed five-minute window.
