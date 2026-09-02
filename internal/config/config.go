@@ -10,10 +10,23 @@ import (
 	"github.com/weshofmann/boxwarden/internal/domain"
 )
 
-const version = 1
+const (
+	legacyVersion = 1
+	version       = 2
+)
 
 type Config struct {
 	domains map[domain.ID]Domain
+	host    *Host
+}
+
+// Host contains declared, unprivileged input locations. Their existence and
+// identities are deliberately validated by hostx doctor/init, not trusted at
+// configuration-load time.
+type Host struct {
+	TartPath    string
+	TartHome    string
+	SoftnetPath string
 }
 
 type Domain struct {
@@ -58,6 +71,15 @@ func (c Config) Domain(raw string) (Domain, error) {
 	return resolved, nil
 }
 
+// Host returns the V3 host prerequisite declaration. Version-1 configuration
+// remains readable for V1/V2 commands but cannot authorize V3 operations.
+func (c Config) Host() (Host, error) {
+	if c.host == nil {
+		return Host{}, fmt.Errorf("configuration version 1 has no V3 host prerequisites; migrate to version 2")
+	}
+	return *c.host, nil
+}
+
 func decodeConfig(decoder *json.Decoder) (Config, error) {
 	if err := requireObjectStart(decoder); err != nil {
 		return Config{}, fmt.Errorf("configuration: %w", err)
@@ -66,8 +88,10 @@ func decodeConfig(decoder *json.Decoder) (Config, error) {
 	seen := map[string]bool{}
 	var gotVersion bool
 	var gotDomains bool
+	var gotHost bool
 	var parsedVersion int
 	var domains map[domain.ID]Domain
+	var host Host
 
 	for decoder.More() {
 		name, err := objectField(decoder, seen)
@@ -87,6 +111,13 @@ func decodeConfig(decoder *json.Decoder) (Config, error) {
 			}
 			domains = parsed
 			gotDomains = true
+		case "host":
+			parsed, err := decodeHost(decoder)
+			if err != nil {
+				return Config{}, err
+			}
+			host = parsed
+			gotHost = true
 		default:
 			return Config{}, fmt.Errorf("unknown configuration field %q", name)
 		}
@@ -94,7 +125,7 @@ func decodeConfig(decoder *json.Decoder) (Config, error) {
 	if err := requireObjectEnd(decoder); err != nil {
 		return Config{}, fmt.Errorf("configuration: %w", err)
 	}
-	if !gotVersion || parsedVersion != version {
+	if !gotVersion || (parsedVersion != legacyVersion && parsedVersion != version) {
 		return Config{}, fmt.Errorf("unsupported configuration version %d", parsedVersion)
 	}
 	if !gotDomains || len(domains) == 0 {
@@ -103,7 +134,54 @@ func decodeConfig(decoder *json.Decoder) (Config, error) {
 	if err := rejectOverlappingRoots(domains); err != nil {
 		return Config{}, err
 	}
-	return Config{domains: domains}, nil
+	if parsedVersion == version && !gotHost {
+		return Config{}, fmt.Errorf("configuration version 2 requires host prerequisites")
+	}
+	if parsedVersion == legacyVersion && gotHost {
+		return Config{}, fmt.Errorf("configuration version 1 does not support host prerequisites")
+	}
+	loaded := Config{domains: domains}
+	if gotHost {
+		loaded.host = &host
+	}
+	return loaded, nil
+}
+
+func decodeHost(decoder *json.Decoder) (Host, error) {
+	if err := requireObjectStart(decoder); err != nil {
+		return Host{}, fmt.Errorf("host: %w", err)
+	}
+	seen := map[string]bool{}
+	var host Host
+	for decoder.More() {
+		name, err := objectField(decoder, seen)
+		if err != nil {
+			return Host{}, fmt.Errorf("host: %w", err)
+		}
+		var target *string
+		switch name {
+		case "tart_path":
+			target = &host.TartPath
+		case "tart_home":
+			target = &host.TartHome
+		case "softnet_path":
+			target = &host.SoftnetPath
+		default:
+			return Host{}, fmt.Errorf("host: unknown field %q", name)
+		}
+		if err := decoder.Decode(target); err != nil {
+			return Host{}, fmt.Errorf("host %s: %w", name, err)
+		}
+	}
+	if err := requireObjectEnd(decoder); err != nil {
+		return Host{}, fmt.Errorf("host: %w", err)
+	}
+	for name, path := range map[string]string{"tart_path": host.TartPath, "tart_home": host.TartHome, "softnet_path": host.SoftnetPath} {
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path || path == "/" {
+			return Host{}, fmt.Errorf("host %s must be canonical and absolute", name)
+		}
+	}
+	return host, nil
 }
 
 func decodeDomains(decoder *json.Decoder) (map[domain.ID]Domain, error) {

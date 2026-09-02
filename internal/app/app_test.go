@@ -13,6 +13,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/backend/fake"
 	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/golden"
+	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/session"
 )
 
@@ -109,6 +110,40 @@ func TestSessionStatusRequiresAnExplicitDomain(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "domain is required") {
 		t.Fatalf("Run() error = %v, want explicit-domain error", err)
+	}
+}
+
+func TestInitIsExplicitAndCannotBeReachedByDoctor(t *testing.T) {
+	configPath, _ := writeV2DomainFixture(t, "work")
+	service := &hostServiceFake{}
+	var output bytes.Buffer
+	if err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "doctor"}, Options{Host: service, Output: &output}); err != nil {
+		t.Fatalf("Run(doctor) error = %v", err)
+	}
+	if service.initCalls != 0 || service.doctorCalls != 1 {
+		t.Fatalf("calls after doctor = init %d doctor %d, want init 0 doctor 1", service.initCalls, service.doctorCalls)
+	}
+	if err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "init"}, Options{Host: service, Output: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("Run(init) error = %v", err)
+	}
+	if service.initCalls != 1 {
+		t.Fatalf("init calls = %d, want 1", service.initCalls)
+	}
+}
+
+func TestDoctorWritesDeterministicFindingsAndReturnsNonzeroForDrift(t *testing.T) {
+	configPath, _ := writeV2DomainFixture(t, "work")
+	service := &hostServiceFake{report: hostx.Report{Status: hostx.Drifted, Findings: []hostx.Finding{
+		{Code: "z.unsafe", Category: hostx.Drifted, Observed: "z", Expected: "safe", Remedy: "inspect"},
+		{Code: "a.mode", Category: hostx.Drifted, Observed: "a", Expected: "04550", Remedy: "inspect"},
+	}}}
+	var output bytes.Buffer
+	err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "doctor"}, Options{Host: service, Output: &output})
+	if err == nil || !strings.Contains(err.Error(), "doctor found") {
+		t.Fatalf("Run(doctor) error = %v, want nonzero drift result", err)
+	}
+	if got, want := output.String(), "status: drifted/unsafe\na.mode: [drifted/unsafe] observed=a expected=04550 remedy=inspect\nz.unsafe: [drifted/unsafe] observed=z expected=safe remedy=inspect\n"; got != want {
+		t.Fatalf("doctor output = %q, want %q", got, want)
 	}
 }
 
@@ -267,4 +302,37 @@ func writeDomainFixture(t *testing.T, rawDomain string) (string, config.Domain) 
 		t.Fatal(err)
 	}
 	return configPath, domainConfig
+}
+
+func writeV2DomainFixture(t *testing.T, rawDomain string) (string, config.Domain) {
+	t.Helper()
+	path, selected := writeDomainFixture(t, rawDomain)
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents = []byte(strings.Replace(string(contents), `"version":1,`, `"version":2,"host":{"tart_path":"/opt/qualified/tart","tart_home":"/tmp/boxwarden-tart","softnet_path":"/opt/qualified/softnet"},`, 1))
+	if err := os.WriteFile(path, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path, selected
+}
+
+type hostServiceFake struct {
+	initCalls   int
+	doctorCalls int
+	report      hostx.Report
+}
+
+func (f *hostServiceFake) Init(_ context.Context, _ hostx.Request) (hostx.InitResult, error) {
+	f.initCalls++
+	return hostx.InitResult{HostInstalled: true, DomainInitialized: true}, nil
+}
+
+func (f *hostServiceFake) Doctor(_ context.Context, _ hostx.Request) hostx.Report {
+	f.doctorCalls++
+	if f.report.Status != "" {
+		return f.report
+	}
+	return hostx.Report{Status: hostx.Healthy}
 }

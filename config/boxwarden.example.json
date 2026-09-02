@@ -1,5 +1,10 @@
 {
-  "version": 1,
+  "version": 2,
+  "host": {
+    "tart_path": "/absolute/canonical/path/to/qualified/tart",
+    "tart_home": "/absolute/canonical/path/to/boxwarden/tart-home",
+    "softnet_path": "/absolute/canonical/path/to/qualified/softnet-source"
+  },
   "domains": {
     "work": {
       "state_root": "/absolute/canonical/path/to/boxwarden/domains/work"

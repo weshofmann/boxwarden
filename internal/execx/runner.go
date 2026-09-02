@@ -1,6 +1,7 @@
 package execx
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os/exec"
@@ -8,12 +9,18 @@ import (
 	"sync"
 )
 
-const defaultMaxOutputBytes = 64 << 10
+const (
+	defaultMaxOutputBytes = 64 << 10
+	defaultMaxStdinBytes  = 64 << 10
+)
 
 type Command struct {
 	Path string
 	Args []string
 	Env  []string
+	// Stdin is passed directly to the child process. It is never included in
+	// Result or diagnostics because callers use it for credential-bearing frames.
+	Stdin []byte
 }
 
 type Result struct {
@@ -28,6 +35,7 @@ type Runner interface {
 
 type OSRunner struct {
 	MaxOutputBytes int
+	MaxStdinBytes  int
 }
 
 func (r OSRunner) Run(ctx context.Context, command Command) (Result, error) {
@@ -37,10 +45,20 @@ func (r OSRunner) Run(ctx context.Context, command Command) (Result, error) {
 	if isShell(command.Path) {
 		return Result{}, fmt.Errorf("shell command %q is prohibited", command.Path)
 	}
+	stdinLimit := r.MaxStdinBytes
+	if stdinLimit <= 0 {
+		stdinLimit = defaultMaxStdinBytes
+	}
+	if len(command.Stdin) > stdinLimit {
+		return Result{}, fmt.Errorf("command stdin exceeds %d-byte limit", stdinLimit)
+	}
 
 	process := exec.CommandContext(ctx, command.Path, command.Args...)
 	if command.Env != nil {
 		process.Env = command.Env
+	}
+	if command.Stdin != nil {
+		process.Stdin = bytes.NewReader(command.Stdin)
 	}
 	limit := r.MaxOutputBytes
 	if limit <= 0 {

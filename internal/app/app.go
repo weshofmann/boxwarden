@@ -15,6 +15,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/golden"
+	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/lifecycle"
 	"github.com/weshofmann/boxwarden/internal/session"
 )
@@ -26,6 +27,7 @@ type Options struct {
 	Env        []string
 	Observer   backend.Observer
 	Creator    backend.Creator
+	Host       hostx.Service
 	Output     io.Writer
 }
 
@@ -56,8 +58,34 @@ func Run(ctx context.Context, args []string, options Options) error {
 	if err != nil {
 		return err
 	}
+	var hostRequest hostx.Request
+	if command.kind == commandInit || command.kind == commandDoctor {
+		host, err := loaded.Host()
+		if err != nil {
+			return err
+		}
+		hostRequest = hostx.Request{Domain: command.domain, StateRoot: selectedDomain.StateRoot, TartPath: host.TartPath, TartHome: host.TartHome, SoftnetPath: host.SoftnetPath}
+		if options.Host == nil {
+			return errors.New("host prerequisite service is required")
+		}
+	}
 
 	switch command.kind {
+	case commandInit:
+		result, err := options.Host.Init(ctx, hostRequest)
+		if err != nil {
+			return fmt.Errorf("initialize host prerequisites: %w", err)
+		}
+		return writeInit(options.Output, result)
+	case commandDoctor:
+		report := options.Host.Doctor(ctx, hostRequest)
+		if err := writeDoctor(options.Output, report); err != nil {
+			return err
+		}
+		if report.Status != hostx.Healthy {
+			return fmt.Errorf("doctor found %s host prerequisites", report.Status)
+		}
+		return nil
 	case commandSessionStatus:
 		if options.Observer == nil {
 			return errors.New("backend observer is required")
@@ -104,6 +132,8 @@ const (
 	commandSessionStatus commandKind = iota + 1
 	commandGoldenRegister
 	commandSessionCreate
+	commandInit
+	commandDoctor
 )
 
 type parsedCommand struct {
@@ -145,6 +175,14 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.name = remaining[2]
 		return base, nil
 	}
+	if len(remaining) == 1 && remaining[0] == "init" {
+		base.kind = commandInit
+		return base, nil
+	}
+	if len(remaining) == 1 && remaining[0] == "doctor" {
+		base.kind = commandDoctor
+		return base, nil
+	}
 	if len(remaining) == 3 && remaining[0] == "golden" && remaining[1] == "register" {
 		base.kind = commandGoldenRegister
 		base.name = remaining[2]
@@ -168,7 +206,27 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.name = createSet.Args()[0]
 		return base, nil
 	}
-	return parsedCommand{}, errors.New("supported commands are: golden register <object>, session create [--mode clean|quarantine] <session>, session status <session>")
+	return parsedCommand{}, errors.New("supported commands are: init, doctor, golden register <object>, session create [--mode clean|quarantine] <session>, session status <session>")
+}
+
+func writeInit(output io.Writer, result hostx.InitResult) error {
+	if _, err := fmt.Fprintf(output, "host-installed: %t\ndomain-initialized: %t\nrefresh-login-session: %t\n", result.HostInstalled, result.DomainInitialized, result.RefreshLoginSession); err != nil {
+		return fmt.Errorf("write init result: %w", err)
+	}
+	return nil
+}
+
+func writeDoctor(output io.Writer, report hostx.Report) error {
+	report.Normalize()
+	if _, err := fmt.Fprintf(output, "status: %s\n", report.Status); err != nil {
+		return fmt.Errorf("write doctor report: %w", err)
+	}
+	for _, finding := range report.Findings {
+		if _, err := fmt.Fprintf(output, "%s: [%s] observed=%s expected=%s remedy=%s\n", finding.Code, finding.Category, finding.Observed, finding.Expected, finding.Remedy); err != nil {
+			return fmt.Errorf("write doctor finding: %w", err)
+		}
+	}
+	return nil
 }
 
 func environmentValue(environment []string, key string) string {

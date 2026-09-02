@@ -40,6 +40,38 @@ func TestLoadResolvesOnlyTheNamedDomain(t *testing.T) {
 	}
 }
 
+func TestLoadVersion2RequiresAndExposesHostPrerequisites(t *testing.T) {
+	base := canonicalTempDir(t)
+	root := makeRoot(t, base, "work")
+	path := writeConfig(t, base, fmt.Sprintf(`{"version":2,"host":{"tart_path":"/opt/qualified/tart","tart_home":"%s/tart-home","softnet_path":"/opt/qualified/softnet"},"domains":{"work":{"state_root":%q}}}`, base, root))
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	host, err := loaded.Host()
+	if err != nil {
+		t.Fatalf("Host() error = %v", err)
+	}
+	if host.TartPath != "/opt/qualified/tart" || host.SoftnetPath != "/opt/qualified/softnet" {
+		t.Fatalf("Host() = %#v, want configured prerequisite paths", host)
+	}
+
+	missing := writeConfig(t, base, fmt.Sprintf(`{"version":2,"domains":{"work":{"state_root":%q}}}`, root))
+	if _, err := Load(missing); err == nil {
+		t.Fatal("Load(version 2 without host) error = nil, want rejection")
+	}
+
+	legacy := writeConfig(t, base, fmt.Sprintf(`{"version":1,"domains":{"work":{"state_root":%q}}}`, root))
+	loaded, err = Load(legacy)
+	if err != nil {
+		t.Fatalf("Load(version 1) error = %v", err)
+	}
+	if _, err := loaded.Host(); err == nil {
+		t.Fatal("Host(version 1) error = nil, want V3 prerequisite gate")
+	}
+}
+
 func TestLoadRejectsAmbiguousOrUnsafeConfiguration(t *testing.T) {
 	base := canonicalTempDir(t)
 	workRoot := makeRoot(t, base, "work")
