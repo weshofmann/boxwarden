@@ -21,7 +21,7 @@ func TestCertificateIssuerUsesExactNoExtensionCertificateArguments(t *testing.T)
 	}
 	runner.commands = nil
 	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	issuer := NewCertificateIssuer(ca, runner, StaticIdentity{UID: 501, Name: "wes"}, func() time.Time { return now })
+	issuer := NewCertificateIssuer(ca.CAIdentity, runner, StaticIdentity{UID: 501, Name: "wes"}, func() time.Time { return now })
 	binding := testBinding(t, work)
 	key := filepath.Join(root, "runtime", "client")
 	if err := os.Mkdir(filepath.Dir(key), 0o700); err != nil {
@@ -114,7 +114,7 @@ func TestCertificateIssueCapsWallDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := &deadlineCapturingRunner{Runner: newKeygenRunner(t)}
-	issuer := NewCertificateIssuer(ca, runner, StaticIdentity{UID: 501, Name: "wes"}, func() time.Time {
+	issuer := NewCertificateIssuer(ca.CAIdentity, runner, StaticIdentity{UID: 501, Name: "wes"}, func() time.Time {
 		return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	})
 	key := filepath.Join(root, "runtime", "client")
@@ -169,7 +169,7 @@ func TestCertificateIssuerRefusesUnsafeExistingOutputBeforeSigning(t *testing.T)
 			output := key + "-cert.pub"
 			test.setup(t, output)
 			runner.commands = nil
-			if _, err := NewCertificateIssuer(ca, runner, StaticIdentity{UID: 501, Name: "wes"}, func() time.Time { return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC) }).Issue(context.Background(), testBinding(t, work), runtime, key); err == nil {
+			if _, err := NewCertificateIssuer(ca.CAIdentity, runner, StaticIdentity{UID: 501, Name: "wes"}, func() time.Time { return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC) }).Issue(context.Background(), testBinding(t, work), runtime, key); err == nil {
 				t.Fatal("Issue() accepted unsafe existing certificate output")
 			}
 			for _, command := range runner.commands {
@@ -200,7 +200,7 @@ func TestCertificateIssuerSafelyRenewsExistingCertificate(t *testing.T) {
 	key := filepath.Join(runtime, "client")
 	mustWrite(t, key, []byte("client-key"), 0o600)
 	mustWrite(t, key+"-cert.pub", []byte("old certificate"), 0o644)
-	if _, err := NewCertificateIssuer(ca, runner, StaticIdentity{UID: 501, Name: "wes"}, func() time.Time { return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC) }).Issue(context.Background(), testBinding(t, work), runtime, key); err != nil {
+	if _, err := NewCertificateIssuer(ca.CAIdentity, runner, StaticIdentity{UID: 501, Name: "wes"}, func() time.Time { return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC) }).Issue(context.Background(), testBinding(t, work), runtime, key); err != nil {
 		t.Fatal(err)
 	}
 	contents, err := os.ReadFile(key + "-cert.pub")
@@ -232,7 +232,7 @@ func TestCertificateIssuerInterruptionCleansOnlyTemporaryState(t *testing.T) {
 		}
 		return original(command)
 	}
-	issuer := NewCertificateIssuer(ca, runner, StaticIdentity{UID: 501, Name: "wes"}, func() time.Time { return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC) })
+	issuer := NewCertificateIssuer(ca.CAIdentity, runner, StaticIdentity{UID: 501, Name: "wes"}, func() time.Time { return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC) })
 	_, err = issuer.Issue(context.Background(), testBinding(t, work), runtime, key)
 	if !errors.Is(err, interrupted) || strings.Contains(err.Error(), "client-key") {
 		t.Fatalf("Issue() interruption error = %v", err)
@@ -275,7 +275,7 @@ func TestCertificateIssuerRejectsLateCertificateCollisionWithoutReplacement(t *t
 		}
 		return original(command)
 	}
-	if _, err := NewCertificateIssuer(ca, runner, StaticIdentity{UID: 501, Name: "wes"}, func() time.Time { return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC) }).Issue(context.Background(), testBinding(t, work), runtime, key); err == nil {
+	if _, err := NewCertificateIssuer(ca.CAIdentity, runner, StaticIdentity{UID: 501, Name: "wes"}, func() time.Time { return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC) }).Issue(context.Background(), testBinding(t, work), runtime, key); err == nil {
 		t.Fatal("Issue() accepted a final-path collision during publication")
 	}
 	contents, err := os.ReadFile(key + "-cert.pub")

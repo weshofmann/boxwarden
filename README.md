@@ -34,12 +34,12 @@ from the corrected generic guest definition and qualified accordingly. The
 unchanged older Task 0 domain-bound artifact is not grandfathered merely because
 it previously passed qualification.
 
-The next executable slices are V3 trusted host/domain management foundation and
-V4 start/supervision plus serial trust bootstrap and readiness. V3 separates a
-host-global foundation (`boxwarden init`, read-only `boxwarden doctor`, and the
-qualified Softnet privilege binding) from a domain foundation
-(`boxwarden --domain D domain init`, one management CA per domain, certificate
-issuance, host-key pins, and strict SSH primitives).
+The implemented V3 foundation separates a host-global lifetime (`boxwarden
+init`, read-only `boxwarden doctor`, and the qualified Softnet privilege
+binding) from a domain lifetime (`boxwarden --domain D domain init`, one
+management CA per domain, certificate issuance, host-key pins, and strict SSH
+primitives). V4 adds start/supervision plus serial trust bootstrap and
+readiness.
 This plan stops after V4. File transfer, stop, destroy, provider authentication,
 and other later work remain deferred.
 
@@ -74,11 +74,11 @@ requalification.
 - Host filesystem sharing, display-server sharing, clipboard and audio sharing,
   host runtime sockets, host credential stores, SSH-agent forwarding, bridged
   networking, port exposure, and nested virtualization are absent by default.
-- The production Softnet mechanism is selected but not yet implemented or
-  qualified on a real host: `boxwarden init` will install the exact qualified
+- The production Softnet mechanism is implemented but has not completed its
+  user-attended real-host gate: `boxwarden init` installs the exact qualified
   Softnet 0.19.0 executable in a root-owned digest-specific path for a dedicated
-  trusted operator group. Until V3 and its user-attended gate are complete, the
-  project is not production-ready.
+  trusted operator group. Until that gate is complete, the project is not
+  production-ready.
 
 Read [the security model](docs/security-model.md),
 [architecture](docs/architecture.md), and the [Task 0 evidence
@@ -88,16 +88,20 @@ project for sensitive work.
 ## Current commands
 
 ```sh
+boxwarden init
+boxwarden doctor
+boxwarden --domain <id> domain init
 boxwarden --domain <id> golden register <qualified-tart-object>
 boxwarden --domain <id> session create [--mode clean|quarantine] <session>
 boxwarden --domain <id> session status <session>
 ```
 
-These implemented commands operate on domain-owned state, so `--domain` is
-mandatory unless `BOXWARDEN_DOMAIN` is set. Boxwarden has no implicit domain and
-never searches across security domains. Future host-global `boxwarden init` and
-`boxwarden doctor` operate outside the security-domain namespace and do not
-require a domain. Start from
+The domain-owned commands require `--domain` unless `BOXWARDEN_DOMAIN` is set.
+Boxwarden has no implicit domain and never searches across security domains.
+`boxwarden init` and `boxwarden doctor` are host-global: they do not select a
+domain and reject an explicitly supplied `--domain`. `domain init` creates only
+the selected domain's management CA; it does not install or modify host-global
+prerequisites. Start from
 [config/boxwarden.example.json](config/boxwarden.example.json).
 
 ## Development

@@ -32,12 +32,30 @@ type Host struct {
 	SoftnetSource  string
 }
 
+// HostAdmission is the fully admitted host prerequisite declaration together
+// with every configured state root that must remain disjoint from it.
+type HostAdmission struct {
+	Host                 Host
+	ConfiguredStateRoots []string
+}
+
 type Domain struct {
 	ID        domain.ID
 	StateRoot string
 }
 
 func Load(path string) (Config, error) {
+	return load(path, true)
+}
+
+// LoadDomains validates exact JSON and all domain-owned state. It validates an
+// optional host object's exact JSON shape but defers host filesystem admission,
+// so a version-2 domain-only configuration need not include a host block.
+func LoadDomains(path string) (Config, error) {
+	return load(path, false)
+}
+
+func load(path string, admitHost bool) (Config, error) {
 	if err := requireRegularFile(path); err != nil {
 		return Config{}, err
 	}
@@ -56,7 +74,7 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("configuration exceeds %d-byte limit", maxConfigurationBytes)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(contents))
-	loaded, err := decodeConfig(decoder)
+	loaded, err := decodeConfig(decoder, admitHost)
 	if err != nil {
 		return Config{}, err
 	}
@@ -100,7 +118,23 @@ func (c Config) Host() (Host, error) {
 	return *c.host, nil
 }
 
-func decodeConfig(decoder *json.Decoder) (Config, error) {
+// HostAdmission returns the fully admitted host declaration and a complete,
+// deterministic collection of configured state roots for host-global overlap
+// checks. Callers cannot select or omit a domain root at this boundary.
+func (c Config) HostAdmission() (HostAdmission, error) {
+	host, err := c.Host()
+	if err != nil {
+		return HostAdmission{}, err
+	}
+	domains := c.Domains()
+	roots := make([]string, 0, len(domains))
+	for _, configured := range domains {
+		roots = append(roots, configured.StateRoot)
+	}
+	return HostAdmission{Host: host, ConfiguredStateRoots: roots}, nil
+}
+
+func decodeConfig(decoder *json.Decoder, admitHost bool) (Config, error) {
 	if err := requireObjectStart(decoder); err != nil {
 		return Config{}, fmt.Errorf("configuration: %w", err)
 	}
@@ -132,11 +166,15 @@ func decodeConfig(decoder *json.Decoder) (Config, error) {
 			domains = parsed
 			gotDomains = true
 		case "host":
-			parsed, err := decodeHost(decoder)
-			if err != nil {
+			if admitHost {
+				parsed, err := decodeHost(decoder)
+				if err != nil {
+					return Config{}, err
+				}
+				host = parsed
+			} else if err := decodeHostShape(decoder); err != nil {
 				return Config{}, err
 			}
-			host = parsed
 			gotHost = true
 		default:
 			return Config{}, fmt.Errorf("unknown configuration field %q", name)
@@ -154,19 +192,19 @@ func decodeConfig(decoder *json.Decoder) (Config, error) {
 	if err := rejectOverlappingRoots(domains); err != nil {
 		return Config{}, err
 	}
-	if parsedVersion == version && !gotHost {
+	if parsedVersion == version && admitHost && !gotHost {
 		return Config{}, fmt.Errorf("configuration version 2 requires host prerequisites")
 	}
 	if parsedVersion == legacyVersion && gotHost {
 		return Config{}, fmt.Errorf("configuration version 1 does not support host prerequisites")
 	}
-	if parsedVersion == version {
+	if parsedVersion == version && admitHost {
 		if err := rejectHostDomainOverlap(host, domains); err != nil {
 			return Config{}, err
 		}
 	}
 	loaded := Config{domains: domains}
-	if gotHost {
+	if gotHost && admitHost {
 		loaded.host = &host
 	}
 	return loaded, nil
@@ -224,6 +262,43 @@ func decodeHost(decoder *json.Decoder) (Host, error) {
 		return Host{}, fmt.Errorf("host softnet_source: %w", err)
 	}
 	return host, nil
+}
+
+func decodeHostShape(decoder *json.Decoder) error {
+	if err := requireObjectStart(decoder); err != nil {
+		return fmt.Errorf("host: %w", err)
+	}
+	seen := map[string]bool{}
+	var gotTartExecutable bool
+	var gotTartHome bool
+	var gotSoftnetSource bool
+	for decoder.More() {
+		name, err := objectField(decoder, seen)
+		if err != nil {
+			return fmt.Errorf("host: %w", err)
+		}
+		var value string
+		switch name {
+		case "tart_executable":
+			gotTartExecutable = true
+		case "tart_home":
+			gotTartHome = true
+		case "softnet_source":
+			gotSoftnetSource = true
+		default:
+			return fmt.Errorf("host: unknown field %q", name)
+		}
+		if err := decoder.Decode(&value); err != nil {
+			return fmt.Errorf("host %s: %w", name, err)
+		}
+	}
+	if err := requireObjectEnd(decoder); err != nil {
+		return fmt.Errorf("host: %w", err)
+	}
+	if !gotTartExecutable || !gotTartHome || !gotSoftnetSource {
+		return fmt.Errorf("host requires tart_executable, tart_home, and softnet_source")
+	}
+	return nil
 }
 
 func decodeDomains(decoder *json.Decoder) (map[domain.ID]Domain, error) {

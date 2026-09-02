@@ -2,12 +2,11 @@ package hostx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/weshofmann/boxwarden/internal/execx"
 )
 
 const (
@@ -66,20 +65,17 @@ func statusSeverity(status Status) int {
 }
 
 type Request struct {
-	Domain      string
-	StateRoot   string
-	TartPath    string
-	TartHome    string
-	SoftnetPath string
+	// ConfiguredStateRoots is the complete already-admitted configuration
+	// collection used only to keep host prerequisites disjoint from every
+	// managed state root. It carries no selected-domain identity.
+	ConfiguredStateRoots []string
+	TartPath             string
+	TartHome             string
+	SoftnetPath          string
 }
 type InitResult struct {
 	HostInstalled       bool
-	DomainInitialized   bool
 	RefreshLoginSession bool
-}
-type Service interface {
-	Init(context.Context, Request) (InitResult, error)
-	Doctor(context.Context, Request) Report
 }
 
 // DoctorInspector is intentionally read-only. Doctor cannot obtain a privilege
@@ -106,18 +102,22 @@ type PathFact struct {
 }
 type HomebrewSoftnet struct{ Path, Privilege string }
 
-type SystemService struct {
-	inspector       DoctorInspector
-	privilege       PrivilegeRunner
-	executable      string
-	sourceValidator func(string, string) error
+// SystemDoctor deliberately has only the read-only inspector capability. The
+// initializer owns the privilege runner in SystemInitializer.
+type SystemDoctor struct {
+	inspector DoctorInspector
 }
 
-func NewSystemService() SystemService {
-	return SystemService{inspector: NewOSDoctorInspector(), privilege: execx.OSRunner{MaxOutputBytes: 16 << 10, MaxStdinBytes: maxInstallRequestBytes}}
+// SystemService remains a source-compatible name for test fixtures and is an
+// alias of the read-only doctor, not a capability-bearing combined service.
+// Production composition uses NewSystemInitializer and NewSystemDoctor.
+type SystemService = SystemDoctor
+
+func NewSystemDoctor() SystemDoctor {
+	return SystemDoctor{inspector: NewOSDoctorInspector()}
 }
 
-func (s SystemService) Doctor(_ context.Context, request Request) Report {
+func (s SystemDoctor) Doctor(_ context.Context, request Request) Report {
 	inspector := s.inspector
 	if inspector == nil {
 		inspector = NewOSDoctorInspector()
@@ -134,15 +134,14 @@ func (s SystemService) Doctor(_ context.Context, request Request) Report {
 	if platform.Release != QualifiedMacOS {
 		add("platform.release", Unsupported, publicValue(platform.Release), QualifiedMacOS, "use the exact qualified macOS release")
 	}
-	if !canonicalAbsolute(request.StateRoot) {
-		add("paths.state-root", Drifted, "noncanonical state root", "canonical absolute domain state root", "correct domain configuration")
-	} else {
-		paths := []string{request.TartPath, request.TartHome, request.SoftnetPath, productionToolchainPath()}
-		for _, path := range paths {
-			if canonicalAbsolute(path) && pathsOverlap(request.StateRoot, path) {
-				add("paths.overlap", Drifted, "host/domain paths overlap", "disjoint host and domain roots", "correct version-2 host configuration")
-				break
-			}
+	if err := validateHostPathOverlaps(request); err != nil {
+		switch {
+		case errors.Is(err, errMissingConfiguredStateRoots):
+			add("paths.state-roots", Drifted, "missing configured state-root collection", "complete canonical configured state-root collection", "correct version-2 host configuration")
+		case errors.Is(err, errNoncanonicalConfiguredStateRoot):
+			add("paths.state-roots", Drifted, "noncanonical configured state root", "complete canonical configured state-root collection", "correct version-2 host configuration")
+		default:
+			add("paths.overlap", Drifted, "host paths overlap", "disjoint host paths and configured state roots", "correct version-2 host configuration")
 		}
 	}
 	if !canonicalAbsolute(request.TartPath) {

@@ -92,6 +92,21 @@ type CAIdentity struct {
 	SSHKeygenPath  string    `json:"-"`
 }
 
+// CAInitDisposition records the atomic outcome of CAStore.Init.
+type CAInitDisposition string
+
+const (
+	CAInitialized        CAInitDisposition = "initialized"
+	CAAlreadyInitialized CAInitDisposition = "already_initialized"
+)
+
+// CAInitResult retains the validated CA identity while reporting whether this
+// Init call created its management CA or found an already-valid one.
+type CAInitResult struct {
+	CAIdentity
+	Disposition CAInitDisposition
+}
+
 func NewCAStore(options CAStoreOptions) *CAStore {
 	path := options.SSHKeygenPath
 	if path == "" {
@@ -100,82 +115,90 @@ func NewCAStore(options CAStoreOptions) *CAStore {
 	return &CAStore{runner: options.Runner, identity: options.Identity, newUUID: options.NewUUID, sshKeygenPath: path}
 }
 
-func (s *CAStore) Init(ctx context.Context, current Domain, configured []Domain) (CAIdentity, error) {
+func (s *CAStore) Init(ctx context.Context, current Domain, configured []Domain) (CAInitResult, error) {
 	ctx, cancel := boundedCAContext(ctx)
 	defer cancel()
 	if err := validDomain(current); err != nil {
-		return CAIdentity{}, err
+		return CAInitResult{}, err
 	}
 	if s.runner == nil || s.identity == nil || s.newUUID == nil {
-		return CAIdentity{}, fmt.Errorf("CA store dependencies are required")
+		return CAInitResult{}, fmt.Errorf("CA store dependencies are required")
 	}
 	existing, err := s.Check(ctx, current, configured)
 	if err == nil {
-		return existing, nil
+		return CAInitResult{CAIdentity: existing, Disposition: CAAlreadyInitialized}, nil
 	}
 	if !errors.Is(err, ErrCAMissing) {
-		return CAIdentity{}, err
+		return CAInitResult{}, err
 	}
 	operator, err := s.identity.Current(ctx)
 	if err != nil {
-		return CAIdentity{}, fmt.Errorf("resolve creating operator: %w", err)
+		return CAInitResult{}, fmt.Errorf("resolve creating operator: %w", err)
 	}
 	if operator.UID < 0 || operator.Name == "" {
-		return CAIdentity{}, fmt.Errorf("creating operator is invalid")
+		return CAInitResult{}, fmt.Errorf("creating operator is invalid")
 	}
 	creationUUID, err := s.newUUID()
 	if err != nil {
-		return CAIdentity{}, fmt.Errorf("generate CA creation UUID: %w", err)
+		return CAInitResult{}, fmt.Errorf("generate CA creation UUID: %w", err)
 	}
 	if !validUUID(creationUUID) {
-		return CAIdentity{}, fmt.Errorf("creation UUID is invalid")
+		return CAInitResult{}, fmt.Errorf("creation UUID is invalid")
 	}
 	if err := ensurePrivateDirectory(current.StateRoot); err != nil {
-		return CAIdentity{}, fmt.Errorf("state root: %w", err)
+		return CAInitResult{}, fmt.Errorf("state root: %w", err)
 	}
 	dir := caDirectory(current.StateRoot)
 	state, err := caState(dir)
 	if err != nil {
-		return CAIdentity{}, err
+		return CAInitResult{}, err
 	}
 	if state.complete {
-		return s.Check(ctx, current, configured)
+		identity, err := s.Check(ctx, current, configured)
+		if err != nil {
+			return CAInitResult{}, err
+		}
+		return CAInitResult{CAIdentity: identity, Disposition: CAAlreadyInitialized}, nil
 	}
 	if state.any {
-		return CAIdentity{}, fmt.Errorf("management CA state is partial; explicit manual remediation is required")
+		return CAInitResult{}, fmt.Errorf("management CA state is partial; explicit manual remediation is required")
 	}
 	if err := ensurePrivateDirectory(filepath.Join(current.StateRoot, "identity")); err != nil {
-		return CAIdentity{}, err
+		return CAInitResult{}, err
 	}
 	if err := ensurePrivateDirectory(dir); err != nil {
-		return CAIdentity{}, err
+		return CAInitResult{}, err
 	}
 	privatePath := filepath.Join(dir, "ca")
 	result, err := s.runner.Run(ctx, Command{Path: s.sshKeygenPath, Args: []string{"-q", "-t", "ed25519", "-f", privatePath, "-N", "", "-C", "boxwarden:" + string(current.ID) + ":management-ca"}})
 	if err != nil {
-		return CAIdentity{}, fmt.Errorf("create management CA: %w", err)
+		return CAInitResult{}, fmt.Errorf("create management CA: %w", err)
 	}
 	if result.Truncated {
-		return CAIdentity{}, fmt.Errorf("create management CA produced oversized output")
+		return CAInitResult{}, fmt.Errorf("create management CA produced oversized output")
 	}
 	if err := normalizePublicFile(filepath.Join(dir, "ca.pub")); err != nil {
-		return CAIdentity{}, fmt.Errorf("normalize CA public key: %w", err)
+		return CAInitResult{}, fmt.Errorf("normalize CA public key: %w", err)
 	}
 	identity, err := s.buildIdentity(ctx, current)
 	if err != nil {
-		return CAIdentity{}, err
+		return CAInitResult{}, err
 	}
 	identity.CreationUUID = creationUUID
 	identity.CreatorUID, identity.CreatorName = operator.UID, operator.Name
 	encoded, err := json.Marshal(identity)
 	if err != nil {
-		return CAIdentity{}, err
+		return CAInitResult{}, err
 	}
 	metadataPath := filepath.Join(dir, "metadata.json")
 	if err := writePrivateNew(metadataPath, append(encoded, '\n')); err != nil {
-		return CAIdentity{}, fmt.Errorf("write CA metadata: %w", err)
+		return CAInitResult{}, fmt.Errorf("write CA metadata: %w", err)
 	}
-	return s.Check(ctx, current, configured)
+	validated, err := s.Check(ctx, current, configured)
+	if err != nil {
+		return CAInitResult{}, err
+	}
+	return CAInitResult{CAIdentity: validated, Disposition: CAInitialized}, nil
 }
 
 // Check validates the selected domain's existing CA without creating or

@@ -12,6 +12,15 @@ import (
 	"time"
 )
 
+func TestNewSystemDoctorConstructsAStandaloneReadOnlyDoctor(t *testing.T) {
+	inspector, request := healthyDoctorFixture(t)
+	doctor := NewSystemDoctor()
+	doctor.inspector = inspector
+	if report := doctor.Doctor(t.Context(), request); report.Status != Healthy {
+		t.Fatalf("Doctor() status = %q, want healthy", report.Status)
+	}
+}
+
 func TestDoctorReportsHealthyOnlyWhenEveryHostPrerequisiteMatches(t *testing.T) {
 	inspector, request := healthyDoctorFixture(t)
 	service := SystemService{inspector: inspector}
@@ -211,9 +220,9 @@ func TestDoctorRejectsMutableSoftnetCurrentPointer(t *testing.T) {
 	}
 }
 
-func TestDoctorRejectsHostAndDomainPathOverlap(t *testing.T) {
+func TestDoctorRejectsHostAndConfiguredStatePathOverlap(t *testing.T) {
 	inspector, request := healthyDoctorFixture(t)
-	request.StateRoot = "/opt"
+	request.ConfiguredStateRoots = []string{"/opt"}
 	report := (SystemService{inspector: inspector}).Doctor(t.Context(), request)
 	if report.Status != Drifted {
 		t.Fatalf("Doctor() status = %q, want drift", report.Status)
@@ -227,9 +236,71 @@ func TestDoctorRejectsHostAndDomainPathOverlap(t *testing.T) {
 	}
 }
 
+func TestDoctorAndInitAgreeOnEveryHostPathOverlap(t *testing.T) {
+	for name, overlap := range map[string]func(*Request){
+		"Tart and tart home": func(request *Request) { request.TartHome = request.TartPath },
+		"Tart and Softnet":   func(request *Request) { request.SoftnetPath = request.TartPath },
+		"tart home and Softnet": func(request *Request) {
+			request.SoftnetPath = request.TartHome
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			inspector, request := healthyDoctorFixture(t)
+			overlap(&request)
+			report := (SystemDoctor{inspector: inspector}).Doctor(t.Context(), request)
+			if report.Status != Drifted || !hasFinding(report, "paths.overlap") {
+				t.Fatalf("Doctor() report = %#v, want paths.overlap drift", report)
+			}
+
+			runner := &privilegeRunnerFake{}
+			initializer := SystemInitializer{inspector: inspector, privilege: runner, executable: "/opt/boxwarden/bin/boxwarden", sourceValidator: func(string, string) error { return nil }}
+			if _, err := initializer.Init(t.Context(), request); err == nil {
+				t.Fatal("Init() error = nil, want host path overlap refusal")
+			}
+			if runner.command.Path != "" {
+				t.Fatalf("Init() invoked privilege runner for overlapping host paths: %#v", runner.command)
+			}
+		})
+	}
+}
+
+func TestDoctorAndInitCheckEveryConfiguredStateRoot(t *testing.T) {
+	for name, root := range map[string]string{
+		"later root overlaps Tart":            "/opt",
+		"later root overlaps fixed toolchain": "/Library",
+	} {
+		t.Run(name, func(t *testing.T) {
+			inspector, request := healthyDoctorFixture(t)
+			request.ConfiguredStateRoots = []string{"/Users/wes/state/work", root}
+			report := (SystemDoctor{inspector: inspector}).Doctor(t.Context(), request)
+			if report.Status != Drifted || !hasFinding(report, "paths.overlap") {
+				t.Fatalf("Doctor() report = %#v, want later-root paths.overlap drift", report)
+			}
+
+			runner := &privilegeRunnerFake{}
+			initializer := SystemInitializer{inspector: inspector, privilege: runner, executable: "/opt/boxwarden/bin/boxwarden", sourceValidator: func(string, string) error { return nil }}
+			if _, err := initializer.Init(t.Context(), request); err == nil {
+				t.Fatal("Init() error = nil, want later-root overlap refusal")
+			}
+			if runner.command.Path != "" {
+				t.Fatalf("Init() invoked privilege runner for later-root overlap: %#v", runner.command)
+			}
+		})
+	}
+}
+
+func hasFinding(report Report, code string) bool {
+	for _, finding := range report.Findings {
+		if finding.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
 func healthyDoctorFixture(t *testing.T) (*doctorInspectorFake, Request) {
 	t.Helper()
-	request := Request{Domain: "work", StateRoot: "/Users/wes/state/work", TartPath: "/opt/qualified/tart", TartHome: "/Users/wes/tart", SoftnetPath: "/opt/homebrew/Cellar/softnet/0.19.0/bin/softnet"}
+	request := Request{ConfiguredStateRoots: []string{"/Users/wes/state/work"}, TartPath: "/opt/qualified/tart", TartHome: "/Users/wes/tart", SoftnetPath: "/opt/homebrew/Cellar/softnet/0.19.0/bin/softnet"}
 	group := Group{ID: 20, Name: OperatorGroupName, Members: []int{501}}
 	operator := Operator{UID: 501, Name: "wes", Home: "/Users/wes"}
 	manifest := Manifest{

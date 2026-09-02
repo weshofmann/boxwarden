@@ -5,9 +5,24 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/weshofmann/boxwarden/internal/execx"
 )
 
-func (s SystemService) Init(ctx context.Context, request Request) (InitResult, error) {
+// SystemInitializer is the only production host service that can invoke the
+// attended root installer.
+type SystemInitializer struct {
+	inspector       DoctorInspector
+	privilege       PrivilegeRunner
+	executable      string
+	sourceValidator func(string, string) error
+}
+
+func NewSystemInitializer() SystemInitializer {
+	return SystemInitializer{inspector: NewOSDoctorInspector(), privilege: execx.OSRunner{MaxOutputBytes: 16 << 10, MaxStdinBytes: maxInstallRequestBytes}}
+}
+
+func (s SystemInitializer) Init(ctx context.Context, request Request) (InitResult, error) {
 	inspector := s.inspector
 	if inspector == nil {
 		inspector = NewOSDoctorInspector()
@@ -16,11 +31,11 @@ func (s SystemService) Init(ctx context.Context, request Request) (InitResult, e
 	if platform.OS != QualifiedPlatform || platform.Arch != QualifiedArch || platform.Release != QualifiedMacOS {
 		return InitResult{}, ErrUnsupportedPlatform
 	}
-	if request.Domain == "" || !canonicalAbsolute(request.StateRoot) || !canonicalAbsolute(request.TartPath) || !canonicalAbsolute(request.TartHome) || !canonicalAbsolute(request.SoftnetPath) {
-		return InitResult{}, fmt.Errorf("init requires validated domain and canonical absolute host paths")
+	if !canonicalAbsolute(request.TartPath) || !canonicalAbsolute(request.TartHome) || !canonicalAbsolute(request.SoftnetPath) {
+		return InitResult{}, fmt.Errorf("init requires a complete configured state-root collection and canonical absolute host paths")
 	}
-	if pathsOverlap(request.StateRoot, request.TartPath) || pathsOverlap(request.StateRoot, request.SoftnetPath) || pathsOverlap(request.StateRoot, request.TartHome) || pathsOverlap(request.StateRoot, productionToolchainPath()) || pathsOverlap(request.TartHome, request.TartPath) || pathsOverlap(request.TartHome, request.SoftnetPath) || pathsOverlap(request.TartPath, request.SoftnetPath) {
-		return InitResult{}, fmt.Errorf("host prerequisite path overlaps domain state root")
+	if err := validateHostPathOverlaps(request); err != nil {
+		return InitResult{}, fmt.Errorf("host prerequisite paths are invalid: %w", err)
 	}
 	unsafe, err := inspector.HomebrewSoftnet()
 	if err != nil {

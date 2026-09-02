@@ -97,6 +97,44 @@ func TestLoadVersion2RequiresEveryHostPrerequisiteExactlyOnce(t *testing.T) {
 	}
 }
 
+func TestLoadDomainsDefersHostFilesystemAdmissionButPreservesHostShape(t *testing.T) {
+	base := canonicalTempDir(t)
+	root := makeRoot(t, base, "work")
+	missingTart := filepath.Join(base, "missing-tart")
+	missingHome := filepath.Join(base, "missing-home")
+	missingSoftnet := filepath.Join(base, "missing-softnet")
+	valid := writeConfig(t, base, v2Config(missingTart, missingHome, missingSoftnet, root))
+
+	loaded, err := LoadDomains(valid)
+	if err != nil {
+		t.Fatalf("LoadDomains() error = %v", err)
+	}
+	if domain, err := loaded.Domain("work"); err != nil || domain.StateRoot != root {
+		t.Fatalf("LoadDomains().Domain(work) = %#v, %v; want admitted domain root", domain, err)
+	}
+	if _, err := Load(valid); err == nil {
+		t.Fatal("Load() error = nil, want host filesystem admission failure")
+	}
+	withoutHost := writeConfig(t, base, fmt.Sprintf(`{"version":2,"domains":{"work":{"state_root":%q}}}`, root))
+	if _, err := LoadDomains(withoutHost); err != nil {
+		t.Fatalf("LoadDomains(version 2 without host) error = %v", err)
+	}
+	if _, err := Load(withoutHost); err == nil {
+		t.Fatal("Load(version 2 without host) error = nil, want host prerequisite rejection")
+	}
+
+	for name, contents := range map[string]string{
+		"missing host field": fmt.Sprintf(`{"version":2,"host":{"tart_executable":%q,"tart_home":%q},"domains":{"work":{"state_root":%q}}}`, missingTart, missingHome, root),
+		"unknown host field": fmt.Sprintf(`{"version":2,"host":{"tart_executable":%q,"tart_home":%q,"softnet_source":%q,"extra":true},"domains":{"work":{"state_root":%q}}}`, missingTart, missingHome, missingSoftnet, root),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := LoadDomains(writeConfig(t, base, contents)); err == nil {
+				t.Fatal("LoadDomains() error = nil, want strict host-shape rejection")
+			}
+		})
+	}
+}
+
 func TestLoadVersion2RejectsUnsafeHostPaths(t *testing.T) {
 	base := canonicalTempDir(t)
 	root := makeRoot(t, base, "work")
@@ -173,6 +211,29 @@ func TestDomainsReturnsSortedIndependentSnapshot(t *testing.T) {
 	second := loaded.Domains()
 	if got, want := second[0].StateRoot, alpha; got != want {
 		t.Fatalf("Domains() leaked mutable state = %q, want %q", got, want)
+	}
+}
+
+func TestHostAdmissionReturnsEveryConfiguredRootInSortedOrder(t *testing.T) {
+	base := canonicalTempDir(t)
+	alpha := makeRoot(t, base, "alpha")
+	personal := makeRoot(t, base, "personal")
+	work := makeRoot(t, base, "work")
+	tartExecutable := makeRegularFile(t, base, "tart")
+	tartHome := makeRoot(t, base, "tart-home")
+	softnetSource := makeRegularFile(t, base, "softnet")
+	path := writeConfig(t, base, fmt.Sprintf(`{"version":2,"host":{"tart_executable":%q,"tart_home":%q,"softnet_source":%q},"domains":{"work":{"state_root":%q},"personal":{"state_root":%q},"alpha":{"state_root":%q}}}`, tartExecutable, tartHome, softnetSource, work, personal, alpha))
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	admission, err := loaded.HostAdmission()
+	if err != nil {
+		t.Fatalf("HostAdmission() error = %v", err)
+	}
+	if got, want := fmt.Sprint(admission.ConfiguredStateRoots), fmt.Sprint([]string{alpha, personal, work}); got != want {
+		t.Fatalf("HostAdmission() roots = %s, want %s", got, want)
 	}
 }
 

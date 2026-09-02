@@ -12,7 +12,7 @@ func TestSystemInitValidatesUnprivilegedStateBeforeExactPrivilegeTransition(t *t
 	inspector, request := healthyDoctorFixture(t)
 	runner := &privilegeRunnerFake{result: execx.Result{Stdout: `{"published":true,"already_installed":false,"refresh_login_session":true}`}}
 	validated := ""
-	service := SystemService{
+	service := SystemInitializer{
 		inspector: inspector, privilege: runner, executable: "/opt/boxwarden/bin/boxwarden",
 		sourceValidator: func(path, digest string) error { validated = path + ":" + digest; return nil },
 	}
@@ -20,7 +20,7 @@ func TestSystemInitValidatesUnprivilegedStateBeforeExactPrivilegeTransition(t *t
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
-	if !result.HostInstalled || result.DomainInitialized || !result.RefreshLoginSession {
+	if !result.HostInstalled || !result.RefreshLoginSession {
 		t.Fatalf("Init() = %#v, want host-only publication boundary", result)
 	}
 	if validated != request.SoftnetPath+":"+SoftnetExecutableSHA256 || runner.command.Path != "/usr/bin/sudo" {
@@ -45,7 +45,7 @@ func TestSystemInitUsesSameExactSafeTartAdmissionAsDoctor(t *testing.T) {
 			mutate(&fact)
 			inspector.paths[request.TartPath] = fact
 			runner := &privilegeRunnerFake{}
-			service := SystemService{inspector: inspector, privilege: runner, executable: "/opt/boxwarden/bin/boxwarden", sourceValidator: func(string, string) error { return nil }}
+			service := SystemInitializer{inspector: inspector, privilege: runner, executable: "/opt/boxwarden/bin/boxwarden", sourceValidator: func(string, string) error { return nil }}
 			if _, err := service.Init(t.Context(), request); err == nil {
 				t.Fatal("Init() error = nil, want unsafe Tart refusal")
 			}
@@ -67,7 +67,7 @@ func TestSystemInitRefusesUnsafeHomebrewOrUnsupportedPlatformWithoutPrivilege(t 
 			inspector, request := healthyDoctorFixture(t)
 			mutate(inspector)
 			runner := &privilegeRunnerFake{}
-			service := SystemService{inspector: inspector, privilege: runner, executable: "/opt/boxwarden/bin/boxwarden", sourceValidator: func(string, string) error { return nil }}
+			service := SystemInitializer{inspector: inspector, privilege: runner, executable: "/opt/boxwarden/bin/boxwarden", sourceValidator: func(string, string) error { return nil }}
 			if _, err := service.Init(context.Background(), request); err == nil {
 				t.Fatal("Init() error = nil, want fail-closed refusal")
 			}

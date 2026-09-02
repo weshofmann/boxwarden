@@ -30,12 +30,7 @@ type HostDoctor interface {
 }
 
 type CAInitializer interface {
-	Init(context.Context, sshx.Domain, []sshx.Domain) (sshx.CAIdentity, error)
-	Check(context.Context, sshx.Domain, []sshx.Domain) (sshx.CAIdentity, error)
-}
-
-type CADoctor interface {
-	Check(context.Context, sshx.Domain, []sshx.Domain) (sshx.CAIdentity, error)
+	Init(context.Context, sshx.Domain, []sshx.Domain) (sshx.CAInitResult, error)
 }
 
 // Options supplies trusted-host dependencies to Run. App depends only on the
@@ -48,7 +43,6 @@ type Options struct {
 	HostInit   HostInitializer
 	HostDoctor HostDoctor
 	CAInit     CAInitializer
-	CADoctor   CADoctor
 	Output     io.Writer
 }
 
@@ -61,7 +55,8 @@ func DefaultConfigPath() (string, error) {
 	return filepath.Join(base, "boxwarden", "config.json"), nil
 }
 
-// Run executes one domain-scoped Boxwarden command.
+// Run executes one Boxwarden command. Commands that own domain state require an
+// explicit domain; host-global commands deliberately do not select one.
 func Run(ctx context.Context, args []string, options Options) error {
 	command, err := parseCommand(args, options)
 	if err != nil {
@@ -71,70 +66,45 @@ func Run(ctx context.Context, args []string, options Options) error {
 		return errors.New("command output is required")
 	}
 
-	loaded, err := config.Load(command.configPath)
+	loadConfig := config.Load
+	if command.kind == commandDomainInit {
+		loadConfig = config.LoadDomains
+	}
+	loaded, err := loadConfig(command.configPath)
 	if err != nil {
 		return fmt.Errorf("load configuration: %w", err)
 	}
-	selectedDomain, err := loaded.Domain(command.domain)
-	if err != nil {
-		return err
-	}
-	var hostRequest hostx.Request
-	var selectedCADomain sshx.Domain
-	var configuredCADomains []sshx.Domain
-	if command.kind == commandInit || command.kind == commandDoctor {
-		host, err := loaded.Host()
+	var selectedDomain config.Domain
+	if command.requiresDomain() {
+		selectedDomain, err = loaded.Domain(command.domain)
 		if err != nil {
 			return err
-		}
-		hostRequest = hostx.Request{Domain: command.domain, StateRoot: selectedDomain.StateRoot, TartPath: host.TartExecutable, TartHome: host.TartHome, SoftnetPath: host.SoftnetSource}
-		selectedCADomain = sshx.Domain{ID: selectedDomain.ID, StateRoot: selectedDomain.StateRoot}
-		for _, configured := range loaded.Domains() {
-			configuredCADomains = append(configuredCADomains, sshx.Domain{ID: configured.ID, StateRoot: configured.StateRoot})
 		}
 	}
 
 	switch command.kind {
 	case commandInit:
-		if options.HostInit == nil || options.CAInit == nil {
-			return errors.New("host and domain CA initializers are required")
+		if options.HostInit == nil {
+			return errors.New("host initializer is required")
 		}
-		if _, err := options.CAInit.Check(ctx, selectedCADomain, configuredCADomains); err != nil && !errors.Is(err, sshx.ErrCAMissing) {
-			return fmt.Errorf("preflight domain management CA: %w", err)
+		hostRequest, err := hostRequest(loaded)
+		if err != nil {
+			return err
 		}
 		result, err := options.HostInit.Init(ctx, hostRequest)
 		if err != nil {
 			return fmt.Errorf("initialize host prerequisites: %w", err)
 		}
-		if _, err := options.CAInit.Init(ctx, selectedCADomain, configuredCADomains); err != nil {
-			return fmt.Errorf("host prerequisites were established but domain %q management CA initialization failed; correct the CA state and rerun explicit init: %w", command.domain, err)
-		}
-		result.DomainInitialized = true
 		return writeInit(options.Output, result)
 	case commandDoctor:
-		if options.HostDoctor == nil || options.CADoctor == nil {
-			return errors.New("host and domain CA doctors are required")
+		if options.HostDoctor == nil {
+			return errors.New("host doctor is required")
+		}
+		hostRequest, err := hostRequest(loaded)
+		if err != nil {
+			return err
 		}
 		report := options.HostDoctor.Doctor(ctx, hostRequest)
-		if _, err := options.CADoctor.Check(ctx, selectedCADomain, configuredCADomains); err != nil {
-			finding := hostx.Finding{
-				Code:     "ca.invalid",
-				Category: hostx.Drifted,
-				Observed: "selected or configured management CA validation failed",
-				Expected: "one valid unique domain-bound management CA per initialized domain",
-				Remedy:   "inspect domain CA state manually",
-			}
-			if errors.Is(err, sshx.ErrCAMissing) {
-				finding = hostx.Finding{
-					Code:     "ca.missing",
-					Category: hostx.Missing,
-					Observed: "selected domain management CA is absent",
-					Expected: "one explicitly initialized domain-bound management CA",
-					Remedy:   "run explicit attended init",
-				}
-			}
-			report.Findings = append(report.Findings, finding)
-		}
 		report.Normalize()
 		if err := writeDoctor(options.Output, report); err != nil {
 			return err
@@ -143,6 +113,17 @@ func Run(ctx context.Context, args []string, options Options) error {
 			return fmt.Errorf("doctor found %s host prerequisites", report.Status)
 		}
 		return nil
+	case commandDomainInit:
+		if options.CAInit == nil {
+			return errors.New("domain CA initializer is required")
+		}
+		selectedCADomain := sshx.Domain{ID: selectedDomain.ID, StateRoot: selectedDomain.StateRoot}
+		configuredCADomains := configuredCADomains(loaded)
+		result, err := options.CAInit.Init(ctx, selectedCADomain, configuredCADomains)
+		if err != nil {
+			return fmt.Errorf("initialize domain management CA: %w", err)
+		}
+		return writeDomainInit(options.Output, command.domain, result.Disposition)
 	case commandSessionStatus:
 		if options.Observer == nil {
 			return errors.New("backend observer is required")
@@ -191,6 +172,7 @@ const (
 	commandSessionCreate
 	commandInit
 	commandDoctor
+	commandDomainInit
 )
 
 type parsedCommand struct {
@@ -199,6 +181,10 @@ type parsedCommand struct {
 	domain     string
 	name       string
 	mode       session.Mode
+}
+
+func (c parsedCommand) requiresDomain() bool {
+	return c.kind != commandInit && c.kind != commandDoctor
 }
 
 func parseCommand(args []string, options Options) (parsedCommand, error) {
@@ -218,26 +204,40 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 	if err := set.Parse(args); err != nil {
 		return parsedCommand{}, fmt.Errorf("parse command: %w", err)
 	}
-	if strings.TrimSpace(*domain) == "" {
-		return parsedCommand{}, errors.New("domain is required; pass --domain or set BOXWARDEN_DOMAIN")
-	}
 	if strings.TrimSpace(*config) == "" {
 		return parsedCommand{}, errors.New("configuration path is required")
 	}
+	explicitDomain := false
+	set.Visit(func(flag *flag.Flag) {
+		if flag.Name == "domain" {
+			explicitDomain = true
+		}
+	})
 
 	remaining := set.Args()
-	base := parsedCommand{configPath: *config, domain: *domain}
+	base := parsedCommand{configPath: *config}
+	if len(remaining) == 1 && (remaining[0] == "init" || remaining[0] == "doctor") {
+		if explicitDomain {
+			return parsedCommand{}, fmt.Errorf("--domain is not accepted for host-global command %q", remaining[0])
+		}
+		if remaining[0] == "init" {
+			base.kind = commandInit
+		} else {
+			base.kind = commandDoctor
+		}
+		return base, nil
+	}
+	if strings.TrimSpace(*domain) == "" {
+		return parsedCommand{}, errors.New("domain is required; pass --domain or set BOXWARDEN_DOMAIN")
+	}
+	base.domain = *domain
 	if len(remaining) == 3 && remaining[0] == "session" && remaining[1] == "status" {
 		base.kind = commandSessionStatus
 		base.name = remaining[2]
 		return base, nil
 	}
-	if len(remaining) == 1 && remaining[0] == "init" {
-		base.kind = commandInit
-		return base, nil
-	}
-	if len(remaining) == 1 && remaining[0] == "doctor" {
-		base.kind = commandDoctor
+	if len(remaining) == 2 && remaining[0] == "domain" && remaining[1] == "init" {
+		base.kind = commandDomainInit
 		return base, nil
 	}
 	if len(remaining) == 3 && remaining[0] == "golden" && remaining[1] == "register" {
@@ -263,14 +263,47 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.name = createSet.Args()[0]
 		return base, nil
 	}
-	return parsedCommand{}, errors.New("supported commands are: init, doctor, golden register <object>, session create [--mode clean|quarantine] <session>, session status <session>")
+	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] <session>, session status <session>")
 }
 
 func writeInit(output io.Writer, result hostx.InitResult) error {
-	if _, err := fmt.Fprintf(output, "host-installed: %t\ndomain-initialized: %t\nrefresh-login-session: %t\n", result.HostInstalled, result.DomainInitialized, result.RefreshLoginSession); err != nil {
+	if _, err := fmt.Fprintf(output, "host-installed: %t\nrefresh-login-session: %t\n", result.HostInstalled, result.RefreshLoginSession); err != nil {
 		return fmt.Errorf("write init result: %w", err)
 	}
 	return nil
+}
+
+func writeDomainInit(output io.Writer, domain string, disposition sshx.CAInitDisposition) error {
+	var status string
+	switch disposition {
+	case sshx.CAInitialized:
+		status = "initialized"
+	case sshx.CAAlreadyInitialized:
+		status = "already initialized"
+	default:
+		return fmt.Errorf("domain CA initializer returned unknown disposition %q", disposition)
+	}
+	if _, err := fmt.Fprintf(output, "domain: %s\nmanagement-ca: %s\n", domain, status); err != nil {
+		return fmt.Errorf("write domain init result: %w", err)
+	}
+	return nil
+}
+
+func hostRequest(loaded config.Config) (hostx.Request, error) {
+	admission, err := loaded.HostAdmission()
+	if err != nil {
+		return hostx.Request{}, err
+	}
+	return hostx.Request{ConfiguredStateRoots: admission.ConfiguredStateRoots, TartPath: admission.Host.TartExecutable, TartHome: admission.Host.TartHome, SoftnetPath: admission.Host.SoftnetSource}, nil
+}
+
+func configuredCADomains(loaded config.Config) []sshx.Domain {
+	configured := loaded.Domains()
+	domains := make([]sshx.Domain, 0, len(configured))
+	for _, configuredDomain := range configured {
+		domains = append(domains, sshx.Domain{ID: configuredDomain.ID, StateRoot: configuredDomain.StateRoot})
+	}
+	return domains
 }
 
 func writeDoctor(output io.Writer, report hostx.Report) error {

@@ -154,7 +154,7 @@ func TestCertificateIssuerRejectsCrossDomainBindingWithoutSigning(t *testing.T) 
 	mustWrite(t, key, []byte("client-key"), 0o600)
 	runner.commands = nil
 	personal := testDomain(t, "personal", privateRoot(t))
-	if _, err := NewCertificateIssuer(ca, runner, StaticIdentity{UID: 501, Name: "wes"}, time.Now).Issue(context.Background(), testBinding(t, personal), filepath.Dir(key), key); err == nil {
+	if _, err := NewCertificateIssuer(ca.CAIdentity, runner, StaticIdentity{UID: 501, Name: "wes"}, time.Now).Issue(context.Background(), testBinding(t, personal), filepath.Dir(key), key); err == nil {
 		t.Fatal("Issue(cross-domain) error = nil")
 	}
 	if len(runner.commands) != 0 {

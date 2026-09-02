@@ -114,6 +114,10 @@ version-1 configuration. Host-global `init`/`doctor` and `session start` require
 version 2 and fail with an upgrade diagnostic when the shared host block is
 absent. Domain `init` resolves only the explicitly selected domain and its
 domain-owned state; it does not require or initialize the shared host block.
+Its domain-only configuration view still rejects malformed JSON, duplicate or
+unknown host fields when a host object is present, and unsafe domain roots, but
+deliberately defers host-path filesystem admission until a host-global command
+needs it.
 Host-global commands resolve only `HostConfig` and never call domain selection.
 The operator group name is the fixed `boxwarden-operators`, not configurable
 input.

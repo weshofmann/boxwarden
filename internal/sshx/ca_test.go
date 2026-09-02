@@ -31,6 +31,30 @@ func TestCAStoreCheckReportsEntirelyAbsentCAWithoutMutatingState(t *testing.T) {
 	}
 }
 
+func TestCAStoreInitReportsCreatedThenAlreadyInitialized(t *testing.T) {
+	root := privateRoot(t)
+	work := testDomain(t, "work", root)
+	store := NewCAStore(CAStoreOptions{Runner: newKeygenRunner(t), Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() (string, error) { return testUUID, nil }})
+
+	created, err := store.Init(context.Background(), work, []Domain{work})
+	if err != nil {
+		t.Fatalf("first Init() error = %v", err)
+	}
+	if created.Disposition != CAInitialized {
+		t.Fatalf("first Init() disposition = %q, want %q", created.Disposition, CAInitialized)
+	}
+	already, err := store.Init(context.Background(), work, []Domain{work})
+	if err != nil {
+		t.Fatalf("second Init() error = %v", err)
+	}
+	if already.Disposition != CAAlreadyInitialized {
+		t.Fatalf("second Init() disposition = %q, want %q", already.Disposition, CAAlreadyInitialized)
+	}
+	if already.CAIdentity.Fingerprint != created.CAIdentity.Fingerprint || already.CAIdentity.CreationUUID != created.CAIdentity.CreationUUID {
+		t.Fatalf("second Init() identity = %#v, want the created identity %#v", already.CAIdentity, created.CAIdentity)
+	}
+}
+
 func TestCAStorePublicOperationsCapWallDeadlineAndPreserveShorterCallerDeadline(t *testing.T) {
 	root := privateRoot(t)
 	work := testDomain(t, "work", root)
@@ -169,7 +193,7 @@ func TestCAStoreCheckScansConfiguredDuplicateBeforeReportingSelectedMissing(t *t
 	}
 	copyCAState(t, personalRoot, otherRoot)
 	identity.Domain = other.ID
-	metadata, err := json.Marshal(identity)
+	metadata, err := json.Marshal(identity.CAIdentity)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +216,7 @@ func TestCAStoreCheckRejectsDuplicateConfiguredDomainFingerprint(t *testing.T) {
 	}
 	copyCAState(t, workRoot, personalRoot)
 	identity.Domain = personal.ID
-	metadata, err := json.Marshal(identity)
+	metadata, err := json.Marshal(identity.CAIdentity)
 	if err != nil {
 		t.Fatal(err)
 	}

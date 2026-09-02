@@ -31,14 +31,14 @@ func main() {
 		NewUUID:       sshx.RandomUUID,
 		SSHKeygenPath: "/usr/bin/ssh-keygen",
 	})
-	hostService := hostx.NewSystemService()
+	hostInitializer := hostx.NewSystemInitializer()
+	hostDoctor := hostx.NewSystemDoctor()
 	err = app.Run(ctx, os.Args[1:], app.Options{
 		Observer:   backendAdapter,
 		Creator:    backendAdapter,
-		HostInit:   hostService,
-		HostDoctor: hostService,
+		HostInit:   hostInitializer,
+		HostDoctor: hostDoctor,
 		CAInit:     caStore,
-		CADoctor:   caStore,
 		Output:     os.Stdout,
 	})
 	finish(err)

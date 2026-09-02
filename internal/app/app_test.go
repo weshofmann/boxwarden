@@ -115,33 +115,107 @@ func TestSessionStatusRequiresAnExplicitDomain(t *testing.T) {
 	}
 }
 
-func TestInitIsExplicitAndCannotBeReachedByDoctor(t *testing.T) {
-	configPath, _ := writeV2DomainFixture(t, "work")
-	service := &hostServiceFake{}
+func TestHostCommandsAreDomainlessAndDoNotTouchDomainCA(t *testing.T) {
+	configPath := writeV2DomainSetFixture(t)
+	host := &hostServiceFake{}
 	ca := &caStoreFake{}
-	var output bytes.Buffer
-	if err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "doctor"}, Options{HostDoctor: service, CADoctor: ca, Output: &output}); err != nil {
-		t.Fatalf("Run(doctor) error = %v", err)
-	}
-	if service.initCalls != 0 || service.doctorCalls != 1 {
-		t.Fatalf("calls after doctor = init %d doctor %d, want init 0 doctor 1", service.initCalls, service.doctorCalls)
-	}
-	if err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "init"}, Options{HostInit: service, CAInit: ca, Output: &bytes.Buffer{}}); err != nil {
+	var initOutput bytes.Buffer
+	if err := Run(context.Background(), []string{"--config", configPath, "init"}, Options{Env: []string{"BOXWARDEN_DOMAIN=work"}, HostInit: host, CAInit: ca, Output: &initOutput}); err != nil {
 		t.Fatalf("Run(init) error = %v", err)
 	}
-	if service.initCalls != 1 {
-		t.Fatalf("init calls = %d, want 1", service.initCalls)
+	if host.initCalls != 1 || host.doctorCalls != 0 || ca.initCalls != 0 {
+		t.Fatalf("init calls = host init %d doctor %d CA init %d, want host init only", host.initCalls, host.doctorCalls, ca.initCalls)
+	}
+	if got, want := initOutput.String(), "host-installed: true\nrefresh-login-session: false\n"; got != want {
+		t.Fatalf("init output = %q, want %q", got, want)
+	}
+	if len(host.request.ConfiguredStateRoots) != 2 || host.request.ConfiguredStateRoots[0] == "" || host.request.ConfiguredStateRoots[1] == "" {
+		t.Fatalf("host request roots = %#v, want complete host-global collection", host.request.ConfiguredStateRoots)
+	}
+
+	var doctorOutput bytes.Buffer
+	if err := Run(context.Background(), []string{"--config", configPath, "doctor"}, Options{Env: []string{"BOXWARDEN_DOMAIN=work"}, HostDoctor: host, Output: &doctorOutput}); err != nil {
+		t.Fatalf("Run(doctor) error = %v", err)
+	}
+	if host.initCalls != 1 || host.doctorCalls != 1 || ca.initCalls != 0 {
+		t.Fatalf("doctor calls = host init %d doctor %d CA init %d, want host doctor only", host.initCalls, host.doctorCalls, ca.initCalls)
+	}
+	if got, want := doctorOutput.String(), "status: healthy\n"; got != want {
+		t.Fatalf("doctor output = %q, want %q", got, want)
 	}
 }
 
-func TestDoctorWritesDeterministicFindingsAndReturnsNonzeroForDrift(t *testing.T) {
+func TestHostCommandsReceiveExactSortedCompleteConfiguredRoots(t *testing.T) {
+	stateBase, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostBase, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := make(map[string]string, 3)
+	for _, name := range []string{"alpha", "personal", "work"} {
+		root := filepath.Join(stateBase, name)
+		if err := os.Mkdir(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		roots[name] = root
+	}
+	tart := filepath.Join(hostBase, "tart")
+	softnet := filepath.Join(hostBase, "softnet")
+	home := filepath.Join(hostBase, "tart-home")
+	for _, path := range []string{tart, softnet} {
+		if err := os.WriteFile(path, []byte("fixture"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(stateBase, "config.json")
+	contents := fmt.Sprintf(`{"version":2,"host":{"tart_executable":%q,"tart_home":%q,"softnet_source":%q},"domains":{"work":{"state_root":%q},"alpha":{"state_root":%q},"personal":{"state_root":%q}}}`, tart, home, softnet, roots["work"], roots["alpha"], roots["personal"])
+	if err := os.WriteFile(configPath, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	host := &hostServiceFake{}
+	if err := Run(context.Background(), []string{"--config", configPath, "init"}, Options{HostInit: host, Output: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("Run(init) error = %v", err)
+	}
+	if got, want := fmt.Sprint(host.request.ConfiguredStateRoots), fmt.Sprint([]string{roots["alpha"], roots["personal"], roots["work"]}); got != want {
+		t.Fatalf("host request roots = %s, want %s", got, want)
+	}
+}
+
+func TestHostCommandsRejectAnExplicitDomainBeforeHostOrCAAccess(t *testing.T) {
+	configPath, _ := writeV2DomainFixture(t, "work")
+	for _, command := range []string{"init", "doctor"} {
+		for _, domainArgs := range [][]string{{"--domain", "work"}, {"--domain=work"}, {"--domain="}} {
+			t.Run(command+"_"+strings.Join(domainArgs, "_"), func(t *testing.T) {
+				host := &hostServiceFake{}
+				ca := &caStoreFake{}
+				args := append([]string{"--config", configPath}, domainArgs...)
+				args = append(args, command)
+				err := Run(context.Background(), args, Options{HostInit: host, HostDoctor: host, CAInit: ca, Output: &bytes.Buffer{}})
+				if err == nil || !strings.Contains(err.Error(), "--domain") {
+					t.Fatalf("Run(%s) error = %v, want explicit-domain refusal", strings.Join(args, " "), err)
+				}
+				if host.initCalls != 0 || host.doctorCalls != 0 || ca.initCalls != 0 {
+					t.Fatalf("rejected %s calls = host init %d doctor %d CA init %d, want none", command, host.initCalls, host.doctorCalls, ca.initCalls)
+				}
+			})
+		}
+	}
+}
+
+func TestDoctorWritesDeterministicHostFindingsAndReturnsNonzeroForDrift(t *testing.T) {
 	configPath, _ := writeV2DomainFixture(t, "work")
 	service := &hostServiceFake{report: hostx.Report{Status: hostx.Drifted, Findings: []hostx.Finding{
 		{Code: "z.unsafe", Category: hostx.Drifted, Observed: "z", Expected: "safe", Remedy: "inspect"},
 		{Code: "a.mode", Category: hostx.Drifted, Observed: "a", Expected: "04550", Remedy: "inspect"},
 	}}}
 	var output bytes.Buffer
-	err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "doctor"}, Options{HostDoctor: service, CADoctor: &caStoreFake{}, Output: &output})
+	err := Run(context.Background(), []string{"--config", configPath, "doctor"}, Options{HostDoctor: service, Output: &output})
 	if err == nil || !strings.Contains(err.Error(), "doctor found") {
 		t.Fatalf("Run(doctor) error = %v, want nonzero drift result", err)
 	}
@@ -150,97 +224,192 @@ func TestDoctorWritesDeterministicFindingsAndReturnsNonzeroForDrift(t *testing.T
 	}
 }
 
-func TestInitPreflightsDependenciesAndCAStateBeforeHostMutation(t *testing.T) {
-	configPath, _ := writeV2DomainFixture(t, "work")
-	host := &hostServiceFake{}
-
-	err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "init"}, Options{HostInit: host, Output: &bytes.Buffer{}})
-	if err == nil || !strings.Contains(err.Error(), "CA initializers") {
-		t.Fatalf("Run(init without CA) error = %v, want dependency error", err)
-	}
-	if host.initCalls != 0 {
-		t.Fatalf("host init calls = %d, want 0", host.initCalls)
-	}
-
-	ca := &caStoreFake{checkErr: errors.New("configured domain CA is unsafe")}
-	err = Run(context.Background(), []string{"--config", configPath, "--domain", "work", "init"}, Options{HostInit: host, CAInit: ca, Output: &bytes.Buffer{}})
-	if err == nil || !strings.Contains(err.Error(), "preflight domain management CA") {
-		t.Fatalf("Run(init with unsafe CA) error = %v, want preflight error", err)
-	}
-	if host.initCalls != 0 || ca.initCalls != 0 {
-		t.Fatalf("unsafe preflight mutations = host %d CA %d, want zero", host.initCalls, ca.initCalls)
-	}
-}
-
-func TestInitEstablishesHostThenSelectedCAUsingEveryConfiguredDomain(t *testing.T) {
+func TestDomainInitInitializesOnlyTheSelectedCAUsingEveryConfiguredDomain(t *testing.T) {
 	configPath := writeV2DomainSetFixture(t)
 	events := []string{}
 	host := &hostServiceFake{events: &events, result: hostx.InitResult{HostInstalled: true, RefreshLoginSession: true}}
-	ca := &caStoreFake{events: &events, checkErr: sshx.ErrCAMissing}
+	ca := &caStoreFake{events: &events}
 	var output bytes.Buffer
 
-	err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "init"}, Options{HostInit: host, CAInit: ca, Output: &output})
+	err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "domain", "init"}, Options{HostInit: host, HostDoctor: host, CAInit: ca, Output: &output})
 	if err != nil {
-		t.Fatalf("Run(init) error = %v", err)
+		t.Fatalf("Run(domain init) error = %v", err)
 	}
-	if got, want := strings.Join(events, ","), "ca.check,host.init,ca.init"; got != want {
-		t.Fatalf("init order = %q, want %q", got, want)
+	if got, want := strings.Join(events, ","), "ca.init"; got != want {
+		t.Fatalf("domain init order = %q, want %q", got, want)
 	}
 	if ca.selected.ID != "work" || len(ca.configured) != 2 || ca.configured[0].ID != "personal" || ca.configured[1].ID != "work" {
 		t.Fatalf("CA domains = selected %#v configured %#v, want selected work and complete sorted set", ca.selected, ca.configured)
 	}
-	if got, want := output.String(), "host-installed: true\ndomain-initialized: true\nrefresh-login-session: true\n"; got != want {
-		t.Fatalf("init output = %q, want %q", got, want)
+	if host.initCalls != 0 || host.doctorCalls != 0 {
+		t.Fatalf("domain init calls = host init %d doctor %d, want CA init only", host.initCalls, host.doctorCalls)
+	}
+	if got, want := output.String(), "domain: work\nmanagement-ca: initialized\n"; got != want {
+		t.Fatalf("domain init output = %q, want %q", got, want)
 	}
 }
 
-func TestInitReportsExactHostEstablishedCABoundaryAndRequiresRerun(t *testing.T) {
+func TestLegacyDomainCommandsRequireFullV2HostAdmissionBeforeAccess(t *testing.T) {
+	for name, write := range map[string]func(*testing.T) string{
+		"missing host": func(t *testing.T) string {
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(root, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, "config.json")
+			if err := os.WriteFile(path, []byte(fmt.Sprintf(`{"version":2,"domains":{"work":{"state_root":%q}}}`, root)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return path
+		},
+		"unavailable host path": func(t *testing.T) string {
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(root, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, "config.json")
+			contents := fmt.Sprintf(`{"version":2,"host":{"tart_executable":%q,"tart_home":%q,"softnet_source":%q},"domains":{"work":{"state_root":%q}}}`, filepath.Join(root, "missing-tart"), filepath.Join(root, "missing-home"), filepath.Join(root, "missing-softnet"), root)
+			if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return path
+		},
+		"host overlaps domain": func(t *testing.T) string {
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(root, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			tart := filepath.Join(root, "tart")
+			softnet := filepath.Join(root, "softnet")
+			home := filepath.Join(root, "tart-home")
+			for _, path := range []string{tart, softnet} {
+				if err := os.WriteFile(path, []byte("fixture"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Mkdir(home, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, "config.json")
+			contents := fmt.Sprintf(`{"version":2,"host":{"tart_executable":%q,"tart_home":%q,"softnet_source":%q},"domains":{"work":{"state_root":%q}}}`, tart, home, softnet, root)
+			if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return path
+		},
+	} {
+		for command, suffix := range map[string][]string{
+			"golden register": {"golden", "register", "golden-work-r1"},
+			"session create":  {"session", "create", "dev"},
+			"session status":  {"session", "status", "dev"},
+		} {
+			t.Run(name+"_"+command, func(t *testing.T) {
+				configPath := write(t)
+				observer := &countingObserver{}
+				args := append([]string{"--config", configPath, "--domain", "work"}, suffix...)
+				err := Run(context.Background(), args, Options{Observer: observer, Output: &bytes.Buffer{}})
+				if err == nil || !strings.Contains(err.Error(), "load configuration") {
+					t.Fatalf("Run(%s) error = %v, want full host-admission failure", command, err)
+				}
+				if observer.calls != 0 {
+					t.Fatalf("Run(%s) observer calls = %d, want 0 before host admission", command, observer.calls)
+				}
+			})
+		}
+	}
+}
+
+func TestDomainInitReportsAlreadyInitializedDisposition(t *testing.T) {
+	configPath, _ := writeDomainFixture(t, "work")
+	var output bytes.Buffer
+	err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "domain", "init"}, Options{
+		CAInit: &caStoreFake{result: sshx.CAInitResult{Disposition: sshx.CAAlreadyInitialized}},
+		Output: &output,
+	})
+	if err != nil {
+		t.Fatalf("Run(domain init) error = %v", err)
+	}
+	if got, want := output.String(), "domain: work\nmanagement-ca: already initialized\n"; got != want {
+		t.Fatalf("domain init output = %q, want %q", got, want)
+	}
+}
+
+func TestDomainInitDoesNotRequireHostPrerequisites(t *testing.T) {
+	configPath, _ := writeDomainFixture(t, "work")
+	host := &hostServiceFake{}
+	ca := &caStoreFake{}
+	if err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "domain", "init"}, Options{HostInit: host, HostDoctor: host, CAInit: ca, Output: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("Run(domain init) error = %v", err)
+	}
+	if host.initCalls != 0 || host.doctorCalls != 0 || ca.initCalls != 1 {
+		t.Fatalf("domain init calls = host init %d doctor %d CA init %d, want CA init only", host.initCalls, host.doctorCalls, ca.initCalls)
+	}
+}
+
+func TestDomainInitDefersUnavailableV2HostArtifacts(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(base, "work")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(base, "config.json")
+	contents := fmt.Sprintf(`{"version":2,"host":{"tart_executable":%q,"tart_home":%q,"softnet_source":%q},"domains":{"work":{"state_root":%q}}}`, filepath.Join(base, "missing-tart"), filepath.Join(base, "missing-tart-home"), filepath.Join(base, "missing-softnet"), root)
+	if err := os.WriteFile(configPath, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	host := &hostServiceFake{}
+	ca := &caStoreFake{}
+	if err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "domain", "init"}, Options{HostInit: host, HostDoctor: host, CAInit: ca, Output: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("Run(domain init) error = %v", err)
+	}
+	if host.initCalls != 0 || host.doctorCalls != 0 || ca.initCalls != 1 {
+		t.Fatalf("domain init calls = host init %d doctor %d CA init %d, want CA init only", host.initCalls, host.doctorCalls, ca.initCalls)
+	}
+}
+
+func TestDomainInitReportsTheDomainScopedFailureWithoutHostMutation(t *testing.T) {
 	configPath, _ := writeV2DomainFixture(t, "work")
 	events := []string{}
 	host := &hostServiceFake{events: &events, result: hostx.InitResult{HostInstalled: true}}
-	ca := &caStoreFake{events: &events, checkErr: sshx.ErrCAMissing, initErr: errors.New("key validation failed")}
+	ca := &caStoreFake{events: &events, initErr: errors.New("key validation failed")}
 	var output bytes.Buffer
 
-	err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "init"}, Options{HostInit: host, CAInit: ca, Output: &output})
-	if err == nil || !strings.Contains(err.Error(), "host prerequisites were established") || !strings.Contains(err.Error(), "rerun explicit init") {
-		t.Fatalf("Run(init partial boundary) error = %v", err)
+	err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "domain", "init"}, Options{HostInit: host, CAInit: ca, Output: &output})
+	if err == nil || !strings.Contains(err.Error(), "initialize domain management CA") {
+		t.Fatalf("Run(domain init) error = %v, want domain CA failure", err)
 	}
-	if got, want := strings.Join(events, ","), "ca.check,host.init,ca.init"; got != want {
-		t.Fatalf("partial init order = %q, want %q", got, want)
+	if got, want := strings.Join(events, ","), "ca.init"; got != want {
+		t.Fatalf("domain init order = %q, want %q", got, want)
 	}
 	if output.Len() != 0 {
-		t.Fatalf("partial init output = %q, want no success output", output.String())
+		t.Fatalf("domain init failure output = %q, want no success output", output.String())
 	}
 }
 
-func TestDoctorCombinesHostAndCAFindingsWithoutLeakingCAErrors(t *testing.T) {
-	configPath, _ := writeV2DomainFixture(t, "work")
-	host := &hostServiceFake{report: hostx.Report{Status: hostx.Drifted, Findings: []hostx.Finding{{Code: "z.host", Category: hostx.Drifted, Observed: "drift", Expected: "qualified", Remedy: "inspect"}}}}
-	ca := &caStoreFake{checkErr: fmt.Errorf("private material %s", "DO-NOT-LEAK")}
-	var output bytes.Buffer
-
-	err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "doctor"}, Options{HostDoctor: host, CADoctor: ca, Output: &output})
-	if err == nil || !strings.Contains(err.Error(), "doctor found drifted/unsafe") {
-		t.Fatalf("Run(doctor) error = %v, want drift", err)
-	}
-	if got := output.String(); !strings.Contains(got, "ca.invalid: [drifted/unsafe]") || !strings.Contains(got, "z.host: [drifted/unsafe]") || strings.Contains(got, "DO-NOT-LEAK") || strings.Index(got, "ca.invalid") > strings.Index(got, "z.host") {
-		t.Fatalf("combined doctor output = %q", got)
-	}
-}
-
-func TestDoctorReportsAnAbsentSelectedDomainCAAsMissing(t *testing.T) {
+func TestDoctorDoesNotReportAnAbsentDomainCA(t *testing.T) {
 	configPath, _ := writeV2DomainFixture(t, "work")
 	var output bytes.Buffer
-	err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "doctor"}, Options{
+	err := Run(context.Background(), []string{"--config", configPath, "doctor"}, Options{
 		HostDoctor: &hostServiceFake{},
-		CADoctor:   &caStoreFake{checkErr: fmt.Errorf("work: %w", sshx.ErrCAMissing)},
 		Output:     &output,
 	})
-	if err == nil || !strings.Contains(err.Error(), "doctor found missing/uninitialized") {
-		t.Fatalf("Run(doctor missing CA) error = %v", err)
+	if err != nil {
+		t.Fatalf("Run(doctor missing CA) error = %v, want host-only success", err)
 	}
-	if got := output.String(); !strings.Contains(got, "status: missing/uninitialized\n") || !strings.Contains(got, "ca.missing: [missing/uninitialized]") {
-		t.Fatalf("doctor missing-CA output = %q", got)
+	if got, want := output.String(), "status: healthy\n"; got != want {
+		t.Fatalf("doctor missing-CA output = %q, want %q", got, want)
 	}
 }
 
@@ -470,10 +639,12 @@ type hostServiceFake struct {
 	report      hostx.Report
 	result      hostx.InitResult
 	events      *[]string
+	request     hostx.Request
 }
 
-func (f *hostServiceFake) Init(_ context.Context, _ hostx.Request) (hostx.InitResult, error) {
+func (f *hostServiceFake) Init(_ context.Context, request hostx.Request) (hostx.InitResult, error) {
 	f.initCalls++
+	f.request = request
 	if f.events != nil {
 		*f.events = append(*f.events, "host.init")
 	}
@@ -483,8 +654,9 @@ func (f *hostServiceFake) Init(_ context.Context, _ hostx.Request) (hostx.InitRe
 	return hostx.InitResult{HostInstalled: true}, nil
 }
 
-func (f *hostServiceFake) Doctor(_ context.Context, _ hostx.Request) hostx.Report {
+func (f *hostServiceFake) Doctor(_ context.Context, request hostx.Request) hostx.Report {
 	f.doctorCalls++
+	f.request = request
 	if f.events != nil {
 		*f.events = append(*f.events, "host.doctor")
 	}
@@ -495,31 +667,23 @@ func (f *hostServiceFake) Doctor(_ context.Context, _ hostx.Request) hostx.Repor
 }
 
 type caStoreFake struct {
-	checkCalls int
 	initCalls  int
-	checkErr   error
 	initErr    error
+	result     sshx.CAInitResult
 	events     *[]string
 	selected   sshx.Domain
 	configured []sshx.Domain
 }
 
-func (f *caStoreFake) Check(_ context.Context, selected sshx.Domain, configured []sshx.Domain) (sshx.CAIdentity, error) {
-	f.checkCalls++
-	if f.events != nil {
-		*f.events = append(*f.events, "ca.check")
-	}
-	f.selected = selected
-	f.configured = append([]sshx.Domain(nil), configured...)
-	return sshx.CAIdentity{}, f.checkErr
-}
-
-func (f *caStoreFake) Init(_ context.Context, selected sshx.Domain, configured []sshx.Domain) (sshx.CAIdentity, error) {
+func (f *caStoreFake) Init(_ context.Context, selected sshx.Domain, configured []sshx.Domain) (sshx.CAInitResult, error) {
 	f.initCalls++
 	if f.events != nil {
 		*f.events = append(*f.events, "ca.init")
 	}
 	f.selected = selected
 	f.configured = append([]sshx.Domain(nil), configured...)
-	return sshx.CAIdentity{}, f.initErr
+	if f.result != (sshx.CAInitResult{}) {
+		return f.result, f.initErr
+	}
+	return sshx.CAInitResult{Disposition: sshx.CAInitialized}, f.initErr
 }
