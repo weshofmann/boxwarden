@@ -191,6 +191,9 @@ func validateConnection(connection Connection) error {
 		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 			return fmt.Errorf("SSH credential paths must be canonical and absolute")
 		}
+		if err := requirePrivateDirectory(filepath.Dir(path)); err != nil {
+			return fmt.Errorf("SSH credential directory: %w", err)
+		}
 	}
 	if _, err := requirePrivateFile(connection.IdentityFile); err != nil {
 		return fmt.Errorf("SSH identity file: %w", err)

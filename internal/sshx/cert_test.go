@@ -54,3 +54,58 @@ func TestCertificateRenewalRequiredAtFiveMinuteThreshold(t *testing.T) {
 		t.Fatal("RenewalRequired(expired) = false")
 	}
 }
+
+func TestCertificateInspectionAcceptsUTCValidityForNonUTCIssuerClock(t *testing.T) {
+	location := time.FixedZone("operator-local", -7*60*60)
+	now := time.Date(2026, 9, 1, 5, 0, 0, 0, location)
+	certificate := Certificate{
+		Identity:  "boxwarden:work:" + testUUID,
+		Principal: "boxwarden-session-" + testUUID,
+		NotBefore: now.Add(-renewalWindow).UTC(),
+		NotAfter:  now.Add(certificateLifetime).UTC(),
+	}
+	inspection := certificateInspection(certificate, certificate.Principal, "(none)", "(none)", "2026-09-01T11:55:00 to 2026-09-01T12:15:00")
+	if !validCertificateInspection(inspection, certificate) {
+		t.Fatal("validCertificateInspection() rejected UTC ssh-keygen output for non-UTC issuer clock")
+	}
+}
+
+func TestCertificateInspectionAllowsOnlySchedulingToleranceAroundFixedValidity(t *testing.T) {
+	certificate := Certificate{
+		Identity:  "boxwarden:work:" + testUUID,
+		Principal: "boxwarden-session-" + testUUID,
+		NotBefore: time.Date(2026, 9, 1, 11, 55, 0, 0, time.UTC),
+		NotAfter:  time.Date(2026, 9, 1, 12, 15, 0, 0, time.UTC),
+	}
+	withinTolerance := certificateInspection(certificate, certificate.Principal, "(none)", "(none)", "2026-09-01T11:55:01 to 2026-09-01T12:15:01")
+	if !validCertificateInspection(withinTolerance, certificate) {
+		t.Fatal("validCertificateInspection() rejected one-second ssh-keygen scheduling delay")
+	}
+	outsideTolerance := certificateInspection(certificate, certificate.Principal, "(none)", "(none)", "2026-09-01T11:55:03 to 2026-09-01T12:15:03")
+	if validCertificateInspection(outsideTolerance, certificate) {
+		t.Fatal("validCertificateInspection() accepted validity outside scheduling tolerance")
+	}
+}
+
+func TestCertificateIssueCapsWallDeadline(t *testing.T) {
+	root := privateRoot(t)
+	work := testDomain(t, "work", root)
+	setup := NewCAStore(CAStoreOptions{Runner: newKeygenRunner(t), Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() (string, error) { return testUUID, nil }})
+	ca, err := setup.Init(context.Background(), work, []Domain{work})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &deadlineCapturingRunner{Runner: newKeygenRunner(t)}
+	issuer := NewCertificateIssuer(ca, runner, StaticIdentity{UID: 501, Name: "wes"}, func() time.Time {
+		return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	})
+	key := filepath.Join(root, "runtime", "client")
+	if err := os.Mkdir(filepath.Dir(key), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, key, []byte("client-key"), 0o600)
+	if _, err := issuer.Issue(context.Background(), testBinding(t, work), key); err != nil {
+		t.Fatal(err)
+	}
+	assertDeadlineWithin(t, runner.deadlines, caWallTimeout)
+}

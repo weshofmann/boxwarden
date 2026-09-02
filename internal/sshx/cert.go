@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	certificateLifetime = 15 * time.Minute
-	renewalWindow       = 5 * time.Minute
+	certificateLifetime            = 15 * time.Minute
+	renewalWindow                  = 5 * time.Minute
+	certificateSchedulingTolerance = 2 * time.Second
 )
 
 // Binding is the durable association that a certificate and host-key pin must match.
@@ -61,6 +62,8 @@ func NewCertificateIssuer(ca CAIdentity, runner Runner, identity Identity, now f
 
 // Issue signs only the derived per-session principal with a fixed validity and no extensions.
 func (i *CertificateIssuer) Issue(ctx context.Context, binding Binding, clientKeyPath string) (Certificate, error) {
+	ctx, cancel := boundedCAContext(ctx)
+	defer cancel()
 	if i == nil || i.runner == nil || i.identity == nil || i.now == nil {
 		return Certificate{}, fmt.Errorf("certificate issuer dependencies are required")
 	}
@@ -69,6 +72,9 @@ func (i *CertificateIssuer) Issue(ctx context.Context, binding Binding, clientKe
 	}
 	if !filepath.IsAbs(clientKeyPath) || filepath.Clean(clientKeyPath) != clientKeyPath {
 		return Certificate{}, fmt.Errorf("client key path must be canonical and absolute")
+	}
+	if err := requirePrivateDirectory(filepath.Dir(clientKeyPath)); err != nil {
+		return Certificate{}, fmt.Errorf("validate client-key directory: %w", err)
 	}
 	if _, err := requirePrivateFile(clientKeyPath); err != nil {
 		return Certificate{}, fmt.Errorf("validate client key: %w", err)
@@ -97,57 +103,97 @@ func (i *CertificateIssuer) Issue(ctx context.Context, binding Binding, clientKe
 		return Certificate{}, fmt.Errorf("validate issued management certificate: %w", err)
 	}
 	inspection, err := i.runner.Run(ctx, Command{Path: store.sshKeygenPath, Args: []string{"-L", "-f", certificate.Path}})
-	if err != nil || inspection.Truncated || !validCertificateInspection(inspection.Stdout, certificate) {
+	actual, valid := parseCertificateInspection(inspection.Stdout)
+	if err != nil || inspection.Truncated || !valid || !certificateInspectionMatches(actual, certificate) {
 		return Certificate{}, fmt.Errorf("issued management certificate inspection failed")
 	}
+	certificate.NotBefore, certificate.NotAfter = actual.NotBefore, actual.NotAfter
 	return certificate, nil
 }
 
 func validCertificateInspection(output string, certificate Certificate) bool {
+	actual, valid := parseCertificateInspection(output)
+	return valid && certificateInspectionMatches(actual, certificate)
+}
+
+func parseCertificateInspection(output string) (Certificate, bool) {
 	if len(output) == 0 || len(output) > maxStateFileBytes {
-		return false
+		return Certificate{}, false
 	}
 	lines := strings.Split(strings.TrimSuffix(output, "\n"), "\n")
 	seen := map[string]bool{}
 	principalIndex := -1
+	var certificate Certificate
 	for index, line := range lines {
 		line = strings.TrimSpace(line)
 		switch {
 		case strings.HasPrefix(line, "Type:"):
 			if seen["type"] || line != "Type: ssh-ed25519-cert-v01@openssh.com user certificate" {
-				return false
+				return Certificate{}, false
 			}
 			seen["type"] = true
 		case strings.HasPrefix(line, "Key ID:"):
-			if seen["id"] || line != "Key ID: \""+certificate.Identity+"\"" {
-				return false
+			if seen["id"] || !strings.HasPrefix(line, "Key ID: \"") || !strings.HasSuffix(line, "\"") {
+				return Certificate{}, false
 			}
 			seen["id"] = true
+			certificate.Identity = strings.TrimSuffix(strings.TrimPrefix(line, "Key ID: \""), "\"")
 		case strings.HasPrefix(line, "Valid:"):
-			want := "Valid: from " + certificate.NotBefore.UTC().Format("2006-01-02T15:04:05") + " to " + certificate.NotAfter.UTC().Format("2006-01-02T15:04:05")
-			if seen["valid"] || line != want {
-				return false
+			if seen["valid"] || !strings.HasPrefix(line, "Valid: from ") {
+				return Certificate{}, false
+			}
+			validity := strings.TrimPrefix(line, "Valid: from ")
+			parts := strings.Split(validity, " to ")
+			if len(parts) != 2 {
+				return Certificate{}, false
+			}
+			var err error
+			certificate.NotBefore, err = time.Parse("2006-01-02T15:04:05", parts[0])
+			if err != nil {
+				return Certificate{}, false
+			}
+			certificate.NotAfter, err = time.Parse("2006-01-02T15:04:05", parts[1])
+			if err != nil {
+				return Certificate{}, false
 			}
 			seen["valid"] = true
 		case line == "Principals:":
-			if seen["principal"] || index+1 >= len(lines) || strings.TrimSpace(lines[index+1]) != certificate.Principal {
-				return false
+			if seen["principal"] || index+1 >= len(lines) || strings.TrimSpace(lines[index+1]) == "" {
+				return Certificate{}, false
 			}
 			seen["principal"] = true
 			principalIndex = index
+			certificate.Principal = strings.TrimSpace(lines[index+1])
 		case strings.HasPrefix(line, "Critical Options:"):
 			if seen["critical"] || line != "Critical Options: (none)" {
-				return false
+				return Certificate{}, false
 			}
 			seen["critical"] = true
 		case strings.HasPrefix(line, "Extensions:"):
 			if seen["extensions"] || line != "Extensions: (none)" {
-				return false
+				return Certificate{}, false
 			}
 			seen["extensions"] = true
 		}
 	}
-	return seen["type"] && seen["id"] && seen["valid"] && seen["principal"] && seen["critical"] && seen["extensions"] && principalIndex+2 < len(lines) && strings.TrimSpace(lines[principalIndex+2]) == "Critical Options: (none)"
+	if !(seen["type"] && seen["id"] && seen["valid"] && seen["principal"] && seen["critical"] && seen["extensions"] && principalIndex+2 < len(lines) && strings.TrimSpace(lines[principalIndex+2]) == "Critical Options: (none)") {
+		return Certificate{}, false
+	}
+	return certificate, true
+}
+
+func certificateInspectionMatches(actual, requested Certificate) bool {
+	if actual.Identity != requested.Identity || actual.Principal != requested.Principal || actual.NotAfter.Sub(actual.NotBefore) != certificateLifetime+renewalWindow {
+		return false
+	}
+	return durationWithin(actual.NotBefore.Sub(requested.NotBefore.UTC()), certificateSchedulingTolerance) && durationWithin(actual.NotAfter.Sub(requested.NotAfter.UTC()), certificateSchedulingTolerance)
+}
+
+func durationWithin(value, limit time.Duration) bool {
+	if value < 0 {
+		value = -value
+	}
+	return value <= limit
 }
 
 // RenewalRequired is pure policy: certificates are refreshed at or inside the fixed five-minute window.

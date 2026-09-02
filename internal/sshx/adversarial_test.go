@@ -217,7 +217,7 @@ func TestCertificateInspectionRejectsAmbiguousSecurityFields(t *testing.T) {
 		certificateInspection(certificate, certificate.Principal+"\n        another", "(none)", "(none)", "2026-09-01T11:55:00 to 2026-09-01T12:15:00"),
 		certificateInspection(certificate, certificate.Principal, "force-command=/bin/sh", "(none)", "2026-09-01T11:55:00 to 2026-09-01T12:15:00"),
 		certificateInspection(certificate, certificate.Principal, "(none)", "permit-pty", "2026-09-01T11:55:00 to 2026-09-01T12:15:00"),
-		certificateInspection(certificate, certificate.Principal, "(none)", "(none)", "2026-09-01T11:55:01 to 2026-09-01T12:15:00"),
+		certificateInspection(certificate, certificate.Principal, "(none)", "(none)", "2026-09-01T11:55:03 to 2026-09-01T12:15:03"),
 		"noise ssh-ed25519-cert-v01@openssh.com Key ID: \"" + certificate.Identity + "\" " + certificate.Principal + " Extensions: (none)",
 	} {
 		if validCertificateInspection(output, certificate) {

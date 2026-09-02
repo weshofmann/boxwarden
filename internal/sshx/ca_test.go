@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/weshofmann/boxwarden/internal/domain"
 )
@@ -26,6 +28,57 @@ func TestCAStoreCheckReportsEntirelyAbsentCAWithoutMutatingState(t *testing.T) {
 	}
 	if len(runner.commands) != 0 {
 		t.Fatalf("Check(absent) invoked ssh-keygen: %#v", runner.commands)
+	}
+}
+
+func TestCAStorePublicOperationsCapWallDeadlineAndPreserveShorterCallerDeadline(t *testing.T) {
+	root := privateRoot(t)
+	work := testDomain(t, "work", root)
+	runner := &deadlineCapturingRunner{Runner: newKeygenRunner(t)}
+	store := NewCAStore(CAStoreOptions{Runner: runner, Identity: StaticIdentity{UID: 501, Name: "wes"}, NewUUID: func() (string, error) { return testUUID, nil }})
+	if _, err := store.Init(context.Background(), work, []Domain{work}); err != nil {
+		t.Fatal(err)
+	}
+	assertDeadlineWithin(t, runner.deadlines, caWallTimeout)
+
+	runner.deadlines = nil
+	if _, err := store.Check(context.Background(), work, []Domain{work}); err != nil {
+		t.Fatal(err)
+	}
+	assertDeadlineWithin(t, runner.deadlines, caWallTimeout)
+
+	runner.deadlines = nil
+	shortContext, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := store.Load(shortContext, work); err != nil {
+		t.Fatal(err)
+	}
+	assertDeadlineWithin(t, runner.deadlines, time.Second)
+}
+
+type deadlineCapturingRunner struct {
+	Runner
+	deadlines []time.Time
+}
+
+func (r *deadlineCapturingRunner) Run(ctx context.Context, command Command) (Result, error) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return Result{}, fmt.Errorf("CA runner context has no deadline")
+	}
+	r.deadlines = append(r.deadlines, deadline)
+	return r.Runner.Run(ctx, command)
+}
+
+func assertDeadlineWithin(t *testing.T, deadlines []time.Time, maximum time.Duration) {
+	t.Helper()
+	if len(deadlines) == 0 {
+		t.Fatal("operation did not invoke its runner")
+	}
+	for _, deadline := range deadlines {
+		if until := time.Until(deadline); until > maximum+time.Second {
+			t.Fatalf("deadline exceeds cap: %v", until)
+		}
 	}
 }
 

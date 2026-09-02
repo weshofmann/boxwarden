@@ -15,8 +15,20 @@ const (
 	maxStateFileBytes    = 64 << 10
 )
 
+type privateACLInspector interface {
+	HasExtendedACL(string) (bool, error)
+}
+
 func caDirectory(root string) string  { return filepath.Join(root, "identity", "ssh-user-ca") }
 func pinDirectory(root string) string { return filepath.Join(root, "identity", "ssh-host-pins") }
+
+func requirePrivateDirectory(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	return requirePrivateDirectoryInfo(path, info)
+}
 
 func ensurePrivateDirectory(path string) error {
 	if !filepath.IsAbs(path) {
@@ -43,10 +55,21 @@ func ensurePrivateDirectory(path string) error {
 	if err != nil {
 		return fmt.Errorf("inspect private directory: %w", err)
 	}
-	return requirePrivateDirectoryInfo(info)
+	return requirePrivateDirectoryInfo(path, info)
 }
 
-func requirePrivateDirectoryInfo(info os.FileInfo) error {
+func requirePrivateDirectoryInfo(path string, info os.FileInfo) error {
+	return requirePrivateDirectoryInfoWithACL(path, info, osPrivateACLInspector{})
+}
+
+func requirePrivateDirectoryInfoWithACL(path string, info os.FileInfo, acl privateACLInspector) error {
+	if err := validatePrivateDirectoryInfo(info); err != nil {
+		return err
+	}
+	return verifyNoExtendedACL(path, info, acl, validatePrivateDirectoryInfo)
+}
+
+func validatePrivateDirectoryInfo(info os.FileInfo) error {
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return fmt.Errorf("must be a non-symlink directory")
 	}
@@ -73,7 +96,7 @@ func requirePrivateTree(root, path string) error {
 	if err != nil {
 		return err
 	}
-	if err := requirePrivateDirectoryInfo(info); err != nil {
+	if err := requirePrivateDirectoryInfo(root, info); err != nil {
 		return err
 	}
 	current := root
@@ -86,7 +109,7 @@ func requirePrivateTree(root, path string) error {
 		if err != nil {
 			return err
 		}
-		if err := requirePrivateDirectoryInfo(info); err != nil {
+		if err := requirePrivateDirectoryInfo(current, info); err != nil {
 			return err
 		}
 	}
@@ -116,14 +139,8 @@ func requireFileMode(path string, mode os.FileMode) (os.FileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm() != mode || info.Sys() == nil {
-		return nil, fmt.Errorf("must be a regular non-symlink file with mode %04o", mode)
-	}
-	if links, ok := linkCount(info); !ok || links != 1 {
-		return nil, fmt.Errorf("must have exactly one link")
-	}
-	if owner, ok := fileOwner(info); !ok || owner != currentUID() {
-		return nil, fmt.Errorf("file must be owned by the current operator")
+	if err := requireFileInfo(path, info, mode); err != nil {
+		return nil, err
 	}
 	return info, nil
 }
@@ -147,7 +164,7 @@ func readFileMode(path string, mode os.FileMode) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := requireFileInfo(before, mode); err != nil {
+	if err := requireFileInfo(path, before, mode); err != nil {
 		return nil, err
 	}
 	file, err := openNoFollow(root, name, os.O_RDONLY, 0)
@@ -162,7 +179,7 @@ func readFileMode(path string, mode os.FileMode) ([]byte, error) {
 	if !os.SameFile(before, after) {
 		return nil, fmt.Errorf("file changed while opening")
 	}
-	if err := requireFileInfo(after, mode); err != nil {
+	if err := requireFileInfo(path, after, mode); err != nil {
 		return nil, err
 	}
 	contents, err := io.ReadAll(io.LimitReader(file, maxStateFileBytes+1))
@@ -176,13 +193,25 @@ func readFileMode(path string, mode os.FileMode) ([]byte, error) {
 	if err != nil || !os.SameFile(before, final) {
 		return nil, fmt.Errorf("file changed while reading")
 	}
-	if err := requireFileInfo(final, mode); err != nil {
+	if err := requireFileInfo(path, final, mode); err != nil {
 		return nil, err
 	}
 	return contents, nil
 }
 
-func requireFileInfo(info os.FileInfo, mode os.FileMode) error {
+func requireFileInfo(path string, info os.FileInfo, mode os.FileMode) error {
+	return requireFileInfoWithACL(path, info, mode, osPrivateACLInspector{})
+}
+
+func requireFileInfoWithACL(path string, info os.FileInfo, mode os.FileMode, acl privateACLInspector) error {
+	validate := func(candidate os.FileInfo) error { return validateFileInfo(candidate, mode) }
+	if err := validate(info); err != nil {
+		return err
+	}
+	return verifyNoExtendedACL(path, info, acl, validate)
+}
+
+func validateFileInfo(info os.FileInfo, mode os.FileMode) error {
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm() != mode {
 		return fmt.Errorf("must be a regular non-symlink file with mode %04o", mode)
 	}
@@ -195,12 +224,37 @@ func requireFileInfo(info os.FileInfo, mode os.FileMode) error {
 	return nil
 }
 
+// verifyNoExtendedACL brackets the pathname-only Darwin ACL query with two
+// lstat checks. File reads and writes separately bind the same inode through
+// os.Root/no-follow descriptors; this check prevents a pathname replacement
+// during admission without widening the trusted-path surface.
+func verifyNoExtendedACL(path string, initial os.FileInfo, acl privateACLInspector, validate func(os.FileInfo) error) error {
+	if acl == nil {
+		return fmt.Errorf("ACL inspector is required")
+	}
+	for range 2 {
+		extended, err := acl.HasExtendedACL(path)
+		if err != nil || extended {
+			return fmt.Errorf("path has unverifiable or extended ACL")
+		}
+		after, err := os.Lstat(path)
+		if err != nil || !os.SameFile(initial, after) {
+			return fmt.Errorf("path changed while checking ACL")
+		}
+		if err := validate(after); err != nil {
+			return err
+		}
+		initial = after
+	}
+	return nil
+}
+
 func openVerifiedRoot(path string) (*os.Root, error) {
 	before, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
 	}
-	if err := requirePrivateDirectoryInfo(before); err != nil {
+	if err := requirePrivateDirectoryInfo(path, before); err != nil {
 		return nil, err
 	}
 	root, err := os.OpenRoot(path)
@@ -212,7 +266,7 @@ func openVerifiedRoot(path string) (*os.Root, error) {
 		root.Close()
 		return nil, fmt.Errorf("directory changed while opening")
 	}
-	if err := requirePrivateDirectoryInfo(after); err != nil {
+	if err := requirePrivateDirectoryInfo(path, after); err != nil {
 		root.Close()
 		return nil, err
 	}
@@ -230,7 +284,7 @@ func normalizePublicFile(path string) error {
 	if err != nil {
 		return err
 	}
-	if err := requireRegularOwnedSingleLink(before); err != nil {
+	if err := requireRegularOwnedSingleLink(path, before); err != nil {
 		return err
 	}
 	file, err := openNoFollow(root, name, os.O_RDONLY, 0)
@@ -242,7 +296,7 @@ func normalizePublicFile(path string) error {
 	if err != nil || !os.SameFile(before, after) {
 		return fmt.Errorf("public key changed while opening")
 	}
-	if err := requireRegularOwnedSingleLink(after); err != nil {
+	if err := requireRegularOwnedSingleLink(path, after); err != nil {
 		return err
 	}
 	if err := file.Chmod(publicFileMode); err != nil {
@@ -252,10 +306,10 @@ func normalizePublicFile(path string) error {
 	if err != nil {
 		return err
 	}
-	return requireFileInfo(after, publicFileMode)
+	return requireFileInfo(path, after, publicFileMode)
 }
 
-func requireRegularOwnedSingleLink(info os.FileInfo) error {
+func requireRegularOwnedSingleLink(path string, info os.FileInfo) error {
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return fmt.Errorf("must be a regular non-symlink file")
 	}
@@ -265,5 +319,9 @@ func requireRegularOwnedSingleLink(info os.FileInfo) error {
 	if owner, ok := fileOwner(info); !ok || owner != currentUID() {
 		return fmt.Errorf("file must be owned by the current operator")
 	}
-	return nil
+	return requireFileInfo(path, info, info.Mode().Perm())
+}
+
+func filepathIsCanonicalAbsolute(path string) bool {
+	return filepath.IsAbs(path) && filepath.Clean(path) == path
 }

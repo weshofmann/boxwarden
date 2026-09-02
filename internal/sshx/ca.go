@@ -12,11 +12,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/weshofmann/boxwarden/internal/domain"
 )
 
-const caMetadataVersion = 1
+const (
+	caMetadataVersion = 1
+	caWallTimeout     = 30 * time.Second
+)
 
 // ErrCAMissing reports that the selected domain has no CA material. Callers
 // can distinguish an uninitialized domain from partial or unsafe CA state.
@@ -97,6 +101,8 @@ func NewCAStore(options CAStoreOptions) *CAStore {
 }
 
 func (s *CAStore) Init(ctx context.Context, current Domain, configured []Domain) (CAIdentity, error) {
+	ctx, cancel := boundedCAContext(ctx)
+	defer cancel()
 	if err := validDomain(current); err != nil {
 		return CAIdentity{}, err
 	}
@@ -177,6 +183,8 @@ func (s *CAStore) Init(ctx context.Context, current Domain, configured []Domain)
 // malformed, or unsafe state fails closed. Complete configured domains are
 // checked for CA fingerprint reuse without searching outside that set.
 func (s *CAStore) Check(ctx context.Context, current Domain, configured []Domain) (CAIdentity, error) {
+	ctx, cancel := boundedCAContext(ctx)
+	defer cancel()
 	if err := validDomain(current); err != nil {
 		return CAIdentity{}, err
 	}
@@ -184,6 +192,8 @@ func (s *CAStore) Check(ctx context.Context, current Domain, configured []Domain
 }
 
 func (s *CAStore) Load(ctx context.Context, current Domain) (CAIdentity, error) {
+	ctx, cancel := boundedCAContext(ctx)
+	defer cancel()
 	if err := validDomain(current); err != nil {
 		return CAIdentity{}, err
 	}
@@ -346,7 +356,7 @@ func checkCAState(current Domain) (caStateResult, error) {
 	if err != nil {
 		return caStateResult{}, err
 	}
-	if err := requirePrivateDirectoryInfo(rootInfo); err != nil {
+	if err := requirePrivateDirectoryInfo(current.StateRoot, rootInfo); err != nil {
 		return caStateResult{}, fmt.Errorf("CA state root: %w", err)
 	}
 	identityRoot := filepath.Join(current.StateRoot, "identity")
@@ -357,7 +367,7 @@ func checkCAState(current Domain) (caStateResult, error) {
 	if err != nil {
 		return caStateResult{}, err
 	}
-	if err := requirePrivateDirectoryInfo(identityInfo); err != nil {
+	if err := requirePrivateDirectoryInfo(identityRoot, identityInfo); err != nil {
 		return caStateResult{}, fmt.Errorf("CA identity directory: %w", err)
 	}
 	return caState(caDirectory(current.StateRoot))
@@ -371,7 +381,7 @@ func caState(dir string) (caStateResult, error) {
 	if err != nil {
 		return caStateResult{}, err
 	}
-	if err := requirePrivateDirectoryInfo(info); err != nil {
+	if err := requirePrivateDirectoryInfo(dir, info); err != nil {
 		return caStateResult{}, err
 	}
 	entries, err := os.ReadDir(dir)
@@ -461,7 +471,7 @@ func writePrivateNew(path string, contents []byte) error {
 		file.Close()
 		return err
 	}
-	if err := requireFileInfo(info, privateFileMode); err != nil {
+	if err := requireFileInfo(path, info, privateFileMode); err != nil {
 		file.Close()
 		return err
 	}
@@ -474,6 +484,14 @@ func writePrivateNew(path string, contents []byte) error {
 	}
 	defer directory.Close()
 	return directory.Sync()
+}
+
+func boundedCAContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	deadline := time.Now().Add(caWallTimeout)
+	if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
+		deadline = callerDeadline
+	}
+	return context.WithDeadline(ctx, deadline)
 }
 
 func validUUID(raw string) bool {
