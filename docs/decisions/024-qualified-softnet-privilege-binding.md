@@ -20,7 +20,7 @@ and a separately qualified narrow wrapper or service boundary is required.
 
 ## Decision
 
-User-attended `boxwarden --domain <domain> init` installs the exact qualified
+User-attended, host-global `boxwarden init` installs the exact qualified
 Softnet 0.19.0 executable SHA-256
 `ab333619fc8bd7277837545e49a771baa994c01c3e8c14904ae4cc4c1f37269e`
 at the corresponding digest-specific path below
@@ -32,6 +32,12 @@ versioned manifest binds the artifact, qualified Tart identity, macOS identity,
 canonical Tart home, exact one trusted operator UID/name/home, and group
 ID/name/membership. It is published last after the tree is verified and fsynced.
 There is no mutable `current` link.
+
+The installed artifact and manifest are host state, outside every
+security-domain namespace. Initialization occurs once per trusted host; adding
+or initializing another domain neither reinstalls nor re-authorizes this
+mechanism. Host-global `boxwarden doctor` diagnoses its health without accepting
+domain ownership semantics or silently repairing or rebinding it.
 
 Init reopens and validates an unprivileged source without following symlinks,
 rejects source setuid/setgid bits, copies through a root-owned sibling staging
@@ -78,7 +84,9 @@ The setuid bit is an intentional, visible host trust grant, not a claim that
 Softnet becomes a sandbox for the trusted operator. The selected mechanism is
 small and matches Tart's qualified execution path while preventing an
 unprivileged process from replacing the privileged bytes. It is valid only for
-the documented trusted-operator boundary.
+the documented trusted-operator boundary. Per-domain management CA creation is
+a separate `boxwarden --domain <domain> domain init` operation and is not part
+of this host-global privilege decision.
 
 Deterministic implementation tests use synthetic roots and fake directory,
 process, and command adapters. Before V3 can be considered operationally

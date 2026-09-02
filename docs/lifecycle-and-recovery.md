@@ -6,6 +6,12 @@ Golden lifecycle: qualify and lock Ubuntu/package/artifact inputs, build a porta
 
 External qualification finalizes the golden clone-ready: reusable machine identity, private authentication material, and session residue are removed, and first boot regenerates `/etc/machine-id`, SSH host keys, DHCP/DUID identity, random-seed material, and any other discovered machine-specific identity. The generic golden contains strict sshd configuration and fixed bootstrap target locations, but no domain CA anchor or fixed domain principal. Session creation runs `tart set <vm> --random-mac`. Acceptance creates two clones and proves their identities differ; V2 registration itself does not assert that this external gate passed.
 
+The attended V2 register/clone gate must use an artifact built or rebuilt from
+that corrected generic guest definition and qualified accordingly. An unchanged
+older Task 0 artifact that contains a pre-baked domain CA anchor or principal
+cannot satisfy the gate merely because the earlier domain-bound design was
+previously qualified.
+
 Session lifecycle is reconciled rather than optimistic. Host state records the security domain, immutable session UUID, selected generic-golden revision, backend kind/object identity, intended state `creating`, `stopped`, `starting`, `running`, `stopping`, `deleting`, or `failed`, and a start-generation correlation token before external mutation. Per-session locks serialize conflicting operations. The backend reports actual process state; the M1A Tart adapter uses `tart list --format json` and other documented Tart inspection commands. Runtime metadata records a supervisor instance, PID/process-start evidence, authenticated control socket, broker health, both PTY identities, Screen child/socket evidence, overflow/poison state, and lease mode, but none replace durable identity.
 
 Backend-running and READY are separate. A long-lived same-user supervisor holds
@@ -47,7 +53,14 @@ V4 recovery complete without waiting for V6.
 
 V2 creates a stopped copy-on-write Tart clone from the selected generic golden and returns only after the randomized-MAC clone is observed stopped. It does not boot the guest, initialize domain trust, obtain a host key, or converge the time zone.
 
-Before V4 start is available, the operator explicitly runs `boxwarden --domain <domain> init`. That one-time host/domain bootstrap installs the exact qualified Softnet privilege binding and creates the domain's sole host-only SSH management user CA. It never runs lazily from start. `boxwarden --domain <domain> doctor` diagnoses missing, unsupported, and drifted prerequisites and gives an actionable explicit-init remedy; it does not repair them.
+Before V4 start is available, the operator explicitly initializes two separate
+scopes. Host-global `boxwarden init` runs once per trusted Mac and installs the
+exact qualified Softnet privilege binding; host-global `boxwarden doctor`
+diagnoses missing, unsupported, and drifted host prerequisites and gives an
+actionable explicit-init or attended-remediation path without repairing them.
+For each domain, `boxwarden --domain <domain> domain init` creates only that
+domain's sole host-only SSH management user CA. Adding a domain does not repeat
+the host installation, and neither scope is created lazily from session start.
 
 V4 verifies the complete V3 prerequisite, establishes the supervisor-owned
 broker/Screen topology, and launches only the exact default qualified Tart +

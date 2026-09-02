@@ -29,12 +29,17 @@ domain's trust material in it. Registration is an operator admission record,
 not a Boxwarden claim that it proved provenance, clone-readiness, or the
 external qualification evidence. Creation is intent-first and reconciles
 partial retries under domain/session locks. V2's attended real-host
-golden/clone gate remains pending.
+golden/clone gate remains pending and requires an artifact built or rebuilt
+from the corrected generic guest definition and qualified accordingly. The
+unchanged older Task 0 domain-bound artifact is not grandfathered merely because
+it previously passed qualification.
 
-The next executable slices are V3 host/domain bootstrap (`init`, read-only
-`doctor`, the qualified Softnet privilege binding, one explicitly initialized
-management CA per domain, certificate issuance, host-key pins, and strict SSH
-primitives) and V4 start/supervision plus serial trust bootstrap and readiness.
+The next executable slices are V3 trusted host/domain management foundation and
+V4 start/supervision plus serial trust bootstrap and readiness. V3 separates a
+host-global foundation (`boxwarden init`, read-only `boxwarden doctor`, and the
+qualified Softnet privilege binding) from a domain foundation
+(`boxwarden --domain D domain init`, one management CA per domain, certificate
+issuance, host-key pins, and strict SSH primitives).
 This plan stops after V4. File transfer, stop, destroy, provider authentication,
 and other later work remain deferred.
 
@@ -88,8 +93,11 @@ boxwarden --domain <id> session create [--mode clean|quarantine] <session>
 boxwarden --domain <id> session status <session>
 ```
 
-`--domain` is mandatory unless `BOXWARDEN_DOMAIN` is set. Boxwarden has no
-implicit domain and never searches across security domains. Start from
+These implemented commands operate on domain-owned state, so `--domain` is
+mandatory unless `BOXWARDEN_DOMAIN` is set. Boxwarden has no implicit domain and
+never searches across security domains. Future host-global `boxwarden init` and
+`boxwarden doctor` operate outside the security-domain namespace and do not
+require a domain. Start from
 [config/boxwarden.example.json](config/boxwarden.example.json).
 
 ## Development

@@ -5,9 +5,10 @@
 > V5 and later are roadmap only and are not authorized by this plan.
 
 **Goal:** Complete the smallest trustworthy path from a registered generic
-golden to a READY M1A workstation: explicit host/domain initialization, strict
-management identity, qualified host-tool privilege, supervised start, trusted
-post-clone serial bootstrap, pinned SSH, and time-zone convergence.
+golden to a READY M1A workstation: explicit host-global and domain-specific
+initialization, strict management identity, qualified host-tool privilege,
+supervised start, trusted post-clone serial bootstrap, pinned SSH, and time-zone
+convergence.
 
 **Architecture:** The common Go control plane owns domain/session identity,
 generic-golden admission, intended state, locks, supervisor/readiness policy,
@@ -25,8 +26,10 @@ Softnet 0.19.0 executable SHA-256
 
 ## Non-negotiable execution rules
 
-- Require `--domain` or `BOXWARDEN_DOMAIN`; never default or search across
-  domains.
+- Require `--domain` or `BOXWARDEN_DOMAIN` for commands that operate on
+  domain-owned state; never default or search across domains. Host-global
+  `boxwarden init` and `boxwarden doctor` operate outside the security-domain
+  namespace, require no domain, and reject an explicitly supplied `--domain`.
 - Keep common packages independent of `internal/backend/tart`; only command
   composition imports the Tart adapter.
 - Use exact argv with bounded contexts and bounded input/output. Never invoke a
@@ -45,8 +48,10 @@ Softnet 0.19.0 executable SHA-256
 - Never use TOFU, `StrictHostKeyChecking=no`, a network bootstrap path, a host
   SSH agent, a host filesystem share, clipboard/audio sharing, forwarding, or
   provider credentials.
-- `init` is explicit and may request attended administrator authorization.
-  `doctor` is read-only and never repairs, installs, rotates, or re-authorizes.
+- Host-global `init` is explicit and may request attended administrator
+  authorization. Host-global `doctor` is read-only and never repairs, installs,
+  rotates, or re-authorizes. Domain `init` creates only domain-owned trust and
+  never installs or modifies host-global prerequisites.
 - Under ADR 024, any privileged Softnet under mutable Homebrew state is blocking
   `drifted/unsafe`; init/start refuse and Boxwarden never chmods it. Init refuses
   a source with any setuid/setgid bit. Only the exact staged copy is `04550`.
@@ -105,9 +110,13 @@ Both executable paths must be canonical absolute existing regular files without
 symlinked components; `tart_home` is a canonical absolute private directory.
 `softnet_source` is input to attended init, never the privileged runtime path.
 V1/V2 read-only/status/create commands continue to accept existing
-version-1 configuration; `init`, `doctor`, and `session start` require version 2
-and fail with an upgrade diagnostic when the host block is absent. The operator
-group name is the fixed `boxwarden-operators`, not configurable input.
+version-1 configuration. Host-global `init`/`doctor` and `session start` require
+version 2 and fail with an upgrade diagnostic when the shared host block is
+absent. Domain `init` resolves only the explicitly selected domain and its
+domain-owned state; it does not require or initialize the shared host block.
+Host-global commands resolve only `HostConfig` and never call domain selection.
+The operator group name is the fixed `boxwarden-operators`, not configurable
+input.
 
 Host-key pins are separate immutable versioned records under
 `<state_root>/identity/ssh-host-pins/<session-uuid>.json`:
@@ -150,21 +159,25 @@ response framing and host runtime metadata.
 Commands added by this plan:
 
 ```text
-boxwarden --domain DOMAIN init
-boxwarden --domain DOMAIN doctor
+boxwarden init
+boxwarden doctor
+boxwarden --domain DOMAIN domain init
 boxwarden --domain DOMAIN session start NAME
 boxwarden --domain DOMAIN session status NAME
 boxwarden --domain DOMAIN session console NAME
 ```
 
-`init` establishes the shared host toolchain if absent and exactly one CA for
-the selected domain. Re-running against fully matching state reports healthy;
-missing partial state, unsafe state, or conflicting state fails without repair.
-`doctor` reports `healthy`, `missing/uninitialized`, `drifted/unsafe`, or
-`unsupported/unqualified` per check and exits nonzero unless every required
-start prerequisite is healthy. `session start` prints success only after READY.
-`session console` is the supported human attach path and uses the same exclusive
-serial lease as automation.
+`boxwarden init` establishes the shared host toolchain once per trusted Mac.
+Re-running against fully matching host state reports healthy; missing partial
+state, unsafe state, or conflicting state fails without repair. `boxwarden
+doctor` reports `healthy`, `missing/uninitialized`, `drifted/unsafe`, or
+`unsupported/unqualified` per host check and exits nonzero unless every
+host-global start prerequisite is healthy. It neither selects a domain nor
+invents domain-CA health semantics. `boxwarden --domain DOMAIN domain init`
+creates or validates exactly one management CA for that domain without touching
+the host toolchain. `session start` requires both scopes to exist and prints
+success only after READY. `session console` is the supported human attach path
+and uses the same exclusive serial lease as automation.
 
 ## Target package structure through V4
 
@@ -191,10 +204,10 @@ The common V3 contracts are deliberately small:
 
 ```go
 type HostInitializer interface {
-    Init(context.Context, config.Domain) (hostx.InitResult, error)
+    Init(context.Context, config.HostConfig) (hostx.InitResult, error)
 }
 type HostDoctor interface {
-    Check(context.Context, config.Domain) (hostx.Report, error)
+    Check(context.Context, config.HostConfig) (hostx.Report, error)
 }
 type CAStore interface {
     Init(context.Context, config.Domain, []config.Domain) (sshx.CAIdentity, error)
@@ -267,13 +280,35 @@ CA, reads a host key, or reports READY.
 - [x] CLI composition for registration, create, and status.
 - [ ] User-attended disposable real-host register/clone gate.
 
-The V2 gate must use an already externally qualified, stopped, non-production
-generic golden and record no private identifiers. Its result may validate V2
-mechanics but must not inflate registration into a provenance claim.
+The V2 gate must use a stopped, non-production artifact built or rebuilt from
+the corrected generic guest definition and externally qualified accordingly.
+It contains no Boxwarden domain identity, domain CA anchor, or fixed domain
+principal. An unchanged older Task 0 artifact built under the domain-bound
+design is not grandfathered merely because it previously passed qualification.
+The gate records no private identifiers. Its result may validate V2 mechanics
+but must not inflate registration into a provenance claim.
 
 ---
 
 ## V3 — trusted host/domain management foundation
+
+V3 has two explicit ownership scopes:
+
+```text
+trusted host
+├── host-global foundation
+│   ├── boxwarden init
+│   ├── qualified Softnet privilege installation
+│   └── boxwarden doctor
+├── domain: work
+│   └── work management CA
+└── domain: personal
+    └── personal management CA
+```
+
+The host-global foundation is established once for the Mac. Each explicit
+`boxwarden --domain D domain init` adds only D's management CA; it never repeats
+or re-authorizes the host toolchain.
 
 ### V3.1 Exact host-tool manifest and safe deterministic seams
 
@@ -309,7 +344,7 @@ timestamp. No `current` symlink exists.
 - [ ] Implement canonical no-symlink traversal and exact manifest parsing. Keep
   policy in `hostx`; do not import Tart.
 
-### V3.2 Explicit `init` and exact ADR 024 Softnet privilege installation
+### V3.2 Host-global `init` and exact ADR 024 Softnet privilege installation
 
 **Files:**
 
@@ -320,7 +355,7 @@ timestamp. No `current` symlink exists.
 - Modify `cmd/boxwarden/main.go`
 - Create `docs/operations/init-and-doctor.md`
 
-`boxwarden --domain D init` resolves the current executable and qualified source
+`boxwarden init` resolves the current executable and qualified source
 paths, hashes before mutation, and sends a bounded versioned install request on
 stdin to an exact `/usr/bin/sudo -- <absolute-boxwarden> internal host-install`
 root phase. The hidden mode requires effective UID 0, ignores ambient PATH and
@@ -367,28 +402,31 @@ digest and never mutates the existing tree.
 - [ ] Implement the root phase behind injected filesystem/group/process seams.
   Unit tests execute it only against a temporary synthetic root and fake group
   DB; they never invoke `sudo`, directory services, or `/Library`.
-- [ ] Add CLI tests proving init is explicit, domain-required, attended, and
-  never reachable from `session start` or `doctor`.
+- [ ] Add CLI tests proving host init is explicit, attended, outside the domain
+  namespace, rejects a supplied `--domain`, and is never reachable from
+  `session start` or `doctor`.
 
-### V3.3 One explicit management CA per domain and certificate issuance
+### V3.3 Explicit domain init, one management CA per domain, and certificate issuance
 
 **Files:**
 
 - Create `internal/sshx/ca.go`, `ca_test.go`
 - Create `internal/sshx/cert.go`, `cert_test.go`
 - Create `internal/sshx/paths.go`, `paths_test.go`
-- Modify `internal/hostx/init.go`, `init_test.go`
+- Modify `internal/app/app.go`, `app_test.go`
+- Modify `cmd/boxwarden/main.go`
+- Create `docs/operations/domain-init.md`
 
 Store the CA at `<state_root>/identity/ssh-user-ca/ca` with owner-only directory
 components and private key mode `0600`; `ca.pub` is a regular non-symlink public
 file in the same private tree. Immutable `metadata.json` binds version, domain
 ID, Ed25519 algorithm, public key/fingerprint/digest, unique creation UUID, and
 exact creating operator UID/name.
-Every load and issue validates key/public/metadata agreement. `init` receives
-the complete configured-domain set and compares public fingerprints across
+Every load and issue validates key/public/metadata agreement. Domain init
+receives the complete configured-domain set and compares public fingerprints across
 their configured roots only to reject accidental reuse; it never uses that scan
 for credential lookup or fallback. A copied CA tree fails its bound domain.
-`init` uses exact argv to the absolute system
+`boxwarden --domain D domain init` uses exact argv to the absolute system
 `ssh-keygen` to create one Ed25519 CA only when the complete target is absent.
 It validates key/public-key agreement and permissions. A complete matching CA
 reports already initialized. Partial, malformed, unsafe, copied-across-domain,
@@ -412,6 +450,10 @@ are runtime state, not session identity.
   and cross-domain issuance denial.
 - [ ] Implement `CAStore.Init` and `Issuer.Issue` with injected argv runner and
   clock. Fake `ssh-keygen` tests assert argv/files without invoking host SSH.
+- [ ] Add CLI tests proving domain init requires an explicit configured domain,
+  initializes only that domain's CA, never searches or falls back across
+  domains, never invokes host init, and is never reached lazily from session
+  start.
 
 ### V3.4 Host-key pin store and strict SSH policy
 
@@ -453,7 +495,7 @@ enter that command. Separate bounded typed request structures exist only for
 - [ ] Implement pin/store/client independently of Tart. V4 supplies address and
   serial evidence through interfaces.
 
-### V3.5 Read-only doctor and V3 integration
+### V3.5 Host-global read-only doctor and V3 integration
 
 **Files:**
 
@@ -461,12 +503,12 @@ enter that command. Separate bounded typed request structures exist only for
 - Modify `internal/app/app.go`, `app_test.go`
 - Modify `cmd/boxwarden/main.go`
 
-Doctor checks: supported macOS/architecture; exact absolute Tart identity;
+`boxwarden doctor` operates outside the domain namespace and checks: supported
+macOS/architecture; exact absolute Tart identity;
 Softnet canonical ancestors, ACLs, link count, digest, root owner, group,
 `04550`, manifest and paired identities; exact manifested operator UID/name/home
 and group ID/name/directory membership; current-process supplementary group;
-canonical `tart_home`; domain CA metadata/key agreement/modes/uniqueness;
-ssh/ssh-keygen availability; and exact `/usr/bin/screen` 4.00.03 (FAU,
+canonical `tart_home`; ssh/ssh-keygen availability; and exact `/usr/bin/screen` 4.00.03 (FAU,
 23-Oct-06), SHA-256
 `07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add`,
 root:wheel `0755`, one link, on macOS 26.6.2. Any setuid/setgid or
@@ -474,14 +516,18 @@ passwordless-root Softnet under mutable Homebrew state is `drifted/unsafe`,
 makes doctor nonzero, and blocks init/start even if the staged copy is healthy.
 Each finding has stable code, category, observed fact, expected fact, and remedy
 requiring attended manual inspection or explicit init; doctor never repairs.
+Domain CA state is deliberately absent from this report. Domain init and the
+domain-scoped session prerequisite checks own those diagnostics.
 
 - [ ] Test every status category, multiple simultaneous findings, deterministic
   ordering, redaction, unsafe Homebrew blocking, current-process group refresh,
-  nonzero exit, no writes/process mutation, and inability to call any
-  initializer/privilege runner.
-- [ ] Wire `init` as host tool installation followed by selected-domain CA init;
-  if host install succeeds but CA init fails, report the exact partial boundary
-  and require explicit rerun. Never roll back or overwrite a valid shared tool.
+  explicit `--domain` rejection, no domain lookup, nonzero exit, no
+  writes/process mutation, and inability to call any initializer/privilege
+  runner.
+- [ ] Wire host-global `init` only to host-tool installation and host-global
+  `doctor` only to read-only host checks. Wire domain `init` independently to
+  the CA store. Never couple host installation success or repair to creation of
+  a selected domain's CA.
 - [ ] Run V3 verification:
 
 ```bash
@@ -493,15 +539,23 @@ go build ./cmd/boxwarden
 git diff --check
 ```
 
-**V3 attended gate:** On the exact qualified disposable M1A host, inspect the
-install request, authorize init, verify the complete installed tree/group/mode/
-ACL/link/digests/manifest, domain CA isolation, idempotent rerun, doctor output,
-and refreshed effective group. Prove the installed exact setuid Softnet's
+**V3 host-global attended gate:** On the exact qualified disposable M1A host,
+inspect the install request, authorize `boxwarden init`, verify the complete
+installed tree/group/mode/ACL/link/digests/manifest, host-global idempotent
+rerun, host-global `boxwarden doctor` output, and refreshed effective group.
+Prove the installed exact setuid Softnet's
 argument parsing, closed environment and dependency resolution, effective
 privilege transition/drop, signals, filesystem writes, exact qualified network
 behavior, and absence of any sudo path. Also prove an unsafe Homebrew setuid
 copy blocks doctor/init/start without chmod/repair. Record redacted evidence;
 deterministic fakes do not satisfy this gate.
+
+**V3 domain-foundation attended gate:** After the host gate, explicitly run
+`boxwarden --domain work domain init` and
+`boxwarden --domain personal domain init`. Verify exactly one distinct host-only
+management CA per domain, idempotent rerun, no cross-domain fallback or reuse,
+and no host-toolchain installation or authorization change during either domain
+operation. Adding the second domain must not require another `boxwarden init`.
 
 ---
 

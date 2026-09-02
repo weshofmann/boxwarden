@@ -105,7 +105,8 @@ broad LAN access, bridging, host networking, or weaker session isolation.
 Under ADR 024, the tested Softnet 0.19.0 path requires host root privilege, so Softnet is a
 privileged component of Boxwarden's trusted-host attack surface rather than an
 ordinary unprivileged helper. For the accepted trusted-macOS-operator / untrusted
-guest boundary, `boxwarden init` stages the exact executable digest
+guest boundary, host-global `boxwarden init` runs once per trusted Mac and stages
+the exact executable digest
 `ab333619fc8bd7277837545e49a771baa994c01c3e8c14904ae4cc4c1f37269e`
 into a digest-specific `/Library/Boxwarden` directory. The installed executable
 is a regular one-link file owned by root and a dedicated trusted operator group,
@@ -128,7 +129,8 @@ Normal start uses the absolute qualified Tart 2.32.1 executable digest
 with PATH exactly the digest-specific Softnet directory, canonical recorded
 `TART_HOME`, generation-private `TMPDIR`, and fixed validated locale/user
 values. No ambient proxy, Sentry, Rust, DYLD, or other environment survives; no
-sudo is used. It never repairs or re-authorizes privilege. `boxwarden doctor` checks
+sudo is used. It never repairs or re-authorizes privilege. Host-global
+`boxwarden doctor` checks
 the full canonical path, ancestor permissions and ACLs, symlinks, file type,
 link count, executable/archive digests, root ownership, mode, group, manifest,
 macOS state, and Tart/Softnet pairing. It reports the current Homebrew setuid
@@ -139,6 +141,12 @@ fail until the group is effective. Upgrades
 install adjacent digest-specific trees and never overwrite a qualified artifact
 or retarget a `current` symlink; exact uninstall refuses active consumers.
 Real-host install and qualification remain user-attended gates.
+
+Both commands operate outside the security-domain namespace and do not require
+or search for a domain. Domain CA creation is a separate explicit
+`boxwarden --domain <domain> domain init` operation and is not a doctor health
+check. Commands that operate on domain-owned state remain explicitly scoped and
+never use cross-domain fallback.
 
 Softnet constrains guest egress but permits incoming guest traffic; its default gateway allowance means M1A does not deny guest-to-host traffic at the vmnet gateway. A compromised guest can probe or attack host services reachable there. This accepted limitation is subordinate to the required ability to inherit the laptop's changing route and resolver environment and must remain visible in status and validation. Ubuntu enforces inbound deny by default except required host-to-guest SSH. A guest runtime can bypass ordinary `ufw` processing; when a golden includes Docker, services bind guest loopback by default and policy is enforced through Docker-compatible iptables/`DOCKER-USER` rules where needed. No workflow habitually publishes `0.0.0.0`.
 

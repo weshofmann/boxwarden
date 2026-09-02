@@ -21,13 +21,15 @@ host-key pinning, and strict-SSH decisions remain in force.
 ## Amended decision
 
 Every security domain has exactly one OpenSSH management user CA. The operator
-creates it explicitly once with `boxwarden --domain <domain> init`; it is never
-created lazily by session start. Its private key remains host-only outside the
-repository, profiles, runtime roots, guest disks, command arguments, and logs.
+creates it explicitly once with `boxwarden --domain <domain> domain init`; it is
+never created lazily by session start. This domain-scoped command does not
+install or modify host-global Boxwarden or Softnet prerequisites. Its private
+key remains host-only outside the repository, profiles, runtime roots, guest
+disks, command arguments, and logs.
 Immutable metadata beside the key binds domain ID, Ed25519 algorithm, public
 key/fingerprint/digest, a unique creation UUID, and exact creating operator
 UID/name; load and issue revalidate it.
-Explicit init receives the complete configured-domain set and compares public
+Explicit domain init receives the complete configured-domain set and compares public
 fingerprints across configured roots only to reject accidental reuse. It does
 not select or discover credentials across domains. Copying a complete CA tree
 fails its bound domain ID. Missing, malformed, unsafe, reused, or conflicting

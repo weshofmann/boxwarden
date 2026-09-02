@@ -43,8 +43,15 @@ Never weaken these to make something work. If a task appears to require it, stop
   identity, management-CA anchor, fixed principal, or guest binding belongs in a
   golden. A fresh clone receives only the selected domain CA's public anchor and
   exact session principal through the ADR 017 trusted serial bootstrap before
-  pinned strict SSH is attempted; the private CA key never leaves the host.
-- **No implicit cross-domain fallback.** Every session belongs to exactly one security domain. Golden pointers, profiles, age material, credentials, memory, projects, registry, and runtime paths are domain-scoped and never resolved across domains.
+  pinned strict SSH is attempted; the private CA key never leaves the host. The
+  V2 attended gate must use an artifact built or rebuilt from the corrected
+  generic guest definition and qualified accordingly; prior qualification does
+  not grandfather an unchanged domain-bound Task 0 artifact.
+- **Host and domain initialization are separate.** `boxwarden init` and
+  `boxwarden doctor` are host-global and operate outside the security-domain
+  namespace. `boxwarden --domain D domain init` creates only D's management CA
+  and never installs or modifies the host-global Softnet privilege mechanism.
+- **No implicit cross-domain fallback.** Commands that operate on domain-owned state require an explicit security domain. Every session belongs to exactly one domain. Golden pointers, profiles, age material, credentials, memory, projects, registry, and runtime paths are domain-scoped and never resolved across domains.
 - **No automatic sandbox → trusted-profile synchronization.** Promotion is always explicit, human-approved, and bound to exact manifest and ciphertext digests.
 - **Validate guest-originated data on the trusted host.** Guest-side checks are convenience, never the control. A compromised session controls every byte it sends.
 - **Quarantine sessions receive no reusable provider or Git credentials.** Public source, or narrowly scoped short-lived read-only ingress only.

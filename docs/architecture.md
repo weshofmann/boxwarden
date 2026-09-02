@@ -108,26 +108,36 @@ repairs. A host-zone mismatch is non-ready until idempotent start on the exactly
 proven generation reconverges it. Unproven running ownership is drift/non-ready
 with no mutation or adoption.
 
-`boxwarden --domain <domain> init` performs the explicit one-time host/domain
-bootstrap. It initializes that domain's sole management CA and installs the
-exact qualified Softnet executable into a root-owned digest-specific
-`/Library/Boxwarden` path with narrowly scoped execute authority for a dedicated
-trusted operator group. The manifest binds the exact single operator UID/name/
-home and group ID/name/membership. A setuid/setgid source is rejected; any
-privileged mutable Homebrew Softnet is unsafe and blocks init/start until
-attended manual remediation. Normal start uses the absolute qualified Tart,
-canonical configured `tart_home`, generation-private `TMPDIR`, and PATH exactly
-equal to the Softnet digest directory, without sudo or ambient proxy,
-telemetry, runtime, or loader variables. `boxwarden --domain <domain> doctor` is a fail-closed,
-read-only diagnostic for dependency, CA, path, ownership, ACL, link, digest,
-mode, group/effective membership, operator identity, manifest, macOS, and
-toolchain drift. Repairs require an explicit operator-attended action.
+Host-wide prerequisites and domain-owned trust have separate lifetimes.
+`boxwarden init` runs once per trusted host, outside the security-domain
+namespace. It installs the exact qualified Softnet executable into a root-owned
+digest-specific `/Library/Boxwarden` path with narrowly scoped execute authority
+for a dedicated trusted operator group. The manifest binds the exact single
+operator UID/name/home and group ID/name/membership. A setuid/setgid source is
+rejected; any privileged mutable Homebrew Softnet is unsafe and blocks
+init/start until attended manual remediation. Normal start uses the absolute
+qualified Tart, canonical configured `tart_home`, generation-private `TMPDIR`,
+and PATH exactly equal to the Softnet digest directory, without sudo or ambient
+proxy, telemetry, runtime, or loader variables. `boxwarden doctor` is the
+host-global, fail-closed, read-only diagnostic for dependency, path, ownership,
+ACL, link, digest, mode, group/effective membership, operator identity,
+manifest, macOS, and toolchain drift. It does not inspect domain CA health or
+silently repair or rebind security-sensitive state. Both host-global command
+implementations reject an explicitly supplied `--domain` rather than ignoring
+it.
+
+`boxwarden --domain <domain> domain init` runs once for each explicitly selected
+domain and initializes only that domain's sole host-only management CA. It does
+not install or modify the host-global Softnet privilege mechanism. Adding a
+second domain therefore adds a second CA without repeating trusted-host
+initialization, and session start never creates either host or domain
+prerequisites lazily.
 
 M1A profile persistence is deliberately narrow: only explicitly implemented declarative adapters with fixed paths, schemas, limits, semantic review, staged restore, validation, and rollback are supported. Arbitrary archives, browser profiles, opaque application state, and Kindex state are not profile inputs. Application and provider login state remains disposable session state.
 
 Canonical and durable project memory is Markdown. Git versions non-sensitive reviewed memory; age protects sensitive persistent Markdown. Session notes and candidate lessons remain disposable until a human reviews and promotes them. Search, vector, SQLite, or other indexes are derived caches and must be fully rebuildable from Markdown.
 
-Every session belongs to an explicit SECURITY DOMAIN, initially a locally configured name such as `personal` or `work`. Domain-scoped namespaces include generic-golden admission and selection metadata, management CAs and host-key pins, profiles, age recipients and identity references, provider/Git credentials and identities, memory, projects, session registry, and runtime paths. Domain scoping of an artifact record does not make the referenced artifact domain-specific. The control plane never searches another domain as a fallback. This is a local separation primitive, not an enterprise tenancy system; a user with access to the trusted host can still access every locally configured domain.
+Every session belongs to an explicit SECURITY DOMAIN, initially a locally configured name such as `personal` or `work`. Commands that operate on domain-owned state require an explicit domain. Domain-scoped namespaces include generic-golden admission and selection metadata, management CAs and host-key pins, profiles, age recipients and identity references, provider/Git credentials and identities, memory, projects, session registry, and runtime paths. Domain scoping of an artifact record does not make the referenced artifact domain-specific. The control plane never searches another domain as a fallback. Host-global prerequisites established by `boxwarden init` and diagnosed by `boxwarden doctor` are outside these namespaces and are not repeated per domain. This is a local separation primitive, not an enterprise tenancy system; a user with access to the trusted host can still access every locally configured domain.
 
 The architecture distinguishes two build products:
 

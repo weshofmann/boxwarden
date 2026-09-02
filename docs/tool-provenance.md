@@ -11,7 +11,8 @@ The M1A host-toolchain identity is exact:
 
 Under ADR 024, Softnet 0.19.0's tested execution path requires host root privilege. The
 selected mechanism for the trusted macOS operator / untrusted guest boundary is
-an exact qualified copy installed by user-attended `boxwarden init` at
+an exact qualified copy installed once per trusted host by user-attended,
+host-global `boxwarden init` at
 `/Library/Boxwarden/toolchains/softnet/0.19.0/ab333619fc8bd7277837545e49a771baa994c01c3e8c14904ae4cc4c1f37269e/softnet`.
 The executable is a regular one-link file, root-owned, assigned to the dedicated
 trusted Boxwarden operator group, and mode `04550`. Every ancestor is a
@@ -35,7 +36,7 @@ variables are absent. It invokes no shell or `sudo`; the `04550` binding is inte
 native code at the trusted operator UID is outside the M1A adversary boundary.
 If that UID becomes hostile, a narrow separately qualified wrapper is required.
 
-`boxwarden doctor` validates the complete canonical path, every ancestor's
+Host-global `boxwarden doctor` validates the complete canonical path, every ancestor's
 owner/mode/ACL/symlink status, Softnet file type/link count/owner/group/mode and
 digest, manifest bytes and publish state, absolute Tart digest, macOS version,
 and the exact paired-toolchain identity. The manifest binds the single trusted
@@ -48,7 +49,9 @@ qualified tree, and never switch a `current` symlink. Exact uninstall names one
 manifested digest root and refuses while any recorded or live supervisor uses
 it. Replacing either tool requires deliberate requalification and explicit
 re-initialization. Installation, upgrade, uninstall, and real-host qualification
-remain user-attended operations.
+remain user-attended operations. Neither host-global command requires or
+searches for a security domain; adding another domain does not repeat the
+privileged installation.
 
 Production V4 also binds `/usr/bin/screen` 4.00.03 (FAU, 23-Oct-06), executable
 SHA-256 `07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add`,
