@@ -34,6 +34,7 @@ type RootedPublisher struct {
 	tartDigest       string
 	softnetMode      uint32
 	chown            func(string, int, int) error
+	openSource       func(string, string, bool) (*os.File, error)
 	acl              ACLInspector
 	token            func() string
 	fail             func(string) error
@@ -78,6 +79,12 @@ func (p RootedPublisher) changeOwner(path string, uid, gid int) error {
 	}
 	return os.Chown(path, uid, gid)
 }
+func (p RootedPublisher) reopenSource(path string) (*os.File, error) {
+	if p.openSource != nil {
+		return p.openSource(path, p.expectedDigest(), true)
+	}
+	return openVerifiedRegular(path, p.expectedDigest(), true)
+}
 func (p RootedPublisher) stageToken() string {
 	if p.token != nil {
 		return p.token()
@@ -120,13 +127,7 @@ func (p RootedPublisher) State(_ context.Context, r InstallRequest, c Caller, g 
 }
 
 func (p RootedPublisher) Preflight(_ context.Context, r InstallRequest, c Caller) (publicationState, error) {
-	if err := p.validateRootParent(); err != nil {
-		return publicationUnexpected, err
-	}
-	if err := p.validateNoCurrentPointer(); err != nil {
-		return publicationUnexpected, err
-	}
-	if err := p.validatePairedInputs(r, c); err != nil {
+	if err := p.validatePreflightInputs(r, c); err != nil {
 		return publicationUnexpected, err
 	}
 	if _, err := os.Lstat(p.finalDir()); os.IsNotExist(err) {
@@ -181,7 +182,7 @@ func (p RootedPublisher) Publish(ctx context.Context, r InstallRequest, c Caller
 	if pathsOverlap(p.Root, r.SoftnetSource) || pathsOverlap(p.Root, r.Tart.Path) || pathsOverlap(p.Root, r.TartHome) || pathsOverlap(r.SoftnetSource, r.Tart.Path) || pathsOverlap(r.SoftnetSource, r.TartHome) || pathsOverlap(r.Tart.Path, r.TartHome) {
 		return fmt.Errorf("trusted input path overlaps installed toolchain root")
 	}
-	source, err := openVerifiedRegular(r.SoftnetSource, p.expectedDigest(), true)
+	source, err := p.reopenSource(r.SoftnetSource)
 	if err != nil {
 		return fmt.Errorf("reopen qualified Softnet source: %w", err)
 	}
@@ -279,6 +280,32 @@ func (p RootedPublisher) Publish(ctx context.Context, r InstallRequest, c Caller
 	}
 	p.observed("tree-synced")
 	return p.publishManifest(r, c, g, token)
+}
+
+func (p RootedPublisher) validatePreflightInputs(r InstallRequest, c Caller) error {
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	if err := p.validateRootParent(); err != nil {
+		return err
+	}
+	if err := p.validateNoCurrentPointer(); err != nil {
+		return err
+	}
+	if err := p.validatePairedInputs(r, c); err != nil {
+		return err
+	}
+	if pathsOverlap(p.Root, r.SoftnetSource) || pathsOverlap(p.Root, r.Tart.Path) || pathsOverlap(p.Root, r.TartHome) || pathsOverlap(r.SoftnetSource, r.Tart.Path) || pathsOverlap(r.SoftnetSource, r.TartHome) || pathsOverlap(r.Tart.Path, r.TartHome) {
+		return fmt.Errorf("trusted input path overlaps installed toolchain root")
+	}
+	source, err := p.reopenSource(r.SoftnetSource)
+	if err != nil {
+		return fmt.Errorf("reopen qualified Softnet source: %w", err)
+	}
+	if err := source.Close(); err != nil {
+		return fmt.Errorf("close qualified Softnet source: %w", err)
+	}
+	return p.validateExistingDirectoryChain(filepath.Dir(p.finalDir()))
 }
 
 func (p RootedPublisher) publishManifest(r InstallRequest, c Caller, g Group, token string) error {
@@ -497,7 +524,43 @@ func (p RootedPublisher) ensureDirectoryChain(target string) error {
 		} else if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("trusted directory %q is unsafe", path)
 		}
-		if err := p.validateDirectory(path, 0); err != nil {
+		if err := p.validateDirectory(path, trustedDirectoryMode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateExistingDirectoryChain checks every already-present destination
+// ancestor without creating anything. Once a component is absent, descendants
+// are necessarily absent too and publication may create the remaining chain.
+func (p RootedPublisher) validateExistingDirectoryChain(target string) error {
+	rel, err := filepath.Rel(p.Root, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("directory target escapes toolchain root")
+	}
+	paths := []string{p.Root}
+	current := p.Root
+	if rel != "." {
+		for _, component := range strings.Split(rel, string(filepath.Separator)) {
+			current = filepath.Join(current, component)
+			paths = append(paths, current)
+		}
+	}
+	missing := false
+	for _, path := range paths {
+		_, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			missing = true
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("inspect trusted directory %q: %w", path, err)
+		}
+		if missing {
+			return fmt.Errorf("trusted directory %q exists below an absent ancestor", path)
+		}
+		if err := p.validateDirectory(path, trustedDirectoryMode); err != nil {
 			return err
 		}
 	}

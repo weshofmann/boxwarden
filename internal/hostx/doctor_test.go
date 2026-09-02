@@ -2,7 +2,9 @@ package hostx
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -46,7 +48,7 @@ func TestDoctorReportsAllCategoriesInStableOrderWithoutSensitiveErrors(t *testin
 			t.Fatalf("finding leaked dependency error: %#v", finding)
 		}
 	}
-	wantPresent := []string{"group.not-effective", "homebrew.softnet-privileged", "platform.unsupported", "softnet.mode", "ssh.missing", "ssh-keygen.missing"}
+	wantPresent := []string{"group.not-effective", "homebrew.softnet-privileged", "platform.unsupported", "softnet.mode", "ssh.metadata", "ssh-keygen.missing"}
 	for _, want := range wantPresent {
 		if !containsString(codes, want) {
 			t.Fatalf("finding codes %v do not contain %q", codes, want)
@@ -54,6 +56,67 @@ func TestDoctorReportsAllCategoriesInStableOrderWithoutSensitiveErrors(t *testin
 	}
 	if !sort.StringsAreSorted(codes) {
 		t.Fatalf("finding codes are not deterministic: %v", codes)
+	}
+}
+
+func TestDoctorClassifiesExistingUnverifiableToolOrManifestAsDrifted(t *testing.T) {
+	for code, path := range map[string]string{
+		"tart":     "/opt/qualified/tart",
+		"manifest": filepath.Join(filepath.Dir(QualifiedSoftnetPath), "manifest.json"),
+		"softnet":  QualifiedSoftnetPath,
+	} {
+		t.Run(code, func(t *testing.T) {
+			inspector, request := healthyDoctorFixture(t)
+			inspector.failures[path] = errors.New("sensitive inspection detail")
+
+			report := (SystemService{inspector: inspector}).Doctor(t.Context(), request)
+			var matched *Finding
+			for index := range report.Findings {
+				if report.Findings[index].Code == code+".metadata" {
+					matched = &report.Findings[index]
+				}
+				if report.Findings[index].Code == code+".missing" {
+					t.Fatalf("Doctor() classified existing unsafe %s as missing: %#v", code, report.Findings[index])
+				}
+			}
+			if matched == nil || matched.Category != Drifted {
+				t.Fatalf("Doctor() findings = %#v, want %s.metadata drift", report.Findings, code)
+			}
+			if matched.Observed != "path exists but safety inspection failed" || matched.Remedy != "inspect host tool state manually" {
+				t.Fatalf("unsafe-path finding = %#v, want stable redacted diagnostic", matched)
+			}
+			if strings.Contains(fmt.Sprint(*matched), "sensitive") {
+				t.Fatalf("unsafe-path finding leaked inspection error: %#v", matched)
+			}
+		})
+	}
+}
+
+func TestOSDoctorInspectorPreservesExistenceForUnsafeLinkedFiles(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(base, "tool")
+	if err := os.WriteFile(target, []byte("tool"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	inspector := &osDoctorInspector{acl: noACLInspector{}}
+
+	symlink := filepath.Join(base, "tool-link")
+	if err := os.Symlink(target, symlink); err != nil {
+		t.Fatal(err)
+	}
+	if fact, err := inspector.InspectPath(symlink); err == nil || !fact.Exists {
+		t.Fatalf("InspectPath(symlink) = %#v, %v; want existing unsafe result", fact, err)
+	}
+
+	hardlink := filepath.Join(base, "tool-hardlink")
+	if err := os.Link(target, hardlink); err != nil {
+		t.Fatal(err)
+	}
+	if fact, err := inspector.InspectPath(target); err == nil || !fact.Exists || fact.Links != 2 {
+		t.Fatalf("InspectPath(hardlink) = %#v, %v; want existing two-link unsafe result", fact, err)
 	}
 }
 
@@ -147,7 +210,7 @@ type doctorInspectorFake struct {
 func (f *doctorInspectorFake) Platform() PlatformFact { return f.platform }
 func (f *doctorInspectorFake) InspectPath(path string) (PathFact, error) {
 	if err := f.failures[path]; err != nil {
-		return PathFact{}, err
+		return f.paths[path], err
 	}
 	return f.paths[path], nil
 }

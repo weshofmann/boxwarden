@@ -243,7 +243,15 @@ func (s SystemService) Doctor(_ context.Context, request Request) Report {
 
 func checkTool(inspector DoctorInspector, report *Report, code, path, digest string, mode uint32, uid, gid int) (PathFact, bool) {
 	fact, err := inspector.InspectPath(path)
-	if err != nil || !fact.Exists {
+	if err != nil {
+		observed := "path safety inspection unavailable"
+		if fact.Exists {
+			observed = "path exists but safety inspection failed"
+		}
+		report.Findings = append(report.Findings, Finding{Code: code + ".metadata", Category: Drifted, Observed: observed, Expected: "single-link regular file without ACL", Remedy: "inspect host tool state manually"})
+		return fact, false
+	}
+	if !fact.Exists {
 		report.Findings = append(report.Findings, Finding{Code: code + ".missing", Category: Missing, Observed: "missing or unreadable", Expected: "exact direct regular file", Remedy: "run explicit attended init or install the qualified system tool"})
 		return PathFact{}, false
 	}

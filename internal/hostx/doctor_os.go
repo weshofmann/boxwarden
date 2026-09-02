@@ -63,17 +63,17 @@ func (i *osDoctorInspector) InspectPath(path string) (PathFact, error) {
 	if err != nil {
 		return PathFact{}, err
 	}
-	if _, err := snapshotPath(path); err != nil {
-		return PathFact{}, err
-	}
 	uid, gid, ok := ownership(info)
 	if !ok {
-		return PathFact{}, fmt.Errorf("unsupported filesystem metadata")
+		return PathFact{Exists: true}, fmt.Errorf("unsupported filesystem metadata")
 	}
 	fact := PathFact{Exists: true, Regular: info.Mode().IsRegular(), Directory: info.IsDir(), Mode: unixMode(info), UID: uid, GID: gid, Links: links(info)}
+	if _, err := snapshotPath(path); err != nil {
+		return fact, err
+	}
 	acl, err := i.acl.HasExtendedACL(path)
 	if err != nil {
-		return PathFact{}, err
+		return fact, err
 	}
 	fact.ExtendedACL = acl
 	if !fact.Regular {
@@ -81,27 +81,27 @@ func (i *osDoctorInspector) InspectPath(path string) (PathFact, error) {
 	}
 	file, err := openVerifiedRegular(path, "", false)
 	if err != nil {
-		return PathFact{}, err
+		return fact, err
 	}
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
 		file.Close()
-		return PathFact{}, err
+		return fact, err
 	}
 	fact.SHA256 = fmt.Sprintf("%x", hash.Sum(nil))
 	if filepath.Base(path) == "manifest.json" {
 		if _, err := file.Seek(0, io.SeekStart); err != nil {
 			file.Close()
-			return PathFact{}, err
+			return fact, err
 		}
 		fact.Data, err = io.ReadAll(io.LimitReader(file, maxManifestBytes+1))
 		if err != nil || len(fact.Data) > maxManifestBytes {
 			file.Close()
-			return PathFact{}, fmt.Errorf("manifest exceeds bounded input")
+			return fact, fmt.Errorf("manifest exceeds bounded input")
 		}
 	}
 	if err := file.Close(); err != nil {
-		return PathFact{}, err
+		return fact, err
 	}
 	return fact, nil
 }

@@ -3,6 +3,8 @@ package hostx
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -97,6 +99,121 @@ func TestRootInstallerDoesNotMutateGroupForPartialExistingTree(t *testing.T) {
 	}
 	if groups.ensureCalls != 0 {
 		t.Fatalf("group mutations = %d, want zero before partial-tree refusal", groups.ensureCalls)
+	}
+}
+
+func TestRootInstallerDoesNotMutateGroupForUnsafeSoftnetSource(t *testing.T) {
+	for name, makeUnsafe := range map[string]func(*testing.T, string, *RootedPublisher){
+		"digest mismatch": func(t *testing.T, source string, _ *RootedPublisher) {
+			t.Helper()
+			if err := os.WriteFile(source, []byte("unqualified replacement"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"hard link": func(t *testing.T, source string, _ *RootedPublisher) {
+			t.Helper()
+			if err := os.Link(source, source+"-second-link"); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"non-regular": func(t *testing.T, source string, _ *RootedPublisher) {
+			t.Helper()
+			if err := os.Remove(source); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(source, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"privilege bit": func(t *testing.T, _ string, publisher *RootedPublisher) {
+			t.Helper()
+			publisher.openSource = func(_ string, _ string, rejectPrivilege bool) (*os.File, error) {
+				if !rejectPrivilege {
+					t.Fatal("preflight source reopen did not request privilege-bit rejection")
+				}
+				return nil, os.ErrPermission
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root, source, digest := publisherFixture(t)
+			publisher := testPublisher(root, digest)
+			makeUnsafe(t, source, &publisher)
+			groups := &groupManagerFake{}
+			caller := Caller{UID: os.Getuid(), Name: "operator", Home: filepath.Join(filepath.Dir(source), "home")}
+			installer := RootInstaller{
+				Identity:  identityFake{euid: 0, caller: caller},
+				Groups:    groups,
+				Publisher: publisher,
+			}
+
+			if _, err := installer.Install(t.Context(), publisherRequest(source)); err == nil {
+				t.Fatal("Install() error = nil, want unsafe source refusal")
+			}
+			if groups.ensureCalls != 0 {
+				t.Fatalf("group mutations = %d, want zero before unsafe source refusal", groups.ensureCalls)
+			}
+		})
+	}
+}
+
+func TestRootInstallerDoesNotMutateGroupForUnsafeDestinationAncestorMetadata(t *testing.T) {
+	for name, makeUnsafe := range map[string]func(*RootedPublisher, string){
+		"wrong group": func(publisher *RootedPublisher, _ string) { publisher.rootGID++ },
+		"extended ACL": func(publisher *RootedPublisher, ancestor string) {
+			publisher.acl = pathACLInspector{ancestor: true}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root, source, digest := publisherFixture(t)
+			ancestor := filepath.Join(root, "toolchains")
+			if err := os.MkdirAll(ancestor, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			publisher := testPublisher(root, digest)
+			makeUnsafe(&publisher, ancestor)
+			groups := &groupManagerFake{}
+			caller := Caller{UID: os.Getuid(), Name: "operator", Home: filepath.Join(filepath.Dir(source), "home")}
+			installer := RootInstaller{
+				Identity: identityFake{euid: 0, caller: caller}, Groups: groups,
+				Publisher: publisher,
+			}
+
+			if _, err := installer.Install(t.Context(), publisherRequest(source)); err == nil {
+				t.Fatal("Install() error = nil, want unsafe destination ancestor refusal")
+			}
+			if groups.ensureCalls != 0 {
+				t.Fatalf("group mutations = %d, want zero before unsafe ancestor refusal", groups.ensureCalls)
+			}
+		})
+	}
+}
+
+func TestRootInstallerDoesNotMutateGroupForUnsafeExistingDestinationAncestor(t *testing.T) {
+	for _, relative := range []string{".", "toolchains", filepath.Join("toolchains", "softnet"), filepath.Join("toolchains", "softnet", SoftnetVersion)} {
+		t.Run(relative, func(t *testing.T) {
+			root, source, digest := publisherFixture(t)
+			ancestor := filepath.Join(root, relative)
+			if err := os.MkdirAll(ancestor, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(ancestor, 0o775); err != nil {
+				t.Fatal(err)
+			}
+			groups := &groupManagerFake{}
+			caller := Caller{UID: os.Getuid(), Name: "operator", Home: filepath.Join(filepath.Dir(source), "home")}
+			installer := RootInstaller{
+				Identity: identityFake{euid: 0, caller: caller}, Groups: groups,
+				Publisher: testPublisher(root, digest),
+			}
+
+			if _, err := installer.Install(t.Context(), publisherRequest(source)); err == nil {
+				t.Fatal("Install() error = nil, want unsafe destination ancestor refusal")
+			}
+			if groups.ensureCalls != 0 {
+				t.Fatalf("group mutations = %d, want zero before unsafe ancestor refusal", groups.ensureCalls)
+			}
+		})
 	}
 }
 
