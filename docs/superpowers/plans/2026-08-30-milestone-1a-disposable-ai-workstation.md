@@ -1,15 +1,20 @@
 # Milestone 1A Disposable AI Workstation Implementation Plan
 
+> **Status: superseded; retained as planning history only. Do not execute any
+> task below.** The corrected V1-V4 sequence, generic-golden model, serial-first
+> trust bootstrap, default-only V4 network policy, and later roadmap are in
+> `docs/superpowers/plans/2026-09-01-boxwarden-v0.1.md`. Accepted ADRs and
+> current canonical architecture documents control wherever this historical
+> plan differs.
+
 > Historical planning note: ADR 023 supersedes this document's treatment of
 > Docker as an expected guest workload runtime. Docker remains a possible
 > qualified guest-local capability, but Boxwarden does not prescribe a runtime
 > for workloads.
 
-> Execution note: implement this plan task by task with test-first development and a review gate after Task 0, golden promotion, and final destructive-path acceptance.
-
 **Goal:** Deliver Boxwarden's `boxwarden` executable, a Go control plane that builds qualified Ubuntu 24.04 ARM64 Tart goldens and manages cheap disposable and quarantine AI workstations on macOS without exposing trusted-host control.
 
-**Architecture:** Common packages own security domains, intent/reconciliation, locks, golden selection, profile/encryption policy, project durability, credential/provider policy, validation, and destructive safety. A narrow Tart backend owns only VM mechanics and observations. Portable guest definitions produce domain-specific immutable Tart golden artifacts. Markdown is canonical memory; M1A profiles use only explicit declarative adapters. Kindex full-state persistence is unsupported.
+**Architecture:** Common packages own security domains, intent/reconciliation, locks, golden selection, profile/encryption policy, project durability, credential/provider policy, validation, and destructive safety. A narrow Tart backend owns only VM mechanics and observations. Portable guest definitions produce generic immutable Tart golden artifacts; domains independently admit and select them through trusted-host metadata. Markdown is canonical memory; M1A profiles use only explicit declarative adapters. Kindex full-state persistence is unsupported.
 
 **M1A platform:** macOS host; Tart backend; Ubuntu 24.04 ARM64 guest; Ubuntu-supported desktop/Wayland with XWayland for ChatGPT Desktop; guest workload-neutral under ADR 023; no Linux-host backend or bootc work.
 
@@ -94,7 +99,12 @@ qualified core platform from explicitly unqualified network environments.
 5. Boot at least two Boxwarden-style Softnet VMs concurrently and prove neither can connect to the other's SSH or another known listening service. Exercise same-domain and different-domain labels so the evidence makes clear that session isolation is a backend network property, not a security-domain namespace property.
 6. Under the default Softnet shared/NAT candidate, prove DHCP lease acquisition and renewal, DNS resolution, the resolver address received by the guest, and whether the vmnet gateway is also the resolver. Prove outcome-level connectivity with available VPN/custom-or-split-DNS configurations and characterize the actual mobile tether rather than inferring its address-family behavior. Record each tested environment independently. If an effectively IPv6-only upstream is unavailable, keep that upstream plus its dependent IPv4-only and IPv6-only destination cases explicitly `NOT YET PROVEN` under ADR 020; do not block the core platform decision or claim support. A static public resolver is diagnostic evidence only and is prohibited in accepted configuration.
 7. Test `tart ip <vm>` and `tart ip --resolver=dhcp <vm>` under Softnet. Observe at least one DHCP lease renewal, whether the address changes, and what refresh/caching interval is safe. Record `arp` incompatibility as a technical constraint and the `agent` resolver as a policy-excluded guest-agent bridge; do not install a guest agent for discovery.
-8. Prove the proposed domain management identity: a per-domain SSH user-CA public trust anchor may be GOLDEN configuration; its private key remains host-only. Issue a short-lived session certificate and connect. Evaluate `tart run --serial` and `--serial-path` as possible authenticated/non-network bootstrap evidence for the regenerated SSH host-key fingerprint. For `--serial-path`, determine the guest device, getty/login behavior, whether it can be a bounded non-login evidence channel, and whether the host can parse a small delimited fingerprint record with byte/time limits. If no stronger authenticated Tart mechanism is suitable, record first-connection TOFU with immediate host-local pinning as an explicit assumption rather than hiding it or using `StrictHostKeyChecking=no`.
+8. Historical investigation item: evaluate serial bootstrap for the regenerated
+   SSH host key and management identity. ADR 017 subsequently qualified the
+   trusted host-local serial recovery channel, and amended ADR 012 now requires
+   post-clone installation of the selected domain's public CA anchor and exact
+   principal before host-key pinning and strict SSH. Generic goldens contain no
+   domain trust, and TOFU is prohibited.
 9. Empirically map graphical Tart process ownership and lifetime. Start from an interactive Terminal; exit the Boxwarden-like launcher; close the invoking shell; start from SSH while the same macOS user has an active Aqua login; disconnect SSH; lock the Mac; log the console user out; and test after host reboot and normal user login. Record whether the UI and VM survive, whether a logged-in Aqua user is required, which process owns the VM, and which process identity/observations can support safe reconciliation without relying on a reusable bare PID. Do not choose launchd agent, launchd daemon, detached child, or helper architecture before this evidence.
 10. Finalize the candidate by removing `/etc/machine-id`, SSH host keys, DHCP/DUID/client identifiers, random seeds where safe, installer residue, shell history, logs, credentials, and provider/browser state. Verify the next boot regenerates required state.
 11. Clone twice, run `tart set <vm> --random-mac` for each clone, boot both, and prove distinct MAC, machine ID, SSH host keys, DHCP/DUID identity where relevant, hostname, machine/random seed behavior where relevant, and discovered address. Confirm neither clone changes the stopped golden.
@@ -220,7 +230,10 @@ git diff --check
 2. Make provisioning idempotent and driven only by the lock/manifests. Verify signatures/digests before install. Disable unattended upgrades, PackageKit/GNOME installation, Snap/vendor/CLI self-updaters where applicable, and record the resulting BOM.
 3. Configure Ubuntu's supported desktop/Wayland path and XWayland; do not force Xorg. Keep every GUI profile/login inside the guest.
 4. Configure Docker guest-local only. Do not install a host context/socket. Treat the Docker group as guest root. Default service examples bind `127.0.0.1`; add Docker-compatible `DOCKER-USER` rules and tests proving no accidental public bind.
-5. Configure `sshd` key-only with the domain user-CA public key, restricted principals, no root/password/X11/agent/TCP/tunnel forwarding, and management access only through the intended guest firewall rule. No private key enters the image.
+5. Configure generic strict `sshd` policy with fixed inactive bootstrap target
+   paths, restricted principals, no root/password/X11/agent/TCP/tunnel
+   forwarding, and management access only through the intended guest firewall
+   rule. Neither a domain public anchor nor a private key enters the image.
 6. Configure inbound deny except SSH, the DNS behavior proven necessary by Task 0, no host/private-network routes beyond the approved M1A model, and no autostarted provider agent, MCP server, extension, browser extension, hook, or scheduled agent.
 7. Finalize clone identity exactly as proven in Task 0. Fail the build if login/provider/browser/project/history/cache/session residue, cookies, keyring entries, tokens, private keys, or reusable machine identity remains.
 8. Test installed versions/BOM, desktop/XWayland, ChatGPT Desktop launch, all available provider tools, Docker isolation, SSH policy, firewall behavior, no listeners beyond the allowlist, no automatic updater, no forbidden integration, and clone-ready identity. Snapshot package/app versions before reboot and GUI/CLI launch, repeat afterward, and fail on unapproved mutation.
@@ -236,7 +249,7 @@ guest/ubuntu-24.04-arm64/tests/network.sh
 guest/ubuntu-24.04-arm64/tests/identity.sh
 ```
 
-## Task 5: Build, validate, and promote immutable domain goldens
+## Task 5: Build, validate, and promote immutable generic goldens
 
 **Files:**
 
@@ -245,7 +258,11 @@ guest/ubuntu-24.04-arm64/tests/identity.sh
 - Create: `internal/golden/promote.go`
 - Create: `internal/golden/promote_test.go`
 
-1. Build a candidate from the qualified lock and complete portable guest-definition digest plus the domain-specific SSH CA public trust anchor. Candidate metadata records host/backend type, exact qualified Tart + Softnet pair, lock digest, guest-definition digest, domain, artifact ID, BOM, tests, and human-acceptance status.
+1. Build a generic candidate from the qualified lock and complete portable
+   guest-definition digest. Candidate metadata records host/backend type, exact
+   qualified Tart + Softnet pair, lock digest, guest-definition digest,
+   artifact ID, BOM, tests, and human-acceptance status. Domain-specific trust
+   is added only to fresh clones through amended ADR 012's serial bootstrap.
 2. Refuse a candidate whose host-tool pair differs from the qualified Task 0 pair or whose guest definition, lock, BOM, identity-finalization evidence, or security-property tests are incomplete.
 3. Promote only a stopped, validated, human-accepted candidate. Use a domain golden lock and atomic pointer-file replacement. Never rename or mutate a `current` VM. Session creation holds the same lock while resolving one immutable revision.
 4. Test power loss before/after candidate creation, validation recording, pointer fsync/rename, and concurrent create/promote. A failed promotion leaves the previous pointer intact.
@@ -301,9 +318,16 @@ go test ./...
 - Create: `internal/sshx/knownhosts_test.go`
 - Create: `scripts/ssh-session.sh`
 
-1. Generate each domain's SSH user CA private key only at an explicit identity-init command, with `0600`/`O_EXCL`, outside repo/profile/backend roots. Store the public trust anchor in domain golden inputs. Refuse shared CA-private paths across domains.
+1. Generate each domain's SSH user CA private key only at explicit domain init,
+   with `0600`/`O_EXCL`, outside repo/profile/backend roots. Keep its public
+   anchor in host domain state for post-clone serial bootstrap; never put it in
+   generic golden inputs. Refuse shared CA-private paths across domains.
 2. Issue short-lived, session-UUID/principal-bound OpenSSH user certificates. Do not copy a reusable private key into the guest and do not use the user's SSH agent.
-3. Resolve the address through `Backend.ManagementAddress` using the Task-0-qualified DHCP resolver behavior, refresh it according to the observed lease/cache limits, and pin the regenerated SSH host key in a domain/session-specific known-hosts file. Implement only the authenticated Tart/serial bootstrap mechanism proven by Task 0, or the explicitly accepted immediate-pinning TOFU fallback. Never use global `StrictHostKeyChecking=no`. Surface the trust mechanism or accepted assumption in status/help.
+3. Resolve the address through `Backend.ManagementAddress` using the
+   Task-0-qualified DHCP resolver behavior, refresh it according to the observed
+   lease/cache limits, and use only ADR 017's trusted serial bootstrap to obtain
+   and pin the regenerated SSH host key in domain/session-specific host state.
+   TOFU and `StrictHostKeyChecking=no` are prohibited.
 4. Execute `ssh` with explicit identity/certificate/known-host paths and `-o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o PermitLocalCommand=no`. The convenience command supports a shell, tmux, logs, Git, and Docker inspection but no host forwarding.
 5. Test wrong domain, expired certificate, changed host key, address reuse, missing state, multiple addresses, timeout, and forbidden user-supplied SSH options.
 

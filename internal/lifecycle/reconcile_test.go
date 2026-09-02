@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
@@ -18,6 +19,22 @@ func TestReconcileRecognizesStableConsistentState(t *testing.T) {
 	}
 	if got.Diagnostic != "" {
 		t.Fatalf("Diagnostic = %q, want empty", got.Diagnostic)
+	}
+}
+
+func TestReconcileMarksRunningBackendWithoutSupervisorReadinessAsDrift(t *testing.T) {
+	got := Reconcile(session.StateRunning, backend.Observation{
+		ObjectID: "boxwarden-work-dev",
+		Exists:   true,
+		State:    backend.ObjectRunning,
+	})
+	if got.Consistency != Drift {
+		t.Fatalf("Consistency = %q, want %q", got.Consistency, Drift)
+	}
+	for _, want := range []string{"supervisor ownership/readiness", "non-ready", "not adopted"} {
+		if !strings.Contains(got.Diagnostic, want) {
+			t.Errorf("Diagnostic = %q, want guidance containing %q", got.Diagnostic, want)
+		}
 	}
 }
 

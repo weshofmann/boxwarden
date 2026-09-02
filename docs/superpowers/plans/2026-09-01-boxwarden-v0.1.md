@@ -1,549 +1,850 @@
-# Boxwarden v0.1 Implementation Plan
+# Boxwarden v0.1 V1-V4 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` for inline execution as a single lead. Steps use checkbox (`- [ ]`) syntax for tracking. Do not run parallel state-changing work against Git, Tart, networking, credentials, or the shared repository.
+> **Execution boundary:** V1 and V2 are completed historical slices. Implement
+> V3 and then V4 with TDD and their independent review gates. Stop after V4.
+> V5 and later are roadmap only and are not authorized by this plan.
 
-**Goal:** Deliver the reduced, production-quality Boxwarden v0.1 lifecycle manager for one qualified local Tart workstation, including practical per-provider work authentication, while first shipping and reviewing only the non-mutating `session status` vertical slice.
+**Goal:** Complete the smallest trustworthy path from a registered generic
+golden to a READY M1A workstation: explicit host/domain initialization, strict
+management identity, qualified host-tool privilege, supervised start, trusted
+post-clone serial bootstrap, pinned SSH, and time-zone convergence.
 
-**Architecture:** The Go control plane owns security-domain resolution, trusted-host state, lifecycle intent, reconciliation, locks, destructive safety, and provider policy. The Tart backend owns only exact VM mechanics and observations; it never decides common policy. Provider support is a closed set of named mechanisms selected per provider and domain—never a generic CONNECT proxy, TLS interceptor, or ambient credential bridge.
+**Architecture:** The common Go control plane owns domain/session identity,
+generic-golden admission, intended state, locks, supervisor/readiness policy,
+management CA/certificates, host-key pins, strict SSH, serial bootstrap protocol,
+time-zone convergence, and failure semantics. The Tart adapter owns exact VM
+mechanics and observation. A running backend is not READY.
 
-**Tech Stack:** Go 1.27 standard library; strict JSON; `os/exec` argv execution; Tart 2.32.1 and Softnet 0.19.0 only where Task 0 qualified them; OpenSSH; provider-supported CLIs/SDKs.
+**Qualified host toolchain:** Go 1.27 standard library; OpenSSH; Tart 2.32.1
+executable SHA-256
+`05b65d5c14e8b41e8e44b6d9fd1278de4bedbc8b735d9b99f3c748f76f75862d`
+(archive `8554ab4f7fc12afe52f9b7e3093a935673cbac737a83973d2db7a0683c814529`);
+Softnet 0.19.0 executable SHA-256
+`ab333619fc8bd7277837545e49a771baa994c01c3e8c14904ae4cc4c1f37269e`
+(archive `1612e1296834aae0b6389650c7c5190add1ee8d71474e328691e67679ecda53c`).
 
-**Spec:** `docs/architecture.md`, `docs/security-model.md`, `docs/state-model.md`, `docs/lifecycle-and-recovery.md`, ADRs 001–023, Task 0 evidence, and the 2026-09-01 approved production mandate. `docs/reviews/2026-09-01-v0.1-scope-reduction.md` is superseded where this plan requires practical provider authentication.
+## Non-negotiable execution rules
 
-## Global constraints
+- Require `--domain` or `BOXWARDEN_DOMAIN`; never default or search across
+  domains.
+- Keep common packages independent of `internal/backend/tart`; only command
+  composition imports the Tart adapter.
+- Use exact argv with bounded contexts and bounded input/output. Never invoke a
+  shell for host operations.
+- Persist and fsync lifecycle intent under the session lock before backend
+  mutation. Treat `(domain, session UUID, backend kind/object, intended state)`
+  as durable identity.
+- Treat PIDs, process start evidence, PTYs, Screen names, addresses,
+  certificates, and a start-generation UUID as correlation/runtime state only.
+- Never install start generation or nonce in guest durable state. The immutable
+  guest binding is `(domain, session UUID, backend kind/object, CA fingerprint,
+  exact derived principal)`; later generations verify the same binding.
+- Never adopt an intended-running, observed-running VM whose current supervisor
+  ownership/readiness cannot be proven. Report DRIFT/NON-READY and require an
+  explicit stop/restart. Cleanup may act only on ownership it proves.
+- Never use TOFU, `StrictHostKeyChecking=no`, a network bootstrap path, a host
+  SSH agent, a host filesystem share, clipboard/audio sharing, forwarding, or
+  provider credentials.
+- `init` is explicit and may request attended administrator authorization.
+  `doctor` is read-only and never repairs, installs, rotates, or re-authorizes.
+- Under ADR 024, any privileged Softnet under mutable Homebrew state is blocking
+  `drifted/unsafe`; init/start refuse and Boxwarden never chmods it. Init refuses
+  a source with any setuid/setgid bit. Only the exact staged copy is `04550`.
+- V4 launches only the default Softnet policy and rejects every allow flag.
+  ADR 015 opt-in requires future persisted record/status/CLI semantics.
+- Deterministic tests use temporary roots, fake runners/backends/process tables,
+  fake clocks, fake serial transports, and fixed fixtures. They never mutate
+  `/Library`, directory services, Tart, Softnet, SSH service state, real VMs, or
+  the actual host toolchain.
+- Real-host install, Tart/Softnet, serial/Screen, SSH, and VM gates are
+  user-attended and remain pending until honestly executed.
 
-- Task 0 is complete: **PASS_WITH_CONDITIONS**. Do not reopen qualification; report its three unqualified IPv6-related environment rows accurately.
-- Each command requires an explicit domain supplied by `--domain` or `BOXWARDEN_DOMAIN`; there is no default domain or cross-domain fallback.
-- Common packages must not import `internal/backend/tart`; a composition boundary supplies the Tart observer/lifecycle implementation.
-- Use the Go standard library unless a concrete added dependency is documented and reviewed. Host commands use `exec.CommandContext` with exact argv, a bounded context, and bounded output; never use a shell.
-- All persistent host paths are canonicalized and checked for symlinks before use. Domain roots must be distinct, private, and non-overlapping. Status creates no directories or files.
-- Every lifecycle mutation records and fsyncs intent under a per-session lock before its backend call, then reconciles from backend observation. A raw PID is never a durable identity.
-- V1 is read-only: it may read configuration, session records, and `tart list --format json`; it must not modify Tart, Softnet, session state, credentials, or host configuration.
-- Normal M1A launches preserve Task 0’s Softnet shared/NAT, no audio, no clipboard, serial Screen-held relay, no host Docker/display/forwarding/port/bridged/nested integration, and ADR 015’s exact-only private CIDR exception policy.
-- ADR 021's read-only host-tree capability is a proposed future design, not a V1-accepted exception. V1 neither accepts, implements, nor relies on it, and V14 implementation is blocked until ADR 021 receives formal acceptance through its own decision process. If later accepted, it must never be ambient or writable: by default a session has no host filesystem, a user must explicitly configure each capability for its exact session, and it remains unavailable to quarantine by default. Guest-local OverlayFS proposal/promotion remains outside V0.1 until separately designed.
-- Quarantine receives neither normal profile restoration nor reusable provider/Git credentials. A human can still log in through the guest GUI; status and documentation must say so.
-- Automated tests use fake backends, fake provider endpoints, and fixtures containing no real credentials. Each provider task separately includes a user-attended real-account gate using test data and revocable/temporary authority.
-- Never inspect or copy a host credential store during V1. Provider tasks access a secret only through the later approved, named provider mechanism and never log a secret value.
+## State and command contract
 
-## Target file structure
+V3/V4 introduce session record version 2 while continuing to read V1 records
+for V2 stopped sessions. On the first V3/V4 write, preserve all V1 identity and
+atomically upgrade to:
+
+```go
+type Record struct {
+    Version         int                     `json:"version"`
+    Domain          domain.ID               `json:"domain"`
+    Name            session.Name            `json:"name"`
+    ID              string                  `json:"id"`
+    Mode            session.Mode            `json:"mode"`
+    IntendedState   session.IntendedState   `json:"intended_state"`
+    Backend         session.BackendRef       `json:"backend"`
+    GoldenRevision  string                  `json:"golden_revision"`
+    StartGeneration string                  `json:"start_generation,omitempty"`
+    Readiness       session.ReadinessRecord `json:"readiness"`
+}
+
+type ReadinessRecord struct {
+    Status     ReadinessStatus `json:"status"`     // not_ready, starting, ready, drift
+    Diagnostic string          `json:"diagnostic"` // bounded, non-secret last result
+}
+```
+
+`ReadinessRecord` is an audit/result hint, never proof of current readiness.
+Status recomputes readiness from current observation and runtime evidence. A
+start-generation is freshly generated and persisted with `starting`; it
+correlates one supervisor instance but does not replace session identity.
+
+Configuration version 2 adds one non-secret shared host block while retaining
+the existing domain map:
+
+```go
+type HostConfig struct {
+    TartExecutable string `json:"tart_executable"`
+    SoftnetSource  string `json:"softnet_source"`
+    TartHome       string `json:"tart_home"`
+}
+```
+
+Both executable paths must be canonical absolute existing regular files without
+symlinked components; `tart_home` is a canonical absolute private directory.
+`softnet_source` is input to attended init, never the privileged runtime path.
+V1/V2 read-only/status/create commands continue to accept existing
+version-1 configuration; `init`, `doctor`, and `session start` require version 2
+and fail with an upgrade diagnostic when the host block is absent. The operator
+group name is the fixed `boxwarden-operators`, not configurable input.
+
+Host-key pins are separate immutable versioned records under
+`<state_root>/identity/ssh-host-pins/<session-uuid>.json`:
+
+```go
+type HostKeyPin struct {
+    Version       int       `json:"version"`
+    Domain        domain.ID `json:"domain"`
+    SessionID     string    `json:"session_id"`
+    BackendKind   string    `json:"backend_kind"`
+    BackendObject string    `json:"backend_object"`
+    Algorithm     string    `json:"algorithm"`
+    PublicKey     string    `json:"public_key"`
+    Fingerprint   string    `json:"fingerprint"`
+}
+```
+
+They contain no IP. An exact repeat is idempotent; any different key or binding
+fails closed and is never replaced implicitly.
+
+The guest `active` binding is independent of generation:
+
+```go
+type GuestBinding struct {
+    Version       int       `json:"version"`
+    Domain        domain.ID `json:"domain"`
+    SessionID     string    `json:"session_id"`
+    BackendKind   string    `json:"backend_kind"`
+    BackendObject string    `json:"backend_object"`
+    CAFingerprint string    `json:"ca_fingerprint"`
+    Principal     string    `json:"principal"`
+}
+```
+
+CA metadata beside `ca` and `ca.pub` is immutable and versioned and contains
+domain ID, Ed25519 algorithm, public key, public-key fingerprint/digest, a
+unique creation UUID, and exact creating operator UID/name. Nonce and start generation appear only in current request/
+response framing and host runtime metadata.
+
+Commands added by this plan:
 
 ```text
-cmd/boxwarden/                       command entrypoint and composition
-internal/app/                        CLI orchestration and human output
-internal/auth/                       closed provider capability registry and revocation inventory
-internal/backend/                    neutral lifecycle interfaces and fake backend
-internal/backend/tart/               defensive Tart argv/observation adapter
-internal/config/                     strict configuration and domain-root admission
-internal/domain/                     domain/session identifier validation
-internal/execx/                      bounded argv-only command runner
-internal/golden/                     registered stopped golden records
-internal/lifecycle/                  intended/observed reconciliation and transitions
-internal/lock/                       domain/session operation locks
-internal/project/                    registered Git durability guard
-internal/serialx/                    private PTY relay and Screen supervisor
-internal/session/                    versioned session records and registry
-internal/sshx/                       per-domain CA, pinning, and bounded SSH launch
-internal/validate/                   host and session validation
-internal/providers/{aws,gcp,github,bitbucket,jira,claude}/
-                                      provider-specific contracts and implementations
-config/boxwarden.example.json        non-secret configuration example
-docs/operations/                     operator and provider runbooks
+boxwarden --domain DOMAIN init
+boxwarden --domain DOMAIN doctor
+boxwarden --domain DOMAIN session start NAME
+boxwarden --domain DOMAIN session status NAME
+boxwarden --domain DOMAIN session console NAME
+```
+
+`init` establishes the shared host toolchain if absent and exactly one CA for
+the selected domain. Re-running against fully matching state reports healthy;
+missing partial state, unsafe state, or conflicting state fails without repair.
+`doctor` reports `healthy`, `missing/uninitialized`, `drifted/unsafe`, or
+`unsupported/unqualified` per check and exits nonzero unless every required
+start prerequisite is healthy. `session start` prints success only after READY.
+`session console` is the supported human attach path and uses the same exclusive
+serial lease as automation.
+
+## Target package structure through V4
+
+```text
+cmd/boxwarden/                       command composition and hidden supervisor/root installer modes
+cmd/boxwarden-guest-bootstrap/       static guest serial bootstrap helper
+internal/app/                        public CLI parsing/output and orchestration
+internal/backend/                    neutral observe/create/start contracts and deterministic fake
+internal/backend/tart/               exact Tart observe/create/address/launch argv
+internal/execx/                      bounded argv runner with bounded stdin
+internal/golden/                     domain-scoped admission of generic stopped artifacts
+internal/hostx/                      exact toolchain manifest, init/install, doctor, uninstall guard
+internal/lifecycle/                  start transition and readiness reconciliation
+internal/serialx/                    Darwin two-PTY broker, Screen child, framed exchange
+internal/session/                    versioned records/store and start-generation state
+internal/sshx/                       domain CA, cert issuer, host-key pins, strict client policy
+internal/supervisor/                 runtime request/manifest, ownership proof, child protocol
+internal/timezonex/                  host detection and guest apply/readback
+guest/ubuntu-24.04-arm64/            generic sshd/bootstrap targets and helper installation
+docs/operations/                     init/doctor, SSH, start/recovery runbooks
+```
+
+The common V3 contracts are deliberately small:
+
+```go
+type HostInitializer interface {
+    Init(context.Context, config.Domain) (hostx.InitResult, error)
+}
+type HostDoctor interface {
+    Check(context.Context, config.Domain) (hostx.Report, error)
+}
+type CAStore interface {
+    Init(context.Context, config.Domain, []config.Domain) (sshx.CAIdentity, error)
+    Load(context.Context, config.Domain) (sshx.CAIdentity, error)
+}
+type CertificateIssuer interface {
+    Issue(context.Context, config.Domain, session.Record, string) (sshx.Certificate, error)
+}
+type PinStore interface {
+    Admit(context.Context, config.Domain, session.Record, sshx.ObservedHostKey) (sshx.HostKeyPin, error)
+    Load(context.Context, config.Domain, session.Record) (sshx.HostKeyPin, error)
+}
+type ManagementClient interface {
+    Probe(context.Context, sshx.Connection, sshx.ProbeRequest) (sshx.ProbeResult, error)
+    ApplyZone(context.Context, sshx.Connection, sshx.ApplyZoneRequest) error
+    ReadZone(context.Context, sshx.Connection, sshx.ReadZoneRequest) (string, error)
+}
+```
+
+The common V4/backend contracts pass typed policy, never arbitrary backend
+flags:
+
+```go
+type Starter interface {
+    Start(context.Context, backend.StartRequest) (backend.StartHandle, error)
+}
+type AddressResolver interface {
+    Resolve(context.Context, string) (netip.Addr, error)
+}
+type RuntimeObserver interface {
+    ObserveRuntime(context.Context, supervisor.Ownership) (supervisor.Observation, error)
+}
+type Bootstrapper interface {
+    Apply(context.Context, serialx.Lease, serialx.BootstrapRequest) (serialx.BootstrapResult, error)
+}
+type GuestZoneManager interface {
+    ApplyAndReadBack(context.Context, sshx.Connection, string) (string, error)
+}
 ```
 
 ---
 
-### Task V1: Read-only session-status vertical slice
+## V1 — read-only status (complete)
+
+V1 implemented strict configuration/domain admission, versioned read-only
+session records, bounded argv-only execution, defensive Tart observation,
+intended/observed reconciliation, and `session status`. It performs no mutation.
+
+- [x] Domain/config/session validation and symlink/path rejection.
+- [x] Narrow backend observation seam and exact `tart list --format json`.
+- [x] Read-only CLI/status and backend import-boundary test.
+
+Do not reimplement V1. Its existing tests remain regression gates.
+
+## V2 — generic golden registration and stopped clone (complete code; attended gate pending)
+
+V2's domain-owned record is admission/selection metadata for a generic artifact.
+`golden register` verifies only that the named backend object exists exactly once
+and is stopped, then records exact identity and explicit operator admission. It
+does not prove or store provenance, clone-readiness, CA state, or qualification
+evidence. Multiple domains may independently record the same exact artifact.
+
+`session create` resolves one admitted revision under the domain golden lock,
+persists `creating`, clones, randomizes the MAC, re-observes the exact clone, and
+persists `stopped`. It never boots the guest, converges time zone, binds a domain
+CA, reads a host key, or reports READY.
+
+- [x] `internal/golden`, locking, atomic immutable records/current pointer.
+- [x] Intent-first clone/random-MAC reconciliation and collision/fault tests.
+- [x] CLI composition for registration, create, and status.
+- [ ] User-attended disposable real-host register/clone gate.
+
+The V2 gate must use an already externally qualified, stopped, non-production
+generic golden and record no private identifiers. Its result may validate V2
+mechanics but must not inflate registration into a provenance claim.
+
+---
+
+## V3 — trusted host/domain management foundation
+
+### V3.1 Exact host-tool manifest and safe deterministic seams
 
 **Files:**
-- Create: `go.mod`, `.gitignore`, `README.md`, `config/boxwarden.example.json`
-- Create: `cmd/boxwarden/main.go`
-- Create: `internal/domain/id.go`, `internal/domain/id_test.go`
-- Create: `internal/config/config.go`, `internal/config/config_test.go`
-- Create: `internal/session/name.go`, `internal/session/name_test.go`, `internal/session/record.go`, `internal/session/record_test.go`, `internal/session/registry.go`, `internal/session/registry_test.go`
-- Create: `internal/backend/observation.go`, `internal/backend/fake/fake.go`, `internal/backend/fake/fake_test.go`
-- Create: `internal/backend/tart/observe.go`, `internal/backend/tart/observe_test.go`, `internal/backend/tart/parse.go`, `internal/backend/tart/parse_test.go`
-- Create: `internal/execx/runner.go`, `internal/execx/runner_test.go`
-- Create: `internal/lifecycle/reconcile.go`, `internal/lifecycle/reconcile_test.go`
-- Create: `internal/app/app.go`, `internal/app/app_test.go`, `internal/app/architecture_test.go`
 
-**Interfaces:**
+- Create `internal/hostx/identity.go`, `manifest.go`, `manifest_test.go`
+- Create `internal/hostx/filesystem.go`, `filesystem_test.go`
+- Modify `internal/execx/runner.go`, `runner_test.go` for bounded stdin
+- Modify `internal/config/config.go`, `config_test.go`
+- Modify `config/boxwarden.example.json`
 
-```go
-// internal/backend/observation.go
-type ObjectState string
-const (ObjectRunning ObjectState = "running"; ObjectStopped ObjectState = "stopped"; ObjectUnknown ObjectState = "unknown")
-type Observation struct { ObjectID string; Exists bool; State ObjectState; Diagnostic string }
-type Observer interface { Observe(context.Context, string) (Observation, error) }
+Define constants for the exact versions and four approved digests above. The
+qualified macOS release is the Task 0 M1A `26.6.2` identity. The
+root-owned manifest lives at
+`/Library/Boxwarden/toolchains/softnet/0.19.0/ab333619fc8bd7277837545e49a771baa994c01c3e8c14904ae4cc4c1f37269e/manifest.json`
+beside `softnet`. It records schema version, platform, qualified macOS identity,
+canonical absolute Tart path and its executable/archive identities, canonical
+Softnet path and executable/archive identities, root UID, dedicated
+`boxwarden-operators` group ID/name/membership, exact single trusted operator
+UID/name/home, canonical `tart_home`, expected mode `04550`, and installation
+timestamp. No `current` symlink exists.
 
-// internal/lifecycle/reconcile.go
-type Status string
-const (StatusConsistent Status = "consistent"; StatusDrift Status = "drift"; StatusUnknown Status = "unknown")
-func Reconcile(intended session.IntendedState, observed backend.Observation) (Status, string)
-```
+- [ ] Write failing strict-manifest tests: duplicate/unknown/missing fields,
+  wrong platform/version/digest/path/group/mode, oversized JSON, symlinks,
+  ancestor replacement, ACL grant, group/other-writable ancestors, non-regular
+  executable, link count other than one, wrong owner, malformed root manifest,
+  operator/group/name/UID/home/membership mismatch, stale process supplementary
+  groups, and path overlap with repository/domain/runtime roots.
+- [ ] Add interfaces `FSInspector`, `GroupDB`, `ProcessInventory`, `PrivilegeRunner`,
+  and `Clock`; production adapters wrap OS calls, tests use only fakes and temp
+  roots. Add `execx.Command.Stdin []byte`, enforce its byte limit, and prove it
+  never appears in errors or output.
+- [ ] Implement canonical no-symlink traversal and exact manifest parsing. Keep
+  policy in `hostx`; do not import Tart.
 
-- [ ] **Step 1: Write the domain/config failure tests before implementation.** Cover missing domain, `BOXWARDEN_DOMAIN` fallback only when the flag is absent, invalid or unknown IDs, duplicate IDs, relative/symlinked roots, overlapping roots, and resolution of `work` versus `personal` to distinct roots.
+### V3.2 Explicit `init` and exact ADR 024 Softnet privilege installation
 
-- [ ] **Step 2: Run the focused domain/config tests and verify they fail.**
+**Files:**
+
+- Create `internal/hostx/init.go`, `init_test.go`
+- Create `internal/hostx/install.go`, `install_test.go`
+- Create `internal/hostx/uninstall.go`, `uninstall_test.go`
+- Modify `internal/app/app.go`, `app_test.go`
+- Modify `cmd/boxwarden/main.go`
+- Create `docs/operations/init-and-doctor.md`
+
+`boxwarden --domain D init` resolves the current executable and qualified source
+paths, hashes before mutation, and sends a bounded versioned install request on
+stdin to an exact `/usr/bin/sudo -- <absolute-boxwarden> internal host-install`
+root phase. The hidden mode requires effective UID 0, ignores ambient PATH and
+security-sensitive environment, reopens source files without following
+symlinks, rejects every setuid/setgid source, revalidates type/link count/digest
+after open, derives and verifies the actual sudo caller UID/name/home rather
+than accepting an arbitrary username, and accepts only the
+compiled qualified identities. Administrator credentials are handled only by
+`sudo`; Boxwarden never stores or reads them.
+
+The root phase creates/validates the dedicated `boxwarden-operators` group and
+the single invoking trusted operator membership, creates every ancestor root-owned and
+non-writable by group/other, copies Softnet to a sibling staging directory,
+fsyncs it, sets root/group and `04550`, verifies digest/type/link/ACL/metadata,
+renames the complete digest directory into place, fsyncs its parent, and
+publishes the root-owned manifest last by atomic rename and parent fsync. It
+never authorizes a Homebrew path. If the exact final tree already exists and is
+fully valid, it is idempotent. Partial, unexpected, or mismatched final state
+fails closed with manual remediation guidance; it is not overwritten. It removes
+only the exact staging tree it created and still owns. New directory-service
+membership does not imply membership in the initiating process tree: init
+reports that a login-session refresh is required, and doctor/start fail until
+the new supplementary group is effective.
+
+Before privileged installation, init scans configured mutable Homebrew Softnet
+locations. Any setuid/setgid or passwordless-root target is blocking unsafe
+state requiring attended manual inspection/remediation. Boxwarden does not
+chmod, delete, copy from, or otherwise repair it, even when its bytes match.
+
+The uninstall primitive accepts the full Softnet digest, resolves exactly one
+manifested digest directory, checks recorded and live supervisor consumers, and
+refuses if any consumer is active or ownership cannot be proven. It never uses a
+glob, version-only selector, broad `/Library/Boxwarden` target, or implicit
+current pointer. Upgrade is a future explicit `init` of an adjacent qualified
+digest and never mutates the existing tree.
+
+- [ ] Write failures first for interrupted copy/fsync/rename/manifest publish,
+  source replacement, altered post-copy digest, malicious request paths,
+  source privilege bits, inherited environment, spoofed sudo caller,
+  wrong caller UID/group/home, new membership without current-process effect,
+  blocking Homebrew privilege, already-correct idempotence, unsafe preexisting
+  directory, staging ownership/cleanup, active/unverifiable uninstall consumer, and
+  exact inactive uninstall.
+- [ ] Implement the root phase behind injected filesystem/group/process seams.
+  Unit tests execute it only against a temporary synthetic root and fake group
+  DB; they never invoke `sudo`, directory services, or `/Library`.
+- [ ] Add CLI tests proving init is explicit, domain-required, attended, and
+  never reachable from `session start` or `doctor`.
+
+### V3.3 One explicit management CA per domain and certificate issuance
+
+**Files:**
+
+- Create `internal/sshx/ca.go`, `ca_test.go`
+- Create `internal/sshx/cert.go`, `cert_test.go`
+- Create `internal/sshx/paths.go`, `paths_test.go`
+- Modify `internal/hostx/init.go`, `init_test.go`
+
+Store the CA at `<state_root>/identity/ssh-user-ca/ca` with owner-only directory
+components and private key mode `0600`; `ca.pub` is a regular non-symlink public
+file in the same private tree. Immutable `metadata.json` binds version, domain
+ID, Ed25519 algorithm, public key/fingerprint/digest, unique creation UUID, and
+exact creating operator UID/name.
+Every load and issue validates key/public/metadata agreement. `init` receives
+the complete configured-domain set and compares public fingerprints across
+their configured roots only to reject accidental reuse; it never uses that scan
+for credential lookup or fallback. A copied CA tree fails its bound domain.
+`init` uses exact argv to the absolute system
+`ssh-keygen` to create one Ed25519 CA only when the complete target is absent.
+It validates key/public-key agreement and permissions. A complete matching CA
+reports already initialized. Partial, malformed, unsafe, copied-across-domain,
+or unexpected state fails; there is no lazy create, silent rotation, or repair.
+
+The persistent supervisor creates and owns an ephemeral Ed25519 client key in
+its private runtime generation directory and issues a certificate with identity
+`boxwarden:<domain>:<session-uuid>`, sole principal
+`boxwarden-session-<session-uuid>`, a five-minute negative validity offset for
+clock skew, and fifteen-minute positive validity. Exact `ssh-keygen -O clear`
+removes all certificate extensions. The issuer accepts no caller principals or
+options and passes no private bytes through argv/logs. The supervisor revalidates
+CA metadata before renewal and renews when five minutes remain. Certificates
+are runtime state, not session identity.
+
+- [ ] Test absent/correct/partial/unsafe CA state, wrong domain, symlink/hardlink,
+  duplicate init, malformed key, key/public/metadata mismatch, copied domain,
+  duplicate fingerprint across configured roots, no cross-domain selection,
+  no private bytes in diagnostics, exact principal/identity/validity/`-O clear`
+  argv, no extensions, renewal threshold, expiry, cancellation, bounded output,
+  and cross-domain issuance denial.
+- [ ] Implement `CAStore.Init` and `Issuer.Issue` with injected argv runner and
+  clock. Fake `ssh-keygen` tests assert argv/files without invoking host SSH.
+
+### V3.4 Host-key pin store and strict SSH policy
+
+**Files:**
+
+- Create `internal/sshx/pin.go`, `pin_test.go`
+- Create `internal/sshx/client.go`, `client_test.go`
+- Create `internal/sshx/knownhosts.go`, `knownhosts_test.go`
+- Create `docs/operations/ssh-management.md`
+
+`PinStore.Admit` accepts only a parsed Ed25519 public host key obtained by V4's
+trusted serial exchange and writes the exact immutable record defined above.
+It derives the filename from the validated session UUID, not user input. It
+also materializes a generation-private known-hosts file keyed by a
+session-UUID-derived `HostKeyAlias`, not the current address.
+
+`Client` uses absolute `/usr/bin/ssh`, `-F /dev/null`, exact generation
+`IdentityFile` and `CertificateFile`, derived `HostKeyAlias`, exact alias-keyed
+`UserKnownHostsFile`, `GlobalKnownHostsFile=/dev/null`,
+`StrictHostKeyChecking=yes`, `CheckHostIP=no`, `BatchMode=yes`,
+`IdentitiesOnly=yes`, `IdentityAgent=none`,
+`HostKeyAlgorithms=ssh-ed25519`, `UpdateHostKeys=no`,
+`VerifyHostKeyDNS=no`, `CanonicalizeHostname=no`, `ProxyCommand=none`,
+`ProxyJump=none`, `ControlMaster=no`, `ControlPath=none`, `RequestTTY=no`,
+`PasswordAuthentication=no`, `KbdInteractiveAuthentication=no`,
+`ForwardAgent=no`, `ForwardX11=no`,
+`ClearAllForwardings=yes`, `PermitLocalCommand=no`, `Tunnel=no`, and bounded
+connect/server-alive timeouts. It logs in only as `boxwarden` and invokes the
+exact fixed remote command `/usr/bin/sudo -n -- /usr/local/libexec/boxwarden-guest-bootstrap management`. No input-derived bytes
+enter that command. Separate bounded typed request structures exist only for
+`Probe`, `ApplyZone`, and `ReadZone`; there is no generic operation+argv API.
+
+- [ ] Test exact idempotent pin, changed key, wrong domain/session/backend,
+  algorithm rejection, duplicate/oversized key, symlink/hardlink store, IP
+  changes, alias-keyed known-host formatting, every exact option above,
+  ambient ssh config/proxy/multiplexing rejection, deadline, output truncation,
+  fixed remote command, typed stdin framing, and no general argv or
+  input-derived shell text.
+- [ ] Implement pin/store/client independently of Tart. V4 supplies address and
+  serial evidence through interfaces.
+
+### V3.5 Read-only doctor and V3 integration
+
+**Files:**
+
+- Create `internal/hostx/doctor.go`, `doctor_test.go`
+- Modify `internal/app/app.go`, `app_test.go`
+- Modify `cmd/boxwarden/main.go`
+
+Doctor checks: supported macOS/architecture; exact absolute Tart identity;
+Softnet canonical ancestors, ACLs, link count, digest, root owner, group,
+`04550`, manifest and paired identities; exact manifested operator UID/name/home
+and group ID/name/directory membership; current-process supplementary group;
+canonical `tart_home`; domain CA metadata/key agreement/modes/uniqueness;
+ssh/ssh-keygen availability; and exact `/usr/bin/screen` 4.00.03 (FAU,
+23-Oct-06), SHA-256
+`07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add`,
+root:wheel `0755`, one link, on macOS 26.6.2. Any setuid/setgid or
+passwordless-root Softnet under mutable Homebrew state is `drifted/unsafe`,
+makes doctor nonzero, and blocks init/start even if the staged copy is healthy.
+Each finding has stable code, category, observed fact, expected fact, and remedy
+requiring attended manual inspection or explicit init; doctor never repairs.
+
+- [ ] Test every status category, multiple simultaneous findings, deterministic
+  ordering, redaction, unsafe Homebrew blocking, current-process group refresh,
+  nonzero exit, no writes/process mutation, and inability to call any
+  initializer/privilege runner.
+- [ ] Wire `init` as host tool installation followed by selected-domain CA init;
+  if host install succeeds but CA init fails, report the exact partial boundary
+  and require explicit rerun. Never roll back or overwrite a valid shared tool.
+- [ ] Run V3 verification:
 
 ```bash
-go test ./internal/domain ./internal/config
+test -z "$(gofmt -l $(git ls-files -- '*.go'))"
+go test ./... -count=1
+go test -race ./... -count=1
+go vet ./...
+go build ./cmd/boxwarden
+git diff --check
 ```
 
-- [ ] **Step 3: Implement strict configuration and path admission.** Define version `1` JSON with a `domains` object keyed by lowercase ASCII domain IDs and an absolute `state_root` per domain. Reject unknown fields with `json.Decoder.DisallowUnknownFields`, roots that do not already exist, and any symlink in the root path. The command may default only its non-secret config *location*; it never defaults a domain.
+**V3 attended gate:** On the exact qualified disposable M1A host, inspect the
+install request, authorize init, verify the complete installed tree/group/mode/
+ACL/link/digests/manifest, domain CA isolation, idempotent rerun, doctor output,
+and refreshed effective group. Prove the installed exact setuid Softnet's
+argument parsing, closed environment and dependency resolution, effective
+privilege transition/drop, signals, filesystem writes, exact qualified network
+behavior, and absence of any sudo path. Also prove an unsafe Homebrew setuid
+copy blocks doctor/init/start without chmod/repair. Record redacted evidence;
+deterministic fakes do not satisfy this gate.
 
-- [ ] **Step 4: Write then run failing session-record tests.** Test valid version-1 records, cross-domain record rejection, unknown JSON fields, missing required backend identity, unsupported intended state, missing record, safe names, traversal, option-shaped names, control bytes, overlength, symlinked `sessions/`, and attempted `work` lookup of a `personal` record.
+---
 
-```go
-type Record struct {
-    Version        int           `json:"version"`
-    Domain         string        `json:"domain"`
-    Name           string        `json:"name"`
-    ID             string        `json:"id"`
-    Mode           Mode          `json:"mode"`
-    IntendedState  IntendedState `json:"intended_state"`
-    Backend        BackendRef    `json:"backend"`
-    GoldenRevision string        `json:"golden_revision,omitempty"`
-}
-```
+## V4 — start, supervise, serial bootstrap, and readiness
 
-- [ ] **Step 5: Implement read-only registry parsing.** Permit only `clean` and `quarantine` modes and `creating`, `stopped`, `starting`, `running`, `stopping`, `deleting`, or `failed` intended states. Resolve `<state_root>/sessions/<validated-name>.json` without creating it; use `Lstat` for every existing component and reject symlinks.
+### V4.1 Generic guest bootstrap contract
 
-- [ ] **Step 6: Write failing runner/backend/reconciliation tests.** Test fake consistent, missing, drift, and ambiguous observations; Tart valid records, empty listing, missing object, duplicate name, malformed JSON, wrong JSON types, unrecognized `State`, command failure, and deadline. Assert exact argv `tart list --format json`, no `sh`/`sh -c`, and output truncation.
+**Files:**
 
-- [ ] **Step 7: Implement the minimal neutral observation seam and Tart parser.** `tart.Observer` invokes only `tart list --format json`; parses the qualified object fields `Name`, `Running`, and `State`; requires `Running` and accepts only a matching `State`/boolean pair. More than one matching name and every unfamiliar schema/state return an actionable error rather than an arbitrary observation.
+- Create `cmd/boxwarden-guest-bootstrap/main.go` and tests
+- Modify `guest/ubuntu-24.04-arm64/autoinstall/user-data`
+- Modify `guest/ubuntu-24.04-arm64/tests/bootstrap.sh`
+- Create `guest/ubuntu-24.04-arm64/artifacts.lock.json`
+- Modify `scripts/spike/bootstrap-tart.sh` remaster mapping and its tests
 
-- [ ] **Step 8: Write failing CLI behavior tests, then implement composition and output.** Accept:
+The golden installs generic sshd policy pointing to
+`/etc/ssh/boxwarden/active/trusted-user-ca.pub` and
+`/etc/ssh/boxwarden/active/authorized_principals/%u`, but the `active`
+directory does not exist in the golden. Install a root-owned static helper at
+`/usr/local/libexec/boxwarden-guest-bootstrap`. Guest root remains unrestricted;
+Boxwarden invokes the helper only through the fixed sudo commands below.
+
+Build the offline helper reproducibly with
+`CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags=-buildid= -o guest/ubuntu-24.04-arm64/artifacts/boxwarden-guest-bootstrap ./cmd/boxwarden-guest-bootstrap`.
+Use Go `debug/elf` to require `EM_AARCH64`, no `PT_INTERP`, and no `DT_NEEDED`;
+build twice from clean inputs and require the same digest before recording that
+exact digest and build identity in `artifacts.lock.json` and the
+golden BOM, and pass the verified file to the actual remaster command as an
+explicit input. `bootstrap-tart.sh remaster-iso` maps that exact source into the
+ISO staging tree; autoinstall late-command verifies the locked digest and
+installs root:root `0755` at the fixed path. Tests trace clean build → exact ISO
+mapping argv → installed source/digest; no network fetch occurs during remaster
+or install.
+
+In serial-bootstrap mode, the helper reads one bounded version-1 JSON request
+from stdin containing nonce, current start generation, durable domain ID,
+session UUID, backend kind/object, public CA line/fingerprint, and exact derived
+principal. This command has one fixed serial-bootstrap request shape rather
+than an operation selector. Nonce/generation are echoed correlation
+only; they are not part of installed binding.
+It emits exactly one `BOXWARDEN-BEGIN <nonce> <session-uuid>` line and one
+`BOXWARDEN-END <nonce> <session-uuid> <base64-json-result>` line. The result
+echoes the full association, installed hashes, validated effective sshd fields,
+and `/etc/ssh/ssh_host_ed25519_key.pub`; it contains no private key.
+
+The helper validates all fields and exact principal derivation, writes the public
+anchor, `authorized_principals/boxwarden`, and a durable management-binding
+manifest containing only domain/session/backend/CA fingerprint/principal into
+one fixed-parent sibling staging directory. Staging is root-only until complete;
+before publication the helper fixes and verifies root:root `0755` on `active`
+and `authorized_principals`, root:root `0644` on the public CA and
+`authorized_principals/boxwarden`, root:root `0600` on the binding manifest,
+and no group/other-writable path component. It fsyncs every file and directory,
+then atomically renames that complete directory to `active` and fsyncs the
+parent. OpenSSH resolves and opens the CA/principals files for each certificate
+authentication, so the next authentication sees the new tree without an sshd
+reload; the traversable final directory modes are required because
+`AuthorizedPrincipalsFile` is opened under the target workstation UID and
+StrictModes validates its ancestry. If `active` already exists, the helper
+succeeds only after verifying the exact association, bytes, ownership, and modes;
+mismatched state is never replaced. It then runs absolute
+`/usr/sbin/sshd -t` and
+`/usr/sbin/sshd -T -C user=boxwarden,host=localhost,addr=127.0.0.1` and verifies
+CA/principals paths plus `AuthorizedKeysFile none`, `PermitUserEnvironment no`,
+`PermitUserRC no`, password, keyboard-interactive, root, X11, TCP,
+stream-local, and tunnel prohibitions before success. `PermitLocalCommand` is
+client-only and is not treated as an sshd field. An
+exact association/bytes retry is idempotent. Any mismatch fails without replacing
+trusted files.
+
+In management mode, the helper reads the bounded versioned request built by
+`sshx.Client`, validates the exact durable association and one typed request
+shape, and directly executes fixed absolute programs. It does not invoke a
+shell. V4 implements only typed readiness-probe, time-zone-apply, and
+time-zone-read requests; no generic operation+argv or remote-shell API exists.
+
+- [ ] Write helper tests first for malformed/duplicate/oversized request,
+  association/principal mismatch, generation/nonce accidentally persisted,
+  later-generation exact binding retry, unsafe target, stale staging directory,
+  every interrupted atomic stage, final-tree ownership/modes/traversal, exact
+  retry, changed anchor/principal, missing/fresh/malformed host key, sshd
+  effective mismatch including client-only/server-field confusion, framing,
+  deadline cancellation, and no private output.
+- [ ] Update golden fixture tests to prove no domain CA/principal exists and the
+  generic policy, locked static helper, and root-owned parent do while `active`
+  does not. Test two clean reproducible builds, Go `debug/elf`
+  AARCH64/no-interpreter/no-needed inspection, digest lock/BOM, remaster
+  mapping argv, and installed source/digest end-to-end with fixtures.
+
+### V4.2 Supervisor-owned two-PTY broker and framed exclusive exchange
+
+**Files:**
+
+- Create `internal/serialx/broker.go`, `broker_test.go`
+- Create `internal/serialx/pty_darwin.go`, `pty_darwin_test.go`
+- Create `internal/serialx/screen.go`, `screen_test.go`
+- Create `internal/serialx/lease.go`, `lease_test.go`
+- Create `internal/serialx/exchange.go`, `exchange_test.go`
+
+On Darwin, allocate two native PTY pairs with Go syscalls/ioctls. The supervisor
+owns both masters and keeps the exact device identities; Tart opens only the
+mode-`0600` Tart slave. Exact `/usr/bin/screen -D -m` is a direct waitable child
+on the mode-`0600` operator slave and remains its sole reader. Its required
+identity is system Screen 4.00.03 (FAU, 23-Oct-06), SHA-256
+`07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add`,
+root:wheel `0755`, one link, on macOS 26.6.2. Production has no socat dependency.
+
+The broker is the sole forwarding reader. Tart-master output goes to a fixed
+256-KiB Screen-output queue and, only while automation is armed, a separate
+fixed-memory raw parser. Operator-master input forwards only in `console`;
+every other mode, including `idle` and `automation`, discards and counts it
+without buffering or replay. Automation never opens the operator
+PTY and never uses Screen log/hardcopy/`stuff`/paste/control as data transport.
+One serialized state machine owns `idle`, `console`, `automation`, and `failed`.
+The parser permits 8-KiB lines, 64-KiB frames/results, 256 KiB total per exchange,
+and a 30-second overall deadline; all bounds are constants. There is no serial
+transcript or log. Queue overflow, guest flood, Screen/broker exit, malformed or
+ambiguous frame, or bound/deadline violation atomically poisons the generation
+and prevents hot repair.
+
+Automation sends exactly `/usr/bin/sudo -n -- /usr/local/libexec/boxwarden-guest-bootstrap serial-bootstrap`, newline, then
+canonical bounded JSON as a separate write. `Exchange` requires exactly one
+matching begin/end pair with fresh nonce, current generation, and durable
+domain/session/backend association. It echoes but never installs nonce or
+generation. Any poisoned/ambiguous transport with still-proven supervisor
+ownership triggers exact owned shutdown and observed cleanup before retry; if
+ownership is unproven it reports drift and mutates nothing.
+
+- [ ] Test native PTY allocation/identity/modes, exact Screen argv/identity and
+  direct-child lifetime, sole-reader topology, attach/detach, unattended output,
+  state transitions, operator-input discard/count/no-replay in every non-console
+  mode including idle and automation, lease races and
+  cancellation, every fixed queue/line/frame/result/total/deadline boundary,
+  flood/overflow/Screen/broker poison, absence of logs and Screen data APIs,
+  static command plus separate canonical JSON, later-generation durable-binding
+  retry, and owned/unowned poisoned cleanup. CI uses deterministic PTY/process/
+  clock/transport fakes; native Darwin tests are non-mutating local probes.
+
+### V4.3 Supervisor ownership and exact Tart/Softnet launch
+
+**Files:**
+
+- Create `internal/supervisor/request.go`, `request_test.go`
+- Create `internal/supervisor/runtime.go`, `runtime_test.go`
+- Create `internal/supervisor/process.go`, `process_test.go`
+- Modify `internal/backend/observation.go`, fake backend and tests
+- Create `internal/backend/tart/launch.go`, `launch_test.go`
+- Create `internal/backend/tart/address.go`, `address_test.go`
+- Modify `cmd/boxwarden/main.go`
+
+Add neutral `Starter.Start(ctx, StartRequest)`, `AddressResolver.Resolve(ctx,
+objectID)`, and `RuntimeObserver.ObserveRuntime(ctx, ownership)` interfaces.
+`StartRequest` contains exact backend object, generation runtime paths, Tart
+path/toolchain identity, and serial Tart endpoint. It
+does not contain policy decisions encoded as arbitrary Tart arguments.
+
+The parent persists a versioned supervisor request in the private generation
+directory and starts hidden `boxwarden internal supervise` in a private process
+group/session with private bounded stdio and a fresh handshake nonce. It does
+not use the initiating CLI's `CommandContext`. The supervisor validates the complete request association,
+acquires the generation ownership lock, writes a manifest containing domain,
+session UUID, backend object, start generation, supervisor instance nonce, PID
+and process-start evidence, broker generation/health, both PTY device identities,
+Screen direct-child/start/socket evidence, overflow/poison state, lease mode,
+and qualified toolchain digests, then signals over an owner-only persistent
+control socket. Parent/status/reconnect use nonce challenge/response and accept
+only matching socket/manifest/process evidence. PID alone is never sufficient.
+
+The same-user supervisor remains long-lived, holds the generation lock and
+socket for its lifetime, and never `exec`-replaces itself with Tart. Tart,
+broker, and Screen are direct/owned children with explicit child-exit and cleanup
+protocols. A replacement CLI reconnects after parent crash. Only the supervisor
+may report or clean its owned generation; external cleanup requires the same
+complete proof.
+
+The supervisor re-runs doctor-equivalent immutable prerequisite checks, then
+executes the absolute qualified Tart path with a closed environment. PATH is
+exactly the digest-specific Softnet directory; `HOME`/`USER`/`LOGNAME` come from
+the manifested operator, `TART_HOME` is the canonical configured directory,
+`TMPDIR` is the private generation directory, and locale values are fixed.
+Ambient proxy, Sentry/telemetry, Rust/language-runtime, DYLD/loader, and other
+variables are absent; no `sudo` or shell is inherited. Launch
+uses Task 0's exact `--net-softnet`, `--no-audio`, `--no-clipboard`,
+and `--serial-path` default policy. Reject every allow flag and
+filesystem shares, disks, Rosetta, VNC, bridged/host networking, port exposure,
+nested virtualization, `0.0.0.0/0`, and arbitrary arguments.
+
+Address resolution uses exact `tart ip --resolver=dhcp --wait=<bounded>` after
+bootstrap is pinned and immediately before SSH. It validates one address,
+refreshes after lifecycle/network failure as Task 0 requires, and never persists
+the IP as identity.
+
+- [ ] Test exact argv/closed env/PATH equality, digest drift between doctor and
+  exec, every allow/prohibited flag, handshake/manifest mismatch, private
+  process group/stdio/socket, initiating-context cancellation and reconnect,
+  never-exec-replace behavior, lost supervisor,
+  fabricated/reused PID, stale socket, duplicate supervisor, parent crash,
+  owned child exit cleanup, unproven cleanup refusal, address stale/empty/
+  multiple/malformed/timeout, and fake toolchain drift.
+- [ ] Ensure only the command composition imports Tart and production process
+  cleanup uses the complete proven generation association.
+
+### V4.4 Start transition, bootstrap, SSH, and time-zone readiness
+
+**Files:**
+
+- Create `internal/lifecycle/start.go`, `start_test.go`
+- Create `internal/lifecycle/readiness.go`, `readiness_test.go`
+- Create `internal/timezonex/host.go`, `host_test.go`
+- Create `internal/timezonex/guest.go`, `guest_test.go`
+- Modify `internal/session/record.go`, `record_test.go`, `store.go`, `store_test.go`
+- Modify `internal/app/app.go`, `app_test.go`
+- Create `docs/operations/start-and-recovery.md`
+
+`session start` acquires the session lock, serializes with supervisor renewal,
+probe, and status snapshot publication, and applies this exact matrix:
+
+| Durable intent | Backend | Runtime proof | Action/result |
+|---|---|---|---|
+| stopped | stopped | none owned | persist `starting` + fresh generation + non-ready, fsync, then launch |
+| starting | running | exact live same generation | reconnect and resume that generation |
+| starting | stopped | no live owned runtime | persist `stopped` + clear generation, fsync, then retry from stopped |
+| running | running | exact live same generation | idempotently ensure/reprobe/reconverge that generation |
+| any | running | absent, stale, mismatched, or unverifiable | report DRIFT/NON-READY; no durable/backend/runtime mutation or adoption |
+
+All other combinations fail closed with a bounded diagnostic. It does not start
+when init/doctor is missing, unsafe, drifted, or unqualified and never repairs
+host privilege. Any mutable Homebrew privileged Softnet blocks it.
+
+After observed backend-running and healthy broker ownership, start enters
+automation and calls the helper `apply` exchange. It verifies current nonce/
+generation echo separately from the durable domain/session/backend/CA/principal
+binding, effective sshd settings, and fresh Ed25519 host public key, then calls
+`PinStore.Admit`. Only after the
+exact pin is durable does it resolve the current address, issue the short-lived
+certificate, materialize known-hosts, and run a bounded strict SSH readiness
+probe. It detects the host IANA zone with no fallback, applies it over strict
+SSH using exact argv, reads back the effective zone, and requires equality.
+
+The persistent supervisor owns the generation client key/certificate. It
+revalidates immutable CA metadata before signing, renews the 15-minute
+no-extension certificate when five minutes remain, and performs a typed strict
+read-only probe every 30 seconds. It publishes only a bounded authenticated
+health snapshot over the control socket. Evidence older than 90 seconds,
+expired certificate, failed challenge, failed probe, poisoned broker, or missing
+child is non-ready. Supervisor renewal/probe are independent lifecycle duties;
+`session status` never triggers them.
+
+When every check succeeds, atomically persist intended `running` and last
+readiness `ready`, then re-observe backend and runtime once before printing
+READY. Read-only status observes backend and current host zone, challenges the
+supervisor, and consumes its health snapshot. It never writes durable/backend/
+guest state, creates credentials, renews, probes, repairs, or applies a zone.
+The supervisor's latest probe reads guest zone without applying it. A host-zone
+mismatch is non-ready; idempotent start on the exact proven running generation
+may apply/read back and reconverge. Status independently recomputes:
 
 ```text
-boxwarden [--config PATH] --domain DOMAIN session status NAME
+READY = intended running
+     && backend running
+     && matching live supervisor ownership
+     && matching live retained serial/Screen state
+     && exact domain/session/backend host-key pin
+     && current no-extension certificate and probe evidence are <= 90s old
+     && guest zone equals current validated host zone
 ```
 
-Print domain, session, mode, intended state, observed state, golden revision when recorded, consistency (`consistent`, `drift`, or `unknown`), and a bounded diagnostic. Do not print state-root, credential, or runtime paths. Status observes once and never calls a mutation interface.
+Any failed step with proven ownership may persist a bounded non-secret
+`starting` diagnostic only when the current durable state and lock allow it and
+reports NON-READY. An unproven running observation reports drift without any
+durable write. With
+proven ownership, failure or poisoned/ambiguous serial transport requires the
+exact supervisor to stop all owned children, observe backend stopped, and
+complete exact runtime cleanup; only then may start persist `stopped`, clear the
+generation, and permit fresh retry. If ownership proof is lost, it leaves the
+VM/runtime untouched and reports drift. This V4 recovery path exists before V6.
 
-- [ ] **Step 9: Add the import-boundary test and execute the V1 verification set.** The test walks Go imports and fails when any common package imports `internal/backend/tart`. Test command spies must prove no mutating Tart subcommand is invoked.
+Cancellation before the first intent fsync leaves the prior stopped record.
+Cancellation after `starting` fsync leaves `starting` with that exact generation
+for reconnect/retry. Cancellation during proven shutdown leaves it `starting`
+until observed backend stop and runtime cleanup allow the final atomic
+`stopped`/clear-generation fsync. Failure of final running fsync leaves
+`starting` with the live exact supervisor generation; retry reconnects and
+revalidates rather than launching another. No boundary creates two generations.
+
+- [ ] Write table-driven failure tests for every boundary: intent fsync,
+  prerequisite check, supervisor handshake, backend launch/observation, relay/
+  Screen loss, serial lease/frame/apply/sshd verification, changed pin, address,
+  certificate, strict SSH, host-zone detect, guest apply/readback, final record
+  fsync, final re-observation, cancellation, and retry after each partial state.
+- [ ] Test intended-running + backend-running with absent/stale/wrong supervisor
+  as DRIFT/NON-READY; prove no adoption and no unproven signal/unlink. Test
+  backend-running before trust as STARTING/NON-READY and stale persisted `ready`
+  as non-authoritative.
+- [ ] Test V2 stopped-record upgrade, exact bootstrap retry idempotence, host-key
+  mismatch refusal, address change without identity change, certificate renewal,
+  and host-zone change across starts. Create never calls time-zone code.
+- [ ] Exercise every matrix row and every cancellation/fsync boundary, including
+  final-running-fsync reconnect, exact owned shutdown before stopped persistence,
+  poisoned serial with/without proof, supervisor renewal/start/status
+  serialization, 30-second probe cadence, five-minute renewal threshold,
+  90-second evidence age, and read-only status call-spies proving no mutation.
+- [ ] Add CLI output tests that distinguish intended, backend, supervisor,
+  bootstrap, SSH, time-zone, and aggregate readiness without printing secret or
+  private runtime paths.
+- [ ] Run V4 verification:
 
 ```bash
-go test ./...
-go test -race ./...
+test -z "$(gofmt -l $(git ls-files -- '*.go'))"
+go test ./... -count=1
+go test -race ./... -count=1
 go vet ./...
 go build ./cmd/boxwarden
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags=-buildid= -o guest/ubuntu-24.04-arm64/artifacts/boxwarden-guest-bootstrap ./cmd/boxwarden-guest-bootstrap
+bash -n guest/ubuntu-24.04-arm64/tests/bootstrap.sh
+bash -n scripts/spike/bootstrap-tart.sh
 git diff --check
 ```
 
-- [ ] **Step 10: Commit in focused, reviewable boundaries.**
-
-```bash
-git add go.mod .gitignore README.md config cmd/boxwarden internal/domain internal/config internal/session
-git commit -m "feat: add strict domain-scoped session state"
-git add internal/backend internal/execx
-git commit -m "feat: add read-only Tart observation adapter"
-git add internal/lifecycle internal/app
-git commit -m "feat: add session status reconciliation command"
-```
-
-**Gate:** Stop for human review after V1. Do not begin V2, create a VM, or access credentials in the V1 pass.
-
-### Task V2: Register an existing golden and create a stopped session
-
-**Files:**
-- Create: `internal/golden/record.go`, `internal/golden/record_test.go`, `internal/golden/register.go`, `internal/golden/register_test.go`
-- Create: `internal/lock/filelock.go`, `internal/lock/filelock_test.go`
-- Modify: `internal/backend/observation.go`, `internal/backend/fake/fake.go`, `internal/backend/tart/observe.go`
-- Create: `internal/session/create.go`, `internal/session/create_test.go`, `internal/session/store.go`, `internal/session/store_test.go`
-- Modify: `internal/app/app.go`, `internal/app/app_test.go`
-
-**Interfaces:**
-
-```go
-type Creator interface {
-    Clone(context.Context, sourceID, targetID string) error
-    RandomizeMAC(context.Context, objectID string) error
-}
-func Register(ctx context.Context, domain config.Domain, tartName string, observer backend.Observer) (golden.Record, error)
-func (s *Service) Create(ctx context.Context, name string, mode session.Mode) (session.Record, error)
-```
-
-- [ ] **Step 1: Write failing golden and lock tests.** Reject running/missing/ambiguous goldens, invalid object IDs, cross-domain golden record reuse, state/lock symlinks, and lock contention. Require a stopped observed object and a domain-owned record.
-- [ ] **Step 2: Implement atomic record storage and locks.** Write only through a same-directory temporary file with `O_EXCL`, `fsync`, `rename`, then directory `fsync`; use owner-only modes. A session lock name derives from its validated domain/name, never a raw path.
-- [ ] **Step 3: Write failing create fault tests.** Cover failure before clone, after clone, after MAC randomization, duplicate retry, collision with an unrecorded object, and process interruption after intent is persisted.
-- [ ] **Step 4: Implement `session create`.** Resolve one registered stopped golden under its lock; reserve a UUID-derived, validated backend object ID; persist `creating`; invoke exact `tart clone` and `tart set <id> --random-mac`; re-observe; persist `stopped` only on a stopped clone. Failures retain the exact intent for later reconciliation and never create a second clone on retry.
-- [ ] **Step 5: Run tests and commit.**
-
-```bash
-go test -race ./internal/golden ./internal/lock ./internal/session ./internal/backend/...
-git add internal/golden internal/lock internal/session internal/backend internal/app
-git commit -m "feat: create stopped sessions from registered goldens"
-```
-
-**Gate:** User-attended test only after unit/fault tests pass: register an already-qualified, stopped non-production golden and create one disposable stopped clone. Record no private identifiers in Git.
-
-### Task V3: Start and supervise the qualified running lifecycle
-
-**Files:**
-- Create: `internal/serialx/relay.go`, `internal/serialx/relay_test.go`, `internal/serialx/screen.go`, `internal/serialx/screen_test.go`
-- Create: `internal/backend/tart/launch.go`, `internal/backend/tart/launch_test.go`, `internal/backend/tart/supervisor.go`, `internal/backend/tart/supervisor_test.go`
-- Create: `internal/lifecycle/start.go`, `internal/lifecycle/start_test.go`, `internal/timezonex/host.go`, `internal/timezonex/host_test.go`
-- Modify: `internal/session/record.go`, `internal/app/app.go`, `internal/app/app_test.go`
-
-**Interfaces:**
-
-```go
-type StartRequest struct { ObjectID, RuntimeDir, SerialPath string; PrivateCIDRs []netip.Prefix }
-type Starter interface { Start(context.Context, StartRequest) (backend.Observation, error) }
-type Session struct { Name, OperatorPTY, TartPTY, ScreenName string }
-func DetectHostZone() (string, error)
-type GuestZoneSetter interface { ApplyAndVerify(context.Context, session.Record, string) error }
-```
-
-- [ ] **Step 1: Write failing launch-policy and relay-lifetime tests.** Assert the exact qualified launch has Softnet, no audio, no clipboard, a generated `--serial-path`, and no share/disk/Rosetta/VNC/bridge/host/expose/nested/allow-all option. Test runtime `0700`, exact PTYs `0600`, detached Screen ownership, attach/detach retention, cleanup on Tart exit, and rejection of arbitrary CIDRs.
-- [ ] **Step 2: Implement `serialx` and Tart launch construction with argv only.** The supervisor stores process identity sufficient to correlate the Tart backend object and its owner-owned runtime metadata; it does not consider a reusable PID proof of a running session.
-- [ ] **Step 3: Write start/reconciliation/time-zone failures before code.** Cover start intent crash points, already-running manual state, uncertain process identity, unsupported IPv6 environment disclosure, invalid host zone, guest apply failure, and guest readback mismatch.
-- [ ] **Step 4: Implement `session start`.** Persist `starting`, build only the Task-0-qualified policy, launch the retained serial relay and Tart supervisor, observe the exact object, detect the host IANA zone with no fallback, apply/read back the zone through the bounded SSH management path, then persist `running`. Any failure remains actionable/non-ready.
-- [ ] **Step 5: Verify and commit.**
-
-```bash
-go test -race ./internal/serialx ./internal/backend/tart ./internal/lifecycle ./internal/timezonex
-git add internal/serialx internal/backend/tart internal/lifecycle internal/timezonex internal/session internal/app
-git commit -m "feat: start sessions with qualified serial supervision"
-```
-
-**Gate:** User-attended M1A launch test: assert serial recovery, GUI readiness, Task-0 launch-policy properties, zone convergence, and clean supervisor cleanup. Any host instability is a hard stop.
-
-### Task V4: Domain SSH CA, pinning, and safe management access
-
-**Files:**
-- Create: `internal/sshx/ca.go`, `internal/sshx/ca_test.go`, `internal/sshx/pin.go`, `internal/sshx/pin_test.go`, `internal/sshx/connect.go`, `internal/sshx/connect_test.go`
-- Modify: `internal/backend/observation.go`, `internal/backend/tart/observe.go`, `internal/session/record.go`, `internal/app/app.go`
-- Create: `docs/operations/ssh-management.md`
-
-**Interfaces:**
-
-```go
-func InitCA(domain config.Domain) (PublicKey, error)
-func PinFromSerial(ctx context.Context, record session.Record, relay serialx.Session) error
-func BuildSSHArgs(record session.Record, command []string) ([]string, error)
-```
-
-- [ ] **Step 1: Write tests for CA path isolation, expiry, wrong domain, changed key, stale DHCP lease, multiple addresses, and user-provided forwarding/options.**
-- [ ] **Step 2: Implement per-domain `0600` CA creation outside every repository/profile/backend root, short-lived session/principal certificates, serial-framed key extraction, and domain/session known-hosts pinning.**
-- [ ] **Step 3: Implement `session ssh` with fresh `tart ip --resolver=dhcp` resolution immediately before connection and retry-on-safe-refresh.** It must pass `ForwardAgent=no`, `ForwardX11=no`, `ClearAllForwardings=yes`, `PermitLocalCommand=no`, pinned known-hosts, and no arbitrary SSH options.
-- [ ] **Step 4: Run unit tests, then perform a user-attended certificate/pinning test against one disposable session.**
-
-```bash
-go test -race ./internal/sshx ./internal/backend/tart
-git add internal/sshx internal/backend internal/session internal/app docs/operations/ssh-management.md
-git commit -m "feat: add pinned domain-scoped session ssh"
-```
-
-### Task V5: Stop with intended-state reconciliation
-
-**Files:**
-- Create: `internal/lifecycle/stop.go`, `internal/lifecycle/stop_test.go`
-- Modify: `internal/backend/observation.go`, `internal/backend/fake/fake.go`, `internal/backend/tart/launch.go`, `internal/session/store.go`, `internal/app/app.go`
-
-**Interfaces:**
-
-```go
-type Stopper interface { Stop(context.Context, string) error }
-func (s *Service) Stop(ctx context.Context, name string) (session.Record, error)
-```
-
-- [ ] **Step 1: Write tests for already-stopped idempotence, timeout, Tart failure, loss of supervisor, interrupted writes, lock contention, manual stop, and stale runtime cleanup.**
-- [ ] **Step 2: Implement `session stop`: persist `stopping`, revoke running management capability only as needed by the session policy, request a bounded Tart stop, observe, clean only recorded serial runtime, and persist `stopped`.** Unknown observation never reports successful stop.
-- [ ] **Step 3: Run focused/race tests and commit.**
-
-```bash
-go test -race ./internal/lifecycle ./internal/backend/... ./internal/session
-git add internal/lifecycle internal/backend internal/session internal/app
-git commit -m "feat: reconcile stopped sessions"
-```
-
-### Task V6: Safe normal and compromised destruction with a minimal Git guard
-
-**Files:**
-- Create: `internal/project/model.go`, `internal/project/model_test.go`, `internal/project/git.go`, `internal/project/git_test.go`
-- Create: `internal/lifecycle/destroy.go`, `internal/lifecycle/destroy_test.go`
-- Create: `internal/session/policy.go`, `internal/session/policy_test.go`
-- Modify: `internal/backend/observation.go`, `internal/backend/fake/fake.go`, `internal/backend/tart/launch.go`, `internal/app/app.go`
-- Create: `docs/operations/destroy-and-recovery.md`
-
-**Interfaces:**
-
-```go
-type ProjectCheck struct { Dirty, Untracked, Ahead, Upstream, RemoteVerified bool; Diagnostic string }
-type Deleter interface { Delete(context.Context, string) error }
-func (s *Service) Destroy(ctx context.Context, name string, compromised, allowDataLoss bool) error
-```
-
-- [ ] **Step 1: Write normal-destroy blocker tests.** Cover unregistered work, dirty/untracked files, unpushed commits, absent upstream, required but unavailable corroboration, invalid acknowledgement, and backend object mismatch.
-- [ ] **Step 2: Write compromised-destroy tests.** Prove it makes no guest SSH/Git/profile/credential call, only targets the exact recorded backend ID, handles a missing/dead guest, and emits credential revocation guidance without secrets.
-- [ ] **Step 3: Implement clean/quarantine policies and the minimal Git inspection contract.** Normal destruction labels guest-reported versus host-corroborated facts and fails closed; `--allow-data-loss` requires the exact domain/session acknowledgement. Quarantine rejects normal credential/profile capability requests.
-- [ ] **Step 4: Implement destroy.** Persist `deleting`; normal flow establishes the configured loss guard before deletion, while compromised flow skips guest trust entirely; both re-observe then remove only the recorded state/runtime once Tart reports absent.
-- [ ] **Step 5: Verify and commit.**
-
-```bash
-go test -race ./internal/project ./internal/lifecycle ./internal/session ./internal/backend/...
-git add internal/project internal/lifecycle internal/session internal/backend internal/app docs/operations/destroy-and-recovery.md
-git commit -m "feat: add guarded and compromised session destruction"
-```
-
-**Gate:** User-attended destructive matrix against disposable test data: normal blocker, deliberate acknowledged loss, compromised deletion of an unreachable guest, and recreation from the registered golden.
-
-### Task V7: Work-auth foundation and provider capability inventory
-
-**Files:**
-- Create: `internal/auth/provider.go`, `internal/auth/provider_test.go`, `internal/auth/inventory.go`, `internal/auth/inventory_test.go`
-- Create: `internal/providers/contracts/contracts.go`, `internal/providers/contracts/contracts_test.go`
-- Modify: `internal/config/config.go`, `internal/session/record.go`, `internal/app/app.go`, `internal/app/app_test.go`
-- Create: `docs/operations/provider-auth.md`, `docs/operations/provider-test-matrix.md`
-
-**Interfaces:**
-
-```go
-type Provider string
-const (AWS Provider = "aws"; GCP = "gcp"; GitHub = "github"; Bitbucket = "bitbucket"; Jira = "jira"; Claude = "claude")
-type Capability struct { Provider Provider; Mechanism string; Scope string; ExpiresAt time.Time }
-type Adapter interface { Validate(context.Context, session.Record) error; Revoke(context.Context, session.Record) error; Status(context.Context, session.Record) (Capability, error) }
-```
-
-- [ ] **Step 1: Write tests that reject unknown providers, cross-domain provider references, duplicate conflicting provider grants, provider capability in quarantine, secrets in config/state/output, and generic arbitrary-upstream URLs.**
-- [ ] **Step 2: Implement a closed provider registry.** It records only provider identity, mechanism, scope label, expiry, and non-secret domain reference ID. It has no universal credential proxy, no generic request relay, and no secret value type.
-- [ ] **Step 3: Add status blast-radius output and revocation inventory.** Report provider identity/mechanism/expiry and warnings, never credential values, paths, authorization headers, cookies, or token hashes.
-- [ ] **Step 4: Write the provider matrix with fake-contract and user-attended-real sections for every provider.** The Bitbucket and Jira rows must require a deployment selection before their implementation tasks begin.
-- [ ] **Step 5: Run tests and commit.**
-
-```bash
-go test -race ./internal/auth ./internal/providers/contracts ./internal/config ./internal/session
-git add internal/auth internal/providers/contracts internal/config internal/session internal/app docs/operations/provider-auth.md docs/operations/provider-test-matrix.md
-git commit -m "feat: add domain-scoped provider capability contracts"
-```
-
-### Task V8: AWS CLI and SDK authentication
-
-**Files:**
-- Create: `internal/providers/aws/adapter.go`, `internal/providers/aws/adapter_test.go`, `internal/providers/aws/credential_process.go`, `internal/providers/aws/credential_process_test.go`
-- Create: `cmd/boxwarden-aws-credential/main.go`
-- Modify: `internal/auth/provider.go`, `docs/operations/provider-auth.md`, `docs/operations/provider-test-matrix.md`
-
-**Interfaces:**
-
-```go
-func (a Adapter) WriteCredentialProcessConfig(session.Record) ([]byte, error)
-type Credentials struct { AccessKeyID, SecretAccessKey, SessionToken string; ExpiresAt time.Time }
-func (a Adapter) MintSTS(context.Context, session.Record) (Credentials, error)
-```
-
-- [ ] **Step 1: Write fake AWS contract tests.** Require role/session-policy scope, short expiry, exact domain/session binding, malformed response rejection, timeout, redaction, revocation, and no long-lived access key in guest configuration.
-- [ ] **Step 2: Implement a named AWS credential-process path.** It uses host-side IAM Identity Center/workforce authority where available to mint STS/AssumeRole credentials and writes guest-side AWS config that invokes only the bounded per-session helper. It returns temporary AWS credentials only over the authenticated session path; no host SSH agent or generic broker is involved.
-- [ ] **Step 3: Run fake tests and commit.**
-
-```bash
-go test -race ./internal/providers/aws ./internal/auth
-git add internal/providers/aws cmd/boxwarden-aws-credential internal/auth docs/operations
-git commit -m "feat: add scoped AWS credential-process support"
-```
-
-- [ ] **Step 4: User-attended real gate.** In an isolated work domain with a revocable test role, run `aws sts get-caller-identity` and one SDK call using the default credential chain; verify expiration/scope and revoke or let the test session expire. Store only redacted evidence.
-
-### Task V9: Google Cloud CLI and ADC authentication
-
-**Files:**
-- Create: `internal/providers/gcp/adapter.go`, `internal/providers/gcp/adapter_test.go`, `internal/providers/gcp/external_account.go`, `internal/providers/gcp/external_account_test.go`
-- Create: `cmd/boxwarden-gcp-token/main.go`
-- Modify: `internal/auth/provider.go`, `docs/operations/provider-auth.md`, `docs/operations/provider-test-matrix.md`
-
-**Interfaces:**
-
-```go
-func (a Adapter) WriteADC(session.Record) ([]byte, error)
-type Token struct { AccessToken string; ExpiresAt time.Time }
-func (a Adapter) MintImpersonatedToken(context.Context, session.Record) (Token, error)
-```
-
-- [ ] **Step 1: Write fake ADC/external-account contract tests.** Cover allowed audience/service account, short expiration, no JSON private key, domain/session mismatch, executable failure, token redaction, and cancellation.
-- [ ] **Step 2: Implement the provider-specific external-account/impersonation path.** Prefer workforce/workload identity federation or host-side service-account impersonation; create guest ADC configuration for a bounded session helper rather than copying persistent service-account JSON keys.
-- [ ] **Step 3: Run fake tests and commit.**
-
-```bash
-go test -race ./internal/providers/gcp ./internal/auth
-git add internal/providers/gcp cmd/boxwarden-gcp-token internal/auth docs/operations
-git commit -m "feat: add scoped GCP ADC support"
-```
-
-- [ ] **Step 4: User-attended real gate.** In a test project, perform one authenticated `gcloud` read and one client-library operation using ADC; preserve only command success, principal class, and redacted expiry evidence.
-
-### Task V10: GitHub HTTPS, Git, and API access
-
-**Files:**
-- Create: `internal/providers/github/adapter.go`, `internal/providers/github/adapter_test.go`, `internal/providers/github/git.go`, `internal/providers/github/git_test.go`
-- Create: `cmd/boxwarden-github-credential/main.go`
-- Modify: `internal/auth/provider.go`, `docs/operations/provider-auth.md`, `docs/operations/provider-test-matrix.md`
-
-**Interfaces:**
-
-```go
-func (a Adapter) InstallationToken(context.Context, session.Record, repository string) (token, error)
-func (a Adapter) GitCredentialHelper(session.Record) []string
-```
-
-- [ ] **Step 1: Write fake GitHub App/OAuth contract tests.** Cover repository/permission restriction, short expiry, Git credential-helper protocol parsing, no SSH agent, no token logging, revocation, and denied push scope.
-- [ ] **Step 2: Implement HTTPS credential helper and `gh` capability setup.** Prefer GitHub App installation tokens; use an official OAuth/device flow only where an App does not fit. A guest-held bearer is explicitly temporary and narrowly scoped, not non-exfiltratable.
-- [ ] **Step 3: Run fake tests and commit.**
-
-```bash
-go test -race ./internal/providers/github ./internal/auth
-git add internal/providers/github cmd/boxwarden-github-credential internal/auth docs/operations
-git commit -m "feat: add scoped GitHub HTTPS authentication"
-```
-
-- [ ] **Step 4: User-attended real gate.** Against a test private repository, clone, fetch, make and push a test-only commit, and call `gh api user`; remove the test branch and revoke/expire the credential.
-
-### Task V11: Bitbucket deployment-specific work authentication
-
-**Files:**
-- Create: `internal/providers/bitbucket/adapter.go`, `internal/providers/bitbucket/adapter_test.go`
-- Modify: `internal/config/config.go`, `internal/auth/provider.go`, `docs/operations/provider-auth.md`, `docs/operations/provider-test-matrix.md`
-
-**Interfaces:**
-
-```go
-type Deployment string
-const (Cloud Deployment = "cloud"; DataCenter Deployment = "data_center")
-func (a Adapter) ValidateDeployment(config.ProviderConfig) error
-```
-
-- [ ] **Step 1: Obtain the required deployment decision from the operator: Bitbucket Cloud, Bitbucket Data Center, or both.** Record the selected target in non-secret domain configuration and reject omitted/unknown deployment values. Do not choose based on URL shape.
-- [ ] **Step 2: Write fake contract tests for the selected deployment.** Test private clone/fetch/push/API authorization, exact base authority, scope/expiry, cross-domain denial, no SSH agent, and no durable credential in session records.
-- [ ] **Step 3: Implement only the selected provider-supported HTTPS/OAuth/App-token mechanism.** A second deployment is a separate reviewed implementation path, not a fallback.
-- [ ] **Step 4: Run fake tests, commit, then perform the matching user-attended private test-repository clone/fetch/push/API gate using test data.**
-
-```bash
-go test -race ./internal/providers/bitbucket ./internal/auth
-git add internal/providers/bitbucket internal/config internal/auth docs/operations
-git commit -m "feat: add Bitbucket work authentication"
-```
-
-### Task V12: Jira/Atlassian deployment-specific work authentication
-
-**Files:**
-- Create: `internal/providers/jira/adapter.go`, `internal/providers/jira/adapter_test.go`
-- Modify: `internal/config/config.go`, `internal/auth/provider.go`, `docs/operations/provider-auth.md`, `docs/operations/provider-test-matrix.md`
-
-**Interfaces:**
-
-```go
-type Deployment string
-const (Cloud Deployment = "cloud"; DataCenter Deployment = "data_center")
-func (a Adapter) TestOperations(context.Context, session.Record) error
-```
-
-- [ ] **Step 1: Obtain the required deployment decision from the operator: Jira Cloud, Jira Data Center, or both.** Persist a non-secret target identifier and reject an absent deployment selection.
-- [ ] **Step 2: Write fake contract tests for account discovery, project/issue read, JQL query, controlled create/update, scope rejection, authority pinning, redaction, and quarantine denial.**
-- [ ] **Step 3: Implement only official support appropriate to the selected deployment.** The code must never convert a Cloud token/configuration into a Data Center fallback or vice versa.
-- [ ] **Step 4: Run fake tests, commit, then execute the user-attended operations on designated test data and delete or restore the test artifact.**
-
-```bash
-go test -race ./internal/providers/jira ./internal/auth
-git add internal/providers/jira internal/config internal/auth docs/operations
-git commit -m "feat: add Jira work authentication"
-```
-
-### Task V13: Claude Teams guest-local official authentication
-
-**Files:**
-- Create: `internal/providers/claude/adapter.go`, `internal/providers/claude/adapter_test.go`
-- Modify: `internal/auth/provider.go`, `internal/session/policy.go`, `docs/operations/provider-auth.md`, `docs/operations/provider-test-matrix.md`
-
-**Interfaces:**
-
-```go
-func (a Adapter) Status(context.Context, session.Record) (auth.Capability, error)
-func (a Adapter) Revoke(context.Context, session.Record) error
-```
-
-- [ ] **Step 1: Write fake policy tests.** Require clean-session-only capability registration, no host credential-store discovery, no claim that a broker protects desktop login state, explicit quarantine rejection, and redacted status.
-- [ ] **Step 2: Implement the policy and operator guidance only.** Claude Code/Desktop authenticate through their official interactive guest-local flow. Do not reverse engineer or proxy Anthropic desktop authentication.
-- [ ] **Step 3: Run tests and commit.**
-
-```bash
-go test -race ./internal/providers/claude ./internal/auth ./internal/session
-git add internal/providers/claude internal/auth internal/session docs/operations
-git commit -m "feat: document Claude Teams session authentication"
-```
-
-- [ ] **Step 4: User-attended real gate.** Complete an official Claude Teams login in a clean disposable guest, verify Claude Code and required Desktop access, then destroy the test session. No cookie/profile/token extraction is permitted.
-
-### Task V14: Proposed explicit read-only host-tree capability
-
-**Formal acceptance gate:** This task is planning only. Do not begin V14
-implementation until ADR 021 has been formally accepted through its own
-decision process. This V1 PR neither changes ADR 021's status nor authorizes a
-host-filesystem exception.
-
-**Files:**
-- Create: `internal/hosttree/capability.go`, `internal/hosttree/capability_test.go`, `internal/hosttree/admit.go`, `internal/hosttree/admit_test.go`
-- Modify: `internal/session/record.go`, `internal/lifecycle/start.go`, `internal/lifecycle/reconcile.go`, `internal/backend/observation.go`, `internal/backend/tart/launch.go`, `internal/backend/tart/launch_test.go`, `internal/validate/session.go`
-- Create: `docs/operations/read-only-host-trees.md`
-
-**Interfaces:**
-
-```go
-type Capability struct { ID, Domain, SessionID, HostSource, GuestDestination string; Access string }
-func Admit(domain config.Domain, record session.Record, requested Capability) (Capability, error)
-```
-
-- [ ] **Step 1: Write the host-root/path matrix before implementation.** Reject the trusted-host root and `<operator-home>` runtime, golden, session, identity, keychain, browser, and credential roots; also reject symlinks, missing/non-directory sources, overlaps, destination collisions, cross-domain ownership, raw Tart `--dir`, and every writable access request.
-- [ ] **Step 2: Implement exact canonical admission and session persistence.** The only accepted access value is `read_only_live`; an explicit user session configuration is required and omission means no host tree. Capability IDs and Tart mount tags derive from recorded identities, not input strings. Do not implement B/G/H, OverlayFS upper/work handling, materialization, or promotion.
-- [ ] **Step 3: Add qualified Tart mapping and observational status.** Exactly map recorded capability intent to a read-only Tart attachment, retain all Task-0 launch properties, revalidate on start, and report disclosure/status without guessing cleanup targets.
-- [ ] **Step 4: Run fake/root/path tests and commit.**
-
-```bash
-go test -race ./internal/hosttree ./internal/lifecycle ./internal/backend/tart ./internal/validate
-git add internal/hosttree internal/session internal/lifecycle internal/backend internal/validate docs/operations/read-only-host-trees.md
-git commit -m "feat: add explicit read-only host-tree capability"
-```
-
-- [ ] **Step 5: User-attended empirical gate.** Re-run the full root/path/destructive matrix on the exact qualified Tart/macOS pair: user/root data and metadata writes, remount, sibling/parent, symlink, replacement, nested source, start/restart, status, stop/destroy, and no host instability. Any related host panic or corruption is a hard stop. OverlayFS proposal/promotion remains unimplemented.
-
-### Task V15: Release validation, traceability, and V0.1 handoff
-
-**Files:**
-- Create: `internal/validate/host.go`, `internal/validate/host_test.go`, `internal/validate/session.go`, `internal/validate/session_test.go`, `internal/validate/properties.go`, `internal/validate/properties_test.go`
-- Modify: `README.md`, `AGENTS.md`, `docs/architecture.md`, `docs/security-model.md`, `docs/lifecycle-and-recovery.md`, `docs/credentials.md`
-- Create: `docs/evidence/v0.1-final-report.md`, `docs/operations/v0.1-acceptance.md`
-
-**Interfaces:**
-
-```go
-type HostValidator interface { ValidateHost(context.Context, config.Domain) ([]Finding, error) }
-type SessionValidator interface { ValidateSession(context.Context, session.Record) ([]Finding, error) }
-```
-
-- [ ] **Step 1: Write host/session validation tests for qualified toolchain identity, domain isolation, golden state, serial dependencies, Softnet privilege binding, unsupported IPv6 rows, ADR 015 gateway limitation, provider capability inventory, quarantine, host-tree capability admission, and forbidden integrations.**
-- [ ] **Step 2: Implement `validate host` and `validate session` as read-only diagnostics.** They must distinguish observed facts, inferred facts, and unqualified environments; they must not mutate a VM or mint credentials.
-- [ ] **Step 3: Run the full automated verification twice.**
-
-```bash
-go test ./...
-go test -race ./...
-go vet ./...
-go build ./cmd/boxwarden
-git diff --check
-```
-
-- [ ] **Step 4: Execute the user-attended acceptance matrix.** One clean lifecycle/restart/SSH, one quarantine rejection, one normal destroy blocker, one compromised destroy/recreate, provider gates V8–V13, read-only host-tree gate V14, and report the three intentionally unqualified IPv6 environment rows. Redact identifiers and never commit a real secret or private path.
-- [ ] **Step 5: Trace every accepted invariant to code and positive/negative evidence, update final documentation, commit, and stop for release approval.**
-
-```bash
-git add README.md AGENTS.md docs internal/validate
-git commit -m "docs: record Boxwarden v0.1 acceptance evidence"
-git status --short
-```
-
-## Explicit deferrals after V0.1
-
-- Automated golden building/promotion and a broad third-party provenance lock.
-- Profile capture/restore, age-encrypted candidate admission, and Kindex persistence.
-- Generic host filesystem promotion, writable VirtioFS, OverlayFS proposal materialization, and all B/G/H review operations.
-- A generalized reusable-secret proxy, transparent TLS interception, CONNECT proxying, host SSH-agent forwarding, and host credential-store discovery.
-- Additional backends, checkpoints, cloud hosting, guest-agent bridges, host display/filesystem/Docker/forwarding integrations, and automatic updates.
+**V4 attended gate:** On one disposable stopped clone and the exact V3-qualified
+host, prove retained serial attach/detach and lease exclusion, generic-to-domain
+anchor/principal binding, effective sshd policy, serial-observed/pinned fresh
+host-key equality, strict short-lived certificate SSH, address refresh, host
+time-zone convergence, READY gating, 30-second probe/90-second evidence/renewal
+behavior, and owned cleanup. Requalify ADR 017's native two-PTY broker with
+exact Screen identity, every bound/flood/poison path, and no transcript. Separately induce lost
+supervisor evidence and prove DRIFT/NON-READY with no adoption or unproven
+cleanup. Record only redacted evidence.
+
+---
+
+## Roadmap after this plan (not executable here)
+
+- **V5 — exact `session cp`:** explicit host↔guest file transfer over V3/V4
+  pinned SSH. No live host filesystem share, mount, sync, promotion, or ADR 021
+  implementation.
+- **V6 — stop:** intended-state reconciliation and exact owned supervisor/backend
+  shutdown.
+- **V7 — destroy:** exact guarded normal and compromised destruction.
+- **Later:** project durability, profiles, provider/application authentication,
+  additional backends, checkpoints, and release validation only after separate
+  decisions and plans.
+
+This run must not implement or authorize V5+, provider authentication, host
+filesystem sharing, ADR 021, or ADR 022. After V4 verification and its honestly
+reported attended-gate status, stop.

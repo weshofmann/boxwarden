@@ -19,17 +19,24 @@ the tested network policy. It does not claim all environments or operational
 mechanisms are production-ready; see
 [the Task 0 summary](docs/evidence/m1a-task0-final-summary.md).
 
-The currently implemented V2 surface registers an existing qualified, stopped
-Tart object as one domain's golden, creates a stopped disposable clone with a
-new UUID-derived backend identity and randomized MAC, and reports persisted
-session intent beside observed state. Creation is intent-first and reconciles
-partial retries under domain/session locks. It does not yet start, stop, delete,
-authenticate, or inject credentials into a workstation. V2's attended real-host
+V1 read-only status is complete. The currently implemented V2 surface lets one
+domain explicitly admit an exact existing, stopped Tart object as its selected
+generic golden, creates a stopped disposable clone with a new UUID-derived
+backend identity and randomized MAC, and reports persisted session intent
+beside observed backend state. The artifact itself is not domain-specific: two
+domains may independently admit the same exact artifact without placing either
+domain's trust material in it. Registration is an operator admission record,
+not a Boxwarden claim that it proved provenance, clone-readiness, or the
+external qualification evidence. Creation is intent-first and reconciles
+partial retries under domain/session locks. V2's attended real-host
 golden/clone gate remains pending.
 
-The broader v0.1 lifecycle and authentication work remains in progress. Its
-planned authentication targets are AWS, GCP, GitHub, Bitbucket, Jira /
-Atlassian, and Claude Teams.
+The next executable slices are V3 host/domain bootstrap (`init`, read-only
+`doctor`, the qualified Softnet privilege binding, one explicitly initialized
+management CA per domain, certificate issuance, host-key pins, and strict SSH
+primitives) and V4 start/supervision plus serial trust bootstrap and readiness.
+This plan stops after V4. File transfer, stop, destroy, provider authentication,
+and other later work remain deferred.
 
 ## Model
 
@@ -62,8 +69,11 @@ requalification.
 - Host filesystem sharing, display-server sharing, clipboard and audio sharing,
   host runtime sockets, host credential stores, SSH-agent forwarding, bridged
   networking, port exposure, and nested virtualization are absent by default.
-- Task 0 did not select the production mechanism that authorizes privileged
-  Softnet execution. The project is therefore not production-ready.
+- The production Softnet mechanism is selected but not yet implemented or
+  qualified on a real host: `boxwarden init` will install the exact qualified
+  Softnet 0.19.0 executable in a root-owned digest-specific path for a dedicated
+  trusted operator group. Until V3 and its user-attended gate are complete, the
+  project is not production-ready.
 
 Read [the security model](docs/security-model.md),
 [architecture](docs/architecture.md), and the [Task 0 evidence

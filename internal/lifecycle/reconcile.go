@@ -44,6 +44,12 @@ func Reconcile(intended session.IntendedState, observed backend.Observation) Rec
 			Diagnostic:  fmt.Sprintf("the backend reported unsupported observed state %q", observed.State),
 		}
 	}
+	if intended == session.StateRunning && observed.State == backend.ObjectRunning {
+		return Reconciliation{
+			Consistency: Drift,
+			Diagnostic:  "the running backend is non-ready because supervisor ownership/readiness is not verified and is not adopted",
+		}
+	}
 
 	if observed.State != expected {
 		return Reconciliation{

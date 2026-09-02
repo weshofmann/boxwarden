@@ -21,11 +21,19 @@ resolves macOS `/etc/localtime` through the host zoneinfo tree, rejects a value
 that cannot be resolved and validated, renders that exact name into the
 autoinstall seed, and verifies the installed guest reports the same name.
 
-The future common lifecycle redetects the host zone during every create and
-start transition, applies it through the bounded guest-management path, reads
-the effective value back, and only then reports the session ready. It does not
-silently fall back to UTC. This policy stays above the backend seam: Tart owns VM
-mechanics, not guest workstation configuration.
+The common lifecycle redetects the host zone whenever a transition actually
+boots or resumes a guest, applies it through the bounded guest-management path,
+reads the effective value back, and only then reports the session ready. V2
+create leaves a stopped clone and performs no guest convergence. The lifecycle
+does not silently fall back to UTC. This policy stays above the backend seam:
+Tart owns VM mechanics, not guest workstation configuration.
+
+Read-only `session status` detects the current host zone and consumes the
+supervisor's recent guest-zone health evidence; it never applies a zone or
+triggers certificate renewal/repair. A mismatch or stale evidence is non-ready.
+Idempotent `session start` on an exact proven running supervisor generation may
+serialize with renewal/status, apply and read back the new host zone, and
+restore readiness without adopting an orphan.
 
 M1A has no checkpoint-resume operation. If checkpoint support is designed in a
 future milestone, its resume transition must perform the same convergence.

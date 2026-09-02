@@ -58,6 +58,40 @@ func TestRegisterStoresAndLoadsObservedStoppedGolden(t *testing.T) {
 	}
 }
 
+func TestRegisterAllowsSeparateDomainAdmissionOfSameStoppedGolden(t *testing.T) {
+	observer := &countingObserver{observation: backend.Observation{
+		ObjectID: "golden-r1",
+		Exists:   true,
+		State:    backend.ObjectStopped,
+	}}
+	work := testDomain(t, "work")
+	personal := testDomain(t, "personal")
+
+	workRecord, err := Register(context.Background(), work, "golden-r1", observer)
+	if err != nil {
+		t.Fatalf("Register work: %v", err)
+	}
+	personalRecord, err := Register(context.Background(), personal, "golden-r1", observer)
+	if err != nil {
+		t.Fatalf("Register personal: %v", err)
+	}
+	if got, want := workRecord.Domain, domain.ID("work"); got != want {
+		t.Fatalf("work record domain = %q, want %q", got, want)
+	}
+	if got, want := personalRecord.Domain, domain.ID("personal"); got != want {
+		t.Fatalf("personal record domain = %q, want %q", got, want)
+	}
+	if workRecord.Backend != personalRecord.Backend {
+		t.Fatalf("backend references differ: work = %#v, personal = %#v", workRecord.Backend, personalRecord.Backend)
+	}
+	if _, err := LoadCurrent(context.Background(), work); err != nil {
+		t.Fatalf("LoadCurrent work: %v", err)
+	}
+	if _, err := LoadCurrent(context.Background(), personal); err != nil {
+		t.Fatalf("LoadCurrent personal: %v", err)
+	}
+}
+
 func TestRegisterRejectsUnacceptableObservation(t *testing.T) {
 	cases := map[string]backend.Observation{
 		"missing":  {ObjectID: "golden-r1", Exists: false, State: backend.ObjectUnknown},

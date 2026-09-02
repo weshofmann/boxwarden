@@ -9,7 +9,9 @@ import (
 
 const recordVersion = 1
 
-// BackendRef identifies the immutable backend object that provides a golden.
+// BackendRef identifies the exact stopped backend object explicitly admitted by
+// this registration. It does not assert backend immutability, provenance,
+// clone-readiness, or qualification evidence.
 type BackendRef struct {
 	Kind     string `json:"kind"`
 	ObjectID string `json:"object_id"`

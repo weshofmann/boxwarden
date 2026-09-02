@@ -20,7 +20,9 @@ In order:
 3. `docs/security-model.md` — threat model and required backend properties.
 4. `docs/state-model.md` — the five layers and the two classification axes.
 5. `docs/decisions/` — the accepted and provisional architecture decisions. Read their current status and supersession notes rather than assuming every numbered ADR remains authoritative.
-6. `docs/superpowers/plans/2026-08-30-milestone-1a-disposable-ai-workstation.md` — the M1A plan, task by task.
+6. `docs/superpowers/plans/2026-09-01-boxwarden-v0.1.md` — the executable
+   V1-V4 plan and corrected roadmap. The 2026-08-30 milestone plan is retained
+   only as superseded planning history and must not be executed.
 7. `docs/reviews/2026-08-30-independent-architecture-review.md` — historical review evidence and rationale. Canonical docs and later ADRs contain the reconciled dispositions. **Read this before starting Task 0.**
 8. `memory/knowledge/tart-and-guest-platform-facts.md` — verified external facts (Tart CLI, Softnet policy, Ubuntu imaging). Check here before re-deriving or guessing platform behavior.
 
@@ -34,9 +36,14 @@ Never weaken these to make something work. If a task appears to require it, stop
 - **No host container-runtime socket or context.** A guest-local runtime may be used when a workload needs it, but it never receives trusted-host runtime control. Docker-group membership is guest-root-equivalent.
 - **No host SSH agent forwarding**, no X11 forwarding, no TCP/tunnel forwarding, no VNC, no nested virtualization, no Tart port exposure.
 - **No guest-agent bridge is part of M1A** (including `tart-guest-agent`). Introducing one requires explicit architecture review because it changes the host↔guest trust surface.
-- **The guest must not initiate connections to private/link-local networks or concurrent sessions by default.** M1A accepts and reports that default Softnet permits access to services on the vmnet gateway because the same gateway provides DNS required for VPN, split-DNS, DNS64, and changing travel networks. ADR 015 permits only an explicit per-session allowlist of exact validated private CIDRs; every other private/link-local destination and every concurrent session remains denied, and status must disclose the exception. Never claim guest-to-host network isolation, hard-code public DNS, use physical bridging/Tart host networking, add implicit/broad LAN access, or add `--net-softnet-allow=0.0.0.0/0`.
+- **The guest must not initiate connections to private/link-local networks or concurrent sessions by default.** M1A accepts and reports that default Softnet permits access to services on the vmnet gateway because the same gateway provides DNS required for VPN, split-DNS, DNS64, and changing travel networks. V4 implements this default policy only and rejects every allow flag. Future ADR 015 support may add an explicit per-session allowlist of exact validated private CIDRs only after persisted record/status/CLI semantics exist; every other private/link-local destination and every concurrent session must remain denied, and status must disclose the exception. Never claim guest-to-host network isolation, hard-code public DNS, use physical bridging/Tart host networking, add implicit/broad LAN access, or add `--net-softnet-allow=0.0.0.0/0`.
 - **Concurrently running sessions must not reach each other**, in the same or different security domains.
-- **No secrets in golden images.** No provider login, browser profile, token, private key, project checkout, cache, or session residue. A domain's *public* SSH user-CA trust anchor is permitted; its private key never is.
+- **Generic goldens contain no domain trust.** No provider login, browser profile,
+  token, private key, project checkout, cache, session residue, Boxwarden domain
+  identity, management-CA anchor, fixed principal, or guest binding belongs in a
+  golden. A fresh clone receives only the selected domain CA's public anchor and
+  exact session principal through the ADR 017 trusted serial bootstrap before
+  pinned strict SSH is attempted; the private CA key never leaves the host.
 - **No implicit cross-domain fallback.** Every session belongs to exactly one security domain. Golden pointers, profiles, age material, credentials, memory, projects, registry, and runtime paths are domain-scoped and never resolved across domains.
 - **No automatic sandbox → trusted-profile synchronization.** Promotion is always explicit, human-approved, and bound to exact manifest and ciphertext digests.
 - **Validate guest-originated data on the trusted host.** Guest-side checks are convenience, never the control. A compromised session controls every byte it sends.
