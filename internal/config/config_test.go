@@ -223,6 +223,17 @@ func TestLoadRejectsSymlinkedConfigFile(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsOversizedConfigurationEvenWhenPrefixIsValid(t *testing.T) {
+	base := canonicalTempDir(t)
+	workRoot := makeRoot(t, base, "work")
+	valid := fmt.Sprintf(`{"version":1,"domains":{"work":{"state_root":%q}}}`, workRoot)
+	path := writeConfig(t, base, valid+strings.Repeat(" ", maxConfigurationBytes))
+
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("Load(oversized valid prefix) error = %v, want size rejection", err)
+	}
+}
+
 func TestLoadRejectsAOneCharacterNestedDomainRoot(t *testing.T) {
 	base := canonicalTempDir(t)
 	parent := makeRoot(t, base, "a")

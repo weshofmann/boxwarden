@@ -18,7 +18,25 @@ import (
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/lifecycle"
 	"github.com/weshofmann/boxwarden/internal/session"
+	"github.com/weshofmann/boxwarden/internal/sshx"
 )
+
+type HostInitializer interface {
+	Init(context.Context, hostx.Request) (hostx.InitResult, error)
+}
+
+type HostDoctor interface {
+	Doctor(context.Context, hostx.Request) hostx.Report
+}
+
+type CAInitializer interface {
+	Init(context.Context, sshx.Domain, []sshx.Domain) (sshx.CAIdentity, error)
+	Check(context.Context, sshx.Domain, []sshx.Domain) (sshx.CAIdentity, error)
+}
+
+type CADoctor interface {
+	Check(context.Context, sshx.Domain, []sshx.Domain) (sshx.CAIdentity, error)
+}
 
 // Options supplies trusted-host dependencies to Run. App depends only on the
 // narrow backend seams and never on Tart directly.
@@ -27,7 +45,10 @@ type Options struct {
 	Env        []string
 	Observer   backend.Observer
 	Creator    backend.Creator
-	Host       hostx.Service
+	HostInit   HostInitializer
+	HostDoctor HostDoctor
+	CAInit     CAInitializer
+	CADoctor   CADoctor
 	Output     io.Writer
 }
 
@@ -59,26 +80,62 @@ func Run(ctx context.Context, args []string, options Options) error {
 		return err
 	}
 	var hostRequest hostx.Request
+	var selectedCADomain sshx.Domain
+	var configuredCADomains []sshx.Domain
 	if command.kind == commandInit || command.kind == commandDoctor {
 		host, err := loaded.Host()
 		if err != nil {
 			return err
 		}
 		hostRequest = hostx.Request{Domain: command.domain, StateRoot: selectedDomain.StateRoot, TartPath: host.TartExecutable, TartHome: host.TartHome, SoftnetPath: host.SoftnetSource}
-		if options.Host == nil {
-			return errors.New("host prerequisite service is required")
+		selectedCADomain = sshx.Domain{ID: selectedDomain.ID, StateRoot: selectedDomain.StateRoot}
+		for _, configured := range loaded.Domains() {
+			configuredCADomains = append(configuredCADomains, sshx.Domain{ID: configured.ID, StateRoot: configured.StateRoot})
 		}
 	}
 
 	switch command.kind {
 	case commandInit:
-		result, err := options.Host.Init(ctx, hostRequest)
+		if options.HostInit == nil || options.CAInit == nil {
+			return errors.New("host and domain CA initializers are required")
+		}
+		if _, err := options.CAInit.Check(ctx, selectedCADomain, configuredCADomains); err != nil && !errors.Is(err, sshx.ErrCAMissing) {
+			return fmt.Errorf("preflight domain management CA: %w", err)
+		}
+		result, err := options.HostInit.Init(ctx, hostRequest)
 		if err != nil {
 			return fmt.Errorf("initialize host prerequisites: %w", err)
 		}
+		if _, err := options.CAInit.Init(ctx, selectedCADomain, configuredCADomains); err != nil {
+			return fmt.Errorf("host prerequisites were established but domain %q management CA initialization failed; correct the CA state and rerun explicit init: %w", command.domain, err)
+		}
+		result.DomainInitialized = true
 		return writeInit(options.Output, result)
 	case commandDoctor:
-		report := options.Host.Doctor(ctx, hostRequest)
+		if options.HostDoctor == nil || options.CADoctor == nil {
+			return errors.New("host and domain CA doctors are required")
+		}
+		report := options.HostDoctor.Doctor(ctx, hostRequest)
+		if _, err := options.CADoctor.Check(ctx, selectedCADomain, configuredCADomains); err != nil {
+			finding := hostx.Finding{
+				Code:     "ca.invalid",
+				Category: hostx.Drifted,
+				Observed: "selected or configured management CA validation failed",
+				Expected: "one valid unique domain-bound management CA per initialized domain",
+				Remedy:   "inspect domain CA state manually",
+			}
+			if errors.Is(err, sshx.ErrCAMissing) {
+				finding = hostx.Finding{
+					Code:     "ca.missing",
+					Category: hostx.Missing,
+					Observed: "selected domain management CA is absent",
+					Expected: "one explicitly initialized domain-bound management CA",
+					Remedy:   "run explicit attended init",
+				}
+			}
+			report.Findings = append(report.Findings, finding)
+		}
+		report.Normalize()
 		if err := writeDoctor(options.Output, report); err != nil {
 			return err
 		}

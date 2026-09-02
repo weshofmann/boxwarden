@@ -17,7 +17,11 @@ select a mutable `current` link.
 `healthy`, `missing/uninitialized`, `drifted/unsafe`, or
 `unsupported/unqualified`. A non-healthy report exits nonzero and includes
 observed/expected facts plus an attended remedy. Doctor never calls init,
-sudo, directory-service mutation, Tart, Softnet, or a session operation.
+requests interactive authorization, mutates directory-service state, executes
+Tart or Softnet, or invokes a session operation. Its mutable-Homebrew safety
+check uses only non-interactive `/usr/bin/sudo -n -l -- <exact-path>` policy
+inspection; inability to prove that an unsafe passwordless rule is absent is a
+fail-closed diagnostic, never an authorization attempt or repair.
 
 Linux and every unqualified platform return `unsupported/unqualified`; this is
 intentional so CI can compile and exercise policy without accidentally treating

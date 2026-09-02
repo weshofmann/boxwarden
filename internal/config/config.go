@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,8 +14,9 @@ import (
 )
 
 const (
-	legacyVersion = 1
-	version       = 2
+	legacyVersion         = 1
+	version               = 2
+	maxConfigurationBytes = 1 << 20
 )
 
 type Config struct {
@@ -46,7 +48,14 @@ func Load(path string) (Config, error) {
 	}
 	defer file.Close()
 
-	decoder := json.NewDecoder(io.LimitReader(file, 1<<20))
+	contents, err := io.ReadAll(io.LimitReader(file, maxConfigurationBytes+1))
+	if err != nil {
+		return Config{}, fmt.Errorf("read configuration: %w", err)
+	}
+	if len(contents) > maxConfigurationBytes {
+		return Config{}, fmt.Errorf("configuration exceeds %d-byte limit", maxConfigurationBytes)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(contents))
 	loaded, err := decodeConfig(decoder)
 	if err != nil {
 		return Config{}, err

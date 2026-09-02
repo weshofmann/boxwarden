@@ -60,8 +60,11 @@ read. The guest helper validates the durable binding before performing those
 operations. SSH success is therefore not a general guest-control channel and
 does not establish identity by TOFU or address reachability.
 
-`sshx` deliberately owns a small argv/stdin runner interface while the shared
-execution package is still gaining bounded-stdin support. Command composition
-must supply a lossless adapter to `execx` once that support lands; it must pass
-only the fixed `sshx.Command` path, argv, and bounded stdin, never introduce a
-shell or a generic remote-command surface.
+`sshx` deliberately owns a small argv/stdin runner interface. Production
+composition supplies a lossless adapter to the shared bounded `execx` runner;
+it passes only the fixed `sshx.Command` path, argv, and bounded stdin under a
+closed C-locale, UTC environment. The fixed timezone makes `ssh-keygen`
+certificate-validity inspection deterministic; parsed times must still match
+the fixed validity policy within the documented process-scheduling tolerance.
+The adapter never introduces a shell, logs stdin, or adds a generic
+remote-command surface.
