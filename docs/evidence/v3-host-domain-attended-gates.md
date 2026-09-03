@@ -1,0 +1,177 @@
+# V3 attended host and domain initialization evidence
+
+## Result
+
+**NOMINAL HOST INIT, DOCTOR, AND DOMAIN INIT PASS; COMPLETE V3 GATE INCOMPLETE**
+
+The host-global `init`/`doctor` and domain-scoped `domain init` behaviors were
+exercised on the qualified macOS host with the maintainer present. The exact
+published V3 commit under test was
+`36839dc7fc987fa0b56f29339331804b091726f2`; the clean binary SHA-256 was
+`242fb3e015f91361f079af9209ff590f3fcefac120216f4e55c0eb4589f23c77`.
+
+No Tart VM was launched. Softnet privilege transition/drop, Softnet launch,
+the native serial relay, and GNU Screen exit/cleanup behavior remain unrun
+until a separately approved lossless-observer design exists. This evidence
+does not make PR #2 Ready and does not qualify those runtime properties.
+
+All domain roots, operator account fields, creation UUIDs, timestamps, and raw
+sudoers output are omitted or redacted. No provider credentials were used.
+
+## Host-global initialization and diagnosis
+
+The initial attended `boxwarden init` installed the exact qualified Softnet
+artifact and reported `refresh-login-session: true`. After a complete
+logout/login, the operator process had the dedicated group as an effective
+supplementary group. A corrected-head repeat reported:
+
+```text
+host-installed: true
+refresh-login-session: false
+```
+
+The final interactive-shell `boxwarden doctor` result, both before and after
+domain initialization, was:
+
+```text
+status: healthy
+```
+
+Doctor ran without a domain and performed read-only production inspection. The
+maintainer first invalidated the Terminal's sudo timestamp with `/usr/bin/sudo
+-k`; doctor then remained noninteractive, returned `status: healthy`, and
+exited zero. Its healthy result therefore includes successful parsing of actual
+macOS `/usr/bin/sudo -n -ll` output for both mutable Homebrew Softnet candidates
+without depending on cached authentication, and no privileged candidate
+finding. The raw policy listing was not retained because the stable, redacted
+repository evidence is the normalized production result.
+
+A run from the Codex sandbox was deliberately excluded: that sandbox denied
+`/usr/bin/sudo` execution and returned Directory Services errors, producing the
+expected fail-closed `homebrew.scan` and `group.identity` findings rather than
+evidence of host drift.
+
+The manifest and direct host probes bound the qualified identities:
+
+| Component | Qualified identity |
+| --- | --- |
+| Host | Apple Silicon macOS 26.6.2 build 25G83 |
+| Tart | 2.32.1; executable SHA-256 `05b65d5c14e8b41e8e44b6d9fd1278de4bedbc8b735d9b99f3c748f76f75862d`; archive SHA-256 `8554ab4f7fc12afe52f9b7e3093a935673cbac737a83973d2db7a0683c814529` |
+| Softnet | 0.19.0; executable SHA-256 `ab333619fc8bd7277837545e49a771baa994c01c3e8c14904ae4cc4c1f37269e`; archive SHA-256 `1612e1296834aae0b6389650c7c5190add1ee8d71474e328691e67679ecda53c` |
+| GNU Screen | 4.00.03 (FAU), 23-Oct-06; executable SHA-256 `07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add` |
+
+The final installed tree remained:
+
+| Object | Owner/group | Mode | Links | Inode | SHA-256 |
+| --- | --- | ---: | ---: | ---: | --- |
+| Softnet digest directory | `root:wheel` | `0755` | 4 | `37686074` | n/a |
+| `softnet` | `root:boxwarden-operators` | `04550` | 1 | `37686075` | `ab333619fc8bd7277837545e49a771baa994c01c3e8c14904ae4cc4c1f37269e` |
+| `manifest.json` | `root:wheel` | `0444` | 1 | `37686076` | `1289fbb409bc075dd188bb4d9574db41136b0ee58b308e91fec950172d7dca68` |
+
+Every ancestor from `/Library/Boxwarden` through the digest directory was a
+direct `root:wheel 0755` directory. No mutable `current` pointer existed. Every
+listed object had an observed `com.apple.provenance` extended attribute and no
+extended ACL entries; the `ls -ldeO@` mode marker was `@`, not `+`.
+
+Before host installation, the mutable Homebrew Softnet was directly observed
+as `root:admin 04555`, one link, with the qualified executable digest. The
+unsandboxed production doctor reported that privileged mutable artifact as
+blocking `drifted/unsafe` state and also reported the then-absent host tree. It
+did not repair either condition. The attended remediation changed only that
+exact Homebrew file's mode to `0555`; inode, ownership, link count, and digest
+were unchanged. Doctor then reported only the missing host tree. Real-host
+blocking of `init` and future `start` by this unsafe state was not exercised and
+remains listed below.
+
+## Legacy manifest exact-target migration
+
+The one pre-qualification installation had an otherwise-valid
+`manifest.json` at mode `0400`. Before mutation, the final-head attended group
+probe established one exact local operator group, one exact caller binding,
+matching named and GUID membership, no nested groups, exhaustive caller
+membership, and no shared GID. The canonical values were retained only in
+redacted form:
+
+```text
+operator_uid=[redacted] group_gid=[redacted] numeric_members=[[redacted]]
+```
+
+The exact old published binary then returned `host-installed: true` and
+`refresh-login-session: false`; the group probe was byte-identical afterward.
+The migration changed only the manifest mode from `0400` to `0444` at its exact
+digest-bound path. Device, inode, owner, group, link count, size, flags, bytes,
+SHA-256, extended attribute, ACL absence, and every other installed-tree object
+remained unchanged. Both a synthetic cross-UID Darwin permission test and an
+actual `sudo -u nobody` SHA-256 read of the installed manifest succeeded with
+the exact digest above.
+
+Normal corrected-head `init` and `doctor` performed no migration or repair.
+
+## Domain initialization
+
+Two disposable configured domains, `gatealpha` and `gatebeta`, began with
+empty owner-private state roots. Sequential first runs returned
+`management-ca: initialized`. The resulting CA trees contained only
+`identity/ssh-user-ca/{ca,ca.pub,metadata.json}` with directory mode `0700`,
+private key and metadata mode `0600`, public key mode `0644`, one-link regular
+files, and exact creating-operator ownership.
+
+The public identities were distinct:
+
+| Domain | SSH fingerprint | Public-key SHA-256 | Metadata SHA-256 |
+| --- | --- | --- | --- |
+| `gatealpha` | `SHA256:T/AqXZFEYVe3n4P3Shj6PTuqYZJ8v2BO/KPvqEAAE2Q` | `cdb3c965ac2f026256ca82475c7e6b51ea391dddab16495fae67070cb0c2e204` | `7cdd9de1147c0ad467bd6a4111893663ab0eebcac63bc054fa582a2991bcb540` |
+| `gatebeta` | `SHA256:Y6EpzO2+32SxU3N5qVxlK0jEaJLrbuneFjWxBvJrbbY` | `e007c544986837e75da8383529b306fd417c423f423cfd7a701194e7ba685239` | `1e3f5e066c92d18afda78fc4ee7f5053a4e4b3af4db0188ea193614ca286c3a0` |
+
+Sequential repeat runs returned `management-ca: already initialized`. Every CA
+file inode, mode, owner/group, link count, size, public fingerprint, public-key
+digest, and metadata digest was unchanged. The post-domain-init host snapshot
+matched the pre-domain-init snapshot exactly, including the two host-toolchain
+digests and absence of a `current` pointer. This proves domain initialization
+did not reinstall or mutate the host-global toolchain.
+
+V3 exposes no `session start` command. Deterministic `sshx` and application
+tests additionally prove that issuance loads existing CA state, missing or
+partial CA state fails closed, and `domain init` is the only application path
+that invokes CA creation. Targeted verification passed:
+
+```text
+go test ./internal/sshx ./internal/app -count=1
+ok github.com/weshofmann/boxwarden/internal/sshx
+ok github.com/weshofmann/boxwarden/internal/app
+```
+
+## Qualification boundary
+
+The following V3 architecture questions are resolved by this attended evidence:
+
+- exact qualified Tart/Softnet host identity and digest-bound installation;
+- ownership, group, modes, ACL absence, link counts, and file digests;
+- real directory-service membership plus required logout/login behavior;
+- host-init and domain-init idempotence;
+- read-only doctor behavior, actual macOS sudo-policy parsing, and useful
+  fail-closed drift reporting;
+- readable non-secret manifest handling across a distinct unprivileged UID;
+- positive doctor detection of a privileged mutable Homebrew Softnet, followed
+  by exact-target attended deprivileging; absence of a matching
+  passwordless-root policy for either canonical mutable Homebrew Softnet path;
+- distinct domain-bound CAs, no host mutation from domain init, and no lazy CA
+  creation.
+
+The following remain explicitly unqualified and block a complete V3 attended
+gate:
+
+- real-host proof that unsafe mutable Homebrew privilege blocks `init` and the
+  future `start` path without repair;
+- installed Softnet argument parsing, dependency resolution, effective setuid
+  transition and privilege drop, signal behavior, and filesystem writes;
+- launch under the closed runtime environment and exact network argv, including
+  the qualified network behavior;
+- lossless observation of Softnet/Tart startup and exit behavior;
+- two-PTY relay and GNU Screen retention/exit/cleanup behavior.
+
+The unsafe-state `init` case needs its own attended exact-target setup and
+restoration procedure; it does not require or authorize a VM launch. The
+runtime and Screen properties must be exercised only after approval of a
+lossless-observer design, using disposable VM/session state. No result in this
+document should be read as evidence for any unrun property.

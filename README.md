@@ -101,7 +101,9 @@ Boxwarden has no implicit domain and never searches across security domains.
 `boxwarden init` and `boxwarden doctor` are host-global: they do not select a
 domain and reject an explicitly supplied `--domain`. `domain init` creates only
 the selected domain's management CA; it does not install or modify host-global
-prerequisites. Start from
+prerequisites. See the [host initialization and diagnosis](docs/operations/init-and-doctor.md)
+and [domain management CA initialization](docs/operations/domain-init.md)
+runbooks. Start from
 [config/boxwarden.example.json](config/boxwarden.example.json).
 
 ## Development
