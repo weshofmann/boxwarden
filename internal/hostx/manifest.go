@@ -29,7 +29,9 @@ type Operator struct {
 }
 
 // Manifest is the root-published, versioned authorization record for the
-// digest tree. It deliberately has no mutable "current" pointer.
+// digest tree. Its fields are intentionally non-secret local host metadata;
+// secrets, security-domain data, and session data are prohibited. It
+// deliberately has no mutable "current" pointer.
 type Manifest struct {
 	Version     int          `json:"version"`
 	Platform    string       `json:"platform"`

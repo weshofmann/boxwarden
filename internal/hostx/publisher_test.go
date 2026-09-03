@@ -38,7 +38,7 @@ func TestRootedPublisherPublishesManifestLastAndValidatesExactTree(t *testing.T)
 	}
 	for path, mode := range map[string]uint32{
 		filepath.Join(p.finalDir(), "softnet"):       0o550,
-		filepath.Join(p.finalDir(), "manifest.json"): 0o400,
+		filepath.Join(p.finalDir(), "manifest.json"): 0o444,
 	} {
 		info, err := os.Lstat(path)
 		if err != nil || unixMode(info) != mode {
@@ -51,6 +51,58 @@ func TestRootedPublisherPublishesManifestLastAndValidatesExactTree(t *testing.T)
 	}
 	if state, _ := p.State(context.Background(), request, caller, group); state != publicationUnexpected {
 		t.Fatalf("State(extra entry) = %v, want unexpected", state)
+	}
+}
+
+func TestRootedPublisherRejectsLegacyPrivateManifestWithoutMutation(t *testing.T) {
+	root, source, digest := publisherFixture(t)
+	p := testPublisher(root, digest)
+	request := publisherRequest(source)
+	caller := Caller{UID: os.Getuid(), Name: "operator", Home: filepath.Join(root, "home")}
+	group := Group{ID: os.Getgid(), Name: OperatorGroupName, Members: []int{caller.UID}}
+	if err := p.Publish(context.Background(), request, caller, group); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+
+	manifestPath := filepath.Join(p.finalDir(), "manifest.json")
+	if err := os.Chmod(manifestPath, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	wantBytes, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantInfo, err := os.Lstat(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := unixMode(wantInfo); got != 0o400 {
+		t.Fatalf("legacy manifest mode = %04o, want 0400", got)
+	}
+
+	if state, err := p.Preflight(context.Background(), request, caller); err != nil || state != publicationUnexpected {
+		t.Fatalf("Preflight(legacy private manifest) = %v, %v; want unexpected", state, err)
+	}
+	if state, err := p.State(context.Background(), request, caller, group); err != nil || state != publicationUnexpected {
+		t.Fatalf("State(legacy private manifest) = %v, %v; want unexpected", state, err)
+	}
+
+	gotBytes, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotInfo, err := os.Lstat(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotBytes) != string(wantBytes) {
+		t.Fatalf("legacy manifest bytes changed: got %q, want %q", gotBytes, wantBytes)
+	}
+	if got, want := unixMode(gotInfo), unixMode(wantInfo); got != want {
+		t.Fatalf("legacy manifest mode = %04o, want unchanged %04o", got, want)
+	}
+	if got, want := gotInfo.Size(), wantInfo.Size(); got != want {
+		t.Fatalf("legacy manifest size = %d, want unchanged %d", got, want)
 	}
 }
 

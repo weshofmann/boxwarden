@@ -365,7 +365,7 @@ func healthyDoctorFixture(t *testing.T) (*doctorInspectorFake, Request) {
 		paths[path] = PathFact{Exists: true, Directory: true, Mode: 0o755, UID: 0, GID: 0, Links: 1}
 	}
 	paths[QualifiedSoftnetPath] = PathFact{Exists: true, Regular: true, Mode: SoftnetMode, UID: 0, GID: group.ID, Links: 1, SHA256: SoftnetExecutableSHA256}
-	paths[filepath.Join(filepath.Dir(QualifiedSoftnetPath), "manifest.json")] = PathFact{Exists: true, Regular: true, Mode: 0o400, UID: 0, GID: 0, Links: 1, Data: manifestBytes}
+	paths[filepath.Join(filepath.Dir(QualifiedSoftnetPath), "manifest.json")] = PathFact{Exists: true, Regular: true, Mode: 0o444, UID: 0, GID: 0, Links: 1, Data: manifestBytes}
 	paths[request.TartPath] = PathFact{Exists: true, Regular: true, Mode: 0o755, UID: 501, GID: 20, Links: 1, SHA256: TartExecutableSHA256}
 	paths[request.TartHome] = PathFact{Exists: true, Directory: true, Mode: 0o700, UID: 501, GID: 20, Links: 1}
 	paths["/usr/bin/ssh"] = PathFact{Exists: true, Regular: true, Mode: 0o755, UID: 0, GID: 0, Links: 1}

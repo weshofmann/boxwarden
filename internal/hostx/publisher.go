@@ -14,7 +14,7 @@ import (
 
 const (
 	trustedDirectoryMode = 0o755
-	manifestMode         = 0o400
+	manifestMode         = 0o444
 )
 
 // ACLInspector reports whether a path carries an extended ACL. It is read-only.
