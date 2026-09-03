@@ -54,8 +54,18 @@ in place.
 Normal init and doctor reject an otherwise exact legacy `0400` manifest as
 drifted/unsafe and do not chmod, rewrite, adopt, or repair it. The one known
 pre-qualification installation may be migrated only while attended and by exact
-path: run the old published `cf2212f` binary's host-global init against the
-original exact configuration to validate the complete tree; capture exact
+path. Before old init, build the final-head hostx test binary as the operator,
+run `BOXWARDEN_ATTENDED_EXACT_GROUP=1` with only
+`TestAttendedExactLocalOperatorGroupState` unprivileged, and capture its
+redacted canonical pre-state evidence. The production inspector's
+`inspectExactLocalOperatorGroup(..., false)` path proves exact local
+group/valid-GID state, exact caller RecordName/UID/GeneratedUID binding, exact
+named and GUID membership, no nested groups, exhaustive caller inventory, and
+no other user/group sharing the GID. Then run the exact old published `cf2212f`
+binary's host-global init against the original configuration and require
+`refresh-login-session: false`; rerun the same test and require the evidence
+line to match exactly. Old-init success alone is not a non-mutation proof. Stop
+before chmod on mismatch, init failure, or refresh request. Then capture exact
 manifest metadata and SHA-256 while it remains `0400`; change only that path's
 mode to `0444`; synchronize filesystem metadata; then verify unchanged inode,
 link count, owner, group, bytes, digest, and absence of ACL, plus exact `0444`

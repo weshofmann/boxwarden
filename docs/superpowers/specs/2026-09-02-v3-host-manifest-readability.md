@@ -51,20 +51,33 @@ repair, adopt, rewrite, or chmod it during normal `init` or `doctor`.
 The one known pre-qualification installation is migrated once, attended, and
 by exact path:
 
-1. Run the old published `cf2212f` binary's host-global `init` against the
-   original exact configuration. Success proves that binary revalidated the
-   complete directory tree, absence of extra/current entries, manifest type,
-   owner/group/mode/ACL/link count, strict schema-v2 bytes, exact caller/group/
-   Tart/configuration binding, installed Softnet metadata, and both tool
-   digests under the original `0400` contract.
-2. Capture the manifest SHA-256 and exact metadata while it is still `0400`.
-3. Change only the exact manifest path from `0400` to `0444`. Do not chown,
+1. Build the final-head `internal/hostx` test binary as the unprivileged
+   operator, then run `BOXWARDEN_ATTENDED_EXACT_GROUP=1` and only
+   `TestAttendedExactLocalOperatorGroupState`. Capture its redacted canonical
+   pre-state evidence line. This read-only test invokes
+   `inspectExactLocalOperatorGroup(..., false)` through the production doctor
+   inspector, proving the exact local group and valid GID; exact caller
+   RecordName/UID/GeneratedUID binding; exact named and GUID membership; no
+   nested groups; caller presence in the exhaustive user inventory; and no
+   other user or group sharing the target GID.
+2. Run the exact old published `cf2212f` binary's host-global `init` against
+   the original exact configuration and require `refresh-login-session: false`.
+   It still validates the complete directory tree, absence of extra/current
+   entries, manifest type, owner/group/mode/ACL/link count, strict schema-v2
+   bytes, exact caller/group/Tart/configuration binding, installed Softnet
+   metadata, and both tool digests under the original `0400` contract; it does
+   not by itself prove that its group pre-state was non-mutating.
+3. Rerun the same unprivileged attended group-state test and require its
+   canonical evidence line to match the pre-state exactly. Stop before chmod
+   on a mismatch, old-init failure, or `refresh-login-session: true`.
+4. Capture the manifest SHA-256 and exact metadata while it is still `0400`.
+5. Change only the exact manifest path from `0400` to `0444`. Do not chown,
    rewrite, replace, or rename it. Protected root-owned ancestry prevents an
    unprivileged path substitution between validation and chmod.
-4. Synchronize filesystem metadata, verify the same inode/link/owner/group,
+6. Synchronize filesystem metadata, verify the same inode/link/owner/group,
    unchanged bytes and digest, no ACL, exact `0444`, and successful read as a
    distinct unprivileged UID.
-5. Use only the corrected binary afterward. Its unprivileged `doctor` and
+7. Use only the corrected binary afterward. Its unprivileged `doctor` and
    attended idempotent `init` must both validate the migrated tree.
 
 Any failed validation stops the migration. Any legacy mode other than exact

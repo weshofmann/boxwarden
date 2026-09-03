@@ -77,15 +77,24 @@ active or unverifiable.
 The corrected binary also treats an otherwise exact legacy `0400` installed
 manifest as unexpected drift. Normal init and doctor do not chmod, rewrite,
 adopt, or repair it. The one known pre-qualification installation is an
-attended, exact-path, mode-only migration: first the old published `cf2212f`
-binary runs host-global init against the original exact configuration, proving
-the complete tree under the original contract; capture its exact metadata and
-SHA-256 digest while still `0400`; change only that manifest path to `0444`;
-synchronize filesystem metadata; then revalidate unchanged inode, link count,
-owner, group, bytes, digest, and absence of ACL together with exact `0444` and
-a read by a distinct unprivileged UID. Use only the corrected binary afterward.
-Any failed validation, legacy mode other than exact `0400`, or other unexpected
-tree state stops the migration for manual investigation.
+attended, exact-path, mode-only migration. Before old init, build the final-head
+hostx test binary as the operator and run
+`BOXWARDEN_ATTENDED_EXACT_GROUP=1 TestAttendedExactLocalOperatorGroupState`
+unprivileged, retaining its redacted canonical pre-state evidence. Through
+`inspectExactLocalOperatorGroup(..., false)`, it proves the exact local group/valid GID, exact caller
+RecordName/UID/GeneratedUID binding, exact named and GUID membership, no nested
+groups, caller presence in exhaustive user inventory, and no other user/group
+sharing the GID. Run the exact old published `cf2212f` init against the original
+configuration only if that test passes, require `refresh-login-session: false`,
+then rerun the same test and require an identical evidence line. Old-init
+success alone does not prove group pre-state or non-mutation. Stop before chmod
+on any evidence mismatch, init failure, or refresh request. Only then capture
+exact metadata and SHA-256 while still `0400`, change only that manifest path
+to `0444`, synchronize filesystem metadata, and revalidate unchanged inode,
+link count, owner, group, bytes, digest, and absence of ACL together with exact
+`0444` and a read by a distinct unprivileged UID. Use only the corrected binary
+afterward. Any failed validation, legacy mode other than exact `0400`, or other
+unexpected tree state stops the migration for manual investigation.
 
 ## Alternatives considered
 

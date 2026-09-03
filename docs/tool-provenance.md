@@ -31,13 +31,21 @@ root-owned non-writable ancestry preserve integrity. Unprivileged doctor must
 read, hash, and strictly parse it; `0440` would fail while the operator group is
 being diagnosed, and a privileged helper would expand the diagnostic boundary.
 Normal init and doctor reject legacy `0400` without chmod, rewrite, adoption,
-or repair. The one known installation is migrated separately: the old published
-`cf2212f` init first validates the complete original tree, exact metadata and
-digest are captured, only the exact manifest path changes mode to `0444`, the
-metadata is synchronized, and unchanged inode/link/owner/group/bytes/digest/
-no-ACL plus `0444` and distinct-UID read are revalidated before only the
-corrected binary is used. Committed evidence redacts local account and path
-values.
+or repair. The one known installation is migrated separately: old published
+`cf2212f` init is not validation-only because it can ensure operator-group
+state. Before it runs, build the final-head hostx test binary as the operator
+and run `BOXWARDEN_ATTENDED_EXACT_GROUP=1` for the unprivileged exact-group
+test, retaining its redacted canonical pre-state. The production
+`inspectExactLocalOperatorGroup(..., false)` semantics prove exact local
+group/valid GID, exact caller RecordName/UID/GeneratedUID binding, exact named
+and GUID membership, no nested groups, exhaustive caller inventory, and no
+other user/group sharing the GID. Run old init only against the original config,
+require `refresh-login-session: false`, rerun the same test, and require
+identical evidence; otherwise stop before chmod. Then capture exact metadata
+and digest, change only the exact manifest path to `0444`, synchronize, and
+revalidate unchanged inode/link/owner/group/bytes/digest/no-ACL plus `0444` and
+distinct-UID read before only the corrected binary is used. Committed evidence
+redacts local account and path values.
 A mutable user-writable Homebrew path never inherits authorization. Any
 setuid/setgid/passwordless-root Softnet in mutable Homebrew state is blocking
 drifted/unsafe state: doctor is nonzero and init/start refuse until attended

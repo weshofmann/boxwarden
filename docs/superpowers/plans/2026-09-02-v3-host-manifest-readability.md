@@ -4,7 +4,7 @@
 
 **Goal:** Make the root-owned V3 host manifest safely readable by unprivileged doctor, prove the cross-UID behavior, and document the one-time attended migration of the existing installation.
 
-**Architecture:** Publish and validate the non-secret host manifest as exact `root:wheel 0444`; retain every existing integrity check and keep doctor privilege-free. Normal code refuses the legacy `0400` state, while the existing installation is migrated separately only after the old published binary validates its complete original tree.
+**Architecture:** Publish and validate the non-secret host manifest as exact `root:wheel 0444`; retain every existing integrity check and keep doctor privilege-free. Normal code refuses the legacy `0400` state, while the existing installation is migrated separately only after a final-head read-only exact-group precheck, a non-mutating old-init comparison, and complete original-tree validation.
 
 **Tech Stack:** Go standard library, Unix/macOS file permissions, existing `internal/hostx` publication/doctor code, Markdown architecture and operations documentation.
 
@@ -30,10 +30,11 @@
 - Modify: `internal/hostx/publisher_test.go`
 - Modify: `internal/hostx/doctor_test.go`
 - Create: `internal/hostx/manifest_permissions_darwin_test.go`
+- Create: `internal/hostx/operator_group_attended_darwin_test.go`
 
 **Interfaces:**
 - Consumes: existing package-private `manifestMode`, `RootedPublisher.State`, `RootedPublisher.Preflight`, and Unix `syscall.SysProcAttr.Credential`.
-- Produces: exact `manifestMode = 0o444`; product comments classifying the schema as non-secret; regression tests that reject legacy `0400` without mutation; root-only cross-UID integration test `TestManifestModeAllowsDistinctUnprivilegedUIDToRead`.
+- Produces: exact `manifestMode = 0o444`; product comments classifying the schema as non-secret; direct-doctor and publisher regressions that reject legacy `0400` without mutation; root-only cross-UID integration test `TestManifestModeAllowsDistinctUnprivilegedUIDToRead`; and attended read-only group-state test `TestAttendedExactLocalOperatorGroupState`.
 
 - [ ] **Step 1: Change test expectations first**
 
@@ -41,6 +42,9 @@ Update publisher and healthy-doctor fixtures to require `0o444`. Add a
 regression case that publishes a manifest, changes only its mode to `0o400`,
 captures its bytes and metadata, invokes both `Preflight` and `State`, expects
 `publicationUnexpected`, and proves the bytes and `0o400` mode are unchanged.
+Also change only the healthy doctor fixture's manifest mode to `0o400`, require
+`Drifted` and `manifest.mode`, and prove doctor leaves that fake fact's mode
+and bytes unchanged with zero mutations.
 
 Create `manifest_permissions_darwin_test.go` with build constraint `darwin`.
 The test must skip unless `os.Geteuid() == 0`, create a
@@ -68,7 +72,7 @@ Run:
 ```bash
 GOCACHE=/private/tmp/boxwarden-v3-manifest-mode-fix-gocache \
   go test -count=1 ./internal/hostx \
-  -run 'TestRootedPublisherPublishesManifestLastAndValidatesExactTree|TestRootedPublisherRejectsLegacyPrivateManifestWithoutMutation|TestDoctorReportsHealthyOnlyWhenEveryHostPrerequisiteMatches'
+  -run 'TestRootedPublisherPublishesManifestLastAndValidatesExactTree|TestRootedPublisherRejectsLegacyPrivateManifestWithoutMutation|TestDoctorReportsHealthyOnlyWhenEveryHostPrerequisiteMatches|TestDoctorReportsLegacyPrivateManifestWithoutMutation'
 ```
 
 Expected: failure because production still publishes and requires `0400`.
@@ -119,6 +123,41 @@ sudo /private/tmp/boxwarden-v3-manifest-permissions.test \
 Expected: PASS, including a successful read after the child credential is
 dropped to the distinct `nobody` UID and a failed read of the `0400` control.
 
+- [ ] **Step 5a: Add the attended exact-group migration preflight**
+
+Create `operator_group_attended_darwin_test.go` with build constraint `darwin`.
+It must skip unless `BOXWARDEN_ATTENDED_EXACT_GROUP=1`, use `os.Getuid()`,
+construct the production OS doctor inspector, call `LookupOperator` and then
+`ExactOperatorGroup(operator, OperatorGroupName)`, and require the exact group
+name, nonnegative GID, and one numeric member equal to the operator UID. Its
+only evidence output is the bounded canonical operator-UID/group-GID/numeric-
+member-list line. `ExactOperatorGroup` must retain the full read-only
+`inspectExactLocalOperatorGroup(..., false)` checks: exact local group/valid
+GID, caller RecordName/UID/GeneratedUID binding, named and GUID membership,
+no nested groups, exhaustive caller inventory, and no other user/group sharing
+the GID.
+
+Run without opt-in during deterministic verification:
+
+```bash
+GOCACHE=/private/tmp/boxwarden-v3-manifest-mode-fix-gocache \
+  go test -count=1 -run '^TestAttendedExactLocalOperatorGroupState$' -v ./internal/hostx
+```
+
+Expected: SKIP. The attended migration gate later builds the final-head test
+binary as the operator and runs the exact opt-in test unprivileged before and
+after old init; it records redacted output and requires identical evidence.
+
+The attended operator uses these exact commands; it must not use `sudo`:
+
+```bash
+GOCACHE=/private/tmp/boxwarden-v3-manifest-mode-fix-gocache \
+  go test -c -o /private/tmp/boxwarden-exact-group.test ./internal/hostx
+BOXWARDEN_ATTENDED_EXACT_GROUP=1 \
+  /private/tmp/boxwarden-exact-group.test \
+  -test.run '^TestAttendedExactLocalOperatorGroupState$' -test.v
+```
+
 - [ ] **Step 6: Verify and commit Task 1**
 
 Run:
@@ -138,7 +177,8 @@ Commit only the Task 1 files with:
 ```bash
 git add internal/hostx/publisher.go internal/hostx/manifest.go \
   internal/hostx/publisher_test.go internal/hostx/doctor_test.go \
-  internal/hostx/manifest_permissions_darwin_test.go
+  internal/hostx/manifest_permissions_darwin_test.go \
+  internal/hostx/operator_group_attended_darwin_test.go
 git commit -m "fix: make host manifest readable to doctor"
 ```
 
@@ -171,16 +211,24 @@ session data categories from the specification.
 Explain why unprivileged doctor must read/hash/parse the manifest and why
 `0440` or a privileged helper would break the diagnostic boundary. State that
 normal init and doctor reject rather than repair legacy `0400`. Add the exact
-one-time migration sequence: old published binary validates the complete tree;
-capture exact metadata and digest; exact-path mode-only change; synchronize;
-revalidate unchanged inode/link/owner/group/bytes/digest/no-ACL plus `0444` and
-distinct-UID read; use only the corrected binary thereafter.
+one-time migration sequence: final-head test binary built as the operator;
+opt-in unprivileged exact-group pre-state evidence using
+`inspectExactLocalOperatorGroup(..., false)` semantics; old published init
+against original configuration only with `refresh-login-session: false`; the
+same post-state evidence line; then exact metadata/digest capture, exact-path
+mode-only change, synchronization, unchanged inode/link/owner/group/bytes/
+digest/no-ACL plus `0444` and distinct-UID read; use only the corrected binary
+thereafter. Stop before chmod on group-evidence mismatch, old-init failure, or
+refresh request; old-init success alone is not a group pre-state/non-mutation
+proof.
 
 - [ ] **Step 3: Update the V3 plan's deterministic and attended gates**
 
 Require exact `root:wheel 0444`, the root-only genuine cross-UID test, legacy
-`0400` refusal without mutation, and redacted evidence from the attended
-migration. Preserve every existing no-Tart/no-Softnet-runtime restriction.
+`0400` refusal without mutation, the direct-doctor `0400` no-mutation
+regression, and redacted exact-group evidence before and after old init in the
+attended migration. Preserve every existing no-Tart/no-Softnet-runtime
+restriction.
 
 - [ ] **Step 4: Check documentation consistency**
 

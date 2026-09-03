@@ -133,13 +133,21 @@ would break that diagnostic boundary before group membership is effective. An
 otherwise exact legacy `0400` manifest is drifted/unsafe: normal init and
 doctor refuse it without mutation. The one attended exact-path mode-only
 migration follows the complete canonical procedure in ADR 024 and the V3 Host
-Manifest Readability Design: old published `cf2212f` init validates the complete
-tree against the original configuration; exact pre-change metadata and digest
-are captured; only the manifest mode changes to `0444`; metadata is
-synchronized; unchanged inode/link/owner/group/bytes/digest/no-ACL plus `0444`
-and distinct-UID read are revalidated; then only the corrected binary is used,
-with both unprivileged doctor and attended idempotent init validating the
-migrated tree.
+Manifest Readability Design. First, a final-head hostx test binary built as the
+operator runs `BOXWARDEN_ATTENDED_EXACT_GROUP=1` for the unprivileged
+group-state test and records its redacted canonical pre-state. Its
+`inspectExactLocalOperatorGroup(..., false)`
+semantics require the exact local group/valid GID, exact caller
+RecordName/UID/GeneratedUID binding, exact named and GUID membership, no nested
+groups, caller inclusion in exhaustive user inventory, and no other user/group
+sharing that GID. Only then may exact old published `cf2212f` init run against
+the original configuration, with `refresh-login-session: false` required. The
+same test must then yield an identical evidence line; old-init success alone
+does not prove non-mutation. Any mismatch, init failure, or refresh request
+stops before chmod. The remaining exact metadata/digest capture, exact-path
+`0444` mode-only change, synchronization, unchanged inode/link/owner/group/
+bytes/digest/no-ACL verification, distinct-UID read, corrected unprivileged
+doctor, and corrected attended idempotent init requirements remain mandatory.
 
 Init refuses a Softnet source with any setuid/setgid bit. Any setuid or
 passwordless-root Softnet under mutable Homebrew state is drifted/unsafe,

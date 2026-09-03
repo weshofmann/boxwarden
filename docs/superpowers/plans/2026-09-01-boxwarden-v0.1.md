@@ -532,12 +532,21 @@ local-host manifest without privilege; group-only `0440` would fail before the
 operator group's membership is effective and a privileged helper would violate
 the diagnostic boundary. An otherwise exact legacy `0400` manifest is rejected
 without mutation by normal init and doctor. The sole known legacy installation
-is migrated only in an attended exact-path mode-only operation after old
-published `cf2212f` init proves the complete original tree: capture exact
-metadata/digest, change only the path's mode to `0444`, synchronize, then
-revalidate unchanged inode/link/owner/group/bytes/digest/no-ACL plus exact
-`0444` and a distinct-UID read; committed evidence redacts local account/path
-values and only the corrected binary is used afterward.
+is migrated only in an attended exact-path mode-only operation after the
+final-head hostx test binary built as the operator records the unprivileged
+exact-group pre-state. That test enforces
+`inspectExactLocalOperatorGroup(..., false)` semantics: exact local group/valid
+GID, caller RecordName/UID/GeneratedUID binding, exact named and GUID
+membership, no nested groups, exhaustive caller inventory, and no other
+user/group sharing the GID. Exact old published `cf2212f` init then runs only
+against the original configuration and must report
+`refresh-login-session: false`; the same test must report identical post-state
+evidence before chmod.
+Old-init success alone does not prove group pre-state or non-mutation. Then
+capture exact metadata/digest, change only the path's mode to `0444`,
+synchronize, and revalidate unchanged inode/link/owner/group/bytes/digest/
+no-ACL plus exact `0444` and a distinct-UID read; committed evidence redacts
+local account/path values and only the corrected binary is used afterward.
 Domain CA state is deliberately absent from this report. Domain init and the
 domain-scoped session prerequisite checks own those diagnostics.
 
@@ -568,16 +577,24 @@ git diff --check
 inspect the install request, authorize `boxwarden init`, verify the complete
 installed tree/group/mode/ACL/link/digests/manifest, host-global idempotent
 rerun, host-global `boxwarden doctor` output, and refreshed effective group.
-The attended manifest migration gate records redacted evidence that old
-published `cf2212f` init first validated the complete `0400` tree; exact
-metadata and digest were captured; only the exact manifest path changed to
-`0444`; synchronization and unchanged inode/link/owner/group/bytes/digest/
-no-ACL were revalidated; and a distinct unprivileged UID read the resulting
-`0444` manifest. After that mode change, redacted evidence must also show the
-corrected binary's unprivileged `boxwarden doctor` and attended idempotent
-`boxwarden init` both validated the migrated tree. Normal init and doctor must
-refuse legacy `0400` without mutation. This gate includes no Tart or Softnet
-runtime execution.
+The attended manifest migration gate first builds the final-head hostx test
+binary as the operator, runs `BOXWARDEN_ATTENDED_EXACT_GROUP=1` for the
+unprivileged exact-group test, and records redacted canonical pre-state. The
+test uses `inspectExactLocalOperatorGroup(..., false)` semantics: exact local
+group/valid GID, exact caller RecordName/UID/GeneratedUID binding, exact named
+and GUID membership, no nested groups, caller inclusion in exhaustive user
+inventory, and no other user/group sharing the GID. Only then may exact old
+published `cf2212f` init run against the original configuration; require
+`refresh-login-session: false`, rerun the test, and require identical evidence.
+Old-init success alone does not prove the pre-state or non-mutation, and any
+mismatch, init failure, or refresh request stops before chmod. The gate then
+records exact metadata/digest capture, exact-path `0444` mode-only change,
+synchronization, unchanged inode/link/owner/group/bytes/digest/no-ACL
+revalidation, and a distinct unprivileged UID read. After that mode change,
+redacted evidence must also show the corrected binary's unprivileged
+`boxwarden doctor` and attended idempotent `boxwarden init` both validated the
+migrated tree. Normal init and doctor must refuse legacy `0400` without
+mutation. This gate includes no Tart or Softnet runtime execution.
 Prove the installed exact setuid Softnet's
 argument parsing, closed environment and dependency resolution, effective
 privilege transition/drop, signals, filesystem writes, exact qualified network

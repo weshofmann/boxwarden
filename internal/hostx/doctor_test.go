@@ -1,6 +1,7 @@
 package hostx
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,6 +31,37 @@ func TestDoctorReportsHealthyOnlyWhenEveryHostPrerequisiteMatches(t *testing.T) 
 	}
 	if inspector.mutations != 0 {
 		t.Fatalf("doctor mutation count = %d, want zero", inspector.mutations)
+	}
+}
+
+func TestDoctorReportsLegacyPrivateManifestWithoutMutation(t *testing.T) {
+	inspector, request := healthyDoctorFixture(t)
+	manifestPath := filepath.Join(filepath.Dir(QualifiedSoftnetPath), "manifest.json")
+	original := inspector.paths[manifestPath]
+	originalBytes := append([]byte(nil), original.Data...)
+	legacy := original
+	legacy.Mode = 0o400
+	inspector.paths[manifestPath] = legacy
+
+	report := (SystemService{inspector: inspector}).Doctor(t.Context(), request)
+	if report.Status != Drifted {
+		t.Fatalf("Doctor() status = %q, want drifted", report.Status)
+	}
+	if !hasFinding(report, "manifest.mode") {
+		t.Fatalf("Doctor() findings = %#v, want manifest.mode", report.Findings)
+	}
+	if inspector.mutations != 0 {
+		t.Fatalf("doctor mutation count = %d, want zero", inspector.mutations)
+	}
+	got := inspector.paths[manifestPath]
+	if got.Mode != 0o400 {
+		t.Fatalf("manifest mode after Doctor() = %04o, want 0400", got.Mode)
+	}
+	if !bytes.Equal(got.Data, originalBytes) {
+		t.Fatalf("manifest bytes changed during Doctor(): got %q, want %q", got.Data, originalBytes)
+	}
+	if original.Mode != 0o444 || !bytes.Equal(original.Data, originalBytes) {
+		t.Fatalf("healthy fake manifest changed before Doctor(): %#v", original)
 	}
 }
 
