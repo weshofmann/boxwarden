@@ -479,5 +479,5 @@ func (b *Bootstrapper) result(request SerialRequest, active string, sshd map[str
 		sum := sha256.Sum256(contents)
 		digests[name] = hex.EncodeToString(sum[:])
 	}
-	return SerialResult{Version: Version, Association: request.Association, CAFingerprint: request.CAFingerprint, Principal: request.Principal, InstalledSHA256: digests, SSHD: sshd, HostPublicKey: host}, nil
+	return SerialResult{Version: Version, StartGeneration: request.StartGeneration, Association: request.Association, CAFingerprint: request.CAFingerprint, Principal: request.Principal, InstalledSHA256: digests, SSHD: sshd, HostPublicKey: host}, nil
 }

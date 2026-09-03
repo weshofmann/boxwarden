@@ -29,7 +29,7 @@ type Association struct {
 type SerialRequest struct {
 	Version         int    `json:"version"`
 	Nonce           string `json:"nonce"`
-	StartGeneration uint64 `json:"start_generation"`
+	StartGeneration string `json:"start_generation"`
 	Association
 	CAPublicKey   string `json:"ca_public_key"`
 	CAFingerprint string `json:"ca_fingerprint"`
@@ -44,7 +44,8 @@ type ManagementRequest struct {
 }
 
 type SerialResult struct {
-	Version int `json:"version"`
+	Version         int    `json:"version"`
+	StartGeneration string `json:"start_generation"`
 	Association
 	CAFingerprint   string            `json:"ca_fingerprint"`
 	Principal       string            `json:"principal"`
@@ -92,7 +93,7 @@ func DecodeManagementRequest(reader io.Reader) (ManagementRequest, error) {
 }
 
 func (r SerialRequest) Validate() error {
-	if r.Version != Version || !validToken(r.Nonce, 1, 128) || r.StartGeneration == 0 || !r.Association.valid() || !validPublicKey(r.CAPublicKey) || !validFingerprint(r.CAFingerprint) || r.Principal != derivedPrincipal(r.SessionID) {
+	if r.Version != Version || !validToken(r.Nonce, 1, 128) || !validUUID(r.StartGeneration) || !r.Association.valid() || !validPublicKey(r.CAPublicKey) || !validFingerprint(r.CAFingerprint) || r.Principal != derivedPrincipal(r.SessionID) {
 		return fmt.Errorf("invalid serial bootstrap request")
 	}
 	if fingerprint(r.CAPublicKey) != r.CAFingerprint {
@@ -250,6 +251,9 @@ func decodeFields(fields map[string]json.RawMessage, value any) error {
 }
 
 func EncodeSerialFrame(request SerialRequest, result SerialResult) (string, string, error) {
+	if result.StartGeneration != request.StartGeneration {
+		return "", "", fmt.Errorf("result start generation differs from request")
+	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		return "", "", err

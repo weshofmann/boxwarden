@@ -63,7 +63,7 @@ func TestSerialPublishesExactStateAndLaterGenerationIsIdempotent(t *testing.T) {
 	if strings.Contains(string(manifest), "nonce") || strings.Contains(string(manifest), "generation") {
 		t.Fatalf("manifest persisted correlation fields: %s", manifest)
 	}
-	request.StartGeneration = 8
+	request.StartGeneration = "9a7b5b4b-8746-4430-9a74-04ab1ced127e"
 	if _, err := bootstrapper.Serial(context.Background(), request); err != nil {
 		t.Fatalf("later generation exact retry: %v", err)
 	}
