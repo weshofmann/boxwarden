@@ -131,9 +131,15 @@ The unprivileged host-global doctor must read, hash, and strictly parse it so it
 can diagnose both the tree and membership without a privileged helper. `0440`
 would break that diagnostic boundary before group membership is effective. An
 otherwise exact legacy `0400` manifest is drifted/unsafe: normal init and
-doctor refuse it without mutation, while the one attended exact-path mode-only
-migration validates the old complete tree first and then proves unchanged
-inode/link/owner/group/bytes/digest/no-ACL plus `0444` and distinct-UID read.
+doctor refuse it without mutation. The one attended exact-path mode-only
+migration follows the complete canonical procedure in ADR 024 and the V3 Host
+Manifest Readability Design: old published `cf2212f` init validates the complete
+tree against the original configuration; exact pre-change metadata and digest
+are captured; only the manifest mode changes to `0444`; metadata is
+synchronized; unchanged inode/link/owner/group/bytes/digest/no-ACL plus `0444`
+and distinct-UID read are revalidated; then only the corrected binary is used,
+with both unprivileged doctor and attended idempotent init validating the
+migrated tree.
 
 Init refuses a Softnet source with any setuid/setgid bit. Any setuid or
 passwordless-root Softnet under mutable Homebrew state is drifted/unsafe,

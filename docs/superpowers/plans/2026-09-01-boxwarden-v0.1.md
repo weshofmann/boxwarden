@@ -573,8 +573,11 @@ published `cf2212f` init first validated the complete `0400` tree; exact
 metadata and digest were captured; only the exact manifest path changed to
 `0444`; synchronization and unchanged inode/link/owner/group/bytes/digest/
 no-ACL were revalidated; and a distinct unprivileged UID read the resulting
-`0444` manifest. Normal init and doctor must refuse legacy `0400` without
-mutation. This gate includes no Tart or Softnet runtime execution.
+`0444` manifest. After that mode change, redacted evidence must also show the
+corrected binary's unprivileged `boxwarden doctor` and attended idempotent
+`boxwarden init` both validated the migrated tree. Normal init and doctor must
+refuse legacy `0400` without mutation. This gate includes no Tart or Softnet
+runtime execution.
 Prove the installed exact setuid Softnet's
 argument parsing, closed environment and dependency resolution, effective
 privilege transition/drop, signals, filesystem writes, exact qualified network
