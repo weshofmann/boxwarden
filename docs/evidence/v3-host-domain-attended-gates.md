@@ -15,9 +15,11 @@ published branch was at `7de2306b83136231beb9e03a7a769c52c9691d7f`; the
 intervening commit changed documentation only.
 
 No Tart VM was launched. Softnet privilege transition/drop, Softnet launch,
-the native serial relay, and GNU Screen exit/cleanup behavior remain unrun
-until a separately approved lossless-observer design exists. This evidence
-does not make PR #2 Ready and does not qualify those runtime properties.
+the native serial relay, and GNU Screen exit/cleanup behavior remain unrun.
+The maintainer has since approved a cumulative, sufficient non-perturbing
+qualification-evidence model that includes bounded `proc_pidinfo` sampling;
+approval of that model is not execution evidence. This evidence does not make
+PR #2 Ready and does not qualify those runtime properties.
 
 All domain roots, operator account fields, creation UUIDs, timestamps, and raw
 sudoers output are omitted or redacted. No provider credentials were used.
@@ -208,9 +210,12 @@ gate:
   transition and privilege drop, signal behavior, and filesystem writes;
 - launch under the closed runtime environment and exact network argv, including
   the qualified network behavior;
-- lossless observation of Softnet/Tart startup and exit behavior;
+- bounded process ancestry and credential sampling, with its explicit race
+  window, plus the rest of the approved cumulative evidence chain;
 - two-PTY relay and GNU Screen retention/exit/cleanup behavior.
 
-The runtime and Screen properties must be exercised only after approval of a
-lossless-observer design, using disposable VM/session state. No result in this
+The runtime and Screen properties must be exercised only through a separately
+reviewed attended procedure using disposable VM/session state. `proc_pidinfo`
+is non-mutating sampling evidence, not lossless tracing and not independent
+proof of every instant of the transient setuid-root phase. No result in this
 document should be read as evidence for any unrun property.

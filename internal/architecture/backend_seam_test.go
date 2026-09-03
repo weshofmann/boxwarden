@@ -41,3 +41,32 @@ func TestOnlyCommandCompositionImportsTheTartAdapter(t *testing.T) {
 		t.Fatalf("walk source tree: %v", err)
 	}
 }
+
+func TestQualificationCodeCannotEnterProductionPackages(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return walkErr
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if err != nil {
+			return err
+		}
+		for _, imported := range file.Imports {
+			if !strings.Contains(strings.Trim(imported.Path.Value, "\""), "/internal/qualification/") {
+				continue
+			}
+			relative, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			if !strings.HasPrefix(relative, filepath.Join("internal", "qualification")+string(filepath.Separator)) {
+				t.Errorf("%s imports qualification-only code", relative)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk source tree: %v", err)
+	}
+}
