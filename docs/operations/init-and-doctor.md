@@ -14,6 +14,17 @@ last, and report when a new group membership needs a login-session refresh.
 It does not store administrator credentials, repair unsafe Homebrew state, or
 select a mutable `current` link.
 
+The installed host-toolchain `manifest.json` is a regular one-link
+`root:wheel 0444` file with no extended ACL. It is intentionally non-secret
+local host metadata, and its integrity comes from root ownership, no write bits,
+exact metadata/content validation, and protected root-owned non-writable
+ancestry. It contains qualified platform release/build, exact Tart and Softnet
+paths/versions/digests, root and dedicated operator-group identity, the trusted
+operator UID/name/home, canonical `TART_HOME`, installed Softnet mode, and
+installation time; it must not contain a security-domain identity, CA material,
+credentials, provider data, session state, private keys, tokens, or other
+secrets.
+
 `boxwarden doctor` is the host-global, read-only diagnostic. It rejects an
 explicit `--domain`, emits a stable status:
 `healthy`, `missing/uninitialized`, `drifted/unsafe`, or
@@ -27,11 +38,31 @@ corresponding `Commands` block; inability to parse the list or prove that an
 unsafe passwordless rule is absent is a fail-closed diagnostic, never an
 authorization attempt or repair.
 
+Doctor must read, hash, and strictly parse the manifest without privilege:
+those checks diagnose both the manifest and the current group membership. A
+`0440 root:boxwarden-operators` manifest would deny diagnosis before a new group
+membership is effective, and a privileged helper would turn a read-only
+diagnostic into a privilege boundary. Therefore `0444`, not group readability,
+is the exact contract.
+
 The qualified host identity is the exact macOS release `26.6.2` and build
 `25G83`, observed with absolute `/usr/bin/sw_vers` probes. Root-published
 toolchain manifests use schema version 2 and record `macos_build`; version-1
 manifests are unsupported/unqualified and must never be migrated or overwritten
 in place.
+
+Normal init and doctor reject an otherwise exact legacy `0400` manifest as
+drifted/unsafe and do not chmod, rewrite, adopt, or repair it. The one known
+pre-qualification installation may be migrated only while attended and by exact
+path: run the old published `cf2212f` binary's host-global init against the
+original exact configuration to validate the complete tree; capture exact
+manifest metadata and SHA-256 while it remains `0400`; change only that path's
+mode to `0444`; synchronize filesystem metadata; then verify unchanged inode,
+link count, owner, group, bytes, digest, and absence of ACL, plus exact `0444`
+and a successful read by a distinct unprivileged UID. Use only the corrected
+binary afterward. Any failed validation or state other than exact legacy `0400`
+requires manual investigation rather than repair. Committed migration evidence
+redacts local account and path values.
 
 Linux and every unqualified platform return `unsupported/unqualified`; this is
 intentional so CI can compile and exercise policy without accidentally treating

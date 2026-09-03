@@ -375,11 +375,16 @@ the single invoking trusted operator membership, creates every ancestor root-own
 non-writable by group/other, copies Softnet to a sibling staging directory,
 fsyncs it, sets root/group and `04550`, verifies digest/type/link/ACL/metadata,
 renames the complete digest directory into place, fsyncs its parent, and
-publishes the root-owned manifest last by atomic rename and parent fsync. It
-never authorizes a Homebrew path. If the exact final tree already exists and is
-fully valid, it is idempotent. Partial, unexpected, or mismatched final state
-fails closed with manual remediation guidance; it is not overwritten. It removes
-only the exact staging tree it created and still owns. New directory-service
+publishes the regular one-link no-ACL `root:wheel 0444` non-secret local-host
+manifest last by atomic rename and parent fsync. The manifest contains only
+qualified platform release/build, exact tool paths/versions/digests, root and
+dedicated operator-group identity, trusted operator UID/name/home, canonical
+`TART_HOME`, Softnet mode, and installation time; it excludes domain identity,
+CA material, credentials, provider data, session state, private keys, tokens,
+and other secrets. It never authorizes a Homebrew path. If the exact final tree
+already exists and is fully valid, it is idempotent. Partial, unexpected, or
+mismatched final state fails closed with manual remediation guidance; it is not
+overwritten. It removes only the exact staging tree it created and still owns. New directory-service
 membership does not imply membership in the initiating process tree: init
 reports that a login-session refresh is required, and doctor/start fail until
 the new supplementary group is effective.
@@ -400,6 +405,7 @@ digest and never mutates the existing tree.
   source replacement, altered post-copy digest, malicious request paths,
   source privilege bits, inherited environment, spoofed sudo caller,
   wrong caller UID/group/home, new membership without current-process effect,
+  exact `0444` manifest mode, legacy exact `0400` refusal without mutation,
   blocking Homebrew privilege, already-correct idempotence, unsafe preexisting
   directory, staging ownership/cleanup, active/unverifiable uninstall consumer, and
   exact inactive uninstall.
@@ -510,7 +516,8 @@ enter that command. Separate bounded typed request structures exist only for
 `boxwarden doctor` operates outside the domain namespace and checks: supported
 macOS/architecture; exact absolute Tart identity;
 Softnet canonical ancestors, ACLs, link count, digest, root owner, group,
-`04550`, manifest and paired identities; exact manifested operator UID/name/home
+`04550`, manifest exact `root:wheel 0444`/one-link/no-ACL metadata and paired
+identities; exact manifested operator UID/name/home
 and group ID/name/directory membership; current-process supplementary group;
 canonical `tart_home`; ssh/ssh-keygen availability; and exact `/usr/bin/screen` 4.00.03 (FAU,
 23-Oct-06), SHA-256
@@ -520,6 +527,17 @@ passwordless-root Softnet under mutable Homebrew state is `drifted/unsafe`,
 makes doctor nonzero, and blocks init/start even if the staged copy is healthy.
 Each finding has stable code, category, observed fact, expected fact, and remedy
 requiring attended manual inspection or explicit init; doctor never repairs.
+Doctor opens, hashes, and strictly parses the intentionally non-secret
+local-host manifest without privilege; group-only `0440` would fail before the
+operator group's membership is effective and a privileged helper would violate
+the diagnostic boundary. An otherwise exact legacy `0400` manifest is rejected
+without mutation by normal init and doctor. The sole known legacy installation
+is migrated only in an attended exact-path mode-only operation after old
+published `cf2212f` init proves the complete original tree: capture exact
+metadata/digest, change only the path's mode to `0444`, synchronize, then
+revalidate unchanged inode/link/owner/group/bytes/digest/no-ACL plus exact
+`0444` and a distinct-UID read; committed evidence redacts local account/path
+values and only the corrected binary is used afterward.
 Domain CA state is deliberately absent from this report. Domain init and the
 domain-scoped session prerequisite checks own those diagnostics.
 
@@ -527,7 +545,10 @@ domain-scoped session prerequisite checks own those diagnostics.
   ordering, redaction, unsafe Homebrew blocking, current-process group refresh,
   explicit `--domain` rejection, no domain lookup, nonzero exit, no
   writes/process mutation, and inability to call any initializer/privilege
-  runner.
+  runner; exact `0444` manifest acceptance; legacy `0400` refusal without
+  mutation; and a root-only genuine cross-UID test showing a distinct
+  unprivileged UID reads the `0444` manifest while an explicit `0400` control
+  remains unreadable.
 - [ ] Wire host-global `init` only to host-tool installation and host-global
   `doctor` only to read-only host checks. Wire domain `init` independently to
   the CA store. Never couple host installation success or repair to creation of
@@ -547,6 +568,13 @@ git diff --check
 inspect the install request, authorize `boxwarden init`, verify the complete
 installed tree/group/mode/ACL/link/digests/manifest, host-global idempotent
 rerun, host-global `boxwarden doctor` output, and refreshed effective group.
+The attended manifest migration gate records redacted evidence that old
+published `cf2212f` init first validated the complete `0400` tree; exact
+metadata and digest were captured; only the exact manifest path changed to
+`0444`; synchronization and unchanged inode/link/owner/group/bytes/digest/
+no-ACL were revalidated; and a distinct unprivileged UID read the resulting
+`0444` manifest. Normal init and doctor must refuse legacy `0400` without
+mutation. This gate includes no Tart or Softnet runtime execution.
 Prove the installed exact setuid Softnet's
 argument parsing, closed environment and dependency resolution, effective
 privilege transition/drop, signals, filesystem writes, exact qualified network

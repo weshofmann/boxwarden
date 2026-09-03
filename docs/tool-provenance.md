@@ -19,6 +19,25 @@ trusted Boxwarden operator group, and mode `04550`. Every ancestor is a
 non-symlink directory owned by root and non-writable by group/other. The
 digest-root `manifest.json` is root-owned and published by atomic rename only
 after the executable and directory metadata have been verified and synchronized.
+It is a regular one-link `root:wheel 0444` file with no ACL, intentionally
+non-secret local host metadata rather than a credential container. It records
+only qualified platform release/build, exact Tart and Softnet
+paths/versions/digests, root and dedicated operator-group identity, the trusted
+operator UID/name/home, canonical `TART_HOME`, Softnet mode, and installation
+time; security-domain identity, CA material, credentials, provider data,
+session state, private keys, tokens, and other secrets are prohibited. Root
+ownership, zero write bits, exact metadata/content validation, and protected
+root-owned non-writable ancestry preserve integrity. Unprivileged doctor must
+read, hash, and strictly parse it; `0440` would fail while the operator group is
+being diagnosed, and a privileged helper would expand the diagnostic boundary.
+Normal init and doctor reject legacy `0400` without chmod, rewrite, adoption,
+or repair. The one known installation is migrated separately: the old published
+`cf2212f` init first validates the complete original tree, exact metadata and
+digest are captured, only the exact manifest path changes mode to `0444`, the
+metadata is synchronized, and unchanged inode/link/owner/group/bytes/digest/
+no-ACL plus `0444` and distinct-UID read are revalidated before only the
+corrected binary is used. Committed evidence redacts local account and path
+values.
 A mutable user-writable Homebrew path never inherits authorization. Any
 setuid/setgid/passwordless-root Softnet in mutable Homebrew state is blocking
 drifted/unsafe state: doctor is nonzero and init/start refuse until attended

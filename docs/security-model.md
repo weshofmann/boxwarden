@@ -118,6 +118,23 @@ qualified Softnet operation without repeated `sudo`; it is not a boundary
 against hostile native code already executing as that operator. Such a threat
 model would require a separately reviewed narrow wrapper.
 
+That installed host-toolchain manifest is a regular one-link `root:wheel 0444`
+file with no ACL, deliberately classified as non-secret local host metadata.
+It may record only qualified platform release/build, exact tool
+paths/versions/digests, root and dedicated operator-group identity, the trusted
+operator UID/name/home, canonical `TART_HOME`, Softnet mode, and installation
+time. It must not contain security-domain identity, CA material, credentials,
+provider data, session state, private keys, tokens, or other secrets. Root
+ownership, no write bits, exact metadata/content validation, and protected
+root-owned non-writable ancestry provide integrity; readability provides none.
+The unprivileged host-global doctor must read, hash, and strictly parse it so it
+can diagnose both the tree and membership without a privileged helper. `0440`
+would break that diagnostic boundary before group membership is effective. An
+otherwise exact legacy `0400` manifest is drifted/unsafe: normal init and
+doctor refuse it without mutation, while the one attended exact-path mode-only
+migration validates the old complete tree first and then proves unchanged
+inode/link/owner/group/bytes/digest/no-ACL plus `0444` and distinct-UID read.
+
 Init refuses a Softnet source with any setuid/setgid bit. Any setuid or
 passwordless-root Softnet under mutable Homebrew state is drifted/unsafe,
 causes doctor to exit nonzero, and blocks both init and start until attended

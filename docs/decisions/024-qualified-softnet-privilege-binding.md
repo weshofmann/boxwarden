@@ -27,17 +27,28 @@ at the corresponding digest-specific path below
 `/Library/Boxwarden/toolchains/softnet/0.19.0/`. The installed executable is a
 regular one-link file owned by root, assigned to the dedicated
 `boxwarden-operators` group, and mode `04550`. Every ancestor is a non-symlink
-directory owned by root and non-writable by group or other. A root-owned
-versioned manifest binds the artifact, qualified Tart identity, macOS identity,
-canonical Tart home, exact one trusted operator UID/name/home, and group
-ID/name/membership. It is published last after the tree is verified and fsynced.
-There is no mutable `current` link.
+directory owned by root and non-writable by group or other. The installed
+versioned manifest is a regular one-link `root:wheel 0444` file with no
+extended ACL. It binds the artifact, qualified platform release/build, qualified
+Tart and Softnet paths/versions/digests, root and dedicated operator-group
+identity, canonical Tart home, exact one trusted operator UID/name/home, the
+Softnet mode, and installation time. It is intentionally non-secret local host
+metadata: it must not contain a security-domain identity, CA material,
+credentials, provider data, session state, private keys, tokens, or other
+secrets. Its integrity depends on root ownership, zero write bits, exact
+metadata/content validation, and protected root-owned non-writable ancestry;
+readability is not an integrity mechanism. It is published last after the tree
+is verified and fsynced. There is no mutable `current` link.
 
 The installed artifact and manifest are host state, outside every
 security-domain namespace. Initialization occurs once per trusted host; adding
 or initializing another domain neither reinstalls nor re-authorizes this
 mechanism. Host-global `boxwarden doctor` diagnoses its health without accepting
-domain ownership semantics or silently repairing or rebinding it.
+domain ownership semantics or silently repairing or rebinding it. Doctor must
+open, hash, and strictly parse the manifest as the unprivileged trusted
+operator; `0440 root:boxwarden-operators` would fail before new membership is
+effective and while that membership is itself under diagnosis. A privileged
+doctor helper would violate this read-only diagnostic boundary.
 
 Init reopens and validates an unprivileged source without following symlinks,
 rejects source setuid/setgid bits, copies through a root-owned sibling staging
@@ -62,6 +73,19 @@ repair it; attended manual inspection and remediation are required. Upgrade
 installs an adjacent qualified version-and-digest tree. Exact uninstall names
 one manifested digest and refuses while any live or recorded supervisor use is
 active or unverifiable.
+
+The corrected binary also treats an otherwise exact legacy `0400` installed
+manifest as unexpected drift. Normal init and doctor do not chmod, rewrite,
+adopt, or repair it. The one known pre-qualification installation is an
+attended, exact-path, mode-only migration: first the old published `cf2212f`
+binary runs host-global init against the original exact configuration, proving
+the complete tree under the original contract; capture its exact metadata and
+SHA-256 digest while still `0400`; change only that manifest path to `0444`;
+synchronize filesystem metadata; then revalidate unchanged inode, link count,
+owner, group, bytes, digest, and absence of ACL together with exact `0444` and
+a read by a distinct unprivileged UID. Use only the corrected binary afterward.
+Any failed validation, legacy mode other than exact `0400`, or other unexpected
+tree state stops the migration for manual investigation.
 
 ## Alternatives considered
 
