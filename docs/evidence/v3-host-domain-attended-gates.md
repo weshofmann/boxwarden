@@ -2,13 +2,17 @@
 
 ## Result
 
-**NOMINAL HOST INIT, DOCTOR, AND DOMAIN INIT PASS; COMPLETE V3 GATE INCOMPLETE**
+**HOST INIT, DOCTOR, DOMAIN INIT, AND UNSAFE-HOMEBREW INIT REFUSAL PASS;
+COMPLETE V3 GATE INCOMPLETE**
 
 The host-global `init`/`doctor` and domain-scoped `domain init` behaviors were
 exercised on the qualified macOS host with the maintainer present. The exact
-published V3 commit under test was
+published V3 code commit under test was
 `36839dc7fc987fa0b56f29339331804b091726f2`; the clean binary SHA-256 was
 `242fb3e015f91361f079af9209ff590f3fcefac120216f4e55c0eb4589f23c77`.
+The unsafe-Homebrew refusal gate was completed with the same binary while the
+published branch was at `7de2306b83136231beb9e03a7a769c52c9691d7f`; the
+intervening commit changed documentation only.
 
 No Tart VM was launched. Softnet privilege transition/drop, Softnet launch,
 the native serial relay, and GNU Screen exit/cleanup behavior remain unrun
@@ -79,9 +83,43 @@ unsandboxed production doctor reported that privileged mutable artifact as
 blocking `drifted/unsafe` state and also reported the then-absent host tree. It
 did not repair either condition. The attended remediation changed only that
 exact Homebrew file's mode to `0555`; inode, ownership, link count, and digest
-were unchanged. Doctor then reported only the missing host tree. Real-host
-blocking of `init` and future `start` by this unsafe state was not exercised and
-remains listed below.
+were unchanged. Doctor then reported only the missing host tree.
+
+## Unsafe mutable Homebrew refusal
+
+The remaining non-runtime negative gate began with no running `softnet` or
+`tart` process. A complete pre-state snapshot recorded the canonical mutable
+Homebrew target as a one-link `root:admin 0555` regular file at device
+`16777232`, inode `35254215`, size `14999920`, with the qualified Softnet
+SHA-256. Its extended ACL was empty. The same snapshot recorded every object
+in the installed `/Library/Boxwarden` tree, including device, inode,
+owner/group, mode, link count, size, flags, SHA-256 where applicable, extended
+attributes, and ACL absence.
+
+With the maintainer present, the target file alone was changed to mode `04555`
+and synchronized. Its other recorded metadata and bytes were unchanged. After
+invalidating the sudo timestamp, `boxwarden init` did not prompt for a password,
+exited one, and returned the expected refusal before invoking the root install
+phase:
+
+```text
+boxwarden: initialize host prerequisites: refuse privileged mutable Homebrew Softnet at [canonical Homebrew path]; inspect and remediate manually
+```
+
+An immediate probe while the file was unsafe found the same device, inode,
+owner/group, link count, size, and SHA-256. The attended cleanup changed only
+that exact file back to mode `0555` and synchronized it. Fresh complete
+snapshots then matched both recorded pre-states exactly: the Homebrew target,
+its canonical symlink resolution, extended attributes, and ACL absence were
+restored, and every object in `/Library/Boxwarden` was unchanged. A final
+fresh-authentication `doctor` remained noninteractive, reported
+`status: healthy`, and exited zero.
+
+This gate used no sudoers change and did not execute Softnet, Tart, GNU Screen,
+or a VM. It proves the V3 `init` path rejects a privileged mutable Homebrew
+Softnet before trusted-host mutation and does not attempt to repair the unsafe
+artifact. V3 has no `session start` command, so the future start-path refusal
+remains outside this evidence.
 
 ## Legacy manifest exact-target migration
 
@@ -155,14 +193,17 @@ The following V3 architecture questions are resolved by this attended evidence:
 - positive doctor detection of a privileged mutable Homebrew Softnet, followed
   by exact-target attended deprivileging; absence of a matching
   passwordless-root policy for either canonical mutable Homebrew Softnet path;
+- real-host rejection of unsafe mutable Homebrew privilege by `init` before
+  root installation or trusted-host mutation, followed by exact restoration
+  and a healthy fresh-authentication doctor;
 - distinct domain-bound CAs, no host mutation from domain init, and no lazy CA
   creation.
 
 The following remain explicitly unqualified and block a complete V3 attended
 gate:
 
-- real-host proof that unsafe mutable Homebrew privilege blocks `init` and the
-  future `start` path without repair;
+- real-host proof that unsafe mutable Homebrew privilege blocks the future
+  `start` path without repair;
 - installed Softnet argument parsing, dependency resolution, effective setuid
   transition and privilege drop, signal behavior, and filesystem writes;
 - launch under the closed runtime environment and exact network argv, including
@@ -170,8 +211,6 @@ gate:
 - lossless observation of Softnet/Tart startup and exit behavior;
 - two-PTY relay and GNU Screen retention/exit/cleanup behavior.
 
-The unsafe-state `init` case needs its own attended exact-target setup and
-restoration procedure; it does not require or authorize a VM launch. The
-runtime and Screen properties must be exercised only after approval of a
+The runtime and Screen properties must be exercised only after approval of a
 lossless-observer design, using disposable VM/session state. No result in this
 document should be read as evidence for any unrun property.
