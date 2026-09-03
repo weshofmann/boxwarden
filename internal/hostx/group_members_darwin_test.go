@@ -45,6 +45,37 @@ func TestInspectExactLocalOperatorGroupAcceptsOnlyExhaustiveCallerBinding(t *tes
 	}
 }
 
+func TestInspectExactLocalOperatorGroupAcceptsSignedNonTargetPrimaryGIDs(t *testing.T) {
+	runner := exactGroupSnapshotRunner("nobody -2\nfuture-system -3\nwes 20\n")
+	runner.set(groupGIDListArgs(), "nobody -2\nnogroup -1\nstaff 20\nboxwarden-operators 701\n")
+
+	group, err := inspectExactLocalOperatorGroup(runner, Operator{UID: 501, Name: "wes", Home: "/Users/wes"}, OperatorGroupName, false)
+	if err != nil || !reflect.DeepEqual(group, Group{ID: 701, Name: OperatorGroupName, Members: []int{501}}) {
+		t.Fatalf("inspectExactLocalOperatorGroup() = %#v, %v", group, err)
+	}
+}
+
+func TestInspectExactLocalOperatorGroupRejectsTargetGIDCollisionsAlongsideSignedSentinels(t *testing.T) {
+	for name, mutate := range map[string]func(*scriptedGroupRunner){
+		"other user": func(r *scriptedGroupRunner) {
+			r.set(primaryUserListArgs(), "nobody -2\nfuture-system -3\nother 701\nwes 20\n")
+			r.set(groupGIDListArgs(), "nobody -2\nnogroup -1\nstaff 20\nboxwarden-operators 701\n")
+		},
+		"group alias": func(r *scriptedGroupRunner) {
+			r.set(primaryUserListArgs(), "nobody -2\nfuture-system -3\nwes 20\n")
+			r.set(groupGIDListArgs(), "nobody -2\nnogroup -1\nalias 701\nstaff 20\nboxwarden-operators 701\n")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			runner := exactGroupSnapshotRunner("")
+			mutate(runner)
+			if _, err := inspectExactLocalOperatorGroup(runner, Operator{UID: 501, Name: "wes", Home: "/Users/wes"}, OperatorGroupName, false); err == nil {
+				t.Fatal("inspectExactLocalOperatorGroup() error = nil, want target gid collision refusal")
+			}
+		})
+	}
+}
+
 func TestInspectExactLocalOperatorGroupAcceptsCallerAmongUniqueRecordNameAliases(t *testing.T) {
 	for name, recordNames := range map[string]string{
 		"observed primary name followed by Apple ID alias shape": "wes com.apple.idms.appleid.prd.example-local-alias",
@@ -164,6 +195,77 @@ func TestInspectExactLocalOperatorGroupRejectsIncompleteOrMalformedExhaustiveLis
 	}
 }
 
+func TestListDirectoryPrimaryGIDsRejectsMalformedEvidence(t *testing.T) {
+	for name, output := range map[string]string{
+		"bare record":                  "wes\n",
+		"nonnumeric gid":               "wes twenty\n",
+		"repeated negative sign":       "wes --2\n",
+		"repeated positive sign":       "wes ++2\n",
+		"extra field":                  "wes 20 extra\n",
+		"duplicate record":             "wes 20\nwes 20\n",
+		"positive native-int overflow": "wes 999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999\n",
+		"negative native-int overflow": "wes -999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			runner := exactGroupSnapshotRunner("")
+			runner.set(primaryUserListArgs(), output)
+			if _, err := listDirectoryPrimaryGIDs(runner, primaryUserListArgs()); err == nil {
+				t.Fatal("listDirectoryPrimaryGIDs() error = nil, want malformed inventory refusal")
+			}
+		})
+	}
+
+	t.Run("truncated output", func(t *testing.T) {
+		runner := exactGroupSnapshotRunner("")
+		runner.truncated[scriptedKey(primaryUserListArgs())] = true
+		if _, err := listDirectoryPrimaryGIDs(runner, primaryUserListArgs()); err == nil {
+			t.Fatal("listDirectoryPrimaryGIDs() error = nil, want truncated inventory refusal")
+		}
+	})
+}
+
+func TestDarwinGroupManagerRefusesMalformedInventoryBeforeMutation(t *testing.T) {
+	for name, output := range map[string]string{
+		"bare record":                  "wes\n",
+		"nonnumeric gid":               "wes twenty\n",
+		"repeated signs":               "wes --2\n",
+		"extra field":                  "wes 20 extra\n",
+		"duplicate record":             "wes 20\nwes 20\n",
+		"positive native-int overflow": "wes 999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999\n",
+		"negative native-int overflow": "wes -999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			runner := exactGroupSnapshotRunner("")
+			runner.set(groupReadArgs(), "PrimaryGroupID: 701\nRecordName: boxwarden-operators\n")
+			runner.set(primaryUserListArgs(), output)
+			manager := darwinGroupManager{runner: runner, lookupGroup: func(string) (*user.Group, error) {
+				return &user.Group{Gid: "701", Name: OperatorGroupName}, nil
+			}}
+			if _, _, err := manager.Ensure(Caller{UID: 501, Name: "wes", Home: "/Users/wes"}, OperatorGroupName); err == nil {
+				t.Fatal("Ensure() error = nil, want malformed inventory refusal")
+			}
+			if runner.mutations != 0 {
+				t.Fatalf("directory mutations = %d, want zero before malformed inventory refusal", runner.mutations)
+			}
+		})
+	}
+
+	t.Run("truncated output", func(t *testing.T) {
+		runner := exactGroupSnapshotRunner("")
+		runner.set(groupReadArgs(), "PrimaryGroupID: 701\nRecordName: boxwarden-operators\n")
+		runner.truncated[scriptedKey(primaryUserListArgs())] = true
+		manager := darwinGroupManager{runner: runner, lookupGroup: func(string) (*user.Group, error) {
+			return &user.Group{Gid: "701", Name: OperatorGroupName}, nil
+		}}
+		if _, _, err := manager.Ensure(Caller{UID: 501, Name: "wes", Home: "/Users/wes"}, OperatorGroupName); err == nil {
+			t.Fatal("Ensure() error = nil, want truncated inventory refusal")
+		}
+		if runner.mutations != 0 {
+			t.Fatalf("directory mutations = %d, want zero before truncated inventory refusal", runner.mutations)
+		}
+	})
+}
+
 func TestInspectExactLocalOperatorGroupRejectsMissingMalformedOrTruncatedEvidence(t *testing.T) {
 	for name, mutate := range map[string]func(*scriptedGroupRunner){
 		"missing record name": func(r *scriptedGroupRunner) {
@@ -171,6 +273,9 @@ func TestInspectExactLocalOperatorGroupRejectsMissingMalformedOrTruncatedEvidenc
 		},
 		"missing primary gid": func(r *scriptedGroupRunner) {
 			r.set(groupReadArgs(), "GroupMembers: CALLER-GUID\nGroupMembership: wes\nRecordName: boxwarden-operators\n")
+		},
+		"negative direct primary gid": func(r *scriptedGroupRunner) {
+			r.set(groupReadArgs(), "GroupMembers: CALLER-GUID\nGroupMembership: wes\nPrimaryGroupID: -2\nRecordName: boxwarden-operators\n")
 		},
 		"missing GroupMembers": func(r *scriptedGroupRunner) {
 			r.set(groupReadArgs(), "GroupMembership: wes\nPrimaryGroupID: 701\nRecordName: boxwarden-operators\n")

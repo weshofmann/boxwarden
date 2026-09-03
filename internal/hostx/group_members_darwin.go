@@ -136,7 +136,7 @@ func listDirectoryPrimaryGIDs(runner execx.Runner, args []string) (map[string]in
 			continue
 		}
 		gid, conversionErr := strconv.Atoi(fields[len(fields)-1])
-		if len(fields) != 2 || conversionErr != nil || gid < 0 || !validDirectoryRecordName(fields[0]) {
+		if len(fields) != 2 || conversionErr != nil || !validDirectoryRecordName(fields[0]) {
 			return nil, fmt.Errorf("malformed local directory primary gid listing")
 		}
 		if _, duplicate := records[fields[0]]; duplicate {
