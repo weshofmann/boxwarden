@@ -62,6 +62,16 @@ installation. Upgrades require requalification and privilege rebinding.
 Softnet child was observed with its own PGID; a common PGID is therefore not a
 valid descendant-ownership invariant.
 
+**[verified-local]** Exact Tart 2.32.1 `list --format json` may advance
+`config.json` ctime for enumerated local and OCI VMs while preserving observed
+device, inode, type, mode, ownership, link count, size, blocks, flags, mtime,
+and exact bytes/SHA-256. Source review traces the access through
+`VMDirectory.running()` to `PIDLock(config.json)`, which opens the file
+`O_RDWR` and issues `F_GETLK`; the evidence does not identify which macOS
+subsystem causes the ctime update and does not establish atomicity. Treat this
+as a narrowly measured observation effect, not filesystem neutrality or a
+general license to ignore ctime.
+
 **[verified-local]** Softnet source commits the complete bootpd dictionary
 before privilege drop. Host observation changed bootpd inode/mtime while
 preserving bytes, SHA-256, security metadata, path, and the sole

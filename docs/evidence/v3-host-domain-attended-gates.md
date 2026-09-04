@@ -61,6 +61,37 @@ The authoritative private seal is
 prohibits continuation from its evidence or dependency on a fresh controller;
 future qualification must use a fresh baseline and fresh disposable runtime.
 
+### Fresh pre-token failures and Tart-list investigation
+
+Three fresh-controller attempts stopped before B0 and before any internal
+token. The first two exposed and preserved strict representation false
+negatives in the Softnet stat and GNU Screen empty-namespace contracts. The
+third, run `b400bf99`, passed those corrected admissions and then reported a
+bounded timeout for `source-tart-list-B0` despite retaining complete valid JSON
+(private SHA-256
+`7b90cf6c5fcd482213165058e8352a32df0fd4d193defdc627c3532c130fafb9`)
+and empty stderr. No clone, VM launch, Softnet, or deletion occurred.
+
+A bounded harmless-child reproduction and one exact read-only Tart-list probe
+established that Tart exited successfully after emitting complete JSON, with no
+helper child or retained FD. The parent Bash job table still listed the exact
+job as `Done`, `ps` reported the process absent, and exact `wait` immediately
+returned zero. The controller's wrapper treated that completed-but-unwaited
+state as invalid and timed out instead of reaping it. This was not caused by
+Terminal reuse or an undersized timeout.
+
+The exact probe also observed ctime advances on enumerated source/OCI
+`config.json` files while all other recorded metadata, mtime, bytes, and
+SHA-256 remained exact. Tart source identifies `O_RDWR` plus `F_GETLK` access
+through `PIDLock`, but this evidence does not prove which macOS subsystem
+causes the ctime update or that it is atomic. Private investigation evidence is
+retained under
+`/private/tmp/boxwarden-v3-adr024-tart-list-probe.314d573d`; its timeline SHA is
+`9f9ba542abafce3c4fb515fe0337442ad15e895ebe3572dd1121a06e78437e56`
+and source-diff SHA is
+`443538745e2e85ed5b193fd8432d8b5f4307444d644f26f6da3e34eac7b4e6ee`.
+These are development/forensic observations, not completed qualification.
+
 ## Host-global initialization and diagnosis
 
 The initial attended `boxwarden init` installed the exact qualified Softnet

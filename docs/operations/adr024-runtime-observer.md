@@ -75,6 +75,20 @@ preserve the failed evidence and qualify again from a fresh B0 and fresh
 disposable runtime; any exception requires explicit qualification design and
 architecture review.
 
+When admission uses exact Tart 2.32.1 `list`, capture the protected Tart config
+set immediately before the command as P0, bracket the bounded command with
+trusted timestamps, and capture P1 immediately afterward. Admit P0→P1 only
+when the exact file set and every protected field/byte remain identical except
+that ctime may stay unchanged or advance within the observation interval; ctime
+must not regress. P1 becomes B0 for later comparisons. This rule is local to
+the measured Tart-list phase: it neither ignores ctime globally nor permits
+changes to device, inode, type, mode, ownership, links, size, blocks, flags,
+mtime, path, or exact bytes/SHA-256. It does not claim an atomic transition.
+Later Tart operations that revisit a protected config require their own
+explicitly bracketed phase contract. This allowance never authorizes changing
+an immutable failed-run or forensic artifact; a qualification design must not
+invoke a metadata-affecting observation against such protected state.
+
 The process evidence must establish that the exact Tart shell-owned job has a
 direct Softnet child with a unique start identity and exact executable, while
 recording credentials independently. Capture the independently observed PGID,
