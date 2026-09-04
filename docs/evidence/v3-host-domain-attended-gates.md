@@ -92,6 +92,18 @@ and source-diff SHA is
 `443538745e2e85ed5b193fd8432d8b5f4307444d644f26f6da3e34eac7b4e6ee`.
 These are development/forensic observations, not completed qualification.
 
+Because the canonical manifest Tart home contains the immutable retained VM,
+the maintainer selected a separate clean qualification-only Tart state root for
+the next ADR024 runtime gate. The installed manifest and its Tart-home value
+remain unchanged and continue to admit host/tool/operator identity, but no Tart
+command in that gate may target the manifest/forensic home. The new private
+qualification home must prove Q0 empty, exactly one fresh VM while active, and
+Q1 empty after exact deletion, while the forensic home is compared
+independently and remains byte/metadata exact. This is a qualification-scope
+decision, not a production Tart-home architecture change. It does not qualify
+occupied-production-home or V4 lifecycle composition; those remain separate
+product gates.
+
 ## Host-global initialization and diagnosis
 
 The initial attended `boxwarden init` installed the exact qualified Softnet

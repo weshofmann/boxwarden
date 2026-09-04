@@ -89,6 +89,27 @@ explicitly bracketed phase contract. This allowance never authorizes changing
 an immutable failed-run or forensic artifact; a qualification design must not
 invoke a metadata-affecting observation against such protected state.
 
+When the manifest Tart home contains immutable forensic state, the ADR024
+runtime gate uses a newly created qualification-only Tart home under that
+run's private root. The installed manifest remains unchanged and continues to
+supply the admitted Tart, Softnet, platform, operator, group, and canonical
+host-state identities. Evidence records both absolute paths and proves they
+are canonical, disjoint from each other and from the source, forensic,
+installation, and repository roots, and never connected by fallback. No Tart
+command may target the manifest/forensic home during this gate.
+
+The qualification home begins with zero VM objects (Q0), contains exactly one
+identity-bound disposable VM during the active phase, and returns to zero VM
+objects after exact deletion (Q1). Tart list/run/stop/delete observations act
+only on that home. Bracket any list-time config ctime effect within its exact
+phase; do not remove ctime from evidence. Separately bracket clone's source VM
+access-metadata transition as SOURCE_P0→SOURCE_P1, admitting only fields
+justified by exact Tart source and attended evidence. This ADR024 gate qualifies
+the exact runtime privilege, network, serial, and lifecycle mechanics with the
+explicit qualification-only state-root value; it does not qualify arbitrary
+pre-existing VM coexistence or V4 product lifecycle composition against an
+occupied production Tart home.
+
 The process evidence must establish that the exact Tart shell-owned job has a
 direct Softnet child with a unique start identity and exact executable, while
 recording credentials independently. Capture the independently observed PGID,
