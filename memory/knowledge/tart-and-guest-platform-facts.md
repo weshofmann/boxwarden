@@ -28,6 +28,23 @@ failed runs and evidence-integrity defects explicit. This records the method,
 not private run details; its controlling policy remains in `AGENTS.md` and
 ADR 024.
 
+The approved ADR024 refinement makes qualification claim-driven. The blocking
+subject is the trusted host/operator versus an untrusted guest, including guest
+root; every blocking assertion must support a named containment, launch,
+privileged-component, lifecycle-safety, or evidence-integrity claim. Immutable
+trust/forensic state remains exact. Trusted mutable operational state (source
+and qualification Tart homes, temporary namespaces, and disposable VMs) is
+admitted by semantic/security-relevant properties, while ordinary atime,
+mtime, ctime, and parent-directory timestamp choreography are diagnostic unless
+a named claim requires them. This is methodology, not a new product policy.
+
+For qualification records, network observations are separate claims labeled
+EXPECTED REACHABILITY, PROHIBITED REACHABILITY, or NOT QUALIFIED. A finite
+probe does not establish whole-LAN/private-network or general IPv6 isolation;
+the accepted vmnet gateway reachability remains an expected behavior where the
+design requires it. Hostile-guest tests must use trusted host-side oracles:
+guest-generated PASS/FAIL output is not authoritative security evidence.
+
 ---
 
 ## Softnet network policy
@@ -81,15 +98,26 @@ device, inode, type, mode, ownership, link count, size, blocks, flags, mtime,
 and exact bytes/SHA-256. Source review traces the access through
 `VMDirectory.running()` to `PIDLock(config.json)`, which opens the file
 `O_RDWR` and issues `F_GETLK`; the evidence does not identify which macOS
-subsystem causes the ctime update and does not establish atomicity. Treat this
-as a narrowly measured observation effect, not filesystem neutrality or a
-general license to ignore ctime.
+subsystem causes the ctime update and does not establish atomicity. Under the
+approved ADR024 method this is diagnostic evidence for trusted mutable state,
+not a filesystem-neutrality or atomicity claim; immutable forensic state stays
+strict.
 
 **[vendor-source]** Tart 2.32.1 clone creates its temporary VM below the
 selected `TART_HOME/tmp` and then moves that object into `TART_HOME/vms`.
-Qualification must therefore bracket both exact parent containers and admit
-only their source-justified mtime/ctime transitions; this is not a general
-timestamp exclusion.
+Qualification should retain parent-container metadata as diagnostic context,
+but blocking admission is based on source identity, intended object shape,
+targeting, and lifecycle/isolation claims rather than timestamp choreography.
+
+**[verified-local]** During the authorized `48bac744` clone/random-MAC/move
+phase, the source Tart home's `tmp` and `vms` parent atime advanced together
+with their expected mtime/ctime changes. Source-VM timestamp changes followed
+the separately observed clone-access pattern, while protected source and clone
+identity/config/member/security fields remained valid. The old validator
+failed because it admitted parent mtime/ctime but not atime. This supports the
+claim-driven ruling that ordinary timestamps on trusted mutable operational
+state are diagnostic; the retained run and clone remain immutable failed-run
+evidence and are not a qualification pass.
 
 **[vendor-source]** Tart 2.32.1 clone copies `config.json`, `disk.img`,
 `nvram.bin`, and optional saved state, but not `control.sock`. The control
@@ -101,8 +129,9 @@ deletion.
 **[verified-local]** Softnet source commits the complete bootpd dictionary
 before privilege drop. Host observation changed bootpd inode/mtime while
 preserving bytes, SHA-256, security metadata, path, and the sole
-`DHCPLeaseTimeSecs=600` semantics. This is consistent with replacement but is
-not proof of atomicity.
+`DHCPLeaseTimeSecs=600` semantics. Inode/timestamp replacement is diagnostic;
+the privileged-component claim still requires the approved bytes, ownership,
+mode, links, and semantics where applicable, and this is not proof of atomicity.
 
 **[verified-local] / [unverified outcome]** Current Softnet accepts ARP and IPv4 frames and drops native IPv6 frames. Apple vmnet documents IPv4 and IPv6 NAT support, but Task 0 has not yet proven whether an IPv4 guest behind Softnet remains functional over Wes's effectively IPv6-only mobile tether. Test the outcome rather than assuming native guest IPv6 is required or host NAT64/464XLAT is sufficient.
 

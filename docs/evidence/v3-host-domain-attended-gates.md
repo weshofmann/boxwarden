@@ -22,6 +22,22 @@ qualification-evidence model that includes bounded `proc_pidinfo` sampling;
 approval of that model is not execution evidence. This evidence does not make
 PR #2 Ready and does not qualify those runtime properties.
 
+Interpret this record by named claim, not by raw observability. The approved
+ADR024 method keeps immutable forensic state exact, but treats timestamps on
+trusted mutable Tart/qualification state as diagnostic unless a named claim
+requires them. Bootpd inode/timestamp replacement remains useful diagnostic
+evidence; protected bytes, security metadata, and approved XML semantics remain
+blocking where the privileged-component claim requires them, without an
+atomicity claim. Network observations must be labeled EXPECTED REACHABILITY,
+PROHIBITED REACHABILITY, or NOT QUALIFIED; a finite probe is not a whole-LAN
+or general IPv6 claim.
+
+Any guest-side PASS/FAIL output is non-authoritative. A future hostile-guest
+qualification result requires trusted host-side oracles and must record the
+stimulus, oracle, expected result, failure condition, and evidence artifact.
+The historical failed run identified as `48bac744` remains immutable forensic
+evidence of that run; it is not a qualification pass or a resumable checkpoint.
+
 All domain roots, operator account fields, creation UUIDs, timestamps, and raw
 sudoers output are omitted or redacted. No provider credentials were used.
 
@@ -54,6 +70,9 @@ Resume4 launched nothing and stopped before token issuance because historical
 bootpd inode/mtime differed while all protected fields, bytes, SHA-256
 `d304019edf49f565d1950da56cbe687c732d57332cb702dc21f8f18e009af6c9`, XML, and
 the sole `DHCPLeaseTimeSecs=600` semantics matched. No atomicity claim is made.
+The inode/mtime difference is therefore retained as diagnostic historical
+evidence, not treated as a qualification failure by itself; the run remains a
+failed pre-qualification attempt and cannot be promoted to a pass.
 
 The authoritative private seal is
 `/private/tmp/boxwarden-v3-adr024-forensic-seal`; its external seal digest is
@@ -103,6 +122,37 @@ independently and remains byte/metadata exact. This is a qualification-scope
 decision, not a production Tart-home architecture change. It does not qualify
 occupied-production-home or V4 lifecycle composition; those remain separate
 product gates.
+
+### Claim-driven redesign trigger: failed run 48bac744
+
+The sealed controller for run `48bac744` had SHA-256
+`a0ce883251cedbf1769b319a6e490a9a3c0153afd5196db11fc969393e7c401d`,
+size 136022, and mode `0444`. Its pre-token phase completed: the source and
+qualification Tart-list commands exited zero, Q0 was empty in both Tart and
+filesystem views, source protected fields/bytes remained exact, B0 evidence
+was captured, doctor was healthy, routing proved the source, qualification,
+and forensic homes disjoint, and the independent forensic seal revalidated.
+
+After the separately approved first token, the controller cloned the exact
+source, randomized the stage MAC, and moved the exact stopped three-file clone
+into the isolated qualification home. It then failed closed at
+SOURCE_P0-to-SOURCE_P1 admission. The exact diff showed that source `tmp` and
+`vms` parent atime advanced along with their expected mtime/ctime changes; the
+old validator allowed only mtime/ctime there. Source-VM timestamp changes
+matched the old rule, and all claim-bearing source and clone identity/config/
+member/security fields remained valid. No active-Q list, relay, Screen, launch
+token, Tart run, Softnet execution, boot, stop, or delete occurred. Later
+read-only containment established that no process or opener remained.
+
+The retained clone remains an exact stopped, three-file evidence object. Its
+config SHA-256 is
+`fda9ce616ebca86e0aabb3e435acbcddeadc19b2ef4d14d6df0d19c26022dbf2`
+and NVRAM SHA-256 is
+`fbc33c8f275ae2968836ba62e0baa90b07a91474168edd18644a81e85c042e88`.
+Neither it nor the run may be resumed, reused, modified, deleted, or called a
+qualification pass without separate authority. The atime failure is immutable
+historical evidence that trusted-mutable timestamp choreography was an
+over-strong admission model; it does not weaken any immutable forensic check.
 
 ## Host-global initialization and diagnosis
 
@@ -293,6 +343,14 @@ gate:
 - bounded process ancestry and credential sampling, with its explicit race
   window, plus the rest of the approved cumulative evidence chain;
 - two-PTY relay and GNU Screen retention/exit/cleanup behavior.
+
+The redesigned qualification intentionally stops making claims about exact
+trusted-mutable timestamp choreography, whole source/cache metadata
+neutrality, globally empty process/Screen/port namespaces, exact Terminal or
+`lsof` presentation, empty scratch-directory state, broad private-network
+isolation from finite samples, or general IPv6 isolation without direct tests.
+Cross-session/domain isolation and destroy/persistence semantics remain V4
+product-lifecycle claims, not ADR024 evidence.
 
 The runtime and Screen properties must be exercised only through a separately
 reviewed attended procedure using disposable VM/session state. `proc_pidinfo`
