@@ -31,6 +31,10 @@ Start/retry reconciliation is executable and conservative:
   generation before launch.
 - `starting` + backend running + exact live supervisor generation reconnects and
   resumes that same generation.
+- `starting` + backend stopped + exact live supervisor generation in prelaunch
+  or launch reconnects to that supervisor and waits for its bounded phase
+  transition. It resumes the same generation or completes proven owned cleanup;
+  it never clears the generation while that supervisor is live.
 - `starting` + backend stopped + no live owned runtime atomically persists
   `stopped`, clears the generation, and only then begins a fresh retry.
 - `running` + backend running + exact live supervisor idempotently ensures the
