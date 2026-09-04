@@ -94,5 +94,8 @@ qualified, an attended disposable-host gate must prove exact installation and
 rollback boundaries plus Softnet's setuid argument parsing, closed-environment
 and dependency behavior, privilege transition/drop, signals, filesystem
 writes, exact qualified network behavior, and absence of an alternate sudo
-path. Until that evidence exists, V3 remains Draft and Boxwarden is not
-production-ready.
+path. Until that evidence exists, V3's unobserved runtime properties remain
+Pending and unclaimed. The missing attended evidence limits assurance claims;
+absent a known unsafe defect, it does not by itself bar merge of deterministically
+verified foundation code. Boxwarden remains not ready for general use or
+production until the applicable operational qualification is complete.
