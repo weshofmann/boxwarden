@@ -231,7 +231,7 @@ These implemented commands operate on domain-owned state, so `--domain` is
 mandatory unless `BOXWARDEN_DOMAIN` is set. Boxwarden has no implicit domain and
 never searches across security domains. Future host-global `boxwarden init` and
 `boxwarden doctor` operate outside the security-domain namespace and do not
-require a domain. Start from
+require a domain.
 
 **Staged Draft commands — not on `main`:**
 
