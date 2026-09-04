@@ -55,9 +55,18 @@ root privilege. Softnet is therefore a privileged trusted-host component. Its
 eventual authorization must bind to an exact qualified artifact and relevant
 execution dependencies that an unprivileged user cannot replace or mutate; a
 user-writable mutable Homebrew path must not receive standing passwordless-root
-authorization. Setuid root is broader than desirable, and the production
-mechanism remains intentionally unselected. Upgrades require requalification
-and privilege rebinding.
+authorization. V3/ADR024 selects the root-owned digest-specific `04550`
+installation. Upgrades require requalification and privilege rebinding.
+
+**[verified-local]** With exact Tart 2.32.1 and Softnet 0.19.0, the direct
+Softnet child was observed with its own PGID; a common PGID is therefore not a
+valid descendant-ownership invariant.
+
+**[verified-local]** Softnet source commits the complete bootpd dictionary
+before privilege drop. Host observation changed bootpd inode/mtime while
+preserving bytes, SHA-256, security metadata, path, and the sole
+`DHCPLeaseTimeSecs=600` semantics. This is consistent with replacement but is
+not proof of atomicity.
 
 **[verified-local] / [unverified outcome]** Current Softnet accepts ARP and IPv4 frames and drops native IPv6 frames. Apple vmnet documents IPv4 and IPv6 NAT support, but Task 0 has not yet proven whether an IPv4 guest behind Softnet remains functional over Wes's effectively IPv6-only mobile tether. Test the outcome rather than assuming native guest IPv6 is required or host NAT64/464XLAT is sufficient.
 

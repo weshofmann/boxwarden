@@ -49,6 +49,40 @@ It emits exactly one bounded JSON object followed by one newline on stdout and
 creates no evidence file. The caller decides whether to retain the private
 output and separately produces a redacted public record.
 
+## Reusable attended method
+
+Begin with a fresh B0 snapshot of all host-toolchain and runtime objects. Create
+a fresh disposable VM, use the corrected controller built from the reviewed
+commit, and record the exact launch inputs. During launch through observer
+admission, observe the Tart shell-owned job, direct Tart-to-Softnet ancestry,
+unique process identities and start times, executable paths and digests, and
+credentials. Observe the qualified network behavior and host-local serial
+relay, then perform a normal stop and identity-bound cleanup. Finish with a
+fresh B1 snapshot and compare it with B0. The post-init snapshot is the running
+and cleanup baseline for that run.
+
+A failed run is immutable evidence, not a checkpoint to resume. Resume only to
+investigate, understand, or safely contain the failed runtime. After correction,
+preserve the failed evidence and qualify again from a fresh B0 and fresh
+disposable runtime; any exception requires explicit qualification design and
+architecture review.
+
+The process evidence must establish that the exact Tart shell-owned job has a
+direct Softnet child with a unique start identity and exact executable, while
+recording credentials independently. Capture the independently observed PGID,
+but do not require PGID equality: Tart group
+termination does not prove Softnet disappearance, and no PID-only signal is
+permitted. The observer remains bounded and non-lossless; no atomicity claim is
+made for filesystem or privilege transitions.
+
+During the launch-to-observer epoch, Softnet may commit/replace the bootpd
+preference object, so an inode/mtime change alone is permitted. Device and type,
+root ownership and mode, link count, size, flags, path, exact SHA-256 and XML
+must remain exact, as must
+the sole approved `DHCPLeaseTimeSecs=600` semantics. Outside that phase all
+fields are exact. This phase-specific rule permits a replacement observation,
+not an atomicity claim.
+
 ## Evidence and limits
 
 At five-millisecond configured intervals, the observer makes at most 6,000

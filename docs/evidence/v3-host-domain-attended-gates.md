@@ -14,8 +14,9 @@ The unsafe-Homebrew refusal gate was completed with the same binary while the
 published branch was at `7de2306b83136231beb9e03a7a769c52c9691d7f`; the
 intervening commit changed documentation only.
 
-No Tart VM was launched. Softnet privilege transition/drop, Softnet launch,
-the native serial relay, and GNU Screen exit/cleanup behavior remain unrun.
+Qualification did not complete, but Resume3 launched once for forensic/development
+evidence. Softnet privilege transition/drop, the native serial relay, and GNU
+Screen exit/cleanup behavior remain unqualified.
 The maintainer has since approved a cumulative, sufficient non-perturbing
 qualification-evidence model that includes bounded `proc_pidinfo` sampling;
 approval of that model is not execution evidence. This evidence does not make
@@ -23,6 +24,42 @@ PR #2 Ready and does not qualify those runtime properties.
 
 All domain roots, operator account fields, creation UUIDs, timestamps, and raw
 sudoers output are omitted or redacted. No provider credentials were used.
+
+## ADR024 Resume3 and Resume4 forensic evidence
+
+Resume3 used exact V3 head `5c09aad9d2c322e42e6e8d7fd38e9584396b3ab5` and
+launched the already retained disposable clone for its first runtime start. The observer recorded direct Tart→Softnet
+ancestry, independent PGIDs, 192 sampled root-effective tuples (corroborating
+only), 100 consecutive steady operator tuples, and stable identity/path. The
+harness then failed its invalid shared-PGID assertion. Tart's group, Screen,
+and relay were stopped; observed Softnet briefly remained, so the controller
+correctly reported containment incomplete and sent no PID-only signal. A later
+read-only inventory found Tart/Softnet/Screen/socat absent. The VM remains
+evidence-only; this is not a completed qualification result. PR #2 remains
+Draft.
+
+### Accepted deterministic preparation
+
+Private deterministic preparation was accepted without publishing raw
+fixtures: process-topology script
+`/private/tmp/boxwarden-v3-adr024-fresh-process-regression-test.sh` (SHA-256
+`b7179de2f78e34fdb2546fed30053b2f617fcb979573954e5eecf80b496bd2d1`, 60/60)
+and bootpd script
+`/private/tmp/boxwarden-v3-adr024-fresh-bootpd-regression-test.sh` (SHA-256
+`689a09753f5953e9623018ae6c902d7ee6d6834d4b0ffbf4f1f2a5ed0d024342`, 40/40).
+These validate the corrected models but are not runtime qualification
+evidence.
+
+Resume4 launched nothing and stopped before token issuance because historical
+bootpd inode/mtime differed while all protected fields, bytes, SHA-256
+`d304019edf49f565d1950da56cbe687c732d57332cb702dc21f8f18e009af6c9`, XML, and
+the sole `DHCPLeaseTimeSecs=600` semantics matched. No atomicity claim is made.
+
+The authoritative private seal is
+`/private/tmp/boxwarden-v3-adr024-forensic-seal`; its external seal digest is
+`a8b546db960e19413ecc2b2bb657d87bebadea35445b4e1d61a6498be16d0f0f`. The seal
+prohibits continuation from its evidence or dependency on a fresh controller;
+future qualification must use a fresh baseline and fresh disposable runtime.
 
 ## Host-global initialization and diagnosis
 
