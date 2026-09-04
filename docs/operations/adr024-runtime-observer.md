@@ -61,6 +61,14 @@ relay, then perform a normal stop and identity-bound cleanup. Finish with a
 fresh B1 snapshot and compare it with B0. The post-init snapshot is the running
 and cleanup baseline for that run.
 
+Before each new attended qualification attempt, fully quit and relaunch
+Terminal.app, especially after any supplementary-group change. This is
+procedure hygiene only: it refreshes the terminal process environment and
+group list, but does not reset or prove the absence of Tart, Softnet, Screen,
+socat, VM, filesystem, or network state. Never treat a fresh Terminal.app
+process as a workaround for an unexplained gate failure; preserve and diagnose
+that failed run independently.
+
 A failed run is immutable evidence, not a checkpoint to resume. Resume only to
 investigate, understand, or safely contain the failed runtime. After correction,
 preserve the failed evidence and qualify again from a fresh B0 and fresh
