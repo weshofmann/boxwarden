@@ -12,8 +12,21 @@ Provenance is marked on every claim:
 - **[verified-local]** — observed directly on this host.
 - **[verified-separate-host]** — observed on an authorized separate host and
   bounded by that experiment's recorded fidelity limitations.
+- **[vendor-source]** — established from the exact pinned upstream source;
+  the corresponding filesystem/runtime manifestation may still require
+  attended evidence.
 - **[vendor-doc]** — stated by Tart, Cirrus Labs, Canonical, or the vendor's own documentation.
 - **[unverified]** — expected but not yet proven. Task 0 must confirm.
+
+## Qualification-method rationale
+
+The bounded, front-loaded review method is a factual qualification aid: review
+of sibling phases can expose predictable platform failures before an attended
+boundary, reducing repeated setup and attended debris. Propagating each newly
+learned failure class to unexecuted phases preserves that benefit while keeping
+failed runs and evidence-integrity defects explicit. This records the method,
+not private run details; its controlling policy remains in `AGENTS.md` and
+ADR 024.
 
 ---
 
@@ -71,6 +84,19 @@ and exact bytes/SHA-256. Source review traces the access through
 subsystem causes the ctime update and does not establish atomicity. Treat this
 as a narrowly measured observation effect, not filesystem neutrality or a
 general license to ignore ctime.
+
+**[vendor-source]** Tart 2.32.1 clone creates its temporary VM below the
+selected `TART_HOME/tmp` and then moves that object into `TART_HOME/vms`.
+Qualification must therefore bracket both exact parent containers and admit
+only their source-justified mtime/ctime transitions; this is not a general
+timestamp exclusion.
+
+**[vendor-source]** Tart 2.32.1 clone copies `config.json`, `disk.img`,
+`nvram.bin`, and optional saved state, but not `control.sock`. The control
+socket is created asynchronously by `tart run`. Admission must consequently
+use phase-specific VM shapes: a fresh stopped clone has no socket, while the
+running and stopped-after-run shapes may retain the exact socket until VM
+deletion.
 
 **[verified-local]** Softnet source commits the complete bootpd dictionary
 before privilege drop. Host observation changed bootpd inode/mtime while

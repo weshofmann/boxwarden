@@ -61,6 +61,14 @@ relay, then perform a normal stop and identity-bound cleanup. Finish with a
 fresh B1 snapshot and compare it with B0. The post-init snapshot is the running
 and cleanup baseline for that run.
 
+Before crossing an attended, privileged, or evidence-producing gate, perform a
+bounded attempt-minimization pass over the planned qualification phases. Apply
+known platform facts to every unexecuted sibling phase, in proportion to the
+cost and risk of the next boundary, and prioritize false-pass or
+evidence-integrity defects. A newly learned failure class must be propagated
+before any rerun; this method does not authorize skipping explicit human gates
+or turning bounded worker output into evidence without supervisor adjudication.
+
 Before each new attended qualification attempt, fully quit and relaunch
 Terminal.app, especially after any supplementary-group change. This is
 procedure hygiene only: it refreshes the terminal process environment and
@@ -103,8 +111,11 @@ identity-bound disposable VM during the active phase, and returns to zero VM
 objects after exact deletion (Q1). Tart list/run/stop/delete observations act
 only on that home. Bracket any list-time config ctime effect within its exact
 phase; do not remove ctime from evidence. Separately bracket clone's source VM
-access-metadata transition as SOURCE_P0→SOURCE_P1, admitting only fields
-justified by exact Tart source and attended evidence. This ADR024 gate qualifies
+access-metadata transition as SOURCE_P0→SOURCE_P1, including only the exact
+source `tmp`/`vms` parent timestamps and source-object fields justified by the
+pinned Tart source and attended evidence. A stopped clone contains no
+`control.sock`; require the socket only in the reviewed running and
+stopped-after-run phases. This ADR024 gate qualifies
 the exact runtime privilege, network, serial, and lifecycle mechanics with the
 explicit qualification-only state-root value; it does not qualify arbitrary
 pre-existing VM coexistence or V4 product lifecycle composition against an
