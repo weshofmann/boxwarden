@@ -18,30 +18,34 @@ graphical and serial access, clone identity reset, and the tested network
 policy. It does not claim all environments or operational mechanisms are
 production-ready; see [the Task 0 summary](docs/evidence/m1a-task0-final-summary.md).
 
-V1 read-only status is complete. The V2 surface — generic-golden registration,
-stopped clone creation, and session status — is implemented in a staged Draft
-PR and is not yet on `main`. It lets one domain explicitly admit an exact
-existing, stopped Tart object as its selected generic golden, creates a stopped
-disposable clone with a new UUID-derived backend identity and randomized MAC,
-and reports persisted session intent beside observed backend state. The artifact
-itself is not domain-specific: two domains may independently admit the same
-exact artifact without placing either domain's trust material in it.
-Registration is an operator admission record, not a Boxwarden claim that it
-proved provenance, clone-readiness, or the external qualification evidence.
-Creation is intent-first and reconciles partial retries under domain/session
-locks. V2's attended real-host golden/clone gate remains pending and requires
-an artifact built or rebuilt from the corrected generic guest definition and
-qualified accordingly. The unchanged older Task 0 domain-bound artifact is not
-grandfathered merely because it previously passed qualification.
+V1 read-only status is complete. The current V2 surface — generic-golden
+registration, stopped clone creation, and session status — lets one domain
+explicitly admit an exact existing, stopped Tart object as its selected generic
+golden, creates a stopped disposable clone with a new UUID-derived backend
+identity and randomized MAC, and reports persisted session intent beside
+observed backend state. The artifact itself is not domain-specific: two domains
+may independently admit the same exact artifact without placing either domain's
+trust material in it. Registration is an operator admission record, not a
+Boxwarden claim that it proved provenance, clone-readiness, or the external
+qualification evidence. Creation is intent-first and reconciles partial retries
+under domain/session locks.
 
-The V3 foundation — `boxwarden init`, `boxwarden doctor`, the qualified Softnet
-privilege binding, per-domain management CAs, certificate issuance, host-key
-pins, and strict SSH primitives — is implemented in staged Draft PRs and is not
-yet on `main`. V4 adds start/supervision plus serial trust bootstrap and
-readiness, also in-progress Draft work. The Softnet runtime gate (privilege
-transition/drop, closed-environment execution, signal handling) has not yet
-produced a complete qualification result; that gate is the last remaining
-blocker before the V3 qualification chain is complete. This plan stops after V4.
+V2's attended real-host golden/clone gate remains **Pending**. It must use an
+artifact built or rebuilt from the corrected generic guest definition and
+qualified accordingly; the older Task 0 domain-bound artifact is not
+grandfathered. This limits V2's assurance claim, but does not alone make the
+deterministically verified implementation unsafe or bar its merge absent a
+known unsafe defect. It does not change the separate conclusion that Boxwarden
+is not ready for general use.
+
+The V3 trusted host/domain-management foundation — `boxwarden init`,
+`boxwarden doctor`, the Softnet privilege binding, per-domain management CAs,
+certificate issuance, host-key pins, and strict SSH primitives — remains staged
+Draft work and is not on `main`. Its complete hostile/runtime Softnet
+qualification remains Pending. V3 therefore supports no claim of runtime
+qualification or full malicious-guest containment. V4 start/supervision plus
+serial trust bootstrap and readiness is also staged Draft work; no V4 start,
+readiness, or operational-readiness claim is made. This plan stops after V4.
 File transfer, stop, destroy, provider authentication, and other later work
 remain deferred.
 
@@ -203,49 +207,45 @@ and evidence gaps.
 - Host filesystem sharing, display-server sharing, clipboard and audio sharing,
   host runtime sockets, host credential stores, SSH-agent forwarding, bridged
   networking, port exposure, and nested virtualization are absent by default.
-- `boxwarden init` installs the exact qualified Softnet 0.19.0 executable in a
-  root-owned digest-specific path; the V3 attended gate qualified this
-  installation and detection. The Softnet runtime gate (privilege
-  transition/drop and closed-environment execution) has not yet produced a
-  complete qualification result. Until it is complete, the project is not
-  production-ready.
+- The V3 Softnet mechanism is staged Draft work, not current `main` behavior.
+  Its host/domain-init attended evidence is also staged, while its hostile/runtime
+  qualification (privilege transition/drop, closed-environment execution,
+  signals, and related behavior) remains Pending and unclaimed. It does not
+  establish V3 runtime qualification, V4 readiness, or product operational
+  readiness.
 
 Read [the security model](docs/security-model.md),
 [architecture](docs/architecture.md), and the [Task 0 evidence
 summary](docs/evidence/m1a-task0-final-summary.md) before evaluating the
 project for sensitive work.
 
-## Commands
-
-**On `main` now:**
+## Current commands
 
 ```sh
+boxwarden --domain <id> golden register <qualified-tart-object>
+boxwarden --domain <id> session create [--mode clean|quarantine] <session>
 boxwarden --domain <id> session status <session>
 ```
 
-**Implemented in staged Draft PRs — not yet on `main`:**
+These implemented commands operate on domain-owned state, so `--domain` is
+mandatory unless `BOXWARDEN_DOMAIN` is set. Boxwarden has no implicit domain and
+never searches across security domains. Future host-global `boxwarden init` and
+`boxwarden doctor` operate outside the security-domain namespace and do not
+require a domain.
+
+**Staged Draft commands — not on `main`:**
 
 ```sh
 boxwarden init
 boxwarden doctor
 boxwarden --domain <id> domain init
-boxwarden --domain <id> golden register <qualified-tart-object>
-boxwarden --domain <id> session create [--mode clean|quarantine] <session>
 ```
 
-Active development is materially ahead of `main` but is intentionally staged
-behind review and qualification gates. The Draft PR stack implements the full
-V2/V3 surface described in this README; none of it is available on `main` yet.
-
-Domain-owned commands require `--domain` unless `BOXWARDEN_DOMAIN` is set.
-Boxwarden has no implicit domain and never searches across security domains.
-`boxwarden init` and `boxwarden doctor` are host-global: they do not select a
-domain and reject an explicitly supplied `--domain`. `domain init` creates only
-the selected domain's management CA; it does not install or modify host-global
-prerequisites. Once the Draft PR stack lands, see the
-host initialization and diagnosis runbook (`docs/operations/init-and-doctor.md`,
-staged Draft branch) and the domain management CA initialization runbook
-(`docs/operations/domain-init.md`, staged Draft branch). Start from
+These commands belong to the staged V3 foundation. `boxwarden init` and
+`boxwarden doctor` are host-global: they do not select a domain and reject an
+explicitly supplied `--domain`. `domain init` creates only the selected domain's
+management CA; it does not install or modify host-global prerequisites. V3 and
+V4 remain behind their stated review and qualification gates. Start from
 [config/boxwarden.example.json](config/boxwarden.example.json).
 
 ## Development

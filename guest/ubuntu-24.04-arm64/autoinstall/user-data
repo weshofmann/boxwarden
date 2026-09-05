@@ -52,19 +52,15 @@ autoinstall:
     - x11-apps
     - xwayland
   late-commands:
-    - install -d -m 0755 /target/etc/ssh/sshd_config.d /target/etc/ssh/auth_principals
-    - "printf '%s\\n' '__BOXWARDEN_SSH_CA_PUBLIC_KEY__' > /target/etc/ssh/boxwarden_task0_user_ca.pub"
-    - chmod 0644 /target/etc/ssh/boxwarden_task0_user_ca.pub
-    - "printf '%s\\n' 'boxwarden-task0' > /target/etc/ssh/auth_principals/boxwarden"
-    - chmod 0644 /target/etc/ssh/auth_principals/boxwarden
+    - install -d -o root -g root -m 0755 /target/etc/ssh/sshd_config.d /target/etc/ssh/boxwarden
     - |
       cat > /target/etc/ssh/sshd_config.d/60-boxwarden-task0.conf <<'EOF'
       PasswordAuthentication no
       KbdInteractiveAuthentication no
       PermitRootLogin no
       PubkeyAuthentication yes
-      TrustedUserCAKeys /etc/ssh/boxwarden_task0_user_ca.pub
-      AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u
+      TrustedUserCAKeys /etc/ssh/boxwarden/active/trusted-user-ca.pub
+      AuthorizedPrincipalsFile /etc/ssh/boxwarden/active/authorized_principals/%u
       AllowAgentForwarding no
       AllowTcpForwarding no
       AllowStreamLocalForwarding no

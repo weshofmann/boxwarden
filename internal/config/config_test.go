@@ -98,6 +98,63 @@ func TestLoadRejectsAOneCharacterNestedDomainRoot(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsCaseAliasedPhysicalDomainRoot(t *testing.T) {
+	base, err := os.MkdirTemp("/private/tmp", "boxwarden-config-case-")
+	if err != nil {
+		t.Skipf("qualified macOS temporary root unavailable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(base) })
+	base, err = filepath.EvalSymlinks(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workRoot := makeRoot(t, base, "work")
+	alias := strings.Replace(workRoot, "/private/tmp/", "/PRIVATE/TMP/", 1)
+	if alias == workRoot {
+		t.Skip("test requires the qualified macOS /private/tmp path")
+	}
+	originalInfo, err := os.Stat(workRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasInfo, err := os.Stat(alias)
+	if err != nil || !os.SameFile(originalInfo, aliasInfo) {
+		t.Skip("filesystem is not case-insensitive for this path")
+	}
+	path := writeConfig(t, base, fmt.Sprintf(`{"version":1,"domains":{"work":{"state_root":%q},"personal":{"state_root":%q}}}`, workRoot, alias))
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("Load() error = nil, want physically identical case-aliased roots rejected")
+	}
+}
+
+func TestLoadRejectsGroupAccessibleDomainRoot(t *testing.T) {
+	base := canonicalTempDir(t)
+	workRoot := makeRoot(t, base, "work")
+	if err := os.Chmod(workRoot, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	path := writeConfig(t, base, fmt.Sprintf(`{"version":1,"domains":{"work":{"state_root":%q}}}`, workRoot))
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("Load() error = nil, want group-accessible root rejection")
+	}
+}
+
+func TestLoadRejectsDomainRootWithoutExactOwnerPrivateMode(t *testing.T) {
+	base := canonicalTempDir(t)
+	workRoot := makeRoot(t, base, "work")
+	if err := os.Chmod(workRoot, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(workRoot, 0o700)
+	path := writeConfig(t, base, fmt.Sprintf(`{"version":1,"domains":{"work":{"state_root":%q}}}`, workRoot))
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("Load() error = nil, want non-writable state root rejection")
+	}
+}
+
 func makeRoot(t *testing.T, base, name string) string {
 	t.Helper()
 	path := filepath.Join(base, name)

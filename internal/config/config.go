@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/weshofmann/boxwarden/internal/domain"
 )
@@ -202,8 +201,8 @@ func canonicalPrivateDirectory(raw string) (string, error) {
 	if !info.IsDir() {
 		return "", fmt.Errorf("must be a directory")
 	}
-	if info.Mode().Perm()&0o007 != 0 {
-		return "", fmt.Errorf("must not be accessible to group or other users")
+	if info.Mode().Perm() != 0o700 {
+		return "", fmt.Errorf("must have mode 0700")
 	}
 	return canonical, nil
 }
@@ -214,7 +213,17 @@ func rejectOverlappingRoots(domains map[domain.ID]Domain) error {
 			if firstID >= secondID {
 				continue
 			}
-			if isSameOrDescendant(first.StateRoot, second.StateRoot) || isSameOrDescendant(second.StateRoot, first.StateRoot) {
+			overlap, err := isSameOrPhysicalDescendant(first.StateRoot, second.StateRoot)
+			if err != nil {
+				return fmt.Errorf("compare domain roots %q and %q: %w", firstID, secondID, err)
+			}
+			if !overlap {
+				overlap, err = isSameOrPhysicalDescendant(second.StateRoot, first.StateRoot)
+				if err != nil {
+					return fmt.Errorf("compare domain roots %q and %q: %w", firstID, secondID, err)
+				}
+			}
+			if overlap {
 				return fmt.Errorf("domain roots %q and %q overlap", firstID, secondID)
 			}
 		}
@@ -222,12 +231,24 @@ func rejectOverlappingRoots(domains map[domain.ID]Domain) error {
 	return nil
 }
 
-func isSameOrDescendant(parent, child string) bool {
-	relative, err := filepath.Rel(parent, child)
+func isSameOrPhysicalDescendant(parent, child string) (bool, error) {
+	parentInfo, err := os.Stat(parent)
 	if err != nil {
-		return false
+		return false, err
 	}
-	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative))
+	for current := child; ; current = filepath.Dir(current) {
+		currentInfo, err := os.Stat(current)
+		if err != nil {
+			return false, err
+		}
+		if os.SameFile(parentInfo, currentInfo) {
+			return true, nil
+		}
+		next := filepath.Dir(current)
+		if next == current {
+			return false, nil
+		}
+	}
 }
 
 func requireObjectStart(decoder *json.Decoder) error {

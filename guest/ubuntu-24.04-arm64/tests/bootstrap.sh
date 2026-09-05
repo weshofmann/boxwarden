@@ -144,6 +144,18 @@ if [[ -f "${user_data}" ]]; then
     fail "autoinstall does not give the disposable workstation account unrestricted passwordless sudo"
   grep -Fq 'curtin in-target -- visudo -cf /etc/sudoers.d/90-boxwarden' "${user_data}" || \
     fail "autoinstall does not validate the passwordless-sudo policy before reboot"
+  grep -Eq '^[[:space:]]+- install -d -o root -g root -m 0755 /target/etc/ssh/sshd_config\.d /target/etc/ssh/boxwarden$' "${user_data}" || \
+    fail "autoinstall does not create the generic root-owned SSH bootstrap parent"
+  grep -Fq 'TrustedUserCAKeys /etc/ssh/boxwarden/active/trusted-user-ca.pub' "${user_data}" || \
+    fail "autoinstall does not point SSH CA trust at the future active bootstrap tree"
+  grep -Fq 'AuthorizedPrincipalsFile /etc/ssh/boxwarden/active/authorized_principals/%u' "${user_data}" || \
+    fail "autoinstall does not point SSH principals at the future active bootstrap tree"
+  require_absent '/target/etc/ssh/boxwarden/active' "${user_data}" \
+    "autoinstall precreates the active SSH bootstrap tree in the generic golden"
+  require_absent '__BOXWARDEN_SSH_CA_PUBLIC_KEY__' "${user_data}" \
+    "autoinstall retains a domain management CA placeholder"
+  require_absent "'boxwarden-task0' > /target/etc/ssh" "${user_data}" \
+    "autoinstall retains a fixed management SSH principal"
   grep -Fq 'serial-getty@hvc0.service.d/10-boxwarden-autologin.conf' "${user_data}" || \
     fail "autoinstall does not configure the qualified Tart hvc0 recovery console"
   grep -Fq -- '--autologin boxwarden' "${user_data}" || \
@@ -213,29 +225,27 @@ if [[ -f "${repo_root}/scripts/spike/bootstrap-tart.sh" ]]; then
     fail "host time-zone detection accepted a localtime target outside the trusted zoneinfo tree"
   fi
 
-  ca_public_key_path="${test_tmp}/user-ca.pub"
   password_hash_path="${test_tmp}/password.hash"
   rendered_seed_dir="${test_tmp}/rendered-seed"
-  printf '%s\n' \
-    'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBwRFasUlbn5G0Ui17nsul/wmOFCPojDG9WnMGaJ6q8F task0-test-ca' \
-    >"${ca_public_key_path}"
   printf '%s\n' '$6$task0$abcdefghijklmnopqrstuvwxyz' >"${password_hash_path}"
 
   if BW_SPIKE_ZONEINFO_ROOT="${zoneinfo_root}" \
     "${repo_root}/scripts/spike/bootstrap-tart.sh" render-seed \
-      run-1 "${ca_public_key_path}" "${password_hash_path}" \
+      run-1 "${password_hash_path}" \
       America/Denver "${rendered_seed_dir}"; then
     grep -Fq 'timezone: "America/Denver"' "${rendered_seed_dir}/user-data" || \
       fail "rendered seed does not contain the explicitly selected host time zone"
     require_absent '__BOXWARDEN_TIMEZONE__' "${rendered_seed_dir}/user-data" \
       "rendered seed retains the unresolved time-zone placeholder"
+    require_absent 'ssh-ed25519 ' "${rendered_seed_dir}/user-data" \
+      "rendered seed contains management CA material"
   else
     fail "seed rendering rejected a valid host time zone"
   fi
 
   if BW_SPIKE_ZONEINFO_ROOT="${zoneinfo_root}" \
     "${repo_root}/scripts/spike/bootstrap-tart.sh" render-seed \
-      run-1 "${ca_public_key_path}" "${password_hash_path}" \
+      run-1 "${password_hash_path}" \
       ../outside-zone "${test_tmp}/invalid-render" \
       >"${test_tmp}/invalid-render.out" 2>"${test_tmp}/invalid-render.err"; then
     fail "seed rendering accepted a time-zone path traversal"

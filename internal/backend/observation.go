@@ -24,3 +24,10 @@ type Observation struct {
 type Observer interface {
 	Observe(context.Context, string) (Observation, error)
 }
+
+// Creator performs the limited backend mutations required to create an
+// isolated, stopped session from a registered golden.
+type Creator interface {
+	Clone(ctx context.Context, sourceID, targetID string) error
+	RandomizeMAC(ctx context.Context, objectID string) error
+}

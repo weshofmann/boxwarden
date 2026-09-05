@@ -5,16 +5,17 @@ claims. It uses a consistent evidence vocabulary and tracks the current status
 of each material claim.
 
 Claims in this document draw on evidence from several source scopes:
-- **Current `main`:** code, tests, and documents present in the current `main` branch.
+- **Current tree:** code, tests, and documents landed in this integration and
+  intended for `main`.
 - **Historical qualification evidence on `main`:** Task 0 and independent architecture
   review evidence committed to `main`.
 - **Staged Draft branch:** implementation, tests, and qualification evidence committed
-  on the V2/V3/V4 Draft PRs but not yet merged to `main`. Where a claim's evidence
+  on the V3/V4 Draft PRs but not yet merged to `main`. Where a claim's evidence
   lives only in a staged Draft branch, that is noted explicitly.
 - **Pending:** the required evidence does not yet exist in any branch.
 
-Do not infer that a test, document, or qualification result is on `main` unless the
-evidence column explicitly says so or omits a staging qualifier.
+Do not infer that a test, document, or qualification result is in the current
+tree unless the evidence column explicitly says so or omits a staging qualifier.
 
 Security properties are not uniformly "tested" or "qualified." This document
 distinguishes the specific evidence basis for each claim rather than collapsing
@@ -26,6 +27,11 @@ qualification. The dimensions are orthogonal; any combination is possible.
 accounting, not a failure. Do not promote a pending claim to qualified status
 merely because implementation looks correct; the distinction only matters when
 it is maintained consistently.
+
+A Pending attended qualification limits the assurance claim; it is not, by
+itself, an absolute Ready or merge blocker for deterministically verified code
+when no known unsafe defect exists. Whether the foundation code may merge and
+whether Boxwarden is ready for general use or production are separate decisions.
 
 ## Evidence dimensions
 
@@ -243,7 +249,7 @@ branch and is not yet on `main`. The runtime properties (S10–S13) are pending.
 |---|---|---|---|---|
 | M1 | One management CA per domain; `domain init` creates it explicitly and cannot create it lazily from session start | D, T, Q | ADR 012; `docs/credentials.md`; `internal/sshx/ca_test.go` (staged Draft branch); V3 gate evidence (staged Draft branch): two distinct CAs created, no lazy CA path exercised | — |
 | M2 | CA private key never enters a guest, golden, repository, argv, or log | D, T | `docs/credentials.md`; `internal/sshx/ca_test.go` (staged Draft branch): private key bytes never appear in any output | No negative test that actually extracts key bytes from a compromised guest |
-| M3 | Generic golden contains no domain CA anchor and no fixed domain principal | D, T | `docs/architecture.md`; `docs/lifecycle-and-recovery.md`; V2 golden test (staged Draft branch): no CA state in golden | V2 real-host register/clone gate is pending (requires artifact from corrected generic guest definition) |
+| M3 | Generic golden contains no domain CA anchor and no fixed domain principal | D, T | `docs/architecture.md`; `docs/lifecycle-and-recovery.md`; V2 golden test (current tree): no CA state in golden | V2 real-host register/clone gate is pending (requires artifact from corrected generic guest definition) |
 | M4 | `domain init` does not install or modify host-global prerequisites; host toolchain unchanged after domain init | D, T, Q | `docs/operations/domain-init.md` (staged Draft branch); V3 gate evidence (staged Draft branch): host snapshot identical before and after domain init | — |
 | M5 | `domain init` compares fingerprints across all configured domain roots to reject accidental CA reuse | D, T | `docs/credentials.md`; `internal/sshx/ca_test.go` (staged Draft branch): duplicate fingerprint rejection | — |
 | M6 | Short-lived no-extension certificates: exact validity window (`-5m:+15m`), exact principal format (`boxwarden-session-<uuid>`), no certificate extensions | D, T | `docs/credentials.md`; `internal/sshx/cert_test.go` (staged Draft branch): exact argv, validity, `-O clear` | Not yet exercised by a real SSH login (V4 pending) |
@@ -259,12 +265,12 @@ branch and is not yet on `main`. The runtime properties (S10–S13) are pending.
 |---|---|---|---|---|
 | L1 | Every clone receives a unique MAC address | Q | Task 0 two-clone comparison: `docs/evidence/m1a-task0-final-summary.md` — distinct MACs confirmed | Qualified for the Task 0 golden; updated golden requires new qualification |
 | L2 | Every clone receives a unique machine ID (`/etc/machine-id`), SSH host keys, and DHCP/DUID identity | Q | Task 0 two-clone comparison: `docs/evidence/m1a-task0-final-summary.md` — all identity components distinct | Same scope limitation as L1 |
-| L3 | Session lifecycle intent is persisted and fsynced before backend mutation | D, T | `docs/lifecycle-and-recovery.md`; `internal/lifecycle/reconcile_test.go`; `internal/session/store_test.go` (staged Draft branch) | No real-host power-loss/crash test |
-| L4 | Per-session locks serialize conflicting operations | D, T | `docs/lifecycle-and-recovery.md`; `internal/lock/filelock_test.go` (staged Draft branch) | — |
+| L3 | Session lifecycle intent is persisted and fsynced before backend mutation | D, T | `docs/lifecycle-and-recovery.md`; `internal/lifecycle/reconcile_test.go`; `internal/session/store_test.go` (current tree) | No real-host power-loss/crash test |
+| L4 | Per-session locks serialize conflicting operations | D, T | `docs/lifecycle-and-recovery.md`; `internal/lock/filelock_test.go` (current tree) | — |
 | L5 | A running VM without proven supervisor ownership is DRIFT/NON-READY with no mutation or adoption | D, T | `docs/lifecycle-and-recovery.md`; `internal/lifecycle/reconcile_test.go`: unproven ownership → drift | V4 supervisor ownership proof not yet implemented |
 | L6 | Retries are idempotent; partial or crashed state does not produce duplicate clones | D, T | ADR 009; `docs/lifecycle-and-recovery.md`; lifecycle reconciliation tests | — |
 | L7 | No checkpoint operation exists in M1A | D | `docs/lifecycle-and-recovery.md` (explicit deferral); ADR 014 | — |
-| L8 | V2 registration records only operator admission and existing artifact identity; it does not assert provenance, clone-readiness, or qualification evidence | D, T | `docs/lifecycle-and-recovery.md`; README; `internal/golden/register_test.go` (staged Draft branch) | V2 real-host gate pending |
+| L8 | V2 registration records only operator admission and existing artifact identity; it does not assert provenance, clone-readiness, or qualification evidence | D, T | `docs/lifecycle-and-recovery.md`; README; `internal/golden/register_test.go` (current tree) | V2 real-host gate pending |
 
 ### State integrity
 
@@ -285,7 +291,7 @@ status.
 | G1 | Every golden input is locked by exact version, source URL/repository identity, and digest before use | D | ADR 010; `docs/tool-provenance.md` | Build and acceptance gates are attended manual operations |
 | G2 | Mutable piped installers are rejected during golden construction | D | ADR 010; `docs/tool-provenance.md` | Design and policy; no automated test of the rejection |
 | G3 | Automatic updates of golden contents are disabled | D | ADR 010; `docs/tool-provenance.md` | Configuration policy; verified at golden build, not continuously |
-| G4 | A golden revision is immutable after promotion; it is never updated in place | D, T | ADR 010; golden register test (staged Draft branch): immutable record after creation | V2 real-host gate pending |
+| G4 | A golden revision is immutable after promotion; it is never updated in place | D, T | ADR 010; golden register test (current tree): immutable record after creation | V2 real-host gate pending |
 | G5 | Exact Tart and Softnet executable and archive digests are recorded and verified | D, Q | `docs/tool-provenance.md` (digest table); V3 gate evidence (staged Draft branch): exact manifested values confirmed for both tools | Specific to the qualified pair |
 
 ### Domain isolation

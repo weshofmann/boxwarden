@@ -21,7 +21,7 @@ Usage:
   bootstrap-tart.sh inventory OUTPUT.json
   bootstrap-tart.sh issue-cert CA_PRIVATE_KEY SESSION_PUBLIC_KEY KEY_ID
   bootstrap-tart.sh host-timezone
-  bootstrap-tart.sh render-seed RUN_ID CA_PUBLIC_KEY PASSWORD_HASH TIMEZONE OUTPUT_DIR
+  bootstrap-tart.sh render-seed RUN_ID PASSWORD_HASH TIMEZONE OUTPUT_DIR
   bootstrap-tart.sh rewrite-grub INPUT.cfg OUTPUT.cfg
   bootstrap-tart.sh remaster-iso SOURCE.iso USER_DATA OUTPUT.iso
   bootstrap-tart.sh create VM
@@ -185,22 +185,18 @@ issue_cert() {
 
 render_seed() {
   local run_id="$1"
-  local ca_public_key_path="$2"
-  local password_hash_path="$3"
-  local timezone="$4"
-  local output_dir="$5"
+  local password_hash_path="$2"
+  local timezone="$3"
+  local output_dir="$4"
   local script_dir
   local repo_root
   local template
-  local ca_public_key
   local password_hash
   local escaped_run_id
-  local escaped_ca
   local escaped_password_hash
   local escaped_timezone
 
   [[ "${run_id}" =~ ^run-[12]$ ]] || die "run ID must be run-1 or run-2"
-  [[ -f "${ca_public_key_path}" ]] || die "missing CA public key: ${ca_public_key_path}"
   [[ -f "${password_hash_path}" ]] || die "missing password hash: ${password_hash_path}"
   validate_timezone "${timezone}"
 
@@ -209,13 +205,10 @@ render_seed() {
   template="${repo_root}/guest/ubuntu-24.04-arm64/autoinstall/user-data"
   [[ -f "${template}" ]] || die "missing seed template: ${template}"
 
-  ca_public_key="$(<"${ca_public_key_path}")"
   password_hash="$(<"${password_hash_path}")"
-  [[ "${ca_public_key}" == ssh-ed25519\ * ]] || die "Task 0 requires an Ed25519 SSH user CA"
   [[ "${password_hash}" == \$6\$* ]] || die "password hash must use SHA-512 crypt"
 
   escaped_run_id="$(escape_sed_replacement "${run_id}")"
-  escaped_ca="$(escape_sed_replacement "${ca_public_key}")"
   escaped_password_hash="$(escape_sed_replacement "${password_hash}")"
   escaped_timezone="$(escape_sed_replacement "${timezone}")"
 
@@ -223,7 +216,6 @@ render_seed() {
   mkdir -p "${output_dir}"
   sed \
     -e "s/__BOXWARDEN_RUN_ID__/${escaped_run_id}/g" \
-    -e "s/__BOXWARDEN_SSH_CA_PUBLIC_KEY__/${escaped_ca}/g" \
     -e "s/__BOXWARDEN_PASSWORD_HASH__/${escaped_password_hash}/g" \
     -e "s/__BOXWARDEN_TIMEZONE__/${escaped_timezone}/g" \
     "${template}" >"${output_dir}/user-data"
@@ -552,7 +544,7 @@ case "${command_name}" in
     host_timezone
     ;;
   render-seed)
-    (( $# == 5 )) || die "render-seed requires RUN_ID CA_PUBLIC_KEY PASSWORD_HASH TIMEZONE OUTPUT_DIR"
+    (( $# == 4 )) || die "render-seed requires RUN_ID PASSWORD_HASH TIMEZONE OUTPUT_DIR"
     render_seed "$@"
     ;;
   rewrite-grub)
