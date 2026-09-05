@@ -88,6 +88,7 @@ The direct child has a new process group. `Handle.Stop` sends graceful terminati
 - Create: `cmd/boxwarden-guest-bootstrap/{main,artifact_test}.go`.
 - Create: `guest/ubuntu-24.04-arm64/artifacts.lock.json`, `guest/ubuntu-24.04-arm64/artifacts/boxwarden-guest-bootstrap`.
 - Modify: `guest/ubuntu-24.04-arm64/autoinstall/user-data`, `guest/ubuntu-24.04-arm64/tests/bootstrap.sh`.
+- Modify: `scripts/spike/bootstrap-tart.sh` to map only the verified current-tree helper into the remastered ISO staging tree.
 
 **Interfaces:**
 
@@ -102,11 +103,11 @@ func EncodeSerialFrame(SerialRequest, SerialResult) (begin, end string, err erro
 
 The helper exposes only `serial-bootstrap` and `management`. Canonical bounded JSON is carried in `BOXWARDEN-BEGIN <nonce> <session-id>` / `BOXWARDEN-END <nonce> <session-id> <base64-json>` frames. It atomically publishes only `/etc/ssh/boxwarden/active` with CA public key, derived principal, and durable binding; exact repeat is idempotent, conflict fails. It checks effective sshd and returns fresh Ed25519 public host key. Management accepts exactly existing typed `probe`, `apply_zone`, `read_zone`.
 
-- [ ] **RED:** `TestSerialRequestRejectsUnknownOrMismatchedFields`, `TestEncodeSerialFrameRoundTripsExactGenerationAndNonce`, `TestSerialBootstrapPublishesOnlyDurableBinding`, `TestSerialBootstrapIsIdempotentAndRejectsConflictingBinding`, `TestManagementRejectsRemoteCommandSurface`, `TestCommittedGuestHelperMatchesLockAndStaticARM64Contract`.
+- [ ] **RED:** `TestSerialRequestRejectsUnknownOrMismatchedFields`, `TestEncodeSerialFrameRoundTripsExactGenerationAndNonce`, `TestSerialFrameIsUnambiguousWithPTYCRLF`, `TestSerialBootstrapPublishesOnlyDurableBinding`, `TestSerialBootstrapRejectsUnexpectedActiveEntries`, `TestSerialBootstrapIsIdempotentAndRejectsConflictingBinding`, `TestManagementRejectsRemoteCommandSurface`, `TestMainPropagatesOutputFailure`, `TestCommittedGuestHelperMatchesLockAndStaticARM64Contract`, and an executable remaster-mapping test proving the locked helper is the installed input.
 - [ ] **Run RED:** `go test ./internal/guestproto ./cmd/boxwarden-guest-bootstrap -count=1`. Expected: missing packages.
-- [ ] **GREEN:** Adapt `75763d58`. Build twice with exactly `CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags=-buildid=`; compare bytes; update committed artifact, SHA-256 lock, and autoinstall checksum/install to root-owned `0755` `/usr/local/libexec/boxwarden-guest-bootstrap`.
+- [ ] **GREEN:** Adapt `c9a178e` plus required UUID correction `75763d58`, never the integer-generation state or preserved binary. Build twice with exactly `CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags=-buildid=`; compare bytes; update committed artifact, SHA-256 lock, remaster mapping, and autoinstall checksum/install to root-owned `0755` `/usr/local/libexec/boxwarden-guest-bootstrap`. Every helper write is checked; exact active-tree validation rejects unexpected entries; PTY CRLF is normalized only at the frame-line boundary and never inside decoded JSON.
 - [ ] **Verify:** `go test ./internal/guestproto ./cmd/boxwarden-guest-bootstrap -count=1 && bash guest/ubuntu-24.04-arm64/tests/bootstrap.sh`.
-- [ ] **Commit:** `git add internal/guestproto cmd/boxwarden-guest-bootstrap guest/ubuntu-24.04-arm64 && git commit -m "feat(guest): add generic serial bootstrap helper" -m "Install a reproducible static arm64 helper that atomically binds one clone to selected public trust without a network bootstrap path."`
+- [ ] **Commit:** `git add docs/superpowers/plans/2026-09-04-boxwarden-mvp-lifecycle.md internal/guestproto cmd/boxwarden-guest-bootstrap guest/ubuntu-24.04-arm64 scripts/spike/bootstrap-tart.sh && git commit -m "feat(guest): add generic serial bootstrap helper" -m "Install a reproducible static arm64 helper that atomically binds one clone to selected public trust without a network bootstrap path."`
 
 ### Task 3: Bounded two-PTY, Screen, and serial exchange
 

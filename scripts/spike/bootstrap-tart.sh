@@ -242,6 +242,12 @@ remaster_iso() {
   local source_iso="$1"
   local user_data="$2"
   local output_iso="$3"
+  local script_dir
+  local repo_root
+  local guest_helper
+  local artifact_lock
+  local expected_sha
+  local actual_sha
   local work_dir
   local grub_cfg
 
@@ -249,6 +255,16 @@ remaster_iso() {
   [[ -f "${source_iso}" ]] || die "missing source ISO: ${source_iso}"
   [[ -f "${user_data}" ]] || die "missing rendered user-data: ${user_data}"
   [[ ! -e "${output_iso}" ]] || die "refusing to overwrite ISO: ${output_iso}"
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+  repo_root="$(cd "${script_dir}/../.." && pwd -P)"
+  guest_helper="${repo_root}/guest/ubuntu-24.04-arm64/artifacts/boxwarden-guest-bootstrap"
+  artifact_lock="${repo_root}/guest/ubuntu-24.04-arm64/artifacts.lock.json"
+  [[ -x "${guest_helper}" ]] || die "missing current-tree guest helper: ${guest_helper}"
+  [[ -f "${artifact_lock}" ]] || die "missing guest helper lock: ${artifact_lock}"
+  expected_sha="$(sed -n 's/.*"sha256": "\([0-9a-f]\{64\}\)".*/\1/p' "${artifact_lock}")"
+  [[ "${expected_sha}" =~ ^[0-9a-f]{64}$ ]] || die "invalid guest helper lock digest"
+  actual_sha="$(shasum -a 256 "${guest_helper}" | awk '{print $1}')"
+  [[ "${actual_sha}" == "${expected_sha}" ]] || die "current-tree guest helper does not match lock"
   require_free_space
 
   work_dir="$(mktemp -d "${TMPDIR:-/tmp}/boxwarden-task0-remaster.XXXXXX")"
@@ -263,6 +279,7 @@ remaster_iso() {
     -outdev "${output_iso}" \
     -boot_image any replay \
     -map "${user_data}" /autoinstall.yaml \
+    -map "${guest_helper}" /boxwarden-artifacts/boxwarden-guest-bootstrap \
     -map "${work_dir}/grub.autoinstall.cfg" /boot/grub/grub.cfg \
     -commit \
     -end
