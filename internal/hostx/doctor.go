@@ -15,6 +15,23 @@ const (
 	ScreenVersionOutput    = "Screen version 4.00.03 (FAU) 23-Oct-06"
 )
 
+// ScreenFact is the exact immutable Screen identity already checked by Doctor.
+// Runtime construction consumes this value instead of accepting a mutable path.
+type ScreenFact struct {
+	Path, SHA256, Version string
+	Mode                  uint32
+	UID, GID              int
+	Links                 uint64
+}
+
+func QualifiedScreenFact() ScreenFact {
+	return ScreenFact{Path: ScreenPath, SHA256: ScreenExecutableSHA256, Version: ScreenVersionOutput, Mode: 0o755, UID: 0, GID: 0, Links: 1}
+}
+
+func (f ScreenFact) Qualified() bool {
+	return f == QualifiedScreenFact()
+}
+
 type Status string
 
 const (

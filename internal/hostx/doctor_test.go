@@ -117,6 +117,16 @@ func TestDoctorNeverExecutesConfiguredTartAndGatesScreenVersionOnExactIdentity(t
 	}
 }
 
+func TestQualifiedScreenFactExposesExactAdmittedScreen(t *testing.T) {
+	fact := QualifiedScreenFact()
+	if !fact.Qualified() {
+		t.Fatalf("QualifiedScreenFact() = %#v, want exact admitted Screen fact", fact)
+	}
+	if fact.Path != ScreenPath || fact.SHA256 != ScreenExecutableSHA256 || fact.Version != ScreenVersionOutput {
+		t.Fatalf("QualifiedScreenFact() = %#v, want current doctor Screen identity", fact)
+	}
+}
+
 func TestDoctorTartAdmissionRequiresExactSafeExecutableMetadata(t *testing.T) {
 	for name, mutate := range map[string]func(*PathFact){
 		"not executable": func(fact *PathFact) { fact.Mode = 0o644 },
