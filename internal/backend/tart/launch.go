@@ -15,34 +15,42 @@ import (
 // LaunchConfig carries the V3-admitted Tart/Softnet and operator facts. Start
 // policy is fixed here rather than being accepted from lifecycle callers.
 type LaunchConfig struct {
-	TartPath       string
-	TartHome       string
-	SoftnetBinDir  string
-	OperatorHome   string
-	OperatorName   string
-	ProcessStarter ProcessStarter
+	TartPath      string
+	TartHome      string
+	SoftnetBinDir string
+	OperatorHome  string
+	OperatorName  string
 }
 
-// ProcessSpec is one bounded, direct-child invocation. It cannot carry a
-// shell, inherited environment, stdin, or caller-selected arguments.
-type ProcessSpec struct {
-	Path string
-	Args []string
-	Env  []string
-	Dir  string
+// processSpec is one bounded direct-child invocation, constructed only by the
+// fixed Launcher policy. It is deliberately not an adapter API.
+type processSpec struct {
+	path string
+	args []string
+	env  []string
+	dir  string
 }
 
-// ProcessStarter creates a direct child and returns the resulting owned
-// handle. It is separate from execx.Runner because Tart run is long-lived.
-type ProcessStarter interface {
-	Start(context.Context, ProcessSpec) (backend.Handle, error)
+// processStarter is private so callers cannot use the Tart lifecycle adapter
+// as a generic direct-execution facility.
+type processStarter interface {
+	start(context.Context, processSpec) (backend.Handle, error)
 }
 
 // Launcher starts exactly one existing Tart object using the qualified launch
 // policy. It contains no generic Tart command capability.
-type Launcher struct{ config LaunchConfig }
+type Launcher struct {
+	config  LaunchConfig
+	process processStarter
+}
 
-func NewLauncher(config LaunchConfig) Launcher { return Launcher{config: config} }
+// NewLauncher installs the only production direct-child implementation. Its
+// public input consists exclusively of already-admitted host facts.
+func NewLauncher(config LaunchConfig) Launcher { return newLauncher(config, osProcessStarter{}) }
+
+func newLauncher(config LaunchConfig, process processStarter) Launcher {
+	return Launcher{config: config, process: process}
+}
 
 func (l Launcher) Start(ctx context.Context, request backend.StartRequest) (backend.Handle, error) {
 	if err := ctx.Err(); err != nil {
@@ -54,10 +62,13 @@ func (l Launcher) Start(ctx context.Context, request backend.StartRequest) (back
 	if err := validateLaunchConfig(l.config); err != nil {
 		return nil, fmt.Errorf("start Tart: %w", err)
 	}
-	spec := ProcessSpec{
-		Path: l.config.TartPath,
-		Args: []string{"run", "--net-softnet", "--no-audio", "--no-clipboard", "--serial-path", request.SerialDevice, request.ObjectID},
-		Env: []string{
+	if l.process == nil {
+		return nil, fmt.Errorf("start Tart: process starter is required")
+	}
+	spec := processSpec{
+		path: l.config.TartPath,
+		args: []string{"run", "--net-softnet", "--no-audio", "--no-clipboard", "--serial-path", request.SerialDevice, request.ObjectID},
+		env: []string{
 			"PATH=" + l.config.SoftnetBinDir,
 			"HOME=" + l.config.OperatorHome,
 			"USER=" + l.config.OperatorName,
@@ -67,9 +78,9 @@ func (l Launcher) Start(ctx context.Context, request backend.StartRequest) (back
 			"LANG=C",
 			"LC_ALL=C",
 		},
-		Dir: request.GenerationDirectory,
+		dir: request.GenerationDirectory,
 	}
-	handle, err := l.config.ProcessStarter.Start(ctx, spec)
+	handle, err := l.process.start(ctx, spec)
 	if err != nil {
 		return nil, fmt.Errorf("start Tart process: %w", err)
 	}
@@ -80,9 +91,6 @@ func (l Launcher) Start(ctx context.Context, request backend.StartRequest) (back
 }
 
 func validateLaunchConfig(config LaunchConfig) error {
-	if config.ProcessStarter == nil {
-		return fmt.Errorf("process starter is required")
-	}
 	for name, path := range map[string]string{
 		"Tart path": config.TartPath, "Tart home": config.TartHome, "Softnet PATH": config.SoftnetBinDir, "operator home": config.OperatorHome,
 	} {
@@ -106,27 +114,35 @@ func safeEnvironmentValue(value string) bool {
 
 var _ backend.Starter = Launcher{}
 
-// OSProcessStarter starts owned Tart processes without CommandContext: the
+// osProcessStarter starts owned Tart processes without CommandContext: the
 // supervisor, rather than a transient launch request context, owns shutdown.
-type OSProcessStarter struct{}
+// It is private because the fixed Launcher is the only allowed caller.
+type osProcessStarter struct {
+	spawn func(*exec.Cmd) error
+}
 
-func NewOSProcessStarter() OSProcessStarter { return OSProcessStarter{} }
-
-func (OSProcessStarter) Start(ctx context.Context, spec ProcessSpec) (backend.Handle, error) {
+func (s osProcessStarter) start(ctx context.Context, spec processSpec) (backend.Handle, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if !supportsOwnedProcessGroups() {
+		return nil, fmt.Errorf("start Tart process: owned process groups are unsupported on this platform")
+	}
 	command := newOwnedCommand(spec)
-	if err := command.Start(); err != nil {
+	spawn := s.spawn
+	if spawn == nil {
+		spawn = func(command *exec.Cmd) error { return command.Start() }
+	}
+	if err := spawn(command); err != nil {
 		return nil, err
 	}
-	return &osProcessHandle{command: command, done: make(chan struct{}), signalGroup: signalOwnedProcessGroup}, nil
+	return &osProcessHandle{command: command, done: make(chan struct{}), signalGroup: signalOwnedProcessGroup, waitCommand: command.Wait}, nil
 }
 
-func newOwnedCommand(spec ProcessSpec) *exec.Cmd {
-	command := exec.Command(spec.Path, spec.Args...)
-	command.Env = append([]string(nil), spec.Env...)
-	command.Dir = spec.Dir
+func newOwnedCommand(spec processSpec) *exec.Cmd {
+	command := exec.Command(spec.path, spec.args...)
+	command.Env = append([]string(nil), spec.env...)
+	command.Dir = spec.dir
 	configureOwnedProcessGroup(command)
 	return command
 }
@@ -139,6 +155,7 @@ type osProcessHandle struct {
 	stopErr     error
 	waitOnce    sync.Once
 	waitErr     error
+	waitCommand func() error
 }
 
 func (h *osProcessHandle) Stop(ctx context.Context) error {
@@ -172,7 +189,11 @@ func (h *osProcessHandle) Wait(ctx context.Context) error {
 	}
 	h.waitOnce.Do(func() {
 		go func() {
-			h.waitErr = h.command.Wait()
+			waitCommand := h.waitCommand
+			if waitCommand == nil {
+				waitCommand = h.command.Wait
+			}
+			h.waitErr = waitCommand()
 			close(h.done)
 		}()
 	})

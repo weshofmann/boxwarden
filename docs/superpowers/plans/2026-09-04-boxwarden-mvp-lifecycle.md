@@ -216,11 +216,11 @@ Stopped is true only with observed stopped. Running requires backend observation
 func (s *Service) Stop(context.Context, string) (Record, error)
 ```
 
-Stop locks session, proves record/backend/supervisor binding, fsyncs `StateStopping` plus non-ready before authenticated control. Supervisor gracefully terminates exact Tart group, waits fixed bound, then uses only documented bounded escalation while proof remains valid; reaps children/removes exact runtime. Service observes exact object stopped before fsyncing `StateStopped` and clearing generation. Unproven runtime is drift/no signal.
+Stop locks session, proves record/backend/supervisor binding, fsyncs `StateStopping` plus non-ready before authenticated control. Supervisor sends SIGINT only through the exact owned Tart handle and waits a fixed bound for that handle to reap. A wait timeout returns without SIGKILL, PID fallback, or other escalation; the record remains `StateStopping` and non-ready for later reconciliation. Service observes the exact object stopped before fsyncing `StateStopped` and clearing generation. Unproven runtime is drift/no signal.
 
-- [ ] **RED:** `TestStopPersistsStoppingBeforeControlRequest`, `TestStopRefusesBarePIDOrMismatchedGeneration`, `TestStopSignalsOnlyOwnedBackendGroup`, `TestStopWaitsForStoppedObservationBeforeClearingGeneration`, `TestStopIsIdempotentForExactStoppedRecord`, `TestStopLeavesDriftUntouched`.
+- [ ] **RED:** `TestStopPersistsStoppingBeforeControlRequest`, `TestStopRefusesBarePIDOrMismatchedGeneration`, `TestStopSignalsOnlyOwnedBackendGroup`, `TestStopWaitsForStoppedObservationBeforeClearingGeneration`, `TestStopTimeoutLeavesStoppingNonReadyWithoutEscalation`, `TestStopIsIdempotentForExactStoppedRecord`, `TestStopLeavesDriftUntouched`.
 - [ ] **Run RED:** `go test ./internal/session ./internal/app -run 'TestStop' -count=1`.
-- [ ] **GREEN:** Add fixed `session stop <name>` parser and reuse Task 4 controller/Task 1 handle; no process search, orphan adoption, signal flag, or PID fallback.
+- [ ] **GREEN:** Add fixed `session stop <name>` parser and reuse Task 4 controller/Task 1 handle; SIGINT plus bounded handle `Wait` is the only shutdown action. No escalation, process search, orphan adoption, signal flag, or PID fallback.
 - [ ] **Verify/commit:** `go test ./internal/session ./internal/app ./cmd/boxwarden -count=1 && go test -race ./internal/session ./internal/supervisor -count=1 && git add internal/session internal/app cmd/boxwarden && git commit -m "feat(session): stop only exact owned runtimes" -m "Require authenticated generation ownership before graceful bounded shutdown and settle stopped only after backend and runtime cleanup are observed."`.
 
 ### Task 8: Explicit-loss-gated exact destroy

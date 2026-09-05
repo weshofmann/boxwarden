@@ -3,6 +3,7 @@ package fake
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"sync"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
@@ -36,6 +37,8 @@ type Backend struct {
 	addressCalls          []string
 	deleteCalls           []string
 	addresses             map[string]string
+	startTokens           map[string]uint64
+	nextStartToken        uint64
 	cloneError            error
 	clonePostError        error
 	randomizeMACError     error
@@ -49,7 +52,11 @@ type Backend struct {
 
 // New constructs a fake from deterministic initial observations.
 func New(observations ...backend.Observation) *Backend {
-	b := &Backend{observations: make(map[string]backend.Observation, len(observations)), addresses: make(map[string]string)}
+	b := &Backend{
+		observations: make(map[string]backend.Observation, len(observations)),
+		addresses:    make(map[string]string),
+		startTokens:  make(map[string]uint64),
+	}
 	for _, observation := range observations {
 		b.observations[observation.ObjectID] = observation
 	}
@@ -83,7 +90,10 @@ func (b *Backend) Start(ctx context.Context, request backend.StartRequest) (back
 	}
 	observation.State = backend.ObjectRunning
 	b.observations[request.ObjectID] = observation
-	return &ownedHandle{backend: b, objectID: request.ObjectID, done: make(chan struct{})}, nil
+	b.nextStartToken++
+	token := b.nextStartToken
+	b.startTokens[request.ObjectID] = token
+	return &ownedHandle{backend: b, objectID: request.ObjectID, token: token, done: make(chan struct{})}, nil
 }
 
 // Resolve returns the configured current address on each call without caching
@@ -108,7 +118,15 @@ func (b *Backend) Resolve(ctx context.Context, objectID string) (string, error) 
 	if !found {
 		return "", fmt.Errorf("no current address for object %q", objectID)
 	}
-	return address, nil
+	return parseLiteralAddress(address)
+}
+
+func parseLiteralAddress(address string) (string, error) {
+	parsed, err := netip.ParseAddr(address)
+	if err != nil || !parsed.IsValid() {
+		return "", fmt.Errorf("expected exactly one literal IP address")
+	}
+	return parsed.String(), nil
 }
 
 // Delete removes exactly one existing fake object after recording its object
@@ -135,12 +153,14 @@ func (b *Backend) Delete(ctx context.Context, objectID string) error {
 	}
 	delete(b.observations, objectID)
 	delete(b.addresses, objectID)
+	delete(b.startTokens, objectID)
 	return nil
 }
 
 type ownedHandle struct {
 	backend  *Backend
 	objectID string
+	token    uint64
 	done     chan struct{}
 	once     sync.Once
 	err      error
@@ -157,7 +177,7 @@ func (h *ownedHandle) Stop(ctx context.Context) error {
 		h.backend.mu.Lock()
 		defer h.backend.mu.Unlock()
 		observation, found := h.backend.observations[h.objectID]
-		if !found || !observation.Exists || observation.State != backend.ObjectRunning {
+		if token, active := h.backend.startTokens[h.objectID]; !active || token != h.token || !found || !observation.Exists || observation.State != backend.ObjectRunning {
 			h.err = fmt.Errorf("cannot stop unowned object %q", h.objectID)
 			close(h.done)
 			return
@@ -389,6 +409,7 @@ func (b *Backend) SetObservation(observation backend.Observation) {
 		b.observations = make(map[string]backend.Observation)
 	}
 	b.observations[observation.ObjectID] = observation
+	delete(b.startTokens, observation.ObjectID)
 }
 
 // DeleteObservation makes an object absent from the fake's next observation.
@@ -396,6 +417,7 @@ func (b *Backend) DeleteObservation(objectID string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.observations, objectID)
+	delete(b.startTokens, objectID)
 }
 
 var _ backend.Observer = (*Backend)(nil)

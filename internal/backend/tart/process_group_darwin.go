@@ -14,6 +14,8 @@ func configureOwnedProcessGroup(command *exec.Cmd) {
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
+func supportsOwnedProcessGroups() bool { return true }
+
 // signalOwnedProcessGroup sends Tart's graceful SIGINT only to the negative
 // process group created for this direct child.
 func signalOwnedProcessGroup(groupID int) error {

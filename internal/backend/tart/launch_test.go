@@ -9,14 +9,13 @@ import (
 
 func TestLauncherUsesClosedQualifiedTartInvocation(t *testing.T) {
 	process := &recordingProcessStarter{handle: &processHandleFake{}}
-	launcher := NewLauncher(LaunchConfig{
-		TartPath:       "/opt/qualified/tart",
-		TartHome:       "/Users/wes/.boxwarden/tart",
-		SoftnetBinDir:  "/Library/Boxwarden/toolchains/softnet/0.19.0/digest",
-		OperatorHome:   "/Users/wes",
-		OperatorName:   "wes",
-		ProcessStarter: process,
-	})
+	launcher := newLauncher(LaunchConfig{
+		TartPath:      "/opt/qualified/tart",
+		TartHome:      "/Users/wes/.boxwarden/tart",
+		SoftnetBinDir: "/Library/Boxwarden/toolchains/softnet/0.19.0/digest",
+		OperatorHome:  "/Users/wes",
+		OperatorName:  "wes",
+	}, process)
 	request := backend.StartRequest{ObjectID: "boxwarden-work-dev", SerialDevice: "/dev/ttys004", GenerationDirectory: "/private/runtime/work/dev/generation-1"}
 
 	handle, err := launcher.Start(context.Background(), request)
@@ -27,10 +26,10 @@ func TestLauncherUsesClosedQualifiedTartInvocation(t *testing.T) {
 		t.Fatalf("Start() handle = %#v, want owned process handle %#v", handle, process.handle)
 	}
 	wantArgs := []string{"run", "--net-softnet", "--no-audio", "--no-clipboard", "--serial-path", "/dev/ttys004", "boxwarden-work-dev"}
-	if got := process.spec.Path; got != "/opt/qualified/tart" {
+	if got := process.spec.path; got != "/opt/qualified/tart" {
 		t.Fatalf("process path = %q, want configured absolute Tart path", got)
 	}
-	if got := process.spec.Args; !sameLifecycleStrings(got, wantArgs) {
+	if got := process.spec.args; !sameLifecycleStrings(got, wantArgs) {
 		t.Fatalf("process args = %#v, want %#v", got, wantArgs)
 	}
 	wantEnv := []string{
@@ -43,16 +42,16 @@ func TestLauncherUsesClosedQualifiedTartInvocation(t *testing.T) {
 		"LANG=C",
 		"LC_ALL=C",
 	}
-	if got := process.spec.Env; !sameLifecycleStrings(got, wantEnv) {
+	if got := process.spec.env; !sameLifecycleStrings(got, wantEnv) {
 		t.Fatalf("process environment = %#v, want exact closed environment %#v", got, wantEnv)
 	}
-	if got := process.spec.Dir; got != request.GenerationDirectory {
+	if got := process.spec.dir; got != request.GenerationDirectory {
 		t.Fatalf("process directory = %q, want generation directory %q", got, request.GenerationDirectory)
 	}
 }
 
 func TestLauncherRejectsAmbientOrUnqualifiedConfiguration(t *testing.T) {
-	valid := validLaunchConfig(&recordingProcessStarter{handle: &processHandleFake{}})
+	valid := validLaunchConfig()
 	request := backend.StartRequest{ObjectID: "boxwarden-work-dev", SerialDevice: "/dev/ttys004", GenerationDirectory: "/private/runtime/work/dev/generation-1"}
 	for name, configure := range map[string]func(*LaunchConfig){
 		"relative Tart path":             func(c *LaunchConfig) { c.TartPath = "tart" },
@@ -65,8 +64,8 @@ func TestLauncherRejectsAmbientOrUnqualifiedConfiguration(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			config := valid
 			configure(&config)
-			starter := config.ProcessStarter.(*recordingProcessStarter)
-			if _, err := NewLauncher(config).Start(context.Background(), request); err == nil {
+			starter := &recordingProcessStarter{handle: &processHandleFake{}}
+			if _, err := newLauncher(config, starter).Start(context.Background(), request); err == nil {
 				t.Fatal("Start() error = nil, want configuration refusal")
 			}
 			if starter.started {
@@ -77,12 +76,12 @@ func TestLauncherRejectsAmbientOrUnqualifiedConfiguration(t *testing.T) {
 }
 
 type recordingProcessStarter struct {
-	spec    ProcessSpec
+	spec    processSpec
 	handle  backend.Handle
 	started bool
 }
 
-func (s *recordingProcessStarter) Start(_ context.Context, spec ProcessSpec) (backend.Handle, error) {
+func (s *recordingProcessStarter) start(_ context.Context, spec processSpec) (backend.Handle, error) {
 	s.started = true
 	s.spec = spec
 	return s.handle, nil
@@ -93,14 +92,13 @@ type processHandleFake struct{}
 func (*processHandleFake) Stop(context.Context) error { return nil }
 func (*processHandleFake) Wait(context.Context) error { return nil }
 
-func validLaunchConfig(process ProcessStarter) LaunchConfig {
+func validLaunchConfig() LaunchConfig {
 	return LaunchConfig{
-		TartPath:       "/opt/qualified/tart",
-		TartHome:       "/Users/wes/.boxwarden/tart",
-		SoftnetBinDir:  "/Library/Boxwarden/toolchains/softnet/0.19.0/digest",
-		OperatorHome:   "/Users/wes",
-		OperatorName:   "wes",
-		ProcessStarter: process,
+		TartPath:      "/opt/qualified/tart",
+		TartHome:      "/Users/wes/.boxwarden/tart",
+		SoftnetBinDir: "/Library/Boxwarden/toolchains/softnet/0.19.0/digest",
+		OperatorHome:  "/Users/wes",
+		OperatorName:  "wes",
 	}
 }
 

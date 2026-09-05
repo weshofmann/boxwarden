@@ -290,6 +290,51 @@ func TestBackendStartResolveAndDeleteRecordExactObjectOperations(t *testing.T) {
 	}
 }
 
+func TestBackendStaleHandleCannotStopRecreatedAndRestartedSameID(t *testing.T) {
+	backendFake := fake.New(backend.Observation{ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectStopped})
+	request := backend.StartRequest{ObjectID: "boxwarden-work-dev", SerialDevice: "/dev/ttys004", GenerationDirectory: "/private/runtime/work/dev/generation-1"}
+	stale, err := backendFake.Start(context.Background(), request)
+	if err != nil {
+		t.Fatalf("first Start() error = %v", err)
+	}
+	if err := backendFake.Delete(context.Background(), request.ObjectID); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	backendFake.SetObservation(backend.Observation{ObjectID: request.ObjectID, Exists: true, State: backend.ObjectStopped})
+	current, err := backendFake.Start(context.Background(), request)
+	if err != nil {
+		t.Fatalf("second Start() error = %v", err)
+	}
+	if err := stale.Stop(context.Background()); err == nil {
+		t.Fatal("stale Stop() error = nil, want ownership refusal")
+	}
+	got, err := backendFake.Observe(context.Background(), request.ObjectID)
+	if err != nil || got.State != backend.ObjectRunning {
+		t.Fatalf("Observe() after stale Stop() = (%#v, %v), want current running object", got, err)
+	}
+	if err := current.Stop(context.Background()); err != nil {
+		t.Fatalf("current Stop() error = %v", err)
+	}
+}
+
+func TestBackendResolveNormalizesOnlyOneLiteralIP(t *testing.T) {
+	backendFake := fake.New()
+	backendFake.SetAddress("boxwarden-work-dev", "2001:0db8::1")
+	got, err := backendFake.Resolve(context.Background(), "boxwarden-work-dev")
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if got != "2001:db8::1" {
+		t.Fatalf("Resolve() = %q, want normalized literal IP", got)
+	}
+	for _, address := range []string{"guest.local", "192.0.2.10:22", "192.0.2.10\n192.0.2.11", ""} {
+		backendFake.SetAddress("boxwarden-work-dev", address)
+		if _, err := backendFake.Resolve(context.Background(), "boxwarden-work-dev"); err == nil {
+			t.Fatalf("Resolve() address %q error = nil, want literal-IP refusal", address)
+		}
+	}
+}
+
 func sameStartCalls(got, want []fake.StartCall) bool {
 	if len(got) != len(want) {
 		return false
