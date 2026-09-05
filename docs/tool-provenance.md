@@ -53,7 +53,7 @@ manual inspection/remediation. Boxwarden never chmods or repairs it. Init also
 refuses any source file with a setuid/setgid bit; only the exact root-owned
 digest-specific installed copy may be `04550`.
 
-Normal start uses the absolute qualified Tart executable and a closed
+Future V4 normal start must use the absolute qualified Tart executable and a closed
 environment whose PATH is exactly the installed digest-specific Softnet
 directory. Other variables are explicitly constructed from validated state:
 the manifested operator user/home, canonical configured `TART_HOME`, private
@@ -80,12 +80,14 @@ remain user-attended operations. Neither host-global command requires or
 searches for a security domain; adding another domain does not repeat the
 privileged installation.
 
-Production V4 also binds `/usr/bin/screen` 4.00.03 (FAU, 23-Oct-06), executable
+**Normative future V4 design — not current operational behavior.** V4 will
+bind `/usr/bin/screen` 4.00.03 (FAU, 23-Oct-06), executable
 SHA-256 `07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add`,
-root:wheel mode `0755`, one link, on qualified macOS 26.6.2 build 25G83. Doctor/runtime
-verify that exact identity. Its PTY/broker behavior and the direct `04550`
-Softnet execution—including argument/environment/dependency use, privilege drop,
-signals, file writes, and absence of sudo—remain explicit attended gates.
+root:wheel mode `0755`, one link, on qualified macOS 26.6.2 build 25G83. The
+future V4 doctor/runtime path must verify that exact identity. Its PTY/broker
+behavior and the direct `04550` Softnet execution—including
+argument/environment/dependency use, privilege drop, signals, file writes, and
+absence of sudo—remain Pending attended gates.
 
 The workstation uses first-party official distributions for ChatGPT Desktop, Claude Desktop/Code, Antigravity, Grok Build, Codex, Chrome, Docker, and language toolchains. Prefer official native ARM64 packages/binaries over npm wrappers when functionality is equivalent.
 
