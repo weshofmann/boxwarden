@@ -473,12 +473,16 @@ func (b *Bootstrapper) verifySSHD(ctx context.Context) (map[string]string, error
 			fields[parts[0]] = parts[1]
 		}
 	}
-	for key, want := range map[string]string{"trustedusercakeys": "/etc/ssh/boxwarden/active/trusted-user-ca.pub", "authorizedprincipalsfile": "/etc/ssh/boxwarden/active/authorized_principals/%u", "authorizedkeysfile": "none", "permituserenvironment": "no", "permituserrc": "no", "passwordauthentication": "no", "kbdinteractiveauthentication": "no", "permitrootlogin": "no", "x11forwarding": "no", "allowagentforwarding": "no", "allowtcpforwarding": "no", "allowstreamlocalforwarding": "no", "gatewayports": "no", "permittunnel": "no"} {
+	for key, want := range requiredSSHD {
 		if fields[key] != want {
 			return nil, fmt.Errorf("effective sshd %s = %q", key, fields[key])
 		}
 	}
-	return fields, nil
+	guards := make(map[string]string, len(requiredSSHD))
+	for key, value := range requiredSSHD {
+		guards[key] = value
+	}
+	return guards, nil
 }
 func (b *Bootstrapper) result(request SerialRequest, active string, sshd map[string]string, host string) (SerialResult, error) {
 	digests := map[string]string{}

@@ -17,7 +17,31 @@ const (
 	Version          = 1
 	MaxRequestBytes  = 64 << 10
 	MaxResponseBytes = 64 << 10
+	maxNonceBytes    = 128
 )
+
+var requiredInstalledSHA256 = map[string]struct{}{
+	"trusted-user-ca.pub":             {},
+	"authorized_principals/boxwarden": {},
+	"management-binding.json":         {},
+}
+
+var requiredSSHD = map[string]string{
+	"trustedusercakeys":            "/etc/ssh/boxwarden/active/trusted-user-ca.pub",
+	"authorizedprincipalsfile":     "/etc/ssh/boxwarden/active/authorized_principals/%u",
+	"authorizedkeysfile":           "none",
+	"permituserenvironment":        "no",
+	"permituserrc":                 "no",
+	"passwordauthentication":       "no",
+	"kbdinteractiveauthentication": "no",
+	"permitrootlogin":              "no",
+	"x11forwarding":                "no",
+	"allowagentforwarding":         "no",
+	"allowtcpforwarding":           "no",
+	"allowstreamlocalforwarding":   "no",
+	"gatewayports":                 "no",
+	"permittunnel":                 "no",
+}
 
 type Association struct {
 	Domain        string `json:"domain"`
@@ -276,6 +300,9 @@ func EncodeSerialFrame(request SerialRequest, result SerialResult) (string, stri
 // line boundary. It does not normalize payload bytes or otherwise loosen the
 // canonical serial frame grammar.
 func DecodeSerialEndLine(request SerialRequest, line string) (SerialResult, error) {
+	if len(line) > maxSerialEndLineBytes() {
+		return SerialResult{}, fmt.Errorf("serial end frame exceeds bound")
+	}
 	if strings.HasSuffix(line, "\r") {
 		line = strings.TrimSuffix(line, "\r")
 	}
@@ -286,22 +313,107 @@ func DecodeSerialEndLine(request SerialRequest, line string) (SerialResult, erro
 	if len(fields) != 4 || fields[0] != "BOXWARDEN-END" || fields[1] != request.Nonce || fields[2] != request.SessionID {
 		return SerialResult{}, fmt.Errorf("invalid serial end frame")
 	}
+	decodedLength, ok := encodedDecodedLength(fields[3])
+	if !ok || decodedLength > MaxResponseBytes {
+		return SerialResult{}, fmt.Errorf("serial end payload exceeds bound")
+	}
 	decoded, err := base64.StdEncoding.DecodeString(fields[3])
 	if err != nil || base64.StdEncoding.EncodeToString(decoded) != fields[3] {
 		return SerialResult{}, fmt.Errorf("invalid serial end payload")
+	}
+	if len(decoded) > MaxResponseBytes {
+		return SerialResult{}, fmt.Errorf("serial end payload exceeds bound")
 	}
 	object, err := exactObject(decoded, "version", "start_generation", "domain", "session_id", "backend_kind", "backend_object", "ca_fingerprint", "principal", "installed_sha256", "sshd", "host_public_key")
 	if err != nil {
 		return SerialResult{}, fmt.Errorf("invalid serial result: %w", err)
 	}
+	digests, err := decodeExactDigests(object["installed_sha256"])
+	if err != nil {
+		return SerialResult{}, fmt.Errorf("invalid installed digests: %w", err)
+	}
+	sshd, err := decodeExactStringMap(object["sshd"], requiredSSHD)
+	if err != nil {
+		return SerialResult{}, fmt.Errorf("invalid effective sshd: %w", err)
+	}
 	var result SerialResult
 	if err := decodeFields(object, &result); err != nil {
 		return SerialResult{}, fmt.Errorf("invalid serial result: %w", err)
 	}
+	result.InstalledSHA256, result.SSHD = digests, sshd
 	if err := validateSerialResult(request, result); err != nil {
 		return SerialResult{}, err
 	}
 	return result, nil
+}
+
+func maxSerialEndLineBytes() int {
+	return len("BOXWARDEN-END ") + maxNonceBytes + 1 + 36 + 1 + base64.StdEncoding.EncodedLen(MaxResponseBytes) + 1
+}
+
+func encodedDecodedLength(encoded string) (int, bool) {
+	if len(encoded) == 0 || len(encoded)%4 != 0 {
+		return 0, false
+	}
+	length := base64.StdEncoding.DecodedLen(len(encoded))
+	if strings.HasSuffix(encoded, "==") {
+		length -= 2
+	} else if strings.HasSuffix(encoded, "=") {
+		length--
+	}
+	return length, length >= 0
+}
+
+func decodeExactDigests(raw json.RawMessage) (map[string]string, error) {
+	keys := make([]string, 0, len(requiredInstalledSHA256))
+	for key := range requiredInstalledSHA256 {
+		keys = append(keys, key)
+	}
+	fields, err := exactObject(raw, keys...)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string, len(fields))
+	for key, value := range fields {
+		var digest string
+		if err := json.Unmarshal(value, &digest); err != nil || !lowerHex64(digest) {
+			return nil, fmt.Errorf("invalid digest %q", key)
+		}
+		result[key] = digest
+	}
+	return result, nil
+}
+
+func decodeExactStringMap(raw json.RawMessage, expected map[string]string) (map[string]string, error) {
+	keys := make([]string, 0, len(expected))
+	for key := range expected {
+		keys = append(keys, key)
+	}
+	fields, err := exactObject(raw, keys...)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string, len(fields))
+	for key, want := range expected {
+		var value string
+		if err := json.Unmarshal(fields[key], &value); err != nil || value != want {
+			return nil, fmt.Errorf("invalid value %q", key)
+		}
+		result[key] = value
+	}
+	return result, nil
+}
+
+func lowerHex64(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, r := range value {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func validateSerialResult(request SerialRequest, result SerialResult) error {

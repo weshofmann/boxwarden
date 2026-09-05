@@ -113,7 +113,7 @@ func TestEncodeSerialFrameRejectsMismatchedResultCorrelation(t *testing.T) {
 // one PTY line ending, accepts loose JSON, or loses request correlation.
 func TestSerialFrameIsUnambiguousWithPTYCRLF(t *testing.T) {
 	r := testRequest()
-	want := SerialResult{Version: Version, StartGeneration: r.StartGeneration, Association: r.Association, CAFingerprint: r.CAFingerprint, Principal: r.Principal, HostPublicKey: testKey}
+	want := validSerialResult()
 	_, end, err := EncodeSerialFrame(r, want)
 	if err != nil {
 		t.Fatal(err)
@@ -126,6 +126,90 @@ func TestSerialFrameIsUnambiguousWithPTYCRLF(t *testing.T) {
 		if _, err := DecodeSerialEndLine(r, invalid); err == nil {
 			t.Fatalf("invalid frame accepted: %q", invalid)
 		}
+	}
+}
+
+func validSerialResult() SerialResult {
+	r := testRequest()
+	return SerialResult{Version: Version, StartGeneration: r.StartGeneration, Association: r.Association, CAFingerprint: r.CAFingerprint, Principal: r.Principal, HostPublicKey: testKey, InstalledSHA256: map[string]string{"trusted-user-ca.pub": strings.Repeat("a", 64), "authorized_principals/boxwarden": strings.Repeat("b", 64), "management-binding.json": strings.Repeat("c", 64)}, SSHD: requiredSSHD}
+}
+
+// This fails if a frame can exceed the bounded wire envelope or if a base64
+// payload is decoded before its derived decoded length is admitted.
+func TestDecodeSerialEndLineRejectsEncodedAndDecodedOversizeBeforeDecode(t *testing.T) {
+	r := testRequest()
+	over := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte("x"), MaxResponseBytes+1))
+	line := "BOXWARDEN-END " + r.Nonce + " " + r.SessionID + " " + over
+	if _, err := DecodeSerialEndLine(r, line); err == nil {
+		t.Fatal("oversized encoded line accepted")
+	}
+	boundary := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte("x"), MaxResponseBytes))
+	line = "BOXWARDEN-END " + r.Nonce + " " + r.SessionID + " " + boundary
+	if _, err := DecodeSerialEndLine(r, line); err == nil {
+		t.Fatal("decoded-size boundary non-JSON payload accepted")
+	}
+	_, valid, err := EncodeSerialFrame(r, validSerialResult())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.Split(valid, " ")[3])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) >= MaxResponseBytes {
+		t.Fatal("fixture unexpectedly reaches boundary")
+	}
+	boundaryJSON := append(raw, bytes.Repeat([]byte(" "), MaxResponseBytes-len(raw))...)
+	line = "BOXWARDEN-END " + r.Nonce + " " + r.SessionID + " " + base64.StdEncoding.EncodeToString(boundaryJSON)
+	if _, err := DecodeSerialEndLine(r, line); err != nil {
+		t.Fatalf("valid decoded-size boundary rejected: %v", err)
+	}
+}
+
+// This fails if duplicate, unknown, missing, malformed, or changed nested
+// result maps bypass the explicit active-tree and effective-sshd contract.
+func TestDecodeSerialEndLineRequiresExactNestedMaps(t *testing.T) {
+	r := testRequest()
+	result := validSerialResult()
+	_, valid, err := EncodeSerialFrame(r, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := DecodeSerialEndLine(r, valid); err != nil || len(got.InstalledSHA256) != 3 || len(got.SSHD) != len(requiredSSHD) {
+		t.Fatalf("valid boundary result = %#v, %v", got, err)
+	}
+	for name, mutate := range map[string]func(string) string{
+		"unknown digest": func(json string) string {
+			return strings.Replace(json, `"installed_sha256":{`, `"installed_sha256":{"extra":"`+strings.Repeat("d", 64)+`",`, 1)
+		},
+		"missing digest": func(json string) string {
+			return strings.Replace(json, `,"management-binding.json":"`+strings.Repeat("c", 64)+`"`, "", 1)
+		},
+		"duplicate digest": func(json string) string {
+			return strings.Replace(json, `"trusted-user-ca.pub":"`+strings.Repeat("a", 64)+`"`, `"trusted-user-ca.pub":"`+strings.Repeat("a", 64)+`","trusted-user-ca.pub":"`+strings.Repeat("a", 64)+`"`, 1)
+		},
+		"malformed digest": func(json string) string {
+			return strings.Replace(json, strings.Repeat("a", 64), strings.Repeat("A", 64), 1)
+		},
+		"unknown sshd": func(json string) string { return strings.Replace(json, `"sshd":{`, `"sshd":{"extra":"no",`, 1) },
+		"missing sshd": func(json string) string { return strings.Replace(json, `,"gatewayports":"no"`, "", 1) },
+		"duplicate sshd": func(json string) string {
+			return strings.Replace(json, `"gatewayports":"no"`, `"gatewayports":"no","gatewayports":"no"`, 1)
+		},
+		"changed sshd": func(json string) string {
+			return strings.Replace(json, `"gatewayports":"no"`, `"gatewayports":"yes"`, 1)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw, err := base64.StdEncoding.DecodeString(strings.Split(valid, " ")[3])
+			if err != nil {
+				t.Fatal(err)
+			}
+			line := "BOXWARDEN-END " + r.Nonce + " " + r.SessionID + " " + base64.StdEncoding.EncodeToString([]byte(mutate(string(raw))))
+			if _, err := DecodeSerialEndLine(r, line); err == nil {
+				t.Fatal("invalid nested map accepted")
+			}
+		})
 	}
 }
 
@@ -204,6 +288,23 @@ func TestVerifySSHDRejectsEachMissingOrChangedRequiredField(t *testing.T) {
 					t.Fatalf("admitted %s", field)
 				}
 			})
+		}
+	}
+}
+
+// This fails if an unrelated `sshd -T` field becomes serial-frame state; the
+// wire contract is only the complete guard set, not a host-config dump.
+func TestVerifySSHDReturnsOnlyRequiredGuardSet(t *testing.T) {
+	got, err := NewBootstrapper(t.TempDir(), &fakeRunner{output: sshdOutput() + "unusedsetting value\n"}).verifySSHD(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(requiredSSHD) {
+		t.Fatalf("sshd result includes non-guard fields: %#v", got)
+	}
+	for key, want := range requiredSSHD {
+		if got[key] != want {
+			t.Fatalf("%s = %q, want %q", key, got[key], want)
 		}
 	}
 }
