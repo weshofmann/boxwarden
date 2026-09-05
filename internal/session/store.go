@@ -33,6 +33,10 @@ func saveRecord(stateRoot string, expectedDomain domain.ID, record Record, hook 
 	if err := validateRecordForStore(expectedDomain, record); err != nil {
 		return err
 	}
+	record = upgradeRecordForStore(record)
+	if err := validateRecordForStore(expectedDomain, record); err != nil {
+		return err
+	}
 	root, err := openSessionStateRoot(stateRoot)
 	if err != nil {
 		return fmt.Errorf("state root: %w", err)
@@ -52,7 +56,7 @@ func saveRecord(stateRoot string, expectedDomain domain.ID, record Record, hook 
 		return fmt.Errorf("inspect session record %q: %w", record.Name, err)
 	}
 
-	raw, err := json.Marshal(record)
+	raw, err := marshalRecord(record)
 	if err != nil {
 		return fmt.Errorf("encode session record: %w", err)
 	}
@@ -102,6 +106,21 @@ func saveRecord(stateRoot string, expectedDomain domain.ID, record Record, hook 
 	return nil
 }
 
+// upgradeRecordForStore performs the one-way V1 compatibility migration after
+// strict validation when the legacy record contains the immutable golden
+// revision required by V2. Reads never invoke it, so read-only operations do
+// not alter durable state.
+func upgradeRecordForStore(record Record) Record {
+	if record.Version != recordVersionV1 || record.GoldenRevision == "" ||
+		(record.IntendedState != StateStopped && record.IntendedState != StateCreating) {
+		return record
+	}
+	record.Version = recordVersion
+	record.StartGeneration = ""
+	record.Readiness = ReadinessRecord{Status: ReadinessNotReady}
+	return record
+}
+
 func validateRecordForStore(expectedDomain domain.ID, record Record) error {
 	parsedDomain, err := domain.Parse(string(expectedDomain))
 	if err != nil {
@@ -110,7 +129,7 @@ func validateRecordForStore(expectedDomain domain.ID, record Record) error {
 	if record.Domain != parsedDomain {
 		return fmt.Errorf("session record domain %q does not match target domain %q", record.Domain, parsedDomain)
 	}
-	raw, err := json.Marshal(record)
+	raw, err := marshalRecord(record)
 	if err != nil {
 		return fmt.Errorf("encode session record for validation: %w", err)
 	}
@@ -125,6 +144,31 @@ func validateRecordForStore(expectedDomain domain.ID, record Record) error {
 		return fmt.Errorf("invalid golden revision")
 	}
 	return nil
+}
+
+func marshalRecord(record Record) ([]byte, error) {
+	if record.Version != recordVersionV1 {
+		return json.Marshal(record)
+	}
+	return json.Marshal(struct {
+		Version        int           `json:"version"`
+		Domain         domain.ID     `json:"domain"`
+		Name           Name          `json:"name"`
+		ID             string        `json:"id"`
+		Mode           Mode          `json:"mode"`
+		IntendedState  IntendedState `json:"intended_state"`
+		Backend        BackendRef    `json:"backend"`
+		GoldenRevision string        `json:"golden_revision,omitempty"`
+	}{
+		Version:        record.Version,
+		Domain:         record.Domain,
+		Name:           record.Name,
+		ID:             record.ID,
+		Mode:           record.Mode,
+		IntendedState:  record.IntendedState,
+		Backend:        record.Backend,
+		GoldenRevision: record.GoldenRevision,
+	})
 }
 
 // requireUnreservedBackendObject checks the durable session registry while the

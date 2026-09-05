@@ -10,7 +10,12 @@ import (
 	"github.com/weshofmann/boxwarden/internal/domain"
 )
 
-const recordVersion = 1
+const (
+	recordVersionV1 = 1
+	recordVersion   = 2
+
+	maxReadinessDiagnosticBytes = 1024
+)
 
 type Mode string
 
@@ -36,15 +41,35 @@ type BackendRef struct {
 	ObjectID string `json:"object_id"`
 }
 
+// ReadinessStatus records the last durable lifecycle result. It is never
+// evidence that a running backend is currently ready.
+type ReadinessStatus string
+
+const (
+	ReadinessNotReady ReadinessStatus = "not_ready"
+	ReadinessStarting ReadinessStatus = "starting"
+	ReadinessReady    ReadinessStatus = "ready"
+	ReadinessDrift    ReadinessStatus = "drift"
+)
+
+// ReadinessRecord is a bounded, non-secret audit hint written by lifecycle
+// transitions. Callers must never put secrets in Diagnostic.
+type ReadinessRecord struct {
+	Status     ReadinessStatus `json:"status"`
+	Diagnostic string          `json:"diagnostic"`
+}
+
 type Record struct {
-	Version        int           `json:"version"`
-	Domain         domain.ID     `json:"domain"`
-	Name           Name          `json:"name"`
-	ID             string        `json:"id"`
-	Mode           Mode          `json:"mode"`
-	IntendedState  IntendedState `json:"intended_state"`
-	Backend        BackendRef    `json:"backend"`
-	GoldenRevision string        `json:"golden_revision,omitempty"`
+	Version         int             `json:"version"`
+	Domain          domain.ID       `json:"domain"`
+	Name            Name            `json:"name"`
+	ID              string          `json:"id"`
+	Mode            Mode            `json:"mode"`
+	IntendedState   IntendedState   `json:"intended_state"`
+	Backend         BackendRef      `json:"backend"`
+	GoldenRevision  string          `json:"golden_revision,omitempty"`
+	StartGeneration string          `json:"start_generation,omitempty"`
+	Readiness       ReadinessRecord `json:"readiness"`
 }
 
 func LoadRecord(stateRoot, expectedDomain, rawName string) (Record, error) {
@@ -110,7 +135,7 @@ func decodeRecord(decoder *json.Decoder) (Record, error) {
 
 	seen := map[string]bool{}
 	var record Record
-	var gotVersion, gotDomain, gotName, gotID, gotMode, gotState, gotBackend bool
+	var gotVersion, gotDomain, gotName, gotID, gotMode, gotState, gotBackend, gotGoldenRevision, gotGeneration, gotReadiness bool
 	for decoder.More() {
 		field, err := objectField(decoder, seen)
 		if err != nil {
@@ -148,6 +173,13 @@ func decodeRecord(decoder *json.Decoder) (Record, error) {
 			gotBackend = true
 		case "golden_revision":
 			err = decoder.Decode(&record.GoldenRevision)
+			gotGoldenRevision = true
+		case "start_generation":
+			err = decoder.Decode(&record.StartGeneration)
+			gotGeneration = true
+		case "readiness":
+			record.Readiness, err = decodeReadiness(decoder)
+			gotReadiness = true
 		default:
 			return Record{}, fmt.Errorf("unknown session record field %q", field)
 		}
@@ -158,7 +190,7 @@ func decodeRecord(decoder *json.Decoder) (Record, error) {
 	if err := requireObjectEnd(decoder); err != nil {
 		return Record{}, fmt.Errorf("session record: %w", err)
 	}
-	if !gotVersion || record.Version != recordVersion {
+	if !gotVersion || (record.Version != recordVersionV1 && record.Version != recordVersion) {
 		return Record{}, fmt.Errorf("unsupported session record version %d", record.Version)
 	}
 	if !gotDomain || !gotName || !gotID || !gotMode || !gotState || !gotBackend {
@@ -173,7 +205,99 @@ func decodeRecord(decoder *json.Decoder) (Record, error) {
 	if !validState(record.IntendedState) {
 		return Record{}, fmt.Errorf("invalid intended state %q", record.IntendedState)
 	}
+	switch record.Version {
+	case recordVersionV1:
+		if gotGeneration || gotReadiness {
+			return Record{}, fmt.Errorf("version 1 session record has version 2 fields")
+		}
+	case recordVersion:
+		if !gotGoldenRevision || !validBackendObjectID(record.GoldenRevision) || !gotReadiness {
+			return Record{}, fmt.Errorf("session record has missing required fields")
+		}
+		if err := validateStartGeneration(record); err != nil {
+			return Record{}, err
+		}
+		if err := validateReadiness(record); err != nil {
+			return Record{}, err
+		}
+	}
 	return record, nil
+}
+
+func validateStartGeneration(record Record) error {
+	switch record.IntendedState {
+	case StateStarting, StateRunning:
+		if !validUUID(record.StartGeneration) {
+			return fmt.Errorf("%s record requires a valid start generation", record.IntendedState)
+		}
+	default:
+		if record.StartGeneration != "" {
+			return fmt.Errorf("%s record must not have a start generation", record.IntendedState)
+		}
+	}
+	return nil
+}
+
+func decodeReadiness(decoder *json.Decoder) (ReadinessRecord, error) {
+	if err := requireObjectStart(decoder); err != nil {
+		return ReadinessRecord{}, err
+	}
+	seen := map[string]bool{}
+	var readiness ReadinessRecord
+	var gotStatus, gotDiagnostic bool
+	for decoder.More() {
+		field, err := objectField(decoder, seen)
+		if err != nil {
+			return ReadinessRecord{}, err
+		}
+		switch field {
+		case "status":
+			err = decoder.Decode(&readiness.Status)
+			gotStatus = true
+		case "diagnostic":
+			err = decoder.Decode(&readiness.Diagnostic)
+			gotDiagnostic = true
+		default:
+			return ReadinessRecord{}, fmt.Errorf("unknown readiness field %q", field)
+		}
+		if err != nil {
+			return ReadinessRecord{}, fmt.Errorf("readiness field %q: %w", field, err)
+		}
+	}
+	if err := requireObjectEnd(decoder); err != nil {
+		return ReadinessRecord{}, err
+	}
+	if !gotStatus || !gotDiagnostic {
+		return ReadinessRecord{}, fmt.Errorf("readiness has missing required fields")
+	}
+	return readiness, nil
+}
+
+func validateReadiness(record Record) error {
+	if len(record.Readiness.Diagnostic) > maxReadinessDiagnosticBytes {
+		return fmt.Errorf("readiness diagnostic exceeds %d bytes", maxReadinessDiagnosticBytes)
+	}
+	switch record.Readiness.Status {
+	case ReadinessNotReady:
+		if record.StartGeneration != "" {
+			return fmt.Errorf("not-ready record must not have a start generation")
+		}
+	case ReadinessStarting:
+		if record.IntendedState != StateStarting {
+			return fmt.Errorf("starting record requires starting intent")
+		}
+	case ReadinessReady:
+		if record.IntendedState != StateRunning {
+			return fmt.Errorf("ready record requires running intent")
+		}
+	case ReadinessDrift:
+		if record.IntendedState != StateRunning {
+			return fmt.Errorf("drift record requires running intent")
+		}
+	default:
+		return fmt.Errorf("invalid readiness status %q", record.Readiness.Status)
+	}
+	return nil
 }
 
 func decodeBackend(decoder *json.Decoder) (BackendRef, error) {

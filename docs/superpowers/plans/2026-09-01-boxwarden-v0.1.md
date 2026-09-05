@@ -114,6 +114,10 @@ version-1 configuration. Host-global `init`/`doctor` and `session start` require
 version 2 and fail with an upgrade diagnostic when the shared host block is
 absent. Domain `init` resolves only the explicitly selected domain and its
 domain-owned state; it does not require or initialize the shared host block.
+Its domain-only configuration view still rejects malformed JSON, duplicate or
+unknown host fields when a host object is present, and unsafe domain roots, but
+deliberately defers host-path filesystem admission until a host-global command
+needs it.
 Host-global commands resolve only `HostConfig` and never call domain selection.
 The operator group name is the fixed `boxwarden-operators`, not configurable
 input.
@@ -321,7 +325,7 @@ or re-authorizes the host toolchain.
 - Modify `config/boxwarden.example.json`
 
 Define constants for the exact versions and four approved digests above. The
-qualified macOS release is the Task 0 M1A `26.6.2` identity. The
+qualified macOS release/build is the Task 0 M1A `26.6.2` / `25G83` identity. The
 root-owned manifest lives at
 `/Library/Boxwarden/toolchains/softnet/0.19.0/ab333619fc8bd7277837545e49a771baa994c01c3e8c14904ae4cc4c1f37269e/manifest.json`
 beside `softnet`. It records schema version, platform, qualified macOS identity,
@@ -371,11 +375,16 @@ the single invoking trusted operator membership, creates every ancestor root-own
 non-writable by group/other, copies Softnet to a sibling staging directory,
 fsyncs it, sets root/group and `04550`, verifies digest/type/link/ACL/metadata,
 renames the complete digest directory into place, fsyncs its parent, and
-publishes the root-owned manifest last by atomic rename and parent fsync. It
-never authorizes a Homebrew path. If the exact final tree already exists and is
-fully valid, it is idempotent. Partial, unexpected, or mismatched final state
-fails closed with manual remediation guidance; it is not overwritten. It removes
-only the exact staging tree it created and still owns. New directory-service
+publishes the regular one-link no-ACL `root:wheel 0444` non-secret local-host
+manifest last by atomic rename and parent fsync. The manifest contains only
+qualified platform release/build, exact tool paths/versions/digests, root and
+dedicated operator-group identity, trusted operator UID/name/home, canonical
+`TART_HOME`, Softnet mode, and installation time; it excludes domain identity,
+CA material, credentials, provider data, session state, private keys, tokens,
+and other secrets. It never authorizes a Homebrew path. If the exact final tree
+already exists and is fully valid, it is idempotent. Partial, unexpected, or
+mismatched final state fails closed with manual remediation guidance; it is not
+overwritten. It removes only the exact staging tree it created and still owns. New directory-service
 membership does not imply membership in the initiating process tree: init
 reports that a login-session refresh is required, and doctor/start fail until
 the new supplementary group is effective.
@@ -396,6 +405,7 @@ digest and never mutates the existing tree.
   source replacement, altered post-copy digest, malicious request paths,
   source privilege bits, inherited environment, spoofed sudo caller,
   wrong caller UID/group/home, new membership without current-process effect,
+  exact `0444` manifest mode, legacy exact `0400` refusal without mutation,
   blocking Homebrew privilege, already-correct idempotence, unsafe preexisting
   directory, staging ownership/cleanup, active/unverifiable uninstall consumer, and
   exact inactive uninstall.
@@ -506,16 +516,37 @@ enter that command. Separate bounded typed request structures exist only for
 `boxwarden doctor` operates outside the domain namespace and checks: supported
 macOS/architecture; exact absolute Tart identity;
 Softnet canonical ancestors, ACLs, link count, digest, root owner, group,
-`04550`, manifest and paired identities; exact manifested operator UID/name/home
+`04550`, manifest exact `root:wheel 0444`/one-link/no-ACL metadata and paired
+identities; exact manifested operator UID/name/home
 and group ID/name/directory membership; current-process supplementary group;
 canonical `tart_home`; ssh/ssh-keygen availability; and exact `/usr/bin/screen` 4.00.03 (FAU,
 23-Oct-06), SHA-256
 `07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add`,
-root:wheel `0755`, one link, on macOS 26.6.2. Any setuid/setgid or
+root:wheel `0755`, one link, on qualified macOS 26.6.2 build 25G83. Any setuid/setgid or
 passwordless-root Softnet under mutable Homebrew state is `drifted/unsafe`,
 makes doctor nonzero, and blocks init/start even if the staged copy is healthy.
 Each finding has stable code, category, observed fact, expected fact, and remedy
 requiring attended manual inspection or explicit init; doctor never repairs.
+Doctor opens, hashes, and strictly parses the intentionally non-secret
+local-host manifest without privilege; group-only `0440` would fail before the
+operator group's membership is effective and a privileged helper would violate
+the diagnostic boundary. An otherwise exact legacy `0400` manifest is rejected
+without mutation by normal init and doctor. The sole known legacy installation
+is migrated only in an attended exact-path mode-only operation after the
+final-head hostx test binary built as the operator records the unprivileged
+exact-group pre-state. That test enforces
+`inspectExactLocalOperatorGroup(..., false)` semantics: exact local group/valid
+GID, caller RecordName/UID/GeneratedUID binding, exact named and GUID
+membership, no nested groups, exhaustive caller inventory, and no other
+user/group sharing the GID. Exact old published `cf2212f` init then runs only
+against the original configuration and must report
+`refresh-login-session: false`; the same test must report identical post-state
+evidence before chmod.
+Old-init success alone does not prove group pre-state or non-mutation. Then
+capture exact metadata/digest, change only the path's mode to `0444`,
+synchronize, and revalidate unchanged inode/link/owner/group/bytes/digest/
+no-ACL plus exact `0444` and a distinct-UID read; committed evidence redacts
+local account/path values and only the corrected binary is used afterward.
 Domain CA state is deliberately absent from this report. Domain init and the
 domain-scoped session prerequisite checks own those diagnostics.
 
@@ -523,7 +554,10 @@ domain-scoped session prerequisite checks own those diagnostics.
   ordering, redaction, unsafe Homebrew blocking, current-process group refresh,
   explicit `--domain` rejection, no domain lookup, nonzero exit, no
   writes/process mutation, and inability to call any initializer/privilege
-  runner.
+  runner; exact `0444` manifest acceptance; legacy `0400` refusal without
+  mutation; and a root-only genuine cross-UID test showing a distinct
+  unprivileged UID reads the `0444` manifest while an explicit `0400` control
+  remains unreadable.
 - [ ] Wire host-global `init` only to host-tool installation and host-global
   `doctor` only to read-only host checks. Wire domain `init` independently to
   the CA store. Never couple host installation success or repair to creation of
@@ -543,6 +577,24 @@ git diff --check
 inspect the install request, authorize `boxwarden init`, verify the complete
 installed tree/group/mode/ACL/link/digests/manifest, host-global idempotent
 rerun, host-global `boxwarden doctor` output, and refreshed effective group.
+The attended manifest migration gate first builds the final-head hostx test
+binary as the operator, runs `BOXWARDEN_ATTENDED_EXACT_GROUP=1` for the
+unprivileged exact-group test, and records redacted canonical pre-state. The
+test uses `inspectExactLocalOperatorGroup(..., false)` semantics: exact local
+group/valid GID, exact caller RecordName/UID/GeneratedUID binding, exact named
+and GUID membership, no nested groups, caller inclusion in exhaustive user
+inventory, and no other user/group sharing the GID. Only then may exact old
+published `cf2212f` init run against the original configuration; require
+`refresh-login-session: false`, rerun the test, and require identical evidence.
+Old-init success alone does not prove the pre-state or non-mutation, and any
+mismatch, init failure, or refresh request stops before chmod. The gate then
+records exact metadata/digest capture, exact-path `0444` mode-only change,
+synchronization, unchanged inode/link/owner/group/bytes/digest/no-ACL
+revalidation, and a distinct unprivileged UID read. After that mode change,
+redacted evidence must also show the corrected binary's unprivileged
+`boxwarden doctor` and attended idempotent `boxwarden init` both validated the
+migrated tree. Normal init and doctor must refuse legacy `0400` without
+mutation. This gate includes no Tart or Softnet runtime execution.
 Prove the installed exact setuid Softnet's
 argument parsing, closed environment and dependency resolution, effective
 privilege transition/drop, signals, filesystem writes, exact qualified network
@@ -661,7 +713,7 @@ mode-`0600` Tart slave. Exact `/usr/bin/screen -D -m` is a direct waitable child
 on the mode-`0600` operator slave and remains its sole reader. Its required
 identity is system Screen 4.00.03 (FAU, 23-Oct-06), SHA-256
 `07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add`,
-root:wheel `0755`, one link, on macOS 26.6.2. Production has no socat dependency.
+root:wheel `0755`, one link, on qualified macOS 26.6.2 build 25G83. Production has no socat dependency.
 
 The broker is the sole forwarding reader. Tart-master output goes to a fixed
 256-KiB Screen-output queue and, only while automation is armed, a separate

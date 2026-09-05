@@ -105,6 +105,10 @@ func (s *Service) Create(ctx context.Context, rawName string, mode Mode) (record
 			if err := SaveRecord(s.domain.StateRoot, record.Domain, record); err != nil {
 				return Record{}, fmt.Errorf("re-persist stopped session: %w", err)
 			}
+			record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+			if err != nil {
+				return Record{}, fmt.Errorf("reload persisted stopped session: %w", err)
+			}
 			return record, nil
 		case StateCreating:
 			if err := validateCreatingIdentity(record); err != nil {
@@ -115,6 +119,10 @@ func (s *Service) Create(ctx context.Context, rawName string, mode Mode) (record
 			// before any retry is allowed to mutate the backend.
 			if err := SaveRecord(s.domain.StateRoot, record.Domain, record); err != nil {
 				return Record{}, fmt.Errorf("re-persist creating intent: %w", err)
+			}
+			record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+			if err != nil {
+				return Record{}, fmt.Errorf("reload persisted creating intent: %w", err)
 			}
 		default:
 			return Record{}, fmt.Errorf("session %q already exists with intended state %q", name, record.IntendedState)
@@ -176,6 +184,7 @@ func (s *Service) reserveIntent(ctx context.Context, domainID domain.ID, name Na
 		IntendedState:  StateCreating,
 		Backend:        BackendRef{Kind: "tart", ObjectID: objectID},
 		GoldenRevision: selected.Revision,
+		Readiness:      ReadinessRecord{Status: ReadinessNotReady},
 	}
 	if err := SaveRecord(s.domain.StateRoot, domainID, record); err != nil {
 		return Record{}, fmt.Errorf("persist creating intent: %w", err)

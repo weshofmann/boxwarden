@@ -40,6 +40,203 @@ func TestLoadResolvesOnlyTheNamedDomain(t *testing.T) {
 	}
 }
 
+func TestLoadVersion2RequiresAndExposesHostPrerequisites(t *testing.T) {
+	base := canonicalTempDir(t)
+	root := makeRoot(t, base, "work")
+	tartExecutable := makeRegularFile(t, base, "tart")
+	tartHome := makeRoot(t, base, "tart-home")
+	softnetSource := makeRegularFile(t, base, "softnet")
+	path := writeConfig(t, base, v2Config(tartExecutable, tartHome, softnetSource, root))
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	host, err := loaded.Host()
+	if err != nil {
+		t.Fatalf("Host() error = %v", err)
+	}
+	if host.TartExecutable != tartExecutable || host.TartHome != tartHome || host.SoftnetSource != softnetSource {
+		t.Fatalf("Host() = %#v, want configured prerequisite paths", host)
+	}
+
+	missing := writeConfig(t, base, fmt.Sprintf(`{"version":2,"domains":{"work":{"state_root":%q}}}`, root))
+	if _, err := Load(missing); err == nil {
+		t.Fatal("Load(version 2 without host) error = nil, want rejection")
+	}
+
+	legacy := writeConfig(t, base, fmt.Sprintf(`{"version":1,"domains":{"work":{"state_root":%q}}}`, root))
+	loaded, err = Load(legacy)
+	if err != nil {
+		t.Fatalf("Load(version 1) error = %v", err)
+	}
+	if _, err := loaded.Host(); err == nil {
+		t.Fatal("Host(version 1) error = nil, want V3 prerequisite gate")
+	}
+}
+
+func TestLoadVersion2RequiresEveryHostPrerequisiteExactlyOnce(t *testing.T) {
+	base := canonicalTempDir(t)
+	root := makeRoot(t, base, "work")
+	tartExecutable := makeRegularFile(t, base, "tart")
+	tartHome := makeRoot(t, base, "tart-home")
+	softnetSource := makeRegularFile(t, base, "softnet")
+
+	for name, contents := range map[string]string{
+		"missing tart executable":   fmt.Sprintf(`{"version":2,"host":{"tart_home":%q,"softnet_source":%q},"domains":{"work":{"state_root":%q}}}`, tartHome, softnetSource, root),
+		"missing tart home":         fmt.Sprintf(`{"version":2,"host":{"tart_executable":%q,"softnet_source":%q},"domains":{"work":{"state_root":%q}}}`, tartExecutable, softnetSource, root),
+		"missing softnet source":    fmt.Sprintf(`{"version":2,"host":{"tart_executable":%q,"tart_home":%q},"domains":{"work":{"state_root":%q}}}`, tartExecutable, tartHome, root),
+		"duplicate tart executable": fmt.Sprintf(`{"version":2,"host":{"tart_executable":%q,"tart_executable":%q,"tart_home":%q,"softnet_source":%q},"domains":{"work":{"state_root":%q}}}`, tartExecutable, tartExecutable, tartHome, softnetSource, root),
+		"legacy host field":         fmt.Sprintf(`{"version":2,"host":{"tart_path":%q,"tart_home":%q,"softnet_source":%q},"domains":{"work":{"state_root":%q}}}`, tartExecutable, tartHome, softnetSource, root),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(writeConfig(t, base, contents)); err == nil {
+				t.Fatal("Load() error = nil, want host field rejection")
+			}
+		})
+	}
+}
+
+func TestLoadDomainsDefersHostFilesystemAdmissionButPreservesHostShape(t *testing.T) {
+	base := canonicalTempDir(t)
+	root := makeRoot(t, base, "work")
+	missingTart := filepath.Join(base, "missing-tart")
+	missingHome := filepath.Join(base, "missing-home")
+	missingSoftnet := filepath.Join(base, "missing-softnet")
+	valid := writeConfig(t, base, v2Config(missingTart, missingHome, missingSoftnet, root))
+
+	loaded, err := LoadDomains(valid)
+	if err != nil {
+		t.Fatalf("LoadDomains() error = %v", err)
+	}
+	if domain, err := loaded.Domain("work"); err != nil || domain.StateRoot != root {
+		t.Fatalf("LoadDomains().Domain(work) = %#v, %v; want admitted domain root", domain, err)
+	}
+	if _, err := Load(valid); err == nil {
+		t.Fatal("Load() error = nil, want host filesystem admission failure")
+	}
+	withoutHost := writeConfig(t, base, fmt.Sprintf(`{"version":2,"domains":{"work":{"state_root":%q}}}`, root))
+	if _, err := LoadDomains(withoutHost); err != nil {
+		t.Fatalf("LoadDomains(version 2 without host) error = %v", err)
+	}
+	if _, err := Load(withoutHost); err == nil {
+		t.Fatal("Load(version 2 without host) error = nil, want host prerequisite rejection")
+	}
+
+	for name, contents := range map[string]string{
+		"missing host field": fmt.Sprintf(`{"version":2,"host":{"tart_executable":%q,"tart_home":%q},"domains":{"work":{"state_root":%q}}}`, missingTart, missingHome, root),
+		"unknown host field": fmt.Sprintf(`{"version":2,"host":{"tart_executable":%q,"tart_home":%q,"softnet_source":%q,"extra":true},"domains":{"work":{"state_root":%q}}}`, missingTart, missingHome, missingSoftnet, root),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := LoadDomains(writeConfig(t, base, contents)); err == nil {
+				t.Fatal("LoadDomains() error = nil, want strict host-shape rejection")
+			}
+		})
+	}
+}
+
+func TestLoadVersion2RejectsUnsafeHostPaths(t *testing.T) {
+	base := canonicalTempDir(t)
+	root := makeRoot(t, base, "work")
+	tartExecutable := makeRegularFile(t, base, "tart")
+	tartHome := makeRoot(t, base, "tart-home")
+	softnetSource := makeRegularFile(t, base, "softnet")
+
+	linkedDirectory := filepath.Join(base, "linked-directory")
+	if err := os.Symlink(base, linkedDirectory); err != nil {
+		t.Fatalf("Symlink linked directory: %v", err)
+	}
+	linkedExecutable := filepath.Join(base, "linked-tart")
+	if err := os.Symlink(tartExecutable, linkedExecutable); err != nil {
+		t.Fatalf("Symlink executable: %v", err)
+	}
+	nonRegular := makeRoot(t, base, "not-a-file")
+	insecureHome := makeRoot(t, base, "insecure-home")
+	if err := os.Chmod(insecureHome, 0o750); err != nil {
+		t.Fatalf("Chmod insecure tart home: %v", err)
+	}
+
+	for name, contents := range map[string]string{
+		"symlink component in executable": v2Config(filepath.Join(linkedDirectory, "tart"), tartHome, softnetSource, root),
+		"final executable symlink":        v2Config(linkedExecutable, tartHome, softnetSource, root),
+		"nonregular softnet source":       v2Config(tartExecutable, tartHome, nonRegular, root),
+		"insecure tart home":              v2Config(tartExecutable, insecureHome, softnetSource, root),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(writeConfig(t, base, contents)); err == nil {
+				t.Fatal("Load() error = nil, want unsafe host path rejection")
+			}
+		})
+	}
+}
+
+func TestLoadVersion2RejectsHostAndDomainPathOverlap(t *testing.T) {
+	base := canonicalTempDir(t)
+	inputs := makeRoot(t, base, "inputs")
+	domainRoot := makeRoot(t, base, "work")
+	tartExecutable := makeRegularFile(t, inputs, "tart")
+	tartHome := makeRoot(t, inputs, "tart-home")
+	softnetSource := makeRegularFile(t, inputs, "softnet")
+
+	for name, contents := range map[string]string{
+		"domain contains Tart executable": v2Config(makeRegularFile(t, domainRoot, "tart"), tartHome, softnetSource, domainRoot),
+		"domain contains Softnet source":  v2Config(tartExecutable, tartHome, makeRegularFile(t, domainRoot, "softnet"), domainRoot),
+		"domain contains tart home":       v2Config(tartExecutable, makeRoot(t, domainRoot, "tart-home"), softnetSource, domainRoot),
+		"tart home contains domain":       v2Config(tartExecutable, tartHome, softnetSource, makeRoot(t, tartHome, "nested-domain")),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(writeConfig(t, base, contents)); err == nil {
+				t.Fatal("Load() error = nil, want host/domain overlap rejection")
+			}
+		})
+	}
+}
+
+func TestDomainsReturnsSortedIndependentSnapshot(t *testing.T) {
+	base := canonicalTempDir(t)
+	alpha := makeRoot(t, base, "alpha")
+	personal := makeRoot(t, base, "personal")
+	work := makeRoot(t, base, "work")
+	path := writeConfig(t, base, fmt.Sprintf(`{"version":1,"domains":{"work":{"state_root":%q},"personal":{"state_root":%q},"alpha":{"state_root":%q}}}`, work, personal, alpha))
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	first := loaded.Domains()
+	if got, want := fmt.Sprint(first[0].ID, ",", first[1].ID, ",", first[2].ID), "alpha,personal,work"; got != want {
+		t.Fatalf("Domains() order = %q, want %q", got, want)
+	}
+	first[0].StateRoot = "mutated"
+	second := loaded.Domains()
+	if got, want := second[0].StateRoot, alpha; got != want {
+		t.Fatalf("Domains() leaked mutable state = %q, want %q", got, want)
+	}
+}
+
+func TestHostAdmissionReturnsEveryConfiguredRootInSortedOrder(t *testing.T) {
+	base := canonicalTempDir(t)
+	alpha := makeRoot(t, base, "alpha")
+	personal := makeRoot(t, base, "personal")
+	work := makeRoot(t, base, "work")
+	tartExecutable := makeRegularFile(t, base, "tart")
+	tartHome := makeRoot(t, base, "tart-home")
+	softnetSource := makeRegularFile(t, base, "softnet")
+	path := writeConfig(t, base, fmt.Sprintf(`{"version":2,"host":{"tart_executable":%q,"tart_home":%q,"softnet_source":%q},"domains":{"work":{"state_root":%q},"personal":{"state_root":%q},"alpha":{"state_root":%q}}}`, tartExecutable, tartHome, softnetSource, work, personal, alpha))
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	admission, err := loaded.HostAdmission()
+	if err != nil {
+		t.Fatalf("HostAdmission() error = %v", err)
+	}
+	if got, want := fmt.Sprint(admission.ConfiguredStateRoots), fmt.Sprint([]string{alpha, personal, work}); got != want {
+		t.Fatalf("HostAdmission() roots = %s, want %s", got, want)
+	}
+}
+
 func TestLoadRejectsAmbiguousOrUnsafeConfiguration(t *testing.T) {
 	base := canonicalTempDir(t)
 	workRoot := makeRoot(t, base, "work")
@@ -84,6 +281,17 @@ func TestLoadRejectsSymlinkedConfigFile(t *testing.T) {
 
 	if _, err := Load(link); err == nil {
 		t.Fatal("Load(symlink) error = nil, want rejection")
+	}
+}
+
+func TestLoadRejectsOversizedConfigurationEvenWhenPrefixIsValid(t *testing.T) {
+	base := canonicalTempDir(t)
+	workRoot := makeRoot(t, base, "work")
+	valid := fmt.Sprintf(`{"version":1,"domains":{"work":{"state_root":%q}}}`, workRoot)
+	path := writeConfig(t, base, valid+strings.Repeat(" ", maxConfigurationBytes))
+
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("Load(oversized valid prefix) error = %v, want size rejection", err)
 	}
 }
 
@@ -162,6 +370,19 @@ func makeRoot(t *testing.T, base, name string) string {
 		t.Fatalf("Mkdir(%q): %v", path, err)
 	}
 	return path
+}
+
+func makeRegularFile(t *testing.T, base, name string) string {
+	t.Helper()
+	path := filepath.Join(base, name)
+	if err := os.WriteFile(path, []byte("fixture"), 0o600); err != nil {
+		t.Fatalf("WriteFile(%q): %v", path, err)
+	}
+	return path
+}
+
+func v2Config(tartExecutable, tartHome, softnetSource, root string) string {
+	return fmt.Sprintf(`{"version":2,"host":{"tart_executable":%q,"tart_home":%q,"softnet_source":%q},"domains":{"work":{"state_root":%q}}}`, tartExecutable, tartHome, softnetSource, root)
 }
 
 func writeConfig(t *testing.T, base, contents string) string {

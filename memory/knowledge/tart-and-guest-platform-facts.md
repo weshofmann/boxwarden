@@ -12,8 +12,38 @@ Provenance is marked on every claim:
 - **[verified-local]** — observed directly on this host.
 - **[verified-separate-host]** — observed on an authorized separate host and
   bounded by that experiment's recorded fidelity limitations.
+- **[vendor-source]** — established from the exact pinned upstream source;
+  the corresponding filesystem/runtime manifestation may still require
+  attended evidence.
 - **[vendor-doc]** — stated by Tart, Cirrus Labs, Canonical, or the vendor's own documentation.
 - **[unverified]** — expected but not yet proven. Task 0 must confirm.
+
+## Qualification-method rationale
+
+The bounded, front-loaded review method is a factual qualification aid: review
+of sibling phases can expose predictable platform failures before an attended
+boundary, reducing repeated setup and attended debris. Propagating each newly
+learned failure class to unexecuted phases preserves that benefit while keeping
+failed runs and evidence-integrity defects explicit. This records the method,
+not private run details; its controlling policy remains in `AGENTS.md` and
+ADR 024.
+
+The approved ADR024 refinement makes qualification claim-driven. The blocking
+subject is the trusted host/operator versus an untrusted guest, including guest
+root; every blocking assertion must support a named containment, launch,
+privileged-component, lifecycle-safety, or evidence-integrity claim. Immutable
+trust/forensic state remains exact. Trusted mutable operational state (source
+and qualification Tart homes, temporary namespaces, and disposable VMs) is
+admitted by semantic/security-relevant properties, while ordinary atime,
+mtime, ctime, and parent-directory timestamp choreography are diagnostic unless
+a named claim requires them. This is methodology, not a new product policy.
+
+For qualification records, network observations are separate claims labeled
+EXPECTED REACHABILITY, PROHIBITED REACHABILITY, or NOT QUALIFIED. A finite
+probe does not establish whole-LAN/private-network or general IPv6 isolation;
+the accepted vmnet gateway reachability remains an expected behavior where the
+design requires it. Hostile-guest tests must use trusted host-side oracles:
+guest-generated PASS/FAIL output is not authoritative security evidence.
 
 ---
 
@@ -55,9 +85,53 @@ root privilege. Softnet is therefore a privileged trusted-host component. Its
 eventual authorization must bind to an exact qualified artifact and relevant
 execution dependencies that an unprivileged user cannot replace or mutate; a
 user-writable mutable Homebrew path must not receive standing passwordless-root
-authorization. Setuid root is broader than desirable, and the production
-mechanism remains intentionally unselected. Upgrades require requalification
-and privilege rebinding.
+authorization. V3/ADR024 selects the root-owned digest-specific `04550`
+installation. Upgrades require requalification and privilege rebinding.
+
+**[verified-local]** With exact Tart 2.32.1 and Softnet 0.19.0, the direct
+Softnet child was observed with its own PGID; a common PGID is therefore not a
+valid descendant-ownership invariant.
+
+**[verified-local]** Exact Tart 2.32.1 `list --format json` may advance
+`config.json` ctime for enumerated local and OCI VMs while preserving observed
+device, inode, type, mode, ownership, link count, size, blocks, flags, mtime,
+and exact bytes/SHA-256. Source review traces the access through
+`VMDirectory.running()` to `PIDLock(config.json)`, which opens the file
+`O_RDWR` and issues `F_GETLK`; the evidence does not identify which macOS
+subsystem causes the ctime update and does not establish atomicity. Under the
+approved ADR024 method this is diagnostic evidence for trusted mutable state,
+not a filesystem-neutrality or atomicity claim; immutable forensic state stays
+strict.
+
+**[vendor-source]** Tart 2.32.1 clone creates its temporary VM below the
+selected `TART_HOME/tmp` and then moves that object into `TART_HOME/vms`.
+Qualification should retain parent-container metadata as diagnostic context,
+but blocking admission is based on source identity, intended object shape,
+targeting, and lifecycle/isolation claims rather than timestamp choreography.
+
+**[verified-local]** During the authorized `48bac744` clone/random-MAC/move
+phase, the source Tart home's `tmp` and `vms` parent atime advanced together
+with their expected mtime/ctime changes. Source-VM timestamp changes followed
+the separately observed clone-access pattern, while protected source and clone
+identity/config/member/security fields remained valid. The old validator
+failed because it admitted parent mtime/ctime but not atime. This supports the
+claim-driven ruling that ordinary timestamps on trusted mutable operational
+state are diagnostic; the retained run and clone remain immutable failed-run
+evidence and are not a qualification pass.
+
+**[vendor-source]** Tart 2.32.1 clone copies `config.json`, `disk.img`,
+`nvram.bin`, and optional saved state, but not `control.sock`. The control
+socket is created asynchronously by `tart run`. Admission must consequently
+use phase-specific VM shapes: a fresh stopped clone has no socket, while the
+running and stopped-after-run shapes may retain the exact socket until VM
+deletion.
+
+**[verified-local]** Softnet source commits the complete bootpd dictionary
+before privilege drop. Host observation changed bootpd inode/mtime while
+preserving bytes, SHA-256, security metadata, path, and the sole
+`DHCPLeaseTimeSecs=600` semantics. Inode/timestamp replacement is diagnostic;
+the privileged-component claim still requires the approved bytes, ownership,
+mode, links, and semantics where applicable, and this is not proof of atomicity.
 
 **[verified-local] / [unverified outcome]** Current Softnet accepts ARP and IPv4 frames and drops native IPv6 frames. Apple vmnet documents IPv4 and IPv6 NAT support, but Task 0 has not yet proven whether an IPv4 guest behind Softnet remains functional over Wes's effectively IPv6-only mobile tether. Test the outcome rather than assuming native guest IPv6 is required or host NAT64/464XLAT is sufficient.
 

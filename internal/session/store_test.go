@@ -48,6 +48,139 @@ func TestSaveRecordAtomicallyCreatesOwnerOnlyState(t *testing.T) {
 	}
 }
 
+func TestSaveRecordAtomicallyUpgradesStoppedVersion1RecordWithoutChangingIdentity(t *testing.T) {
+	stateRoot := privateStateRoot(t)
+	if err := os.Mkdir(filepath.Join(stateRoot, "sessions"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeRecord(t, stateRoot, "dev", `{"version":1,"domain":"work","name":"dev","id":"00000000-0000-4000-8000-000000000001","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-work-r1"}`)
+	legacy, err := LoadRecord(stateRoot, "work", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveRecord(stateRoot, legacy.Domain, legacy); err != nil {
+		t.Fatalf("SaveRecord() error = %v", err)
+	}
+	upgraded, err := LoadRecord(stateRoot, "work", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := version2NotReadyRecord(legacy)
+	if upgraded != want {
+		t.Fatalf("upgraded record = %#v, want %#v", upgraded, want)
+	}
+	if upgraded.Domain != legacy.Domain || upgraded.Name != legacy.Name || upgraded.ID != legacy.ID || upgraded.Mode != legacy.Mode || upgraded.IntendedState != legacy.IntendedState || upgraded.Backend != legacy.Backend || upgraded.GoldenRevision != legacy.GoldenRevision {
+		t.Fatalf("upgrade changed legacy identity: got %#v, legacy %#v", upgraded, legacy)
+	}
+}
+
+func TestSaveRecordAtomicallyUpgradesCreatingVersion1RecordWithoutChangingIdentity(t *testing.T) {
+	stateRoot := privateStateRoot(t)
+	if err := os.Mkdir(filepath.Join(stateRoot, "sessions"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeRecord(t, stateRoot, "dev", `{"version":1,"domain":"work","name":"dev","id":"00000000-0000-4000-8000-000000000001","mode":"clean","intended_state":"creating","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-work-r1"}`)
+	legacy, err := LoadRecord(stateRoot, "work", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveRecord(stateRoot, legacy.Domain, legacy); err != nil {
+		t.Fatalf("SaveRecord() error = %v", err)
+	}
+	upgraded, err := LoadRecord(stateRoot, "work", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := version2NotReadyRecord(legacy)
+	if upgraded != want {
+		t.Fatalf("upgraded record = %#v, want %#v", upgraded, want)
+	}
+}
+
+func TestSaveRecordPreservesNonUpgradeableVersion1Intents(t *testing.T) {
+	for _, state := range []string{"starting", "running", "stopping", "deleting", "failed"} {
+		t.Run(state, func(t *testing.T) {
+			stateRoot := privateStateRoot(t)
+			if err := os.Mkdir(filepath.Join(stateRoot, "sessions"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeRecord(t, stateRoot, "dev", `{"version":1,"domain":"work","name":"dev","id":"00000000-0000-4000-8000-000000000001","mode":"clean","intended_state":"`+state+`","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-work-r1"}`)
+			legacy, err := LoadRecord(stateRoot, "work", "dev")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := SaveRecord(stateRoot, legacy.Domain, legacy); err != nil {
+				t.Fatalf("SaveRecord() error = %v", err)
+			}
+			stored, err := LoadRecord(stateRoot, "work", "dev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored != legacy {
+				t.Fatalf("stored record = %#v, want unchanged legacy record %#v", stored, legacy)
+			}
+		})
+	}
+}
+
+func TestSaveRecordRejectsVersion1RecordWithVersion2Fields(t *testing.T) {
+	stateRoot := privateStateRoot(t)
+	legacy := storeTestRecord(StateStopped)
+	legacy.Version = recordVersionV1
+	legacy.Readiness = ReadinessRecord{Status: ReadinessReady}
+	legacy.StartGeneration = "00112233-4455-4677-8899-aabbccddeeff"
+
+	if err := SaveRecord(stateRoot, legacy.Domain, legacy); err == nil {
+		t.Fatal("SaveRecord() error = nil, want version-mixing rejection")
+	}
+}
+
+func TestSaveRecordUpgradeFaultBoundariesKeepOneCompleteVersion(t *testing.T) {
+	for name, hook := range map[string]storeHook{
+		"before rename retains version 1": func(stage storeStage) error {
+			if stage == storeBeforeRename {
+				return errors.New("interrupted before rename")
+			}
+			return nil
+		},
+		"after rename exposes version 2": func(stage storeStage) error {
+			if stage == storeAfterRename {
+				return errors.New("interrupted after rename")
+			}
+			return nil
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			stateRoot := privateStateRoot(t)
+			if err := os.Mkdir(filepath.Join(stateRoot, "sessions"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeRecord(t, stateRoot, "dev", `{"version":1,"domain":"work","name":"dev","id":"00000000-0000-4000-8000-000000000001","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-work-r1"}`)
+			legacy, err := LoadRecord(stateRoot, "work", "dev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := saveRecord(stateRoot, legacy.Domain, legacy, hook); err == nil {
+				t.Fatal("saveRecord() error = nil, want simulated interruption")
+			}
+			loaded, err := LoadRecord(stateRoot, "work", "dev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name == "before rename retains version 1" && loaded != legacy {
+				t.Fatalf("pre-rename record = %#v, want legacy %#v", loaded, legacy)
+			}
+			if name == "after rename exposes version 2" && loaded != version2NotReadyRecord(legacy) {
+				t.Fatalf("post-rename record = %#v, want upgraded %#v", loaded, version2NotReadyRecord(legacy))
+			}
+			assertNoTemporaryRecords(t, stateRoot)
+		})
+	}
+}
+
 func TestSaveRecordPreRenameFaultPreservesPreviousCompleteRecord(t *testing.T) {
 	stateRoot := privateStateRoot(t)
 	original := storeTestRecord(StateCreating)
@@ -210,7 +343,7 @@ func privateStateRoot(t *testing.T) string {
 
 func storeTestRecord(state IntendedState) Record {
 	return Record{
-		Version:       1,
+		Version:       recordVersion,
 		Domain:        domain.ID("work"),
 		Name:          Name("dev"),
 		ID:            "00000000-0000-4000-8000-000000000001",
@@ -221,7 +354,15 @@ func storeTestRecord(state IntendedState) Record {
 			ObjectID: "boxwarden-work-dev",
 		},
 		GoldenRevision: "golden-work-r1",
+		Readiness:      ReadinessRecord{Status: ReadinessNotReady},
 	}
+}
+
+func version2NotReadyRecord(record Record) Record {
+	record.Version = recordVersion
+	record.StartGeneration = ""
+	record.Readiness = ReadinessRecord{Status: ReadinessNotReady}
+	return record
 }
 
 func assertNoTemporaryRecords(t *testing.T, stateRoot string) {

@@ -1,11 +1,102 @@
 package session
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestLoadRecordAcceptsVersion2StoppedRecordWithNonReadyAuditState(t *testing.T) {
+	root := sessionRoot(t)
+	writeRecord(t, root, "dev", `{"version":2,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-r1","readiness":{"status":"not_ready","diagnostic":"created"}}`)
+
+	record, err := LoadRecord(root, "work", "dev")
+	if err != nil {
+		t.Fatalf("LoadRecord() error = %v", err)
+	}
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(encoded), `{"version":2,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-r1","readiness":{"status":"not_ready","diagnostic":"created"}}`; got != want {
+		t.Fatalf("version 2 record = %s, want %s", got, want)
+	}
+}
+
+func TestLoadRecordAcceptsEachVersion2ReadinessStateWithItsAllowedGeneration(t *testing.T) {
+	root := sessionRoot(t)
+	for name, contents := range map[string]string{
+		"starting": `{"version":2,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"starting","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-r1","start_generation":"00112233-4455-4677-8899-aabbccddeeff","readiness":{"status":"starting","diagnostic":"supervisor launching"}}`,
+		"ready":    `{"version":2,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"running","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-r1","start_generation":"00112233-4455-4677-8899-aabbccddeeff","readiness":{"status":"ready","diagnostic":"probe succeeded"}}`,
+		"drift":    `{"version":2,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"running","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-r1","start_generation":"00112233-4455-4677-8899-aabbccddeeff","readiness":{"status":"drift","diagnostic":"supervisor evidence missing"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			writeRecord(t, root, "dev", contents)
+			if _, err := LoadRecord(root, "work", "dev"); err != nil {
+				t.Fatalf("LoadRecord() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadRecordAcceptsEveryLegacyIntentWithoutRewritingIt(t *testing.T) {
+	root := sessionRoot(t)
+	for _, state := range []string{"creating", "stopped", "starting", "running", "stopping", "deleting", "failed"} {
+		t.Run(state, func(t *testing.T) {
+			contents := `{"version":1,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"` + state + `","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-r1"}`
+			writeRecord(t, root, "dev", contents)
+
+			record, err := LoadRecord(root, "work", "dev")
+			if err != nil {
+				t.Fatalf("LoadRecord() error = %v", err)
+			}
+			if record.Version != recordVersionV1 || record.IntendedState != IntendedState(state) {
+				t.Fatalf("LoadRecord() = %#v, want version 1 %q record", record, state)
+			}
+			stored, err := os.ReadFile(filepath.Join(root, "sessions", "dev.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := string(stored); got != contents {
+				t.Fatalf("LoadRecord rewrote legacy record = %q, want %q", got, contents)
+			}
+		})
+	}
+}
+
+func TestLoadRecordRejectsInvalidVersion2ReadinessAndLegacyCombinations(t *testing.T) {
+	root := sessionRoot(t)
+	v1Stopped := `{"version":1,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-dev"}}`
+	v2Stopped := `{"version":2,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-r1","readiness":{"status":"not_ready","diagnostic":""}}`
+	for name, contents := range map[string]string{
+		"v1 readiness field":                      v1Stopped[:len(v1Stopped)-1] + `,"readiness":{"status":"not_ready","diagnostic":""}}`,
+		"v1 start-generation field":               v1Stopped[:len(v1Stopped)-1] + `,"start_generation":"00112233-4455-4677-8899-aabbccddeeff"}`,
+		"v2 missing readiness":                    strings.Replace(v2Stopped, `,"readiness":{"status":"not_ready","diagnostic":""}`, "", 1),
+		"v2 missing golden revision":              strings.Replace(v2Stopped, `,"golden_revision":"golden-r1"`, "", 1),
+		"v2 empty golden revision":                strings.Replace(v2Stopped, `"golden-r1"`, `""`, 1),
+		"v2 invalid golden revision":              strings.Replace(v2Stopped, `"golden-r1"`, `"--delete"`, 1),
+		"v2 unknown readiness field":              strings.Replace(v2Stopped, `"diagnostic":""`, `"diagnostic":"","extra":true`, 1),
+		"v2 duplicate readiness field":            strings.Replace(v2Stopped, `"diagnostic":""`, `"diagnostic":"","status":"ready"`, 1),
+		"v2 invalid readiness status":             strings.Replace(v2Stopped, `"not_ready"`, `"unknown"`, 1),
+		"v2 not-ready with generation":            strings.Replace(v2Stopped, `,"readiness"`, `,"start_generation":"00112233-4455-4677-8899-aabbccddeeff","readiness"`, 1),
+		"v2 starting without generation":          strings.Replace(v2Stopped, `"not_ready"`, `"starting"`, 1),
+		"v2 running not-ready without generation": strings.Replace(v2Stopped, `"intended_state":"stopped"`, `"intended_state":"running"`, 1),
+		"v2 ready with stopped intent":            strings.Replace(strings.Replace(v2Stopped, `,"readiness"`, `,"start_generation":"00112233-4455-4677-8899-aabbccddeeff","readiness"`, 1), `"not_ready"`, `"ready"`, 1),
+		"v2 ready with invalid generation":        strings.Replace(v2Stopped, `,"readiness"`, `,"start_generation":"not-a-uuid","readiness"`, 1),
+		"v2 drift without generation":             strings.Replace(strings.Replace(v2Stopped, `"intended_state":"stopped"`, `"intended_state":"running"`, 1), `"not_ready"`, `"drift"`, 1),
+		"v2 stopped with generation":              strings.Replace(v2Stopped, `,"readiness"`, `,"start_generation":"00112233-4455-4677-8899-aabbccddeeff","readiness"`, 1),
+		"v2 oversized diagnostic":                 strings.Replace(v2Stopped, `"diagnostic":""`, `"diagnostic":"`+strings.Repeat("x", 1025)+`"`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			writeRecord(t, root, "dev", contents)
+			if _, err := LoadRecord(root, "work", "dev"); err == nil {
+				t.Fatal("LoadRecord() error = nil, want rejection")
+			}
+		})
+	}
+}
 
 func TestLoadRecordReturnsOnlyMatchingDomainRecord(t *testing.T) {
 	root := sessionRoot(t)
@@ -31,6 +122,7 @@ func TestLoadRecordRejectsUnsafeOrMalformedState(t *testing.T) {
 	valid := `{"version":1,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-dev"}}`
 	for name, contents := range map[string]string{
 		"unknown record field":      valid[:len(valid)-1] + `,"extra":true}`,
+		"duplicate record field":    strings.Replace(valid, `"mode":"clean"`, `"mode":"clean","mode":"clean"`, 1),
 		"unknown backend field":     `{"version":1,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-dev","extra":true}}`,
 		"unsupported version":       strings.Replace(valid, `"version":1`, `"version":2`, 1),
 		"record name mismatch":      strings.Replace(valid, `"name":"dev"`, `"name":"other"`, 1),

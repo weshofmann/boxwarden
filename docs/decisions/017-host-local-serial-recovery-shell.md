@@ -46,37 +46,47 @@ is broken would make the recovery path ineffective.
 
 ## Decision
 
-Every M1A VM starts with Tart serial hardware as well as the isolated graphical
-console. The host creates a private mode-`0700` runtime directory and a two-PTY
-relay before starting Tart. Both relay endpoints ignore client EOF; the
+**V4-only normative design — not current implementation or operational
+behavior.** The following supervisor, broker, managed-launch, readiness, and
+cleanup requirements specify the intended V4 lifecycle. They do not claim a
+current `session start`, READY, stop, or destroy command. Task 0's separately
+qualified foreground socat/Screen harness evidence remains historical evidence
+for the facts explicitly recorded below; it is not V4 broker qualification.
+
+Every V4 M1A VM will start with Tart serial hardware as well as the isolated
+graphical console. The host will create a private mode-`0700` runtime directory
+and a two-PTY relay before starting Tart. Both relay endpoints will ignore client EOF; the
 underlying PTY devices are restricted to mode `0600`. Tart receives one endpoint
-through `--serial-path`. Before Tart starts, a harness-owned detached GNU Screen
-process opens the other endpoint and remains its lifetime owner. The runtime
-records the Screen session name; operators use `screen -r` and detach with
-`Ctrl-A d` rather than terminating the persistent window. The control plane
-never publishes the session, passes its PTY into a guest, or treats it as a
+through `--serial-path`. Before Tart starts in that future lifecycle, a supervisor-owned detached GNU
+Screen process will open the other endpoint and remain its lifetime owner. The
+runtime will record the Screen session name; operators will use `screen -r` and
+detach with `Ctrl-A d` rather than terminating the persistent window. The
+control plane will never publish the session, pass its PTY into a guest, or
+treat it as a
 portable guest identifier.
 
 The Task 0 harness implements the relay using socat 1.8.1.3 and macOS system
-GNU Screen 4.00.03. Production V4 preserves the two-PTY topology but replaces
-opaque socat forwarding with one supervisor-owned broker and therefore requires
-ADR 017 requalification. The supervisor creates and retains both PTY pairs and
-both masters. Tart opens only the Tart slave. Exact `/usr/bin/screen -D -m`
+GNU Screen 4.00.03. The V4 design preserves the two-PTY topology but replaces
+opaque socat forwarding with one supervisor-owned broker; it requires ADR 017
+implementation and requalification. The future supervisor will create and
+retain both PTY pairs and both masters. Tart will open only the Tart slave.
+Exact `/usr/bin/screen -D -m`
 4.00.03 (FAU, 23-Oct-06), executable SHA-256
 `07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add`,
-root:wheel `0755`, one link, is a direct waitable supervisor child and remains
-the operator slave's sole reader on qualified macOS 26.6.2.
+root:wheel `0755`, one link, will be a direct waitable supervisor child and
+remain the operator slave's sole reader on qualified macOS 26.6.2 build 25G83.
 
-The broker is the sole forwarding reader. Tart-master output enters a bounded
-Screen-output queue and, only in automation mode, a fixed-memory raw frame
-parser. Operator-master input forwards only in console mode; every other mode,
-including `idle` and `automation`, discards and counts it without buffering or
-replay. Automation never opens the operator PTY and never uses
+The future broker will be the sole forwarding reader. Tart-master output will
+enter a bounded Screen-output queue and, only in automation mode, a fixed-memory
+raw frame parser. Operator-master input will forward only in console mode; every other mode,
+including `idle` and `automation`, will discard and count it without buffering
+or replay. Automation will never open the operator PTY or use
 Screen log, hardcopy, `stuff`, paste, or control as its data path. A serialized
-broker state machine owns `idle`, `console`, `automation`, and `failed`.
-Queues, lines, frames, decoded results, total bytes, and deadlines are fixed and
-bounded. Guest flood, queue overflow, Screen or broker loss, and ambiguous
-exchange poison readiness for the generation; there is no hot repair.
+future broker state machine will own `idle`, `console`, `automation`, and
+`failed`. Queues, lines, frames, decoded results, total bytes, and deadlines
+will be fixed and bounded. Guest flood, queue overflow, Screen or broker loss,
+and ambiguous exchange will poison readiness for the generation; there will be
+no hot repair.
 
 Ubuntu enables `serial-getty@hvc0.service` with automatic login as the explicit
 UID-1000 `boxwarden` workstation account. The console does not log in directly
@@ -85,11 +95,12 @@ ordered after clone first-boot identity initialization so delimited SSH host-key
 fingerprints can be emitted before the interactive prompt without interleaving.
 
 The serial device must be present at VM boot. It cannot be added after SSH has
-already failed. Normal and installation launch paths therefore both use the
-managed relay and `--serial-path`. Detaching a terminal client does not stop the
-Screen holder, relay, Tart, or VM; a later client reconnects to the retained
-Screen session. Tart exit stops Screen and the relay and removes session metadata
-and both endpoint links so a stale handle cannot silently address a later VM.
+already failed. Future V4 normal and installation launch paths will therefore
+both use the managed relay and `--serial-path`. Detaching a terminal client will
+not stop the Screen holder, relay, Tart, or VM; a later client will reconnect to
+the retained Screen session. Tart exit will stop Screen and the relay and remove
+session metadata and both endpoint links so a stale handle cannot silently
+address a later VM.
 
 ## Consequences
 
@@ -103,24 +114,27 @@ The serial shell is an emergency and bootstrap path, not the routine command
 transport. SSH retains structured authentication, bounded certificates, host-key
 pinning, command execution, and better automation behavior.
 
-ADR 012's amended post-clone trust establishment uses this accepted channel.
-Automation enters the broker's exclusive automation state and sends the exact
+ADR 012's amended post-clone trust establishment specifies this accepted
+channel. In the future V4 lifecycle, automation will enter the broker's
+exclusive automation state and send the exact
 static command `/usr/bin/sudo -n -- /usr/local/libexec/boxwarden-guest-bootstrap serial-bootstrap`, followed
-separately by canonical bounded JSON. Fresh nonce and start generation correlate
-the current frames and echoed response, but only durable domain/session/backend,
-CA fingerprint, and derived principal are installed. Later generations verify
-the same durable binding and current host key. Missing, interleaved, malformed,
-oversized, stale, mismatched, or ambiguous frames poison the generation. This
-contract adds neither a network bootstrap path nor a private CA key in the guest.
+separately by canonical bounded JSON. Fresh nonce and start generation will
+correlate the current frames and echoed response, but only durable
+domain/session/backend, CA fingerprint, and derived principal will be
+installed. Later generations will verify the same durable binding and current
+host key. Missing, interleaved, malformed, oversized, stale, mismatched, or
+ambiguous frames will poison the generation. This contract adds neither a
+network bootstrap path nor a private CA key in the guest.
 
-The long-lived same-user supervisor owns the generation lock, persistent
-owner-only authenticated control socket, broker, PTYs, Screen, and Tart as
-direct children. It never `exec`-replaces itself with Tart or depends on the
-initiating CLI context. Nonce challenge/response plus manifest/process-start
-evidence supports reconnect after CLI crash. Its ownership manifest includes
-broker generation/health, both PTY device identities, Screen direct-child/start/
-socket evidence, overflow/poison state, and lease mode. Cleanup follows an
-explicit child-exit protocol and acts only on fully proven ownership.
+The future long-lived same-user supervisor will own the generation lock,
+persistent owner-only authenticated control socket, broker, PTYs, Screen, and
+Tart as direct children. It will not `exec`-replace itself with Tart or depend
+on the initiating CLI context. Nonce challenge/response plus
+manifest/process-start evidence will support reconnect after CLI crash. Its
+ownership manifest will include broker generation/health, both PTY device
+identities, Screen direct-child/start/socket evidence, overflow/poison state,
+and lease mode. Cleanup will follow an explicit child-exit protocol and act only
+on fully proven ownership.
 
 Task 0 proved that Tart maps the channel to guest `hvc0`, automatic login reaches
 UID 1000 without a password, and `sudo -n` succeeds. It disproved raw

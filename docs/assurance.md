@@ -9,13 +9,14 @@ Claims in this document draw on evidence from several source scopes:
   intended for `main`.
 - **Historical qualification evidence on `main`:** Task 0 and independent architecture
   review evidence committed to `main`.
-- **Staged Draft branch:** implementation, tests, and qualification evidence committed
-  on the V3/V4 Draft PRs but not yet merged to `main`. Where a claim's evidence
-  lives only in a staged Draft branch, that is noted explicitly.
+- **Future design:** normative V4 supervisor/broker and lifecycle design that is
+  not current operational behavior and still requires implementation and
+  qualification.
 - **Pending:** the required evidence does not yet exist in any branch.
 
-Do not infer that a test, document, or qualification result is in the current
-tree unless the evidence column explicitly says so or omits a staging qualifier.
+V3 implementation, deterministic tests, runbooks, and the completed
+host/domain attended-evidence record are current-tree evidence. Their presence
+does not promote a distinct pending runtime or V4 claim.
 
 Security properties are not uniformly "tested" or "qualified." This document
 distinguishes the specific evidence basis for each claim rather than collapsing
@@ -145,7 +146,7 @@ migration. Tested at code commit `36839dc7`; binary SHA-256 `242fb3e0`.
 Softnet runtime behavior (privilege transition, closed-environment execution,
 signal handling, network behavior) is not part of this gate and remains pending.
 
-Evidence: `docs/evidence/v3-host-domain-attended-gates.md` (staged V3 Draft branch — not yet on `main`)
+Evidence: [`docs/evidence/v3-host-domain-attended-gates.md`](evidence/v3-host-domain-attended-gates.md)
 
 **Independent architecture review (2026-08-30):** Reviewed commit `9ba73679`.
 Verdict: IMPLEMENT WITH CONDITIONS. Scope: architecture, threat model, security
@@ -162,7 +163,7 @@ Evidence: [`docs/reviews/2026-08-30-independent-architecture-review.md`](reviews
   evidence; those runs are sealed as forensic evidence and may not serve as
   qualification continuations. The complete fresh-run qualification remains
   pending; no completed runtime result is claimed. Observer and procedure are
-  committed on the staged V3 Draft branch (`docs/operations/adr024-runtime-observer.md`).
+  documented in the current tree (`docs/operations/adr024-runtime-observer.md`).
 - **V2 real-host register/clone gate:** Requires an artifact built or rebuilt
   from the corrected generic guest definition (no embedded domain CA). An
   unchanged Task 0 artifact built under the domain-bound design is not
@@ -204,7 +205,7 @@ codes when the evidence is multi-dimensional.
 | H9 | No Rosetta share | D, T | `docs/architecture.md`; backend seam test | — |
 | H10 | The serial PTY is not reachable through guest networking | D, Q, I | Design basis: `docs/security-model.md`, `docs/decisions/017-host-local-serial-recovery-shell.md`; Task 0 qualified PTY isolation | V4 supervisor uses a different broker; ADR 017 requalification pending |
 | H11 | Guest-local runtimes (Docker group, etc.) are not treated as a substitute for VM isolation | D | `docs/security-model.md` | — |
-| H12 | `--net-softnet-allow=0.0.0.0/0` is prohibited | D, T | `docs/architecture.md`; V4 launch test: rejects every allow flag | Also disables bridge isolation; prohibition documented and tested |
+| H12 | Future V4 launch must prohibit `--net-softnet-allow=0.0.0.0/0` | D, P | ADR 015; `docs/architecture.md`; `docs/security-model.md` (normative future V4 design) | It disables bridge isolation; no production launch enforcement or runtime qualification exists yet |
 
 ### Network isolation
 
@@ -224,40 +225,40 @@ assert general guest-to-host isolation.
 ### Softnet privilege binding (ADR 024)
 
 ADR 024 is accepted. The V3 attended gate qualified the installation and
-detection properties; that gate evidence is committed on the staged V3 Draft
-branch and is not yet on `main`. The runtime properties (S10–S13) are pending.
+detection properties, with its evidence in the current tree. The runtime
+properties (S10–S13) remain pending.
 
 | # | Claim | Dims | Evidence | Limitation |
 |---|---|---|---|---|
-| S1 | Softnet privilege is bound to an exact root-owned digest-specific artifact, not a mutable Homebrew path | D, Q | ADR 024 (staged Draft branch); V3 gate evidence (staged Draft branch): exact SHA-256, mode `04550`, path, ancestry |  |
-| S2 | Any setuid/setgid or passwordless-root Homebrew Softnet causes doctor to report `drifted/unsafe` and blocks init | D, T, Q | ADR 024 (staged Draft branch); `internal/hostx/doctor_test.go` (staged Draft branch); V3 gate evidence (staged Draft branch): unsafe-Homebrew refusal test | V3 has no `session start`; start-path refusal awaits V4 |
-| S3 | `boxwarden init` refuses a source with any setuid/setgid bit | D, T | ADR 024 (staged Draft branch); `internal/hostx/root_install_test.go` (staged Draft branch) | Same-UID test model; real-host cross-UID semantics confirmed at V3 gate (staged Draft branch) |
-| S4 | The installed Softnet executable is SHA-256 `ab333619…`, mode `04550`, one link, root-owned, assigned to `boxwarden-operators` | Q | V3 gate evidence (staged Draft branch): exact inode, link count, ACL absence table | Specific to macOS 26.6.2 / Tart 2.32.1 / Softnet 0.19.0 |
-| S5 | The manifest is `root:wheel 0444`; doctor reads and parses it without privilege | D, T, Q | ADR 024 manifest contract (staged Draft branch); V3 gate evidence (staged Draft branch): `sudo -u nobody` SHA-256 read, healthy doctor post `sudo -k` | The `0444` fix (commit `24d6487`) corrects an earlier `0400`; migration procedure documented in V3 evidence (staged Draft branch) |
-| S6 | Tart's launch PATH equals only the digest-specific Softnet directory; no ambient proxy, DYLD, telemetry, or loader variables survive | D, T | ADR 024 (staged Draft branch); launch construction tests (staged Draft branch, V4 pending) | V4 real-host launch not yet qualified |
-| S7 | Doctor diagnoses the full tree: path, ancestors, ACLs, symlinks, digests, modes, group, manifest | D, T, Q | ADR 024 (staged Draft branch); `internal/hostx/doctor_test.go` (staged Draft branch); V3 gate evidence (staged Draft branch): doctor passed full production inspection post-install | Deterministic tests use same-UID synthetic root; cross-UID semantics confirmed at V3 gate (staged Draft branch) |
-| S8 | Doctor is read-only; it never repairs, re-authorizes, or silently mutates | D, T, Q | `docs/operations/init-and-doctor.md` (staged Draft branch); `internal/hostx/doctor_test.go` (staged Draft branch): zero mutation assertions; V3 gate evidence (staged Draft branch): doctor ran post `sudo -k` without prompting | — |
-| S9 | Unsafe Homebrew Softnet blocks `boxwarden init` before any trusted-host mutation | D, T, Q | ADR 024 (staged Draft branch); `internal/hostx/init_test.go` (staged Draft branch); V3 gate evidence (staged Draft branch): unsafe-Homebrew init-refusal attended test | Start-path blocking awaits V4 |
-| S10 | Softnet runtime privilege transition: effective UID 0 after Tart exec's the `04550` binary | P | ADR 024 (staged Draft branch); observer at `internal/qualification/adr024/cmd/observe` (staged Draft branch); procedure at `docs/operations/adr024-runtime-observer.md` (staged Draft branch) | Partial attended runtime work produced non-final forensic evidence; complete fresh-run qualification not yet performed; no completed result claimed; observer uses sampling — not lossless |
-| S11 | Softnet privilege drop after vmnet setup | P | ADR 024 (staged Draft branch) | Partial attended runtime work produced non-final forensic evidence; complete fresh-run qualification not yet performed |
-| S12 | Softnet closed-environment dependency resolution | P | ADR 024 (staged Draft branch) | Complete fresh-run qualification not yet performed |
-| S13 | Softnet signal behavior and filesystem writes under the qualified launch | P | ADR 024 (staged Draft branch) | Complete fresh-run qualification not yet performed |
+| S1 | Softnet privilege is bound to an exact root-owned digest-specific artifact, not a mutable Homebrew path | D, Q | ADR 024; V3 attended evidence: exact SHA-256, mode `04550`, path, ancestry |  |
+| S2 | Any setuid/setgid or passwordless-root Homebrew Softnet causes doctor to report `drifted/unsafe` and blocks init | D, T, Q | ADR 024; `internal/hostx/doctor_test.go`; V3 attended unsafe-Homebrew refusal | V3 has no `session start`; start-path refusal awaits V4 |
+| S3 | `boxwarden init` refuses a source with any setuid/setgid bit | D, T | ADR 024; `internal/hostx/root_install_test.go` | Same-UID test model; real-host cross-UID semantics confirmed at the V3 gate |
+| S4 | The installed Softnet executable is SHA-256 `ab333619…`, mode `04550`, one link, root-owned, assigned to `boxwarden-operators` | Q | V3 attended evidence: exact inode, link count, ACL absence table | Specific to macOS 26.6.2 / Tart 2.32.1 / Softnet 0.19.0 |
+| S5 | The manifest is `root:wheel 0444`; doctor reads and parses it without privilege | D, T, Q | ADR 024 manifest contract; V3 evidence: `sudo -u nobody` SHA-256 read, healthy doctor post `sudo -k` | The `0444` contract corrects the historical `0400`; the exact attended migration is preserved in V3 evidence |
+| S6 | Future V4 Tart launch must set PATH to only the digest-specific Softnet directory and exclude ambient proxy, DYLD, telemetry, and loader variables | D, P | ADR 024; `docs/security-model.md`; `docs/tool-provenance.md` (normative future V4 design) | No V4 production-launch implementation or deterministic launch test exists; runtime qualification remains pending |
+| S7 | Doctor diagnoses the full tree: path, ancestors, ACLs, symlinks, digests, modes, group, manifest | D, T, Q | ADR 024; `internal/hostx/doctor_test.go`; V3 evidence: full production inspection post-install | Deterministic tests use same-UID synthetic root; cross-UID semantics confirmed at V3 gate |
+| S8 | Doctor is read-only; it never repairs, re-authorizes, or silently mutates | D, T, Q | `docs/operations/init-and-doctor.md`; `internal/hostx/doctor_test.go`: zero-mutation assertions; V3 evidence: post-`sudo -k` doctor | — |
+| S9 | Unsafe Homebrew Softnet blocks `boxwarden init` before any trusted-host mutation | D, T, Q | ADR 024; `internal/hostx/init_test.go`; V3 attended unsafe-Homebrew refusal | Start-path blocking awaits V4 |
+| S10 | Softnet runtime privilege transition: effective UID 0 after Tart exec's the `04550` binary | P | ADR 024; current-tree observer and procedure | Partial attended runtime work is non-final forensic evidence; complete fresh-run qualification is pending; observer sampling is not lossless |
+| S11 | Softnet privilege drop after vmnet setup | P | ADR 024 | Complete fresh-run qualification remains pending |
+| S12 | Softnet closed-environment dependency resolution | P | ADR 024 | Complete fresh-run qualification remains pending |
+| S13 | Softnet signal behavior, filesystem writes, and qualified launch network behavior | P | ADR 024 | Complete fresh-run qualification remains pending |
 
 ### Management SSH and identity
 
 | # | Claim | Dims | Evidence | Limitation |
 |---|---|---|---|---|
-| M1 | One management CA per domain; `domain init` creates it explicitly and cannot create it lazily from session start | D, T, Q | ADR 012; `docs/credentials.md`; `internal/sshx/ca_test.go` (staged Draft branch); V3 gate evidence (staged Draft branch): two distinct CAs created, no lazy CA path exercised | — |
-| M2 | CA private key never enters a guest, golden, repository, argv, or log | D, T | `docs/credentials.md`; `internal/sshx/ca_test.go` (staged Draft branch): private key bytes never appear in any output | No negative test that actually extracts key bytes from a compromised guest |
+| M1 | One management CA per domain; `domain init` creates it explicitly and cannot create it lazily from session start | D, T, Q | ADR 012; `docs/credentials.md`; `internal/sshx/ca_test.go`; V3 evidence: two distinct CAs created, no lazy CA path exercised | — |
+| M2 | CA private key never enters a guest, golden, repository, argv, or log | D, T | `docs/credentials.md`; `internal/sshx/ca_test.go`: private key bytes never appear in any output | No negative test that actually extracts key bytes from a compromised guest |
 | M3 | Generic golden contains no domain CA anchor and no fixed domain principal | D, T | `docs/architecture.md`; `docs/lifecycle-and-recovery.md`; V2 golden test (current tree): no CA state in golden | V2 real-host register/clone gate is pending (requires artifact from corrected generic guest definition) |
-| M4 | `domain init` does not install or modify host-global prerequisites; host toolchain unchanged after domain init | D, T, Q | `docs/operations/domain-init.md` (staged Draft branch); V3 gate evidence (staged Draft branch): host snapshot identical before and after domain init | — |
-| M5 | `domain init` compares fingerprints across all configured domain roots to reject accidental CA reuse | D, T | `docs/credentials.md`; `internal/sshx/ca_test.go` (staged Draft branch): duplicate fingerprint rejection | — |
-| M6 | Short-lived no-extension certificates: exact validity window (`-5m:+15m`), exact principal format (`boxwarden-session-<uuid>`), no certificate extensions | D, T | `docs/credentials.md`; `internal/sshx/cert_test.go` (staged Draft branch): exact argv, validity, `-O clear` | Not yet exercised by a real SSH login (V4 pending) |
-| M7 | SSH client configuration disables all forwarding: `ForwardAgent=no`, `ForwardX11=no`, `ClearAllForwardings=yes`, `Tunnel=no`, `ControlMaster=no`, `ProxyCommand=none`, `ProxyJump=none`, `IdentityAgent=none` (full 23-option policy) | D, T | `docs/credentials.md`; `internal/sshx/client_test.go` (staged Draft branch); `internal/sshx/adversarial_test.go` (staged Draft branch) | Not yet exercised against a real sshd (V4 pending) |
-| M8 | `StrictHostKeyChecking=yes`; ambient SSH config neutralized (`-F /dev/null`); no TOFU | D, T | `docs/credentials.md`; `internal/sshx/client_test.go` (staged Draft branch); `internal/sshx/adversarial_test.go` (staged Draft branch) | — |
+| M4 | `domain init` does not install or modify host-global prerequisites; host toolchain unchanged after domain init | D, T, Q | `docs/operations/domain-init.md`; V3 evidence: host snapshot identical before and after domain init | — |
+| M5 | `domain init` compares fingerprints across all configured domain roots to reject accidental CA reuse | D, T | `docs/credentials.md`; `internal/sshx/ca_test.go`: duplicate fingerprint rejection | — |
+| M6 | Short-lived no-extension certificates: exact validity window (`-5m:+15m`), exact principal format (`boxwarden-session-<uuid>`), no certificate extensions | D, T | `docs/credentials.md`; `internal/sshx/cert_test.go`: exact argv, validity, `-O clear` | Not yet exercised by a real SSH login (V4 pending) |
+| M7 | SSH client configuration disables all forwarding: `ForwardAgent=no`, `ForwardX11=no`, `ClearAllForwardings=yes`, `Tunnel=no`, `ControlMaster=no`, `ProxyCommand=none`, `ProxyJump=none`, `IdentityAgent=none` (full 23-option policy) | D, T | `docs/credentials.md`; `internal/sshx/client_test.go`; `internal/sshx/adversarial_test.go` | Not yet exercised against a real sshd (V4 pending) |
+| M8 | `StrictHostKeyChecking=yes`; ambient SSH config neutralized (`-F /dev/null`); no TOFU | D, T | `docs/credentials.md`; `internal/sshx/client_test.go`; `internal/sshx/adversarial_test.go` | — |
 | M9 | Guest host key observed via serial channel (ADR 017 path); no network TOFU | D, Q, I | ADR 012; ADR 017; Task 0 serial-to-scan host-key agreement, clone fingerprint comparison: `docs/evidence/m1a-task0-final-summary.md` | V4 supervisor uses different broker than Task 0 socat harness; ADR 017 requalification pending |
-| M10 | Only typed management operations (probe, timezone-apply, timezone-read); no generic remote-shell API | D, T | `docs/credentials.md`; `docs/operations/ssh-management.md` (staged Draft branch); `internal/sshx/` typed request tests (staged Draft branch) | Not yet exercised against a real guest (V4 pending) |
-| M11 | Cross-domain CA fallback is prohibited; no CA from another domain is ever used | D, T | `docs/credentials.md`; `internal/sshx/ca_test.go` (staged Draft branch): absent-selected-domain with valid other-domain CA returns `ErrCAMissing` | — |
+| M10 | Only typed management operations (probe, timezone-apply, timezone-read); no generic remote-shell API | D, T | `docs/credentials.md`; `docs/operations/ssh-management.md`; `internal/sshx/` typed request tests | Not yet exercised against a real guest (V4 pending) |
+| M11 | Cross-domain CA fallback is prohibited; no CA from another domain is ever used | D, T | `docs/credentials.md`; `internal/sshx/ca_test.go`: absent-selected-domain with valid other-domain CA returns `ErrCAMissing` | — |
 
 ### Clone identity and lifecycle
 
@@ -276,10 +277,10 @@ branch and is not yet on `main`. The runtime properties (S10–S13) are pending.
 
 | # | Claim | Dims | Evidence | Limitation |
 |---|---|---|---|---|
-| I1 | Private state paths reject symlinks, hardlinks, unsafe modes, and extended ACLs | D, T | `internal/sshx/paths_acl_test.go` (staged Draft branch); `internal/hostx/publisher_test.go` (staged Draft branch); `internal/hostx/filesystem_test.go` (staged Draft branch) | Same-UID test model for root-owned paths; real-host cross-UID semantics confirmed at V3 gate (staged Draft branch) for the manifest |
+| I1 | Private state paths reject symlinks, hardlinks, unsafe modes, and extended ACLs | D, T | `internal/sshx/paths_acl_test.go`; `internal/hostx/publisher_test.go`; `internal/hostx/filesystem_test.go` | Same-UID test model for root-owned paths; V3 evidence confirms manifest cross-UID semantics |
 | I2 | Guest-controlled input cannot automatically become trusted persistent host state | D | `docs/security-model.md`; `docs/state-model.md` | Profile persistence not yet implemented |
 | I3 | age private keys are host-only; never enter a guest | D | `docs/credentials.md`; `docs/decisions/005-age-and-explicit-profile-writeback.md` | — |
-| I4 | The installed manifest contains only non-secret metadata; CA material, credentials, and session data are prohibited | D, T, Q | ADR 024 (staged Draft branch); `internal/hostx/manifest_test.go` (staged Draft branch); V3 gate evidence (staged Draft branch): manifest SHA-256 and content verified | — |
+| I4 | The installed manifest contains only non-secret metadata; CA material, credentials, and session data are prohibited | D, T, Q | ADR 024; `internal/hostx/manifest_test.go`; V3 evidence: manifest SHA-256 and content verified | — |
 
 ### Golden provenance
 
@@ -292,7 +293,7 @@ status.
 | G2 | Mutable piped installers are rejected during golden construction | D | ADR 010; `docs/tool-provenance.md` | Design and policy; no automated test of the rejection |
 | G3 | Automatic updates of golden contents are disabled | D | ADR 010; `docs/tool-provenance.md` | Configuration policy; verified at golden build, not continuously |
 | G4 | A golden revision is immutable after promotion; it is never updated in place | D, T | ADR 010; golden register test (current tree): immutable record after creation | V2 real-host gate pending |
-| G5 | Exact Tart and Softnet executable and archive digests are recorded and verified | D, Q | `docs/tool-provenance.md` (digest table); V3 gate evidence (staged Draft branch): exact manifested values confirmed for both tools | Specific to the qualified pair |
+| G5 | Exact Tart and Softnet executable and archive digests are recorded and verified | D, Q | `docs/tool-provenance.md` (digest table); V3 evidence: exact manifested values confirmed for both tools | Specific to the qualified pair |
 
 ### Domain isolation
 
@@ -300,8 +301,8 @@ status.
 |---|---|---|---|---|
 | D1 | All domain-owned commands require an explicit `--domain`; no implicit default domain | D, T | `docs/architecture.md`; `internal/domain/id_test.go`; `internal/config/config_test.go` | — |
 | D2 | No cross-domain fallback for any domain-scoped resource | D, T | ADR 004; ADR 011; `docs/state-model.md`; `internal/config/config_test.go` | — |
-| D3 | `boxwarden init` and `boxwarden doctor` operate outside the domain namespace and reject an explicitly supplied `--domain` | D, T, Q | `docs/operations/init-and-doctor.md` (staged Draft branch); `internal/app/app_test.go`; V3 gate evidence (staged Draft branch): both commands ran domain-free | — |
-| D4 | Domain CA creation is never triggered lazily by session start | D, T | `docs/credentials.md`; `internal/sshx/ca_test.go` (staged Draft branch); V3 gate evidence (staged Draft branch): no lazy CA path exercised | — |
+| D3 | `boxwarden init` and `boxwarden doctor` operate outside the domain namespace and reject an explicitly supplied `--domain` | D, T, Q | `docs/operations/init-and-doctor.md`; `internal/app/app_test.go`; V3 evidence: both commands ran domain-free | — |
+| D4 | Domain CA creation is never triggered lazily by session start | D, T | `docs/credentials.md`; `internal/sshx/ca_test.go`; V3 evidence: no lazy CA path exercised | — |
 
 ### Explicitly deferred and not claimed
 
@@ -326,14 +327,13 @@ available evidence supports, where evidence exists but is not surfaced, or where
 important limitations should be more visible. They are documentation improvement
 targets, not implementation defects.
 
-**EG-1 — V4 supervisor specification described in present tense in design docs**
+**EG-1 — V4 supervisor specification remains normative, not operational**
 
-`docs/security-model.md` and `docs/architecture.md` describe the V4 supervisor,
-two-PTY broker, generation locking, and nonce challenge/response in detailed
-present tense. These are correct design specifications but V4 is not yet
-implemented. A reader of those documents cannot determine which behaviors are
-currently operational and which are design intent. The assurance matrix above
-marks all V4-supervisor-dependent properties as pending where applicable.
+`docs/security-model.md` now marks its V4 supervisor, two-PTY broker,
+generation-locking, and nonce/challenge-response text as normative future
+design. `docs/architecture.md` still needs equivalent wording. V4 is not
+implemented or qualified; the assurance matrix marks all
+V4-supervisor-dependent properties as pending where applicable.
 
 **EG-2 — PROPOSED ADR status requires attention when reading the decisions index**
 
@@ -346,9 +346,9 @@ before treating any ADR as settled.
 
 **EG-3 — Same-UID test model for root-owned path checks**
 
-Several tests in `internal/hostx/publisher_test.go` (staged Draft branch) use `os.Getuid()` as the
+Several tests in `internal/hostx/publisher_test.go` use `os.Getuid()` as the
 expected root UID and a no-op `chown`, proving logic under same-UID semantics
-but not under real root-owned file conditions. The V3 attended gate (staged Draft branch) provides
+but not under real root-owned file conditions. The V3 attended gate provides
 real-host cross-UID evidence for the manifest itself (the `sudo -u nobody` SHA-256 read).
 Claims labeled T where this applies note the same-UID limitation.
 

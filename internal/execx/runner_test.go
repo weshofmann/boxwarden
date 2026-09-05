@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -34,5 +35,20 @@ func TestOSRunnerRejectsShellExecution(t *testing.T) {
 	_, err := (OSRunner{}).Run(context.Background(), Command{Path: "sh", Args: []string{"-c", "echo unsafe"}})
 	if err == nil {
 		t.Fatal("Run(sh -c) error = nil, want rejection")
+	}
+}
+
+func TestOSRunnerRejectsOversizedStdinWithoutLeakingBytes(t *testing.T) {
+	const secret = "do-not-disclose"
+	_, err := (OSRunner{MaxStdinBytes: len(secret) - 1}).Run(context.Background(), Command{
+		Path:  os.Args[0],
+		Args:  []string{"-test.run=^$"},
+		Stdin: []byte(secret),
+	})
+	if err == nil {
+		t.Fatal("Run() error = nil, want oversized stdin rejection")
+	}
+	if got := err.Error(); strings.Contains(got, secret) {
+		t.Fatalf("Run() error leaked stdin: %q", got)
 	}
 }

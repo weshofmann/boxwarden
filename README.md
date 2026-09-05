@@ -38,16 +38,22 @@ deterministically verified implementation unsafe or bar its merge absent a
 known unsafe defect. It does not change the separate conclusion that Boxwarden
 is not ready for general use.
 
-The V3 trusted host/domain-management foundation — `boxwarden init`,
-`boxwarden doctor`, the Softnet privilege binding, per-domain management CAs,
-certificate issuance, host-key pins, and strict SSH primitives — remains staged
-Draft work and is not on `main`. Its complete hostile/runtime Softnet
-qualification remains Pending. V3 therefore supports no claim of runtime
-qualification or full malicious-guest containment. V4 start/supervision plus
-serial trust bootstrap and readiness is also staged Draft work; no V4 start,
-readiness, or operational-readiness claim is made. This plan stops after V4.
-File transfer, stop, destroy, provider authentication, and other later work
-remain deferred.
+The implemented V3 host/domain-management foundation separates host-global
+`boxwarden init` and read-only `boxwarden doctor` from per-domain
+`boxwarden --domain <id> domain init`. It provides the digest-bound Softnet
+privilege binding, one management CA per domain, certificate issuance, host-key
+pins, and strict SSH primitives. Attended evidence covers host init,
+fresh-authentication doctor, the exact `0400`-to-`0444` manifest migration,
+unsafe-Homebrew init refusal, and distinct idempotent domain CAs. It does not
+qualify Softnet runtime behavior, hostile-guest containment, or broad network
+isolation beyond the Task 0 claims. Pending runtime evidence limits those
+claims but is not automatically a software-merge blocker absent a known unsafe
+defect.
+
+V4 start, supervisor/broker, serial bootstrap, and READY behavior remain
+normative future design and pending qualification; no start, readiness, stop,
+destroy, or operational-readiness claim is made. This plan stops after V4.
+File transfer, provider authentication, and other later work remain deferred.
 
 ## Model
 
@@ -101,7 +107,7 @@ not claims about arbitrary host configurations.
 **What this does not cover:**
 - Hostile native code already executing as the trusted macOS operator. The
   `04550` Softnet privilege mechanism is not a boundary against that threat; see
-  ADR 024 (staged Draft branch) for the explicit scope statement.
+  ADR 024 for the explicit scope statement.
 - A guest using its permitted outbound internet access to exfiltrate data it was
   given.
 - The vmnet gateway, which the guest can reach and which may host services on
@@ -178,7 +184,7 @@ root-owned digest-specific path, doctor read-only behavior, domain init
 separation, unsafe Homebrew detection and init refusal, and legacy manifest
 migration. Softnet runtime behavior awaits a separate gate whose procedure has
 been approved. Attended evidence has been produced and is committed on the
-staged V3 Draft branch; it is not yet on `main`.
+current tree.
 
 **Pending gates:**
 - Softnet runtime behavior (privilege transition/drop, closed-environment
@@ -207,12 +213,11 @@ and evidence gaps.
 - Host filesystem sharing, display-server sharing, clipboard and audio sharing,
   host runtime sockets, host credential stores, SSH-agent forwarding, bridged
   networking, port exposure, and nested virtualization are absent by default.
-- The V3 Softnet mechanism is staged Draft work, not current `main` behavior.
-  Its host/domain-init attended evidence is also staged, while its hostile/runtime
-  qualification (privilege transition/drop, closed-environment execution,
-  signals, and related behavior) remains Pending and unclaimed. It does not
-  establish V3 runtime qualification, V4 readiness, or product operational
-  readiness.
+- The implemented V3 host/domain gate proves exact host installation,
+  read-only diagnosis, manifest migration, unsafe-Homebrew init refusal, and
+  domain-CA separation only. Softnet privilege transition/drop, dependency and
+  signal/filesystem behavior, runtime network behavior, hostile-guest evidence,
+  and V4 lifecycle behavior remain Pending; Boxwarden is not production-ready.
 
 Read [the security model](docs/security-model.md),
 [architecture](docs/architecture.md), and the [Task 0 evidence
@@ -222,30 +227,22 @@ project for sensitive work.
 ## Current commands
 
 ```sh
+boxwarden init
+boxwarden doctor
+boxwarden --domain <id> domain init
 boxwarden --domain <id> golden register <qualified-tart-object>
 boxwarden --domain <id> session create [--mode clean|quarantine] <session>
 boxwarden --domain <id> session status <session>
 ```
 
-These implemented commands operate on domain-owned state, so `--domain` is
-mandatory unless `BOXWARDEN_DOMAIN` is set. Boxwarden has no implicit domain and
-never searches across security domains. Future host-global `boxwarden init` and
-`boxwarden doctor` operate outside the security-domain namespace and do not
-require a domain.
-
-**Staged Draft commands — not on `main`:**
-
-```sh
-boxwarden init
-boxwarden doctor
-boxwarden --domain <id> domain init
-```
-
-These commands belong to the staged V3 foundation. `boxwarden init` and
-`boxwarden doctor` are host-global: they do not select a domain and reject an
-explicitly supplied `--domain`. `domain init` creates only the selected domain's
-management CA; it does not install or modify host-global prerequisites. V3 and
-V4 remain behind their stated review and qualification gates. Start from
+The domain-owned commands require `--domain` unless `BOXWARDEN_DOMAIN` is set.
+Boxwarden has no implicit domain and never searches across security domains.
+`boxwarden init` and `boxwarden doctor` are host-global: they do not select a
+domain and reject an explicitly supplied `--domain`. `domain init` creates only
+the selected domain's management CA; it does not install or modify host-global
+prerequisites. See the [host initialization and diagnosis](docs/operations/init-and-doctor.md)
+and [domain management CA initialization](docs/operations/domain-init.md)
+runbooks. Start from
 [config/boxwarden.example.json](config/boxwarden.example.json).
 
 ## Development
