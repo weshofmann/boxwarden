@@ -55,35 +55,36 @@ guest.
 The same ADR 017 channel is the specified initial management-trust bootstrap
 path. V4 is designed to use a supervisor-owned two-PTY broker rather than
 opaque socat forwarding and therefore requires ADR 017 implementation and
-requalification. Tart will open only its
-slave; exact system Screen is a direct waitable child and sole reader of the
-operator slave; the bounded broker owns both masters, all forwarding, and the
-serialized `idle`/`console`/`automation`/`failed` state. Operator input reaches
-Tart only in `console`; every other mode, including `idle` and `automation`,
-discards and counts it without buffering or replay. Automation never opens
-the operator PTY or uses Screen log/hardcopy/input-control facilities. A fresh
-nonce and start generation frame each bounded exchange, but guest `active`
-state contains only durable domain/session/backend identity, CA fingerprint,
-and derived principal. Later generations verify that same durable binding and
-the current host key. Missing, duplicate, interleaved, oversized, overflowed,
-or mismatched frames poison the generation. The CA private key never enters the
-guest. Network reachability and `tart ip` are not identity evidence; TOFU and
-`StrictHostKeyChecking=no` remain prohibited.
+requalification. Tart will open only its slave; exact system Screen will be a
+direct waitable child and sole reader of the operator slave; the bounded broker
+will own both masters, all forwarding, and the serialized
+`idle`/`console`/`automation`/`failed` state. Operator input will reach Tart
+only in `console`; every other mode, including `idle` and `automation`, will
+discard and count it without buffering or replay. Automation will never open
+the operator PTY or use Screen log/hardcopy/input-control facilities. A fresh
+nonce and start generation frame will bound each exchange, but guest `active`
+state will contain only durable domain/session/backend identity, CA fingerprint,
+and derived principal. Later generations will verify that same durable binding
+and the current host key. Missing, duplicate, interleaved, oversized,
+overflowed, or mismatched frames will poison the generation. The CA private key
+will never enter the guest. Network reachability and `tart ip` are not identity
+evidence; TOFU and `StrictHostKeyChecking=no` remain prohibited.
 
 The generic golden contains only root:root mode-`0755`
-`/etc/ssh/boxwarden`; its `active` child is absent. Serial bootstrap constructs
-a private root-only sibling and, only after complete verification, publishes
+`/etc/ssh/boxwarden`; its `active` child is absent. Future V4 serial bootstrap
+will construct a private root-only sibling and, only after complete verification, publish
 root:root mode-`0755` `active` and `authorized_principals`, root:root mode-`0644`
 public CA and `authorized_principals/boxwarden` files, and a root:root
 mode-`0600` binding manifest with no group/other-writable ancestry. The final
 directories must be traversable because OpenSSH opens the principals file under
-the workstation UID and applies StrictModes ancestry checks. OpenSSH reads both
-configured trust files for each certificate authentication, so no sshd reload
-is needed; a missing pre-bootstrap target simply fails authentication. Because
+the workstation UID and applies StrictModes ancestry checks. OpenSSH will read
+both configured trust files for each certificate authentication, so no sshd
+reload will be needed; a missing pre-bootstrap target will simply fail
+authentication. Because
 the CA path itself does not receive the principals path's StrictModes walk, the
-helper independently rejects symlinks, non-regular files, wrong ownership,
+helper will independently reject symlinks, non-regular files, wrong ownership,
 writable ancestry, and byte/mode mismatches for the entire tree. The first
-strict certificate SSH probe is the end-to-end proof.
+strict certificate SSH probe will be the end-to-end proof.
 
 Anything admitted from a disposable session into trusted persistent configuration is a persistence attempt until reviewed. M1A accepts only declarative adapter outputs whose exact bytes, normalized manifest, confidentiality, execution trust, paths, limits, and semantic diff have been validated authoritatively by trusted-host code. Guest checks may fail early for usability but are never security controls. Human review renders guest-controlled bytes without terminal control: C0/C1 and ANSI/OSC sequences are escaped, bidi and zero-width/format controls are visibly marked, truncation and byte counts are explicit, and the exact relevant digests are adjacent to the reviewed material. Untrusted candidate content is never passed to a rich Markdown renderer. Restore occurs in a fresh staging directory and is applied only after validation; arbitrary archives and opaque state are rejected.
 
@@ -91,7 +92,14 @@ Use a credential-free quarantine session for hostile builds or dependencies. `bo
 
 Restore only the domain/profile/project material required for the named task. One provider per session is the recommended high-isolation mode. A multi-provider session is supported for convenience, but compromise of its guest user may expose every provider login, browser session, Git credential, and sensitive artifact present. Separate Unix users do not solve this while the operating principal retains Docker/root-equivalent access.
 
-After suspected compromise, do not inject a fresh rescue credential. Revoke affected credentials, destroy with the compromised path, and recreate from a promoted golden. M1A has no checkpoint operation. A separately reviewed export-to-host-quarantine mechanism may be designed later. Sensitive-data disclosure differs from credential disclosure: credentials can normally be revoked, while private knowledge and proprietary content cannot be rotated.
+**Future lifecycle policy — not a currently available command.** After suspected
+compromise, a future lifecycle must not inject a fresh rescue credential; the
+operator should revoke affected credentials and, once a separately implemented
+and qualified compromised-destroy path exists, use it before recreating from a
+promoted golden. M1A has no checkpoint operation. A separately reviewed
+export-to-host-quarantine mechanism may be designed later. Sensitive-data
+disclosure differs from credential disclosure: credentials can normally be
+revoked, while private knowledge and proprietary content cannot be rotated.
 
 ## M1A Tart realization
 
@@ -161,8 +169,9 @@ doctor, and corrected attended idempotent init requirements remain mandatory.
 
 Init refuses a Softnet source with any setuid/setgid bit. Any setuid or
 passwordless-root Softnet under mutable Homebrew state is drifted/unsafe,
-causes doctor to exit nonzero, and blocks both init and start until attended
-manual inspection/remediation. Boxwarden never chmods, repairs, or adopts it;
+causes doctor to exit nonzero and blocks the implemented V3 init until attended
+manual inspection/remediation. A future V4 start path must also refuse it.
+Boxwarden never chmods, repairs, or adopts it;
 only the root-owned digest-specific installed copy may be `04550`.
 
 Future V4 normal start must use the absolute qualified Tart 2.32.1 executable digest
@@ -177,8 +186,9 @@ link count, executable/archive digests, root ownership, mode, group, manifest,
 macOS state, and Tart/Softnet pairing. It reports the current Homebrew setuid
 copy as blocking unsafe state rather than trusting or modifying it. Directory
 service membership and the current process's supplementary group are checked
-separately; init reports the required login-session refresh and doctor/start
-fail until the group is effective. Upgrades
+separately; init reports the required login-session refresh and doctor fails
+until the group is effective. A future V4 start path must fail until the group
+is effective. Upgrades
 install adjacent digest-specific trees and never overwrite a qualified artifact
 or retarget a `current` symlink; exact uninstall refuses active consumers.
 Real-host install and qualification remain user-attended gates.

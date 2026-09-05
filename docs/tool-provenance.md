@@ -48,10 +48,12 @@ distinct-UID read before only the corrected binary is used. Committed evidence
 redacts local account and path values.
 A mutable user-writable Homebrew path never inherits authorization. Any
 setuid/setgid/passwordless-root Softnet in mutable Homebrew state is blocking
-drifted/unsafe state: doctor is nonzero and init/start refuse until attended
-manual inspection/remediation. Boxwarden never chmods or repairs it. Init also
-refuses any source file with a setuid/setgid bit; only the exact root-owned
-digest-specific installed copy may be `04550`.
+drifted/unsafe state: doctor is nonzero and the implemented V3 `init` refuses
+until attended manual inspection/remediation. A future V4 `start` path must
+likewise refuse; that start behavior is not implemented or qualified.
+Boxwarden never chmods or repairs it. Init also refuses any source file with a
+setuid/setgid bit; only the exact root-owned digest-specific installed copy may
+be `04550`.
 
 Future V4 normal start must use the absolute qualified Tart executable and a closed
 environment whose PATH is exactly the installed digest-specific Softnet
@@ -70,11 +72,12 @@ and the exact paired-toolchain identity. The manifest binds the single trusted
 operator UID/name/home and exact dedicated group ID/name/membership. Directory
 service membership and effective supplementary membership of the current
 process are distinct checks; init reports a required login-session refresh and
-doctor/start fail until membership is effective. It is diagnostic and never changes
+doctor fails until membership is effective. A future V4 start path must also
+fail until membership is effective. It is diagnostic and never changes
 privilege. Upgrades install adjacent version-and-digest roots, never overwrite a
-qualified tree, and never switch a `current` symlink. Exact uninstall names one
-manifested digest root and refuses while any recorded or live supervisor uses
-it. Replacing either tool requires deliberate requalification and explicit
+qualified tree, and never switch a `current` symlink. Future V4 exact uninstall
+must name one manifested digest root and refuse while any recorded or live
+supervisor uses it. Replacing either tool requires deliberate requalification and explicit
 re-initialization. Installation, upgrade, uninstall, and real-host qualification
 remain user-attended operations. Neither host-global command requires or
 searches for a security domain; adding another domain does not repeat the
