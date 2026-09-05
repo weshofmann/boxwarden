@@ -156,6 +156,14 @@ if [[ -f "${user_data}" ]]; then
     fail "autoinstall does not install the fixed guest bootstrap helper"
   grep -Fq '/cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap' "${user_data}" || \
     fail "autoinstall does not verify the explicitly remastered helper input"
+  locked_helper="${repo_root}/guest/ubuntu-24.04-arm64/artifacts/boxwarden-guest-bootstrap"
+  lock_file="${repo_root}/guest/ubuntu-24.04-arm64/artifacts.lock.json"
+  helper_digest="$(shasum -a 256 "${locked_helper}" | awk '{print $1}')"
+  lock_digest="$(sed -n 's/.*"sha256": "\([0-9a-f]\{64\}\)".*/\1/p' "${lock_file}")"
+  [[ "${helper_digest}" == "${lock_digest}" ]] || \
+    fail "locked guest helper bytes do not match artifacts lock"
+  grep -Fq "'${helper_digest}'" "${user_data}" || \
+    fail "autoinstall checksum does not bind the locked guest helper bytes"
   require_absent '/target/etc/ssh/boxwarden/active' "${user_data}" \
     "autoinstall precreates the active SSH bootstrap tree in the generic golden"
   require_absent '__BOXWARDEN_SSH_CA_PUBLIC_KEY__' "${user_data}" \

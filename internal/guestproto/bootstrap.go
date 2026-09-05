@@ -53,11 +53,12 @@ func (b *boundedBuffer) Write(data []byte) (int, error) {
 }
 
 type Bootstrapper struct {
-	Root        string
-	Runner      Runner
-	HostKeyPath string
-	ZonePath    string
-	Failpoint   func(string) error
+	Root            string
+	Runner          Runner
+	HostKeyPath     string
+	ZonePath        string
+	Failpoint       func(string) error
+	renameNoReplace func(string, string) error
 }
 
 func NewBootstrapper(root string, runner Runner) *Bootstrapper {
@@ -67,11 +68,11 @@ func NewBootstrapper(root string, runner Runner) *Bootstrapper {
 	if runner == nil {
 		runner = ExecRunner{}
 	}
-	return &Bootstrapper{Root: root, Runner: runner, HostKeyPath: "/etc/ssh/ssh_host_ed25519_key.pub", ZonePath: "/etc/timezone"}
+	return &Bootstrapper{Root: root, Runner: runner, HostKeyPath: "/etc/ssh/ssh_host_ed25519_key.pub", ZonePath: "/etc/timezone", renameNoReplace: renameWithoutReplacement}
 }
 
 func (b *Bootstrapper) Serial(ctx context.Context, request SerialRequest) (SerialResult, error) {
-	if b == nil || b.Runner == nil {
+	if b == nil || b.Runner == nil || b.renameNoReplace == nil {
 		return SerialResult{}, fmt.Errorf("bootstrapper is required")
 	}
 	if err := ctx.Err(); err != nil {
@@ -254,7 +255,7 @@ func (b *Bootstrapper) publishActive(parent, active string, request SerialReques
 	if err := b.fail("before-publish"); err != nil {
 		return err
 	}
-	if err := renameWithoutReplacement(stage, active); err != nil {
+	if err := b.renameNoReplace(stage, active); err != nil {
 		return err
 	}
 	if err := syncDir(parent); err != nil {
@@ -472,7 +473,7 @@ func (b *Bootstrapper) verifySSHD(ctx context.Context) (map[string]string, error
 			fields[parts[0]] = parts[1]
 		}
 	}
-	for key, want := range map[string]string{"trustedusercakeys": "/etc/ssh/boxwarden/active/trusted-user-ca.pub", "authorizedprincipalsfile": "/etc/ssh/boxwarden/active/authorized_principals/%u", "authorizedkeysfile": "none", "permituserenvironment": "no", "permituserrc": "no", "passwordauthentication": "no", "kbdinteractiveauthentication": "no", "permitrootlogin": "no", "x11forwarding": "no", "allowtcpforwarding": "no", "allowstreamlocalforwarding": "no", "permittunnel": "no"} {
+	for key, want := range map[string]string{"trustedusercakeys": "/etc/ssh/boxwarden/active/trusted-user-ca.pub", "authorizedprincipalsfile": "/etc/ssh/boxwarden/active/authorized_principals/%u", "authorizedkeysfile": "none", "permituserenvironment": "no", "permituserrc": "no", "passwordauthentication": "no", "kbdinteractiveauthentication": "no", "permitrootlogin": "no", "x11forwarding": "no", "allowagentforwarding": "no", "allowtcpforwarding": "no", "allowstreamlocalforwarding": "no", "gatewayports": "no", "permittunnel": "no"} {
 		if fields[key] != want {
 			return nil, fmt.Errorf("effective sshd %s = %q", key, fields[key])
 		}

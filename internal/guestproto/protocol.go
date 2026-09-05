@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -162,7 +163,26 @@ func validPublicKey(value string) bool {
 		return false
 	}
 	raw, err := base64.StdEncoding.DecodeString(p[1])
-	return err == nil && len(raw) == 51
+	if err != nil || base64.StdEncoding.EncodeToString(raw) != p[1] {
+		return false
+	}
+	innerType, rest, ok := readRFC4253String(raw)
+	if !ok || string(innerType) != "ssh-ed25519" {
+		return false
+	}
+	key, rest, ok := readRFC4253String(rest)
+	return ok && len(key) == 32 && len(rest) == 0
+}
+
+func readRFC4253String(input []byte) ([]byte, []byte, bool) {
+	if len(input) < 4 {
+		return nil, nil, false
+	}
+	length := binary.BigEndian.Uint32(input[:4])
+	if length > uint32(len(input)-4) {
+		return nil, nil, false
+	}
+	return input[4 : 4+length], input[4+length:], true
 }
 func fingerprint(value string) string {
 	parts := strings.Fields(value)
@@ -239,8 +259,8 @@ func decodeFields(fields map[string]json.RawMessage, value any) error {
 	return json.Unmarshal(raw, value)
 }
 func EncodeSerialFrame(request SerialRequest, result SerialResult) (string, string, error) {
-	if result.StartGeneration != request.StartGeneration {
-		return "", "", fmt.Errorf("result start generation differs from request")
+	if err := validateSerialResult(request, result); err != nil {
+		return "", "", err
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
@@ -250,4 +270,46 @@ func EncodeSerialFrame(request SerialRequest, result SerialResult) (string, stri
 		return "", "", fmt.Errorf("response exceeds bound")
 	}
 	return fmt.Sprintf("BOXWARDEN-BEGIN %s %s", request.Nonce, request.SessionID), fmt.Sprintf("BOXWARDEN-END %s %s %s", request.Nonce, request.SessionID, base64.StdEncoding.EncodeToString(encoded)), nil
+}
+
+// DecodeSerialEndLine accepts exactly one optional CR produced by a PTY at the
+// line boundary. It does not normalize payload bytes or otherwise loosen the
+// canonical serial frame grammar.
+func DecodeSerialEndLine(request SerialRequest, line string) (SerialResult, error) {
+	if strings.HasSuffix(line, "\r") {
+		line = strings.TrimSuffix(line, "\r")
+	}
+	if strings.ContainsAny(line, "\r\n") {
+		return SerialResult{}, fmt.Errorf("invalid serial frame line ending")
+	}
+	fields := strings.Split(line, " ")
+	if len(fields) != 4 || fields[0] != "BOXWARDEN-END" || fields[1] != request.Nonce || fields[2] != request.SessionID {
+		return SerialResult{}, fmt.Errorf("invalid serial end frame")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(fields[3])
+	if err != nil || base64.StdEncoding.EncodeToString(decoded) != fields[3] {
+		return SerialResult{}, fmt.Errorf("invalid serial end payload")
+	}
+	object, err := exactObject(decoded, "version", "start_generation", "domain", "session_id", "backend_kind", "backend_object", "ca_fingerprint", "principal", "installed_sha256", "sshd", "host_public_key")
+	if err != nil {
+		return SerialResult{}, fmt.Errorf("invalid serial result: %w", err)
+	}
+	var result SerialResult
+	if err := decodeFields(object, &result); err != nil {
+		return SerialResult{}, fmt.Errorf("invalid serial result: %w", err)
+	}
+	if err := validateSerialResult(request, result); err != nil {
+		return SerialResult{}, err
+	}
+	return result, nil
+}
+
+func validateSerialResult(request SerialRequest, result SerialResult) error {
+	if result.Version != Version || result.StartGeneration != request.StartGeneration || result.Association != request.Association || result.CAFingerprint != request.CAFingerprint || result.Principal != request.Principal {
+		return fmt.Errorf("serial result does not match request")
+	}
+	if !validPublicKey(result.HostPublicKey) {
+		return fmt.Errorf("invalid serial result host public key")
+	}
+	return nil
 }

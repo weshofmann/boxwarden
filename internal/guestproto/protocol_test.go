@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -54,7 +55,7 @@ func TestSerialRequestRejectsUnknownOrMismatchedFields(t *testing.T) {
 // loses either framing token used by the host broker.
 func TestEncodeSerialFrameRoundTripsExactGenerationAndNonce(t *testing.T) {
 	r := testRequest()
-	result := SerialResult{Version: Version, StartGeneration: r.StartGeneration, Association: r.Association, CAFingerprint: r.CAFingerprint, Principal: r.Principal}
+	result := SerialResult{Version: Version, StartGeneration: r.StartGeneration, Association: r.Association, CAFingerprint: r.CAFingerprint, Principal: r.Principal, HostPublicKey: testKey}
 	begin, end, err := EncodeSerialFrame(r, result)
 	if err != nil {
 		t.Fatal(err)
@@ -83,24 +84,93 @@ func TestEncodeSerialFrameRoundTripsExactGenerationAndNonce(t *testing.T) {
 	}
 }
 
-// This fails if frame parsing treats CR as JSON content instead of only a PTY
-// line ending, which would make an otherwise canonical base64 payload ambiguous.
+// This fails if an end frame can carry an association or trust result from a
+// different bootstrap request.
+func TestEncodeSerialFrameRejectsMismatchedResultCorrelation(t *testing.T) {
+	r := testRequest()
+	base := SerialResult{Version: Version, StartGeneration: r.StartGeneration, Association: r.Association, CAFingerprint: r.CAFingerprint, Principal: r.Principal, HostPublicKey: testKey}
+	for name, mutate := range map[string]func(*SerialResult){
+		"version":     func(result *SerialResult) { result.Version++ },
+		"association": func(result *SerialResult) { result.BackendObject = "other" },
+		"fingerprint": func(result *SerialResult) {
+			result.CAFingerprint = "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+		},
+		"principal": func(result *SerialResult) {
+			result.Principal = "boxwarden-session-00000000-0000-0000-0000-000000000000"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			result := base
+			mutate(&result)
+			if _, _, err := EncodeSerialFrame(r, result); err == nil {
+				t.Fatal("mismatched result accepted")
+			}
+		})
+	}
+}
+
+// This fails if frame parsing treats CR as JSON content instead of only the
+// one PTY line ending, accepts loose JSON, or loses request correlation.
 func TestSerialFrameIsUnambiguousWithPTYCRLF(t *testing.T) {
 	r := testRequest()
-	_, end, err := EncodeSerialFrame(r, SerialResult{Version: Version, StartGeneration: r.StartGeneration, Association: r.Association, CAFingerprint: r.CAFingerprint, Principal: r.Principal})
+	want := SerialResult{Version: Version, StartGeneration: r.StartGeneration, Association: r.Association, CAFingerprint: r.CAFingerprint, Principal: r.Principal, HostPublicKey: testKey}
+	_, end, err := EncodeSerialFrame(r, want)
 	if err != nil {
 		t.Fatal(err)
 	}
-	line := strings.TrimSuffix(end+"\r\n", "\n")
-	line = strings.TrimSuffix(line, "\r")
-	payload := strings.Split(line, " ")[3]
-	decoded, err := base64.StdEncoding.DecodeString(payload)
-	if err != nil {
+	got, err := DecodeSerialEndLine(r, end+"\r")
+	if err != nil || got.Version != want.Version || got.StartGeneration != want.StartGeneration || got.Association != want.Association || got.CAFingerprint != want.CAFingerprint || got.Principal != want.Principal || got.HostPublicKey != want.HostPublicKey {
+		t.Fatalf("DecodeSerialEndLine() = %#v, %v", got, err)
+	}
+	for _, invalid := range []string{end + "\r\r", end + "\n", strings.Replace(end, "BOXWARDEN-END", "BOXWARDEN-END extra", 1), strings.Replace(end, r.Nonce, "other", 1)} {
+		if _, err := DecodeSerialEndLine(r, invalid); err == nil {
+			t.Fatalf("invalid frame accepted: %q", invalid)
+		}
+	}
+}
+
+// This fails if a syntactically shaped authorized key contains arbitrary bytes
+// rather than an exact RFC4253 ssh-ed25519 public-key blob.
+func TestValidPublicKeyRequiresExactRFC4253Ed25519Blob(t *testing.T) {
+	badPayload := base64.StdEncoding.EncodeToString(make([]byte, 51))
+	wrongType := wireKey("ssh-rsa", make([]byte, 32), nil)
+	wrongLength := wireKey("ssh-ed25519", make([]byte, 31), nil)
+	trailing := wireKey("ssh-ed25519", make([]byte, 32), []byte{1})
+	for name, key := range map[string]string{"arbitrary 51 bytes": "ssh-ed25519 " + badPayload, "wrong inner type": wrongType, "wrong key length": wrongLength, "trailing bytes": trailing} {
+		t.Run(name, func(t *testing.T) {
+			if validPublicKey(key) {
+				t.Fatal("invalid wire blob accepted")
+			}
+		})
+	}
+}
+
+func TestSerialRequestAndHostResultRejectMalformedEd25519Blob(t *testing.T) {
+	bad := "ssh-ed25519 " + base64.StdEncoding.EncodeToString(make([]byte, 51))
+	request := testRequest()
+	request.CAPublicKey = bad
+	request.CAFingerprint = testFingerprint(bad)
+	if err := request.Validate(); err == nil {
+		t.Fatal("malformed CA accepted")
+	}
+	b, _ := testBootstrapper(t)
+	b.HostKeyPath = "/etc/ssh/bad.pub"
+	if err := os.WriteFile(filepath.Join(b.Root, "etc/ssh/bad.pub"), []byte(bad+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(decoded, []byte{'\r', '\n'}) {
-		t.Fatalf("unexpected line ending in decoded JSON: %q", decoded)
+	if _, err := b.Serial(context.Background(), testRequest()); err == nil {
+		t.Fatal("malformed host key accepted")
 	}
+}
+
+func wireKey(kind string, key, trailing []byte) string {
+	var blob bytes.Buffer
+	_ = binary.Write(&blob, binary.BigEndian, uint32(len(kind)))
+	blob.WriteString(kind)
+	_ = binary.Write(&blob, binary.BigEndian, uint32(len(key)))
+	blob.Write(key)
+	blob.Write(trailing)
+	return "ssh-ed25519 " + base64.StdEncoding.EncodeToString(blob.Bytes())
 }
 
 type fakeRunner struct {
@@ -120,7 +190,22 @@ func (r *fakeRunner) Run(_ context.Context, path string, args ...string) ([]byte
 	return []byte(r.output), nil
 }
 func sshdOutput() string {
-	return strings.Join([]string{"trustedusercakeys /etc/ssh/boxwarden/active/trusted-user-ca.pub", "authorizedprincipalsfile /etc/ssh/boxwarden/active/authorized_principals/%u", "authorizedkeysfile none", "permituserenvironment no", "permituserrc no", "passwordauthentication no", "kbdinteractiveauthentication no", "permitrootlogin no", "x11forwarding no", "allowtcpforwarding no", "allowstreamlocalforwarding no", "permittunnel no", ""}, "\n")
+	return strings.Join([]string{"trustedusercakeys /etc/ssh/boxwarden/active/trusted-user-ca.pub", "authorizedprincipalsfile /etc/ssh/boxwarden/active/authorized_principals/%u", "authorizedkeysfile none", "permituserenvironment no", "permituserrc no", "passwordauthentication no", "kbdinteractiveauthentication no", "permitrootlogin no", "x11forwarding no", "allowagentforwarding no", "allowtcpforwarding no", "allowstreamlocalforwarding no", "gatewayports no", "permittunnel no", ""}, "\n")
+}
+
+// This fails if removing or changing any golden-set effective sshd guard is
+// admitted despite the host's `sshd -T` output being otherwise complete.
+func TestVerifySSHDRejectsEachMissingOrChangedRequiredField(t *testing.T) {
+	fields := []string{"trustedusercakeys", "authorizedprincipalsfile", "authorizedkeysfile", "permituserenvironment", "permituserrc", "passwordauthentication", "kbdinteractiveauthentication", "permitrootlogin", "x11forwarding", "allowagentforwarding", "allowtcpforwarding", "allowstreamlocalforwarding", "gatewayports", "permittunnel"}
+	for _, field := range fields {
+		for _, output := range []string{strings.Replace(sshdOutput(), field+" ", "", 1), strings.Replace(sshdOutput(), field+" ", field+" yes-", 1)} {
+			t.Run(field, func(t *testing.T) {
+				if _, err := NewBootstrapper(t.TempDir(), &fakeRunner{output: output}).verifySSHD(context.Background()); err == nil {
+					t.Fatalf("admitted %s", field)
+				}
+			})
+		}
+	}
 }
 func testBootstrapper(t *testing.T) (*Bootstrapper, string) {
 	t.Helper()
@@ -135,7 +220,9 @@ func testBootstrapper(t *testing.T) (*Bootstrapper, string) {
 	if err := os.WriteFile(filepath.Join(root, "etc/ssh/ssh_host_ed25519_key.pub"), []byte(testKey+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return NewBootstrapper(root, &fakeRunner{output: sshdOutput()}), parent
+	bootstrapper := NewBootstrapper(root, &fakeRunner{output: sshdOutput()})
+	bootstrapper.renameNoReplace = func(source, destination string) error { return os.Rename(source, destination) }
+	return bootstrapper, parent
 }
 
 type shortWriter struct{}
@@ -185,6 +272,88 @@ func TestSerialBootstrapRejectsUnexpectedActiveEntries(t *testing.T) {
 	}
 	if _, err := b.Serial(context.Background(), testRequest()); err == nil {
 		t.Fatal("active tree with unexpected entry accepted")
+	}
+}
+
+// This fails if an existing active tree can change expected entry type or mode
+// and remain a trusted management/bootstrap binding.
+func TestSerialBootstrapRejectsActiveTreeCorruption(t *testing.T) {
+	for name, corrupt := range map[string]func(t *testing.T, parent string){
+		"CA mode": func(t *testing.T, parent string) {
+			if err := os.Chmod(filepath.Join(parent, "active/trusted-user-ca.pub"), 0o666); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"manifest symlink": func(t *testing.T, parent string) {
+			path := filepath.Join(parent, "active/management-binding.json")
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("trusted-user-ca.pub", path); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"principal type": func(t *testing.T, parent string) {
+			path := filepath.Join(parent, "active/authorized_principals/boxwarden")
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(path, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			b, parent := testBootstrapper(t)
+			if _, err := b.Serial(context.Background(), testRequest()); err != nil {
+				t.Fatal(err)
+			}
+			corrupt(t, parent)
+			if _, err := b.Serial(context.Background(), testRequest()); err == nil {
+				t.Fatal("corrupt active tree accepted")
+			}
+		})
+	}
+}
+
+// This fails if an active target that appears after pre-publication validation
+// can be replaced by the staged trust tree.
+func TestSerialBootstrapRejectsTargetAppearingAtPublication(t *testing.T) {
+	b, parent := testBootstrapper(t)
+	b.renameNoReplace = func(_, destination string) error {
+		if err := os.Mkdir(destination, 0o755); err != nil {
+			return err
+		}
+		return fmt.Errorf("target appeared")
+	}
+	if _, err := b.Serial(context.Background(), testRequest()); err == nil {
+		t.Fatal("publication race accepted")
+	}
+	info, err := os.Stat(filepath.Join(parent, "active"))
+	if err != nil || !info.IsDir() {
+		t.Fatalf("appeared target = %v, %v", info, err)
+	}
+}
+
+func TestManagementAppliesAndReadsTypedZoneWithExactProgramBoundary(t *testing.T) {
+	b, _ := testBootstrapper(t)
+	if _, err := b.Serial(context.Background(), testRequest()); err != nil {
+		t.Fatal(err)
+	}
+	zone := filepath.Join(b.Root, "etc/timezone")
+	if err := os.WriteFile(zone, []byte("America/Chihuahua\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	read, err := b.Management(context.Background(), ManagementRequest{Version: Version, Kind: "read_zone", Association: testRequest().Association})
+	if err != nil || string(read) != `{"version":1,"zone":"America/Chihuahua"}` {
+		t.Fatalf("read_zone = %q, %v", read, err)
+	}
+	if _, err := b.Management(context.Background(), ManagementRequest{Version: Version, Kind: "apply_zone", Association: testRequest().Association, Zone: "America/Denver"}); err != nil {
+		t.Fatal(err)
+	}
+	calls := b.Runner.(*fakeRunner).calls
+	if len(calls) != 3 || strings.Join(calls[2], " ") != "/usr/bin/timedatectl set-timezone America/Denver" {
+		t.Fatalf("calls = %#v", calls)
 	}
 }
 

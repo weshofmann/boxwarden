@@ -130,7 +130,7 @@ Create one private generation directory, two Darwin PTY pairs, exact private end
 
 - [ ] **RED:** `TestCreateRuntimeRejectsExistingOrUnsafeGenerationPath`, `TestCreateRuntimeUsesTwoOwnerOnlyPTYSlavesAndFixedScreenSpec`, `TestBrokerDiscardsOperatorInputOutsideConsole`, `TestExchangeAcceptsOnlyOneCanonicalAssociatedFrame`, `TestExchangePoisonsOnOverflowInterleavingAndTimeout`, `TestConsoleEOFDoesNotCloseScreenOrTartEndpoint`. Fakes cover platform-independent behavior; Darwin allocation gets a Darwin-tagged integration test.
 - [ ] **Run RED:** `go test ./internal/serialx -count=1`. Expected: missing package.
-- [ ] **GREEN:** Adapt `6ca97e782`, implement missing Darwin allocator and exact cleanup. No socat, generic broker protocol, or Screen hardcopy/log/stuff/paste/control.
+- [ ] **GREEN:** Adapt `6ca97e782`, implement missing Darwin allocator and exact cleanup. The broker consumes Task 2 `DecodeSerialEndLine` so PTY CR normalization is limited to one frame-line boundary before strict correlation validation. No socat, generic broker protocol, or Screen hardcopy/log/stuff/paste/control.
 - [ ] **Verify:** `go test ./internal/serialx -count=1 && go test -race ./internal/serialx -count=1 && go test ./internal/hostx -run 'TestDoctor.*Screen' -count=1`.
 - [ ] **Commit:** `git add internal/serialx internal/hostx && git commit -m "feat(serial): add bounded owned PTY and Screen transport" -m "Port canonical bootstrap framing into a two-PTY runtime whose fixed bounds and direct-child ownership fail closed on ambiguity."`
 
