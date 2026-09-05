@@ -150,6 +150,20 @@ if [[ -f "${user_data}" ]]; then
     fail "autoinstall does not point SSH CA trust at the future active bootstrap tree"
   grep -Fq 'AuthorizedPrincipalsFile /etc/ssh/boxwarden/active/authorized_principals/%u' "${user_data}" || \
     fail "autoinstall does not point SSH principals at the future active bootstrap tree"
+  grep -Fq 'PermitUserRC no' "${user_data}" || \
+    fail "autoinstall does not prohibit user rc execution for management SSH"
+  grep -Fq '/usr/local/libexec/boxwarden-guest-bootstrap' "${user_data}" || \
+    fail "autoinstall does not install the fixed guest bootstrap helper"
+  grep -Fq '/cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap' "${user_data}" || \
+    fail "autoinstall does not verify the explicitly remastered helper input"
+  locked_helper="${repo_root}/guest/ubuntu-24.04-arm64/artifacts/boxwarden-guest-bootstrap"
+  lock_file="${repo_root}/guest/ubuntu-24.04-arm64/artifacts.lock.json"
+  helper_digest="$(shasum -a 256 "${locked_helper}" | awk '{print $1}')"
+  lock_digest="$(sed -n 's/.*"sha256": "\([0-9a-f]\{64\}\)".*/\1/p' "${lock_file}")"
+  [[ "${helper_digest}" == "${lock_digest}" ]] || \
+    fail "locked guest helper bytes do not match artifacts lock"
+  grep -Fq "'${helper_digest}'" "${user_data}" || \
+    fail "autoinstall checksum does not bind the locked guest helper bytes"
   require_absent '/target/etc/ssh/boxwarden/active' "${user_data}" \
     "autoinstall precreates the active SSH bootstrap tree in the generic golden"
   require_absent '__BOXWARDEN_SSH_CA_PUBLIC_KEY__' "${user_data}" \
@@ -197,6 +211,35 @@ fi
 if [[ -f "${repo_root}/scripts/spike/bootstrap-tart.sh" ]]; then
   bash -n "${repo_root}/scripts/spike/bootstrap-tart.sh" || fail "bootstrap-tart.sh has invalid shell syntax"
   require_executable "${repo_root}/scripts/spike/bootstrap-tart.sh"
+
+  fake_remaster_bin="${test_tmp}/fake-remaster-bin"
+  fake_xorriso_log="${test_tmp}/fake-xorriso.log"
+  fake_source_iso="${test_tmp}/source.iso"
+  fake_user_data="${test_tmp}/user-data"
+  fake_output_iso="${test_tmp}/output.iso"
+  mkdir -p "${fake_remaster_bin}"
+  : >"${fake_source_iso}"
+  : >"${fake_user_data}"
+  cat >"${fake_remaster_bin}/xorriso" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "-osirrox" ]]; then
+  printf 'linux /casper/vmlinuz ---\n' >"${!#}"
+else
+  printf '%s\n' "$@" >"${FAKE_XORRISO_LOG}"
+fi
+EOF
+  chmod +x "${fake_remaster_bin}/xorriso"
+  if PATH="${fake_remaster_bin}:${PATH}" FAKE_XORRISO_LOG="${fake_xorriso_log}" TART_HOME="${test_tmp}" BW_SPIKE_MIN_FREE_GIB=0 \
+    "${repo_root}/scripts/spike/bootstrap-tart.sh" remaster-iso "${fake_source_iso}" "${fake_user_data}" "${fake_output_iso}"; then
+    grep -Fx -- "-map" "${fake_xorriso_log}" >/dev/null || fail "remaster did not map ISO inputs"
+    grep -Fx -- "${repo_root}/guest/ubuntu-24.04-arm64/artifacts/boxwarden-guest-bootstrap" "${fake_xorriso_log}" >/dev/null || \
+      fail "remaster did not install the locked current-tree helper"
+    grep -Fx -- "/boxwarden-artifacts/boxwarden-guest-bootstrap" "${fake_xorriso_log}" >/dev/null || \
+      fail "remaster mapped the helper to the wrong ISO path"
+  else
+    fail "remaster rejected the locked current-tree helper"
+  fi
 
   zoneinfo_root="${test_tmp}/zoneinfo"
   localtime_path="${test_tmp}/localtime"
