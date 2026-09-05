@@ -75,6 +75,57 @@ func TestSaveRecordAtomicallyUpgradesStoppedVersion1RecordWithoutChangingIdentit
 	}
 }
 
+func TestSaveRecordAtomicallyUpgradesCreatingVersion1RecordWithoutChangingIdentity(t *testing.T) {
+	stateRoot := privateStateRoot(t)
+	if err := os.Mkdir(filepath.Join(stateRoot, "sessions"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeRecord(t, stateRoot, "dev", `{"version":1,"domain":"work","name":"dev","id":"00000000-0000-4000-8000-000000000001","mode":"clean","intended_state":"creating","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-work-r1"}`)
+	legacy, err := LoadRecord(stateRoot, "work", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveRecord(stateRoot, legacy.Domain, legacy); err != nil {
+		t.Fatalf("SaveRecord() error = %v", err)
+	}
+	upgraded, err := LoadRecord(stateRoot, "work", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := version2NotReadyRecord(legacy)
+	if upgraded != want {
+		t.Fatalf("upgraded record = %#v, want %#v", upgraded, want)
+	}
+}
+
+func TestSaveRecordPreservesNonUpgradeableVersion1Intents(t *testing.T) {
+	for _, state := range []string{"starting", "running", "stopping", "deleting", "failed"} {
+		t.Run(state, func(t *testing.T) {
+			stateRoot := privateStateRoot(t)
+			if err := os.Mkdir(filepath.Join(stateRoot, "sessions"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeRecord(t, stateRoot, "dev", `{"version":1,"domain":"work","name":"dev","id":"00000000-0000-4000-8000-000000000001","mode":"clean","intended_state":"`+state+`","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-work-r1"}`)
+			legacy, err := LoadRecord(stateRoot, "work", "dev")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := SaveRecord(stateRoot, legacy.Domain, legacy); err != nil {
+				t.Fatalf("SaveRecord() error = %v", err)
+			}
+			stored, err := LoadRecord(stateRoot, "work", "dev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored != legacy {
+				t.Fatalf("stored record = %#v, want unchanged legacy record %#v", stored, legacy)
+			}
+		})
+	}
+}
+
 func TestSaveRecordRejectsVersion1RecordWithVersion2Fields(t *testing.T) {
 	stateRoot := privateStateRoot(t)
 	legacy := storeTestRecord(StateStopped)

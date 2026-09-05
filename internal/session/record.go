@@ -207,9 +207,6 @@ func decodeRecord(decoder *json.Decoder) (Record, error) {
 	}
 	switch record.Version {
 	case recordVersionV1:
-		if record.IntendedState != StateStopped {
-			return Record{}, fmt.Errorf("version 1 session record must be stopped")
-		}
 		if gotGeneration || gotReadiness {
 			return Record{}, fmt.Errorf("version 1 session record has version 2 fields")
 		}

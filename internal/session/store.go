@@ -111,7 +111,8 @@ func saveRecord(stateRoot string, expectedDomain domain.ID, record Record, hook 
 // revision required by V2. Reads never invoke it, so read-only operations do
 // not alter durable state.
 func upgradeRecordForStore(record Record) Record {
-	if record.Version != recordVersionV1 || record.GoldenRevision == "" {
+	if record.Version != recordVersionV1 || record.GoldenRevision == "" ||
+		(record.IntendedState != StateStopped && record.IntendedState != StateCreating) {
 		return record
 	}
 	record.Version = recordVersion

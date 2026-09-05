@@ -87,6 +87,99 @@ func TestCreateUpgradesStoppedVersion1RecordAndReturnsPersistedVersion2(t *testi
 	}
 }
 
+func TestCreateReconcilesCreatingVersion1IntentAsPersistedVersion2(t *testing.T) {
+	for name, observedStopped := range map[string]bool{
+		"backend absent":          false,
+		"backend already stopped": true,
+	} {
+		t.Run(name, func(t *testing.T) {
+			domainConfig, backendFake, service := createFixture(t)
+			if err := os.Mkdir(filepath.Join(domainConfig.StateRoot, "sessions"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeRecord(t, domainConfig.StateRoot, "dev", `{"version":1,"domain":"work","name":"dev","id":"00112233-4455-4677-8899-aabbccddeeff","mode":"clean","intended_state":"creating","backend":{"kind":"tart","object_id":"boxwarden-work-00112233445546778899aabbccddeeff"},"golden_revision":"golden-r1"}`)
+			if observedStopped {
+				backendFake.SetObservation(backend.Observation{ObjectID: testObjectID, Exists: true, State: backend.ObjectStopped})
+			}
+			assertPersistedVersion2 := func() {
+				stored, err := LoadRecord(domainConfig.StateRoot, "work", "dev")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if stored.Version != recordVersion || stored.IntendedState != StateCreating || stored.Readiness != (ReadinessRecord{Status: ReadinessNotReady}) {
+					t.Fatalf("backend mutation saw %#v, want persisted version 2 creating not-ready record", stored)
+				}
+			}
+			backendFake.SetCloneFault(func(_ context.Context, _ fake.CloneCall) error {
+				assertPersistedVersion2()
+				return nil
+			})
+			backendFake.SetRandomizeMACFault(func(_ context.Context, _ string) error {
+				assertPersistedVersion2()
+				return nil
+			})
+			service.newID = func() (string, error) {
+				t.Fatal("Create() reserved a new identity for an existing creating intent")
+				return "", nil
+			}
+
+			record, err := service.Create(context.Background(), "dev", ModeClean)
+			if err != nil {
+				t.Fatalf("Create() error = %v", err)
+			}
+			if record.Version != recordVersion || record.ID != testSessionID || record.Backend.ObjectID != testObjectID || record.GoldenRevision != "golden-r1" || record.IntendedState != StateStopped || record.Readiness != (ReadinessRecord{Status: ReadinessNotReady}) {
+				t.Fatalf("Create() record = %#v, want retained version 2 stopped not-ready intent", record)
+			}
+			stored, err := LoadRecord(domainConfig.StateRoot, "work", "dev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored != record {
+				t.Fatalf("persisted record = %#v, want returned record %#v", stored, record)
+			}
+			wantClones := 1
+			if observedStopped {
+				wantClones = 0
+			}
+			if got := len(backendFake.CloneCalls()); got != wantClones {
+				t.Fatalf("clone attempts = %d, want %d", got, wantClones)
+			}
+			if got := len(backendFake.RandomizeMACCalls()); got != 1 {
+				t.Fatalf("MAC attempts = %d, want 1", got)
+			}
+		})
+	}
+}
+
+func TestCreateRejectsIncompleteOrMismatchedCreatingVersion1IntentBeforeMutation(t *testing.T) {
+	for name, contents := range map[string]string{
+		"missing golden revision":     `{"version":1,"domain":"work","name":"dev","id":"00112233-4455-4677-8899-aabbccddeeff","mode":"clean","intended_state":"creating","backend":{"kind":"tart","object_id":"boxwarden-work-00112233445546778899aabbccddeeff"}}`,
+		"mismatched backend identity": `{"version":1,"domain":"work","name":"dev","id":"00112233-4455-4677-8899-aabbccddeeff","mode":"clean","intended_state":"creating","backend":{"kind":"tart","object_id":"boxwarden-work-other"},"golden_revision":"golden-r1"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			domainConfig, backendFake, service := createFixture(t)
+			if err := os.Mkdir(filepath.Join(domainConfig.StateRoot, "sessions"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeRecord(t, domainConfig.StateRoot, "dev", contents)
+
+			if _, err := service.Create(context.Background(), "dev", ModeClean); err == nil {
+				t.Fatal("Create() error = nil, want immutable-intent rejection")
+			}
+			if len(backendFake.CloneCalls()) != 0 || len(backendFake.RandomizeMACCalls()) != 0 {
+				t.Fatal("invalid legacy creating intent caused backend mutation")
+			}
+			stored, err := os.ReadFile(filepath.Join(domainConfig.StateRoot, "sessions", "dev.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := string(stored); got != contents {
+				t.Fatalf("invalid legacy intent was rewritten = %q, want %q", got, contents)
+			}
+		})
+	}
+}
+
 func TestCreateRejectsMissingOrNoLongerStoppedRegisteredGolden(t *testing.T) {
 	for name, prepare := range map[string]func(t *testing.T, domainConfig config.Domain, backendFake *fake.Backend){
 		"missing registration": func(_ *testing.T, _ config.Domain, _ *fake.Backend) {},

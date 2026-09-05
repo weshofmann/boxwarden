@@ -41,13 +41,38 @@ func TestLoadRecordAcceptsEachVersion2ReadinessStateWithItsAllowedGeneration(t *
 	}
 }
 
+func TestLoadRecordAcceptsEveryLegacyIntentWithoutRewritingIt(t *testing.T) {
+	root := sessionRoot(t)
+	for _, state := range []string{"creating", "stopped", "starting", "running", "stopping", "deleting", "failed"} {
+		t.Run(state, func(t *testing.T) {
+			contents := `{"version":1,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"` + state + `","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-r1"}`
+			writeRecord(t, root, "dev", contents)
+
+			record, err := LoadRecord(root, "work", "dev")
+			if err != nil {
+				t.Fatalf("LoadRecord() error = %v", err)
+			}
+			if record.Version != recordVersionV1 || record.IntendedState != IntendedState(state) {
+				t.Fatalf("LoadRecord() = %#v, want version 1 %q record", record, state)
+			}
+			stored, err := os.ReadFile(filepath.Join(root, "sessions", "dev.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := string(stored); got != contents {
+				t.Fatalf("LoadRecord rewrote legacy record = %q, want %q", got, contents)
+			}
+		})
+	}
+}
+
 func TestLoadRecordRejectsInvalidVersion2ReadinessAndLegacyCombinations(t *testing.T) {
 	root := sessionRoot(t)
 	v1Stopped := `{"version":1,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-dev"}}`
 	v2Stopped := `{"version":2,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-r1","readiness":{"status":"not_ready","diagnostic":""}}`
 	for name, contents := range map[string]string{
-		"v1 non-stopped intent":                   strings.Replace(v1Stopped, `"intended_state":"stopped"`, `"intended_state":"creating"`, 1),
-		"v1 version-two field":                    v1Stopped[:len(v1Stopped)-1] + `,"readiness":{"status":"not_ready","diagnostic":""}}`,
+		"v1 readiness field":                      v1Stopped[:len(v1Stopped)-1] + `,"readiness":{"status":"not_ready","diagnostic":""}}`,
+		"v1 start-generation field":               v1Stopped[:len(v1Stopped)-1] + `,"start_generation":"00112233-4455-4677-8899-aabbccddeeff"}`,
 		"v2 missing readiness":                    strings.Replace(v2Stopped, `,"readiness":{"status":"not_ready","diagnostic":""}`, "", 1),
 		"v2 missing golden revision":              strings.Replace(v2Stopped, `,"golden_revision":"golden-r1"`, "", 1),
 		"v2 empty golden revision":                strings.Replace(v2Stopped, `"golden-r1"`, `""`, 1),
@@ -97,6 +122,7 @@ func TestLoadRecordRejectsUnsafeOrMalformedState(t *testing.T) {
 	valid := `{"version":1,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-dev"}}`
 	for name, contents := range map[string]string{
 		"unknown record field":      valid[:len(valid)-1] + `,"extra":true}`,
+		"duplicate record field":    strings.Replace(valid, `"mode":"clean"`, `"mode":"clean","mode":"clean"`, 1),
 		"unknown backend field":     `{"version":1,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-dev","extra":true}}`,
 		"unsupported version":       strings.Replace(valid, `"version":1`, `"version":2`, 1),
 		"record name mismatch":      strings.Replace(valid, `"name":"dev"`, `"name":"other"`, 1),

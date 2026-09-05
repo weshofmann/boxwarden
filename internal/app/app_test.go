@@ -21,8 +21,13 @@ import (
 
 func TestSessionStatusRendersPersistedAndObservedState(t *testing.T) {
 	configPath := writeStatusFixture(t, "work", "dev")
+	recordPath := filepath.Join(filepath.Dir(configPath), "sessions", "dev.json")
+	before, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var output bytes.Buffer
-	err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "session", "status", "dev"}, Options{
+	err = Run(context.Background(), []string{"--config", configPath, "--domain", "work", "session", "status", "dev"}, Options{
 		Observer: fake.Observer{Observations: map[string]backend.Observation{
 			"boxwarden-work-dev": {ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectStopped},
 		}},
@@ -35,6 +40,13 @@ func TestSessionStatusRendersPersistedAndObservedState(t *testing.T) {
 	const want = "domain: work\nsession: dev\nmode: clean\nintended: stopped\nobserved: stopped\ngolden: golden-work-r1\nconsistency: consistent\n"
 	if got := output.String(); got != want {
 		t.Fatalf("Run() output =\n%s\nwant:\n%s", got, want)
+	}
+	after, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("session status rewrote version 1 record = %q, want %q", after, before)
 	}
 }
 

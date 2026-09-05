@@ -120,6 +120,10 @@ func (s *Service) Create(ctx context.Context, rawName string, mode Mode) (record
 			if err := SaveRecord(s.domain.StateRoot, record.Domain, record); err != nil {
 				return Record{}, fmt.Errorf("re-persist creating intent: %w", err)
 			}
+			record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+			if err != nil {
+				return Record{}, fmt.Errorf("reload persisted creating intent: %w", err)
+			}
 		default:
 			return Record{}, fmt.Errorf("session %q already exists with intended state %q", name, record.IntendedState)
 		}
