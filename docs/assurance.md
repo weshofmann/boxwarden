@@ -205,7 +205,7 @@ codes when the evidence is multi-dimensional.
 | H9 | No Rosetta share | D, T | `docs/architecture.md`; backend seam test | — |
 | H10 | The serial PTY is not reachable through guest networking | D, Q, I | Design basis: `docs/security-model.md`, `docs/decisions/017-host-local-serial-recovery-shell.md`; Task 0 qualified PTY isolation | V4 supervisor uses a different broker; ADR 017 requalification pending |
 | H11 | Guest-local runtimes (Docker group, etc.) are not treated as a substitute for VM isolation | D | `docs/security-model.md` | — |
-| H12 | `--net-softnet-allow=0.0.0.0/0` is prohibited | D, T | `docs/architecture.md`; V4 launch test: rejects every allow flag | Also disables bridge isolation; prohibition documented and tested |
+| H12 | Future V4 launch must prohibit `--net-softnet-allow=0.0.0.0/0` | D, P | ADR 015; `docs/architecture.md`; `docs/security-model.md` (normative future V4 design) | It disables bridge isolation; no production launch enforcement or runtime qualification exists yet |
 
 ### Network isolation
 
