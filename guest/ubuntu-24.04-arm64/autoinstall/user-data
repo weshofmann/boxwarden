@@ -71,7 +71,7 @@ autoinstall:
       PermitUserRC no
       EOF
     - install -d -o root -g root -m 0755 /target/usr/local/libexec
-    - "printf '%s  %s\\n' '812f86f57ea86259898439f0025d1c54060b6504998bfce43c3dacf97295b179' '/cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap' | sha256sum -c -"
+    - "printf '%s  %s\\n' '8c9492624f3fd240b8e5e247d17702e76dabff54a57027753717338e328b831c' '/cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap' | sha256sum -c -"
     - install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap /target/usr/local/libexec/boxwarden-guest-bootstrap
     - "printf '%s\\n' '__BOXWARDEN_RUN_ID__' > /target/etc/boxwarden-task0-spike"
     - chmod 0644 /target/etc/boxwarden-task0-spike
