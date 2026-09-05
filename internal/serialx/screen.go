@@ -2,7 +2,6 @@ package serialx
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"os"
@@ -40,20 +39,6 @@ func (e ScreenEvidence) valid() bool {
 	return e.pid > 0 && !e.started.IsZero() && e.token != [16]byte{}
 }
 
-// NewScreenEvidence binds a direct starter's observed PID/start time to an
-// unguessable local token. Task 4 records and revalidates this evidence with
-// its process-start proof; this package never discovers processes by PID.
-func NewScreenEvidence(pid int, started time.Time) (ScreenEvidence, error) {
-	if pid <= 0 || started.IsZero() {
-		return ScreenEvidence{}, errors.New("Screen PID and start time are required")
-	}
-	var token [16]byte
-	if _, err := rand.Read(token[:]); err != nil {
-		return ScreenEvidence{}, fmt.Errorf("generate Screen evidence token: %w", err)
-	}
-	return ScreenEvidence{pid: pid, started: started, token: token}, nil
-}
-
 type ScreenChild interface {
 	Stop(context.Context) error
 	Wait(context.Context) error
@@ -78,6 +63,12 @@ func StartScreen(ctx context.Context, starter ScreenStarter, binary ScreenBinary
 		return nil, err
 	}
 	if child == nil || !child.Evidence().valid() {
+		if child != nil {
+			cleanup, cancel := context.WithTimeout(context.Background(), ExchangeDeadline)
+			_ = child.Stop(cleanup)
+			_ = child.Wait(cleanup)
+			cancel()
+		}
 		return nil, errors.New("Screen child or direct-child evidence is invalid")
 	}
 	return child, nil

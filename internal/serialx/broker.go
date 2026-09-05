@@ -2,7 +2,6 @@
 package serialx
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -32,13 +31,13 @@ const (
 )
 
 type BrokerConfig struct {
-	Tart, Screen io.Writer
+	Tart, Screen io.WriteCloser
 	Generation   string
 	Clock        Clock
 }
 type Broker struct {
 	mu                     sync.Mutex
-	tart, screen           io.Writer
+	tart, screen           io.WriteCloser
 	generation             string
 	clock                  Clock
 	state                  State
@@ -50,6 +49,7 @@ type Broker struct {
 	changed                chan struct{}
 	poisonCause            error
 	closeOnce              sync.Once
+	outsidePartial         []byte
 }
 
 func NewBroker(config BrokerConfig) *Broker {
@@ -83,10 +83,12 @@ func (b *Broker) TartOutput(output []byte) error {
 	// Control-looking output is legal only while the exact active exchange owns
 	// the parser. A delayed/duplicate result must never become harmless console
 	// text after Exchange releases its lease.
-	if b.state != StateAutomation && bytes.Contains(output, []byte("BOXWARDEN-")) {
-		b.poisonLocked(fmt.Errorf("serial control frame outside active exchange"))
-		b.closeEndpoints()
-		return ErrPoisoned
+	if b.state != StateAutomation {
+		if err := b.feedOutsideControlLocked(output); err != nil {
+			b.poisonLocked(err)
+			b.closeEndpoints()
+			return ErrPoisoned
+		}
 	}
 	if err := b.enqueueScreenLocked(output); err != nil {
 		b.failExchangeLocked(err)
@@ -100,6 +102,34 @@ func (b *Broker) TartOutput(output []byte) error {
 			b.poisonLocked(err)
 			b.closeEndpoints()
 			return ErrPoisoned
+		}
+	}
+	return nil
+}
+func (b *Broker) feedOutsideControlLocked(output []byte) error {
+	for len(output) != 0 {
+		index := -1
+		for i, c := range output {
+			if c == '\n' {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			if len(b.outsidePartial)+len(output) > MaxPhysicalLineBytes {
+				return fmt.Errorf("out-of-exchange serial line exceeds bound")
+			}
+			b.outsidePartial = append(b.outsidePartial, output...)
+			return nil
+		}
+		if len(b.outsidePartial)+index > MaxPhysicalLineBytes {
+			return fmt.Errorf("out-of-exchange serial line exceeds bound")
+		}
+		line := append(b.outsidePartial, output[:index]...)
+		b.outsidePartial = b.outsidePartial[:0]
+		output = output[index+1:]
+		if len(line) != 0 && string(line) != "" && len(line) >= len("BOXWARDEN-") && string(line[:len("BOXWARDEN-")]) == "BOXWARDEN-" {
+			return fmt.Errorf("serial control frame outside active exchange")
 		}
 	}
 	return nil
@@ -125,10 +155,11 @@ func (b *Broker) CloseWithError(err error) {
 func (b *Broker) Close() error { b.CloseWithError(errors.New("serial broker closed")); return nil }
 func (b *Broker) closeEndpoints() {
 	b.closeOnce.Do(func() {
-		for _, writer := range []io.Writer{b.tart, b.screen} {
-			if closer, ok := writer.(io.Closer); ok && closer != nil {
-				_ = closer.Close()
-			}
+		if b.tart != nil {
+			_ = b.tart.Close()
+		}
+		if b.screen != nil {
+			_ = b.screen.Close()
 		}
 	})
 }

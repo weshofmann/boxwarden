@@ -12,16 +12,17 @@ import (
 // Root is an existing, exact owner-private runtime parent directory.
 type Root = string
 type Runtime struct {
-	TartSlave, OperatorSlave   string
-	TartMaster, OperatorMaster *os.File
-	Screen                     ScreenChild
-	generationDir              string
-	root, generationRoot       *os.Root
-	tartLink, operatorLink     endpointIdentity
+	TartSlave, OperatorSlave     string
+	TartMaster, OperatorMaster   *os.File
+	Screen                       ScreenChild
+	generationDir                string
+	root, generationRoot         *os.Root
+	generationDev, generationIno uint64
+	tartLink, operatorLink       endpointIdentity
 }
 type endpointIdentity struct {
-	name, target string
-	dev, ino     uint64
+	name, target               string
+	dev, ino, linkDev, linkIno uint64
 }
 type ptyAllocator interface {
 	Allocate() (*os.File, *os.File, error)
@@ -50,6 +51,16 @@ func createRuntime(ctx context.Context, root Root, generation string, screen Scr
 	if err != nil {
 		return Runtime{}, fmt.Errorf("open runtime root: %w", err)
 	}
+	before, err := os.Lstat(root)
+	if err != nil {
+		rootHandle.Close()
+		return Runtime{}, fmt.Errorf("reinspect runtime root: %w", err)
+	}
+	opened, err := rootHandle.Stat(".")
+	if err != nil || !sameFileIdentity(before, opened) || !privateDirectory(opened) {
+		rootHandle.Close()
+		return Runtime{}, fmt.Errorf("runtime root changed during admission")
+	}
 	if _, err := rootHandle.Lstat(generation); err == nil {
 		rootHandle.Close()
 		return Runtime{}, fmt.Errorf("generation directory already exists")
@@ -68,7 +79,21 @@ func createRuntime(ctx context.Context, root Root, generation string, screen Scr
 		return Runtime{}, fmt.Errorf("open generation directory: %w", err)
 	}
 	directory := filepath.Join(root, generation)
-	runtime := Runtime{generationDir: directory, root: rootHandle, generationRoot: generationRoot}
+	genInfo, err := generationRoot.Stat(".")
+	if err != nil {
+		generationRoot.Close()
+		rootHandle.Remove(generation)
+		rootHandle.Close()
+		return Runtime{}, fmt.Errorf("inspect generation directory: %w", err)
+	}
+	dev, ino, ok := deviceIdentity(genInfo)
+	if !ok {
+		generationRoot.Close()
+		rootHandle.Remove(generation)
+		rootHandle.Close()
+		return Runtime{}, fmt.Errorf("generation identity unavailable")
+	}
+	runtime := Runtime{generationDir: directory, root: rootHandle, generationRoot: generationRoot, generationDev: dev, generationIno: ino}
 	cleanup := func(err error) (Runtime, error) { _ = runtime.Close(); return Runtime{}, err }
 	tartMaster, tartSlave, err := allocator.Allocate()
 	if err != nil {
@@ -98,11 +123,17 @@ func createRuntime(ctx context.Context, root Root, generation string, screen Scr
 	if err != nil {
 		return cleanup(err)
 	}
+	if err := runtime.captureLinkIdentity(&runtime.tartLink); err != nil {
+		return cleanup(err)
+	}
 	if err := generationRoot.Symlink(operatorSlave.Name(), "operator-console"); err != nil {
 		return cleanup(fmt.Errorf("link operator slave: %w", err))
 	}
 	runtime.operatorLink, err = identityForEndpoint("operator-console", operatorSlave.Name())
 	if err != nil {
+		return cleanup(err)
+	}
+	if err := runtime.captureLinkIdentity(&runtime.operatorLink); err != nil {
 		return cleanup(err)
 	}
 	child, err := StartScreen(ctx, starter, screen, operatorSlave, "boxwarden-"+generation)
@@ -153,7 +184,9 @@ func (r Runtime) Shutdown(ctx context.Context) error {
 			first = err
 		}
 		if first == nil {
-			if err := r.root.Remove(filepath.Base(r.generationDir)); err != nil && first == nil {
+			if info, err := r.root.Lstat(filepath.Base(r.generationDir)); err != nil || !sameDeviceIdentity(info, r.generationDev, r.generationIno) || !privateDirectory(info) {
+				first = fmt.Errorf("generation directory changed before cleanup")
+			} else if err := r.root.Remove(filepath.Base(r.generationDir)); err != nil && first == nil {
 				first = err
 			}
 		}
@@ -183,6 +216,9 @@ func (r Runtime) revalidateEndpoint(endpoint endpointIdentity) error {
 	if err != nil || info.Mode()&os.ModeSymlink == 0 {
 		return fmt.Errorf("endpoint link changed")
 	}
+	if !sameDeviceIdentity(info, endpoint.linkDev, endpoint.linkIno) {
+		return fmt.Errorf("endpoint link identity changed")
+	}
 	target, err := r.generationRoot.Readlink(endpoint.name)
 	if err != nil || target != endpoint.target {
 		return fmt.Errorf("endpoint link target changed")
@@ -196,6 +232,33 @@ func (r Runtime) revalidateEndpoint(endpoint endpointIdentity) error {
 		return fmt.Errorf("endpoint target identity changed")
 	}
 	return nil
+}
+func (r Runtime) captureLinkIdentity(endpoint *endpointIdentity) error {
+	info, err := r.generationRoot.Lstat(endpoint.name)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return fmt.Errorf("inspect endpoint link: %w", err)
+	}
+	dev, ino, ok := deviceIdentity(info)
+	if !ok {
+		return fmt.Errorf("endpoint link identity unavailable")
+	}
+	endpoint.linkDev, endpoint.linkIno = dev, ino
+	return nil
+}
+func privateDirectory(info os.FileInfo) bool {
+	return info.IsDir() && info.Mode().Perm() == 0o700 && ownedByCurrentUser(info)
+}
+func sameFileIdentity(left, right os.FileInfo) bool {
+	dl, il, ok := deviceIdentity(left)
+	if !ok {
+		return false
+	}
+	dr, ir, ok := deviceIdentity(right)
+	return ok && dl == dr && il == ir
+}
+func sameDeviceIdentity(info os.FileInfo, dev, ino uint64) bool {
+	gotDev, gotIno, ok := deviceIdentity(info)
+	return ok && gotDev == dev && gotIno == ino
 }
 func deviceIdentity(info os.FileInfo) (uint64, uint64, bool) {
 	stat, ok := info.Sys().(*syscall.Stat_t)

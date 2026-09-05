@@ -33,7 +33,6 @@ func (b *Broker) Exchange(ctx context.Context, request ExchangeRequest) (json.Ra
 	if err != nil {
 		return nil, err
 	}
-	defer lease.Close()
 	b.mu.Lock()
 	if b.exchange != nil || b.state != StateAutomation {
 		b.poisonLocked(fmt.Errorf("automation parser state conflict"))
@@ -43,13 +42,7 @@ func (b *Broker) Exchange(ctx context.Context, request ExchangeRequest) (json.Ra
 	exchange := &activeExchange{request: request.Request, result: make(chan exchangeResult, 1)}
 	b.exchange = exchange
 	b.mu.Unlock()
-	defer func() {
-		b.mu.Lock()
-		if b.exchange == exchange {
-			b.exchange = nil
-		}
-		b.mu.Unlock()
-	}()
+	defer func() { b.finishExchange(exchange, lease) }()
 	encoded, err := json.Marshal(request.Request)
 	if err != nil || len(encoded) > guestproto.MaxRequestBytes {
 		b.poison(fmt.Errorf("canonical request is invalid or exceeds frame bound"))
@@ -77,6 +70,19 @@ func (b *Broker) Exchange(ctx context.Context, request ExchangeRequest) (json.Ra
 		b.poison(fmt.Errorf("automation deadline exceeded"))
 		return nil, ErrPoisoned
 	}
+}
+func (b *Broker) finishExchange(exchange *activeExchange, lease Lease) {
+	b.mu.Lock()
+	if b.exchange == exchange {
+		b.exchange = nil
+		if b.state == StateAutomation {
+			b.state = StateIdle
+			b.activeLeaseID = 0
+			b.notifyLocked()
+		}
+	}
+	b.mu.Unlock()
+	_ = lease.Close()
 }
 func (b *Broker) validateRequest(request ExchangeRequest) error {
 	if b.tart == nil {

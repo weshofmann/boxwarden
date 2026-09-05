@@ -127,12 +127,16 @@ func TestCreateRuntimeRejectsInvalidDirectScreenEvidence(t *testing.T) {
 	if err := os.Chmod(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	starter := &screenStarterFake{child: invalidScreenChild{}}
+	child := &invalidScreenChild{}
+	starter := &screenStarterFake{child: child}
 	if _, err := createRuntime(context.Background(), root, "generation-invalid", qualifiedScreenFact(), starter, &ptyAllocatorFake{}); err == nil {
 		t.Fatal("CreateRuntime() accepted invalid Screen child evidence")
 	}
 	if _, err := os.Lstat(filepath.Join(root, "generation-invalid")); !os.IsNotExist(err) {
 		t.Fatalf("invalid child cleanup left generation: %v", err)
+	}
+	if !child.stopped || !child.waited {
+		t.Fatalf("invalid child cleanup = %#v, want stop and reap", child)
 	}
 }
 
@@ -161,7 +165,7 @@ func TestRuntimeShutdownRefusesTamperedEndpointReplacement(t *testing.T) {
 
 func TestBrokerDiscardsOperatorInputOutsideConsole(t *testing.T) {
 	var tart bytes.Buffer
-	broker := NewBroker(BrokerConfig{Tart: &tart, Generation: testRequest().StartGeneration})
+	broker := NewBroker(BrokerConfig{Tart: writeCloser{&tart}, Generation: testRequest().StartGeneration})
 	broker.OperatorInput([]byte("danger"))
 	if got, want := broker.InputDiscarded(), uint64(len("danger")); got != want {
 		t.Fatalf("InputDiscarded() = %d, want %d", got, want)
@@ -179,7 +183,7 @@ func TestExchangeAcceptsOnlyOneCanonicalAssociatedFrame(t *testing.T) {
 		t.Fatal(err)
 	}
 	tart := &recordingWriter{}
-	broker := NewBroker(BrokerConfig{Tart: tart, Screen: io.Discard, Generation: request.StartGeneration})
+	broker := NewBroker(BrokerConfig{Tart: tart, Screen: discardCloser{}, Generation: request.StartGeneration})
 	tart.after = func() {
 		broker.OperatorInput([]byte("operator-must-not-replay"))
 		_ = broker.TartOutput([]byte("banner\r\nBOXWARDEN-BEGIN " + request.Nonce + " " + request.SessionID + "\r\n" + end + "\r\n"))
@@ -215,7 +219,7 @@ func TestExchangePoisonsDuplicateOrMismatchedFrames(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			tart := &recordingWriter{}
-			broker := NewBroker(BrokerConfig{Tart: tart, Screen: io.Discard, Generation: request.StartGeneration})
+			broker := NewBroker(BrokerConfig{Tart: tart, Screen: discardCloser{}, Generation: request.StartGeneration})
 			tart.after = func() { _ = broker.TartOutput([]byte(frame)) }
 			if _, err := broker.Exchange(context.Background(), ExchangeRequest{Request: request}); !errors.Is(err, ErrPoisoned) {
 				t.Fatalf("Exchange() error = %v, want ErrPoisoned", err)
@@ -234,7 +238,7 @@ func TestLateEndAfterExchangeResultPoisonsIdleBroker(t *testing.T) {
 		t.Fatal(err)
 	}
 	tart := &recordingWriter{}
-	broker := NewBroker(BrokerConfig{Tart: tart, Screen: io.Discard, Generation: request.StartGeneration})
+	broker := NewBroker(BrokerConfig{Tart: tart, Screen: discardCloser{}, Generation: request.StartGeneration})
 	tart.after = func() {
 		_ = broker.TartOutput([]byte("BOXWARDEN-BEGIN " + request.Nonce + " " + request.SessionID + "\n" + end + "\n"))
 	}
@@ -312,7 +316,7 @@ func TestBlockedScreenWriterCannotWedgeTartReaderAndIsBounded(t *testing.T) {
 
 func TestBrokerCloseUnblocksBlockedConsoleWriteWithoutLeaseReplay(t *testing.T) {
 	tart := &blockingWriter{started: make(chan struct{}), release: make(chan struct{})}
-	broker := NewBroker(BrokerConfig{Tart: tart, Screen: io.Discard})
+	broker := NewBroker(BrokerConfig{Tart: tart, Screen: discardCloser{}})
 	lease, err := broker.AcquireConsole(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -377,7 +381,7 @@ func TestExchangePoisonsOnOverflowInterleavingAndTimeout(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			clock := newClockFake()
 			tart := &recordingWriter{}
-			broker := NewBroker(BrokerConfig{Tart: tart, Screen: io.Discard, Generation: request.StartGeneration, Clock: clock})
+			broker := NewBroker(BrokerConfig{Tart: tart, Screen: discardCloser{}, Generation: request.StartGeneration, Clock: clock})
 			tart.after = func() {
 				respond(broker)
 				if name == "timeout" {
@@ -396,7 +400,7 @@ func TestExchangePoisonsOnOverflowInterleavingAndTimeout(t *testing.T) {
 
 func TestConsoleEOFDoesNotCloseScreenOrTartEndpoint(t *testing.T) {
 	var tart bytes.Buffer
-	broker := NewBroker(BrokerConfig{Tart: &tart})
+	broker := NewBroker(BrokerConfig{Tart: writeCloser{&tart}})
 	lease, err := broker.AcquireConsole(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -446,6 +450,7 @@ func (w *recordingWriter) values() []string {
 	defer w.mu.Unlock()
 	return append([]string(nil), w.writes...)
 }
+func (*recordingWriter) Close() error { return nil }
 
 type clockFake struct{ ch chan time.Time }
 
@@ -478,11 +483,11 @@ func (screenChildFake) Stop(context.Context) error { return nil }
 func (screenChildFake) Wait(context.Context) error { return nil }
 func (screenChildFake) Evidence() ScreenEvidence   { return testScreenEvidence() }
 
-type invalidScreenChild struct{}
+type invalidScreenChild struct{ stopped, waited bool }
 
-func (invalidScreenChild) Stop(context.Context) error { return nil }
-func (invalidScreenChild) Wait(context.Context) error { return nil }
-func (invalidScreenChild) Evidence() ScreenEvidence   { return ScreenEvidence{} }
+func (c *invalidScreenChild) Stop(context.Context) error { c.stopped = true; return nil }
+func (c *invalidScreenChild) Wait(context.Context) error { c.waited = true; return nil }
+func (c *invalidScreenChild) Evidence() ScreenEvidence   { return ScreenEvidence{} }
 
 type waitScreenChild struct{ result chan error }
 
@@ -556,6 +561,23 @@ func (w *snapshotCountWriter) Write(data []byte) (int, error) {
 	<-w.release
 	return len(data) + 1, nil
 }
+func (w *snapshotCountWriter) Close() error {
+	select {
+	case <-w.release:
+	default:
+		close(w.release)
+	}
+	return nil
+}
+
+type writeCloser struct{ io.Writer }
+
+func (writeCloser) Close() error { return nil }
+
+type discardCloser struct{}
+
+func (discardCloser) Write(data []byte) (int, error) { return len(data), nil }
+func (discardCloser) Close() error                   { return nil }
 func qualifiedScreenFact() ScreenBinary {
 	fact, err := hostx.AdmitScreen(hostx.PathFact{Exists: true, Regular: true, Mode: 0o755, UID: 0, GID: 0, Links: 1, SHA256: ScreenSHA256}, ScreenVersion)
 	if err != nil {
