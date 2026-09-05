@@ -258,6 +258,50 @@ func TestBackendDeleteObservationMakesObjectAbsent(t *testing.T) {
 	}
 }
 
+func TestBackendStartResolveAndDeleteRecordExactObjectOperations(t *testing.T) {
+	backendFake := fake.New(backend.Observation{ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectStopped})
+	request := backend.StartRequest{ObjectID: "boxwarden-work-dev", SerialDevice: "/dev/ttys004", GenerationDirectory: "/private/runtime/work/dev/generation-1"}
+
+	handle, err := backendFake.Start(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if got, want := backendFake.StartCalls(), []fake.StartCall{{Request: request}}; !sameStartCalls(got, want) {
+		t.Fatalf("StartCalls() = %#v, want %#v", got, want)
+	}
+	backendFake.SetAddress(request.ObjectID, "192.0.2.10")
+	if got, err := backendFake.Resolve(context.Background(), request.ObjectID); err != nil || got != "192.0.2.10" {
+		t.Fatalf("Resolve() = (%q, %v), want configured current address", got, err)
+	}
+	if err := handle.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	if err := handle.Wait(context.Background()); err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if err := backendFake.Delete(context.Background(), request.ObjectID); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if got, want := backendFake.DeleteCalls(), []string{request.ObjectID}; !sameStrings(got, want) {
+		t.Fatalf("DeleteCalls() = %#v, want %#v", got, want)
+	}
+	if got, err := backendFake.Observe(context.Background(), request.ObjectID); err != nil || got.Exists {
+		t.Fatalf("Observe() after Delete() = (%#v, %v), want absent", got, err)
+	}
+}
+
+func sameStartCalls(got, want []fake.StartCall) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for index := range got {
+		if got[index] != want[index] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestObserverReturnsConfiguredObservation(t *testing.T) {
 	expected := backend.Observation{ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectStopped}
 	observer := fake.Observer{Observations: map[string]backend.Observation{expected.ObjectID: expected}}
