@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/weshofmann/boxwarden/internal/guestproto"
+	"github.com/weshofmann/boxwarden/internal/hostx"
 )
 
 const serialTestKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -70,8 +71,8 @@ func TestCreateRuntimeUsesTwoOwnerOnlyPTYSlavesAndFixedScreenSpec(t *testing.T) 
 	if allocator.calls != 2 {
 		t.Fatalf("PTY allocations = %d, want two", allocator.calls)
 	}
-	if got, want := starter.spec, (ScreenSpec{Path: ScreenPath, Args: []string{"-D", "-m", "-S", "boxwarden-generation-1"}, Stdin: runtime.OperatorSlave}); !sameScreenSpec(got, want) {
-		t.Fatalf("Screen spec = %#v, want %#v", got, want)
+	if got := starter.spec; got.Path != ScreenPath || !sameStrings(got.Args, []string{"-D", "-m", "-S", "boxwarden-generation-1"}) || got.Stdin == nil || got.Stdin.Name() != allocator.slaves[1] {
+		t.Fatalf("Screen spec = %#v, want exact opened operator slave %q", got, allocator.slaves[1])
 	}
 	for _, link := range []string{runtime.TartSlave, runtime.OperatorSlave} {
 		linkInfo, err := os.Lstat(link)
@@ -118,6 +119,43 @@ func TestCreateRuntimeRollsBackOnlyItsPartialGeneration(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(root, "generation-2")); !os.IsNotExist(err) {
 		t.Fatalf("partial generation remained after rollback: %v", err)
+	}
+}
+
+func TestCreateRuntimeRejectsInvalidDirectScreenEvidence(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	starter := &screenStarterFake{child: invalidScreenChild{}}
+	if _, err := createRuntime(context.Background(), root, "generation-invalid", qualifiedScreenFact(), starter, &ptyAllocatorFake{}); err == nil {
+		t.Fatal("CreateRuntime() accepted invalid Screen child evidence")
+	}
+	if _, err := os.Lstat(filepath.Join(root, "generation-invalid")); !os.IsNotExist(err) {
+		t.Fatalf("invalid child cleanup left generation: %v", err)
+	}
+}
+
+func TestRuntimeShutdownRefusesTamperedEndpointReplacement(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := createRuntime(context.Background(), root, "generation-tamper", qualifiedScreenFact(), &screenStarterFake{}, &ptyAllocatorFake{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(runtime.TartSlave); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/dev/null", runtime.TartSlave); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.Shutdown(context.Background()); err == nil {
+		t.Fatal("Shutdown() accepted tampered endpoint")
+	}
+	if _, err := os.Lstat(runtime.TartSlave); err != nil {
+		t.Fatalf("Shutdown() removed tampered replacement: %v", err)
 	}
 }
 
@@ -189,6 +227,28 @@ func TestExchangePoisonsDuplicateOrMismatchedFrames(t *testing.T) {
 	}
 }
 
+func TestLateEndAfterExchangeResultPoisonsIdleBroker(t *testing.T) {
+	request, result := testRequest(), testResult(testRequest())
+	_, end, err := guestproto.EncodeSerialFrame(request, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tart := &recordingWriter{}
+	broker := NewBroker(BrokerConfig{Tart: tart, Screen: io.Discard, Generation: request.StartGeneration})
+	tart.after = func() {
+		_ = broker.TartOutput([]byte("BOXWARDEN-BEGIN " + request.Nonce + " " + request.SessionID + "\n" + end + "\n"))
+	}
+	if _, err := broker.Exchange(context.Background(), ExchangeRequest{Request: request}); err != nil {
+		t.Fatalf("Exchange() error = %v", err)
+	}
+	if err := broker.TartOutput([]byte(end + "\n")); !errors.Is(err, ErrPoisoned) {
+		t.Fatalf("late TartOutput() error = %v, want ErrPoisoned", err)
+	}
+	if !broker.Poisoned() {
+		t.Fatal("late end did not poison idle broker")
+	}
+}
+
 func TestScreenChildLossPoisonsGeneration(t *testing.T) {
 	broker := NewBroker(BrokerConfig{})
 	broker.ChildLost(errors.New("unexpected exit"))
@@ -213,6 +273,17 @@ func TestRuntimeWatchScreenPoisonsOnlyOnItsDirectChildExit(t *testing.T) {
 	}
 }
 
+func TestRuntimeShutdownStopsAndReapsOnlyItsDirectScreenChild(t *testing.T) {
+	child := &trackedScreenChild{evidence: testScreenEvidence()}
+	runtime := Runtime{Screen: child}
+	if err := runtime.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+	if !child.stopped || !child.waited {
+		t.Fatalf("Shutdown() child state = %#v, want direct stop and reap", child)
+	}
+}
+
 func TestBlockedScreenWriterCannotWedgeTartReaderAndIsBounded(t *testing.T) {
 	screen := &blockingWriter{started: make(chan struct{}), release: make(chan struct{})}
 	broker := NewBroker(BrokerConfig{Screen: screen})
@@ -234,7 +305,54 @@ func TestBlockedScreenWriterCannotWedgeTartReaderAndIsBounded(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("blocked Screen writer wedged TartOutput")
 	}
+	if err := broker.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBrokerCloseUnblocksBlockedConsoleWriteWithoutLeaseReplay(t *testing.T) {
+	tart := &blockingWriter{started: make(chan struct{}), release: make(chan struct{})}
+	broker := NewBroker(BrokerConfig{Tart: tart, Screen: io.Discard})
+	lease, err := broker.AcquireConsole(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { broker.OperatorInput([]byte("console")); close(done) }()
+	<-tart.started
+	if err := broker.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Close() did not unblock console writer")
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestScreenDrainRejectsConcurrentWriteCountBeyondExactSnapshot(t *testing.T) {
+	screen := &snapshotCountWriter{started: make(chan struct{}), release: make(chan struct{})}
+	broker := NewBroker(BrokerConfig{Screen: screen})
+	if err := broker.TartOutput([]byte("first")); err != nil {
+		t.Fatal(err)
+	}
+	<-screen.started
+	if err := broker.TartOutput([]byte("second")); err != nil {
+		t.Fatal(err)
+	}
 	close(screen.release)
+	deadline := time.After(time.Second)
+	for !broker.Poisoned() {
+		select {
+		case <-deadline:
+			t.Fatal("oversized stale write count did not poison")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
 }
 
 func TestTartOutputPoisonsWithoutScreenWriter(t *testing.T) {
@@ -356,11 +474,30 @@ func (s *screenStarterFake) StartScreen(_ context.Context, spec ScreenSpec) (Scr
 
 type screenChildFake struct{}
 
-func (screenChildFake) Wait() error { return nil }
+func (screenChildFake) Stop(context.Context) error { return nil }
+func (screenChildFake) Wait(context.Context) error { return nil }
+func (screenChildFake) Evidence() ScreenEvidence   { return testScreenEvidence() }
+
+type invalidScreenChild struct{}
+
+func (invalidScreenChild) Stop(context.Context) error { return nil }
+func (invalidScreenChild) Wait(context.Context) error { return nil }
+func (invalidScreenChild) Evidence() ScreenEvidence   { return ScreenEvidence{} }
 
 type waitScreenChild struct{ result chan error }
 
-func (c *waitScreenChild) Wait() error { return <-c.result }
+func (c *waitScreenChild) Stop(context.Context) error { return nil }
+func (c *waitScreenChild) Wait(context.Context) error { return <-c.result }
+func (c *waitScreenChild) Evidence() ScreenEvidence   { return testScreenEvidence() }
+
+type trackedScreenChild struct {
+	evidence        ScreenEvidence
+	stopped, waited bool
+}
+
+func (c *trackedScreenChild) Stop(context.Context) error { c.stopped = true; return nil }
+func (c *trackedScreenChild) Wait(context.Context) error { c.waited = true; return nil }
+func (c *trackedScreenChild) Evidence() ScreenEvidence   { return c.evidence }
 
 type ptyAllocatorFake struct {
 	calls  int
@@ -398,8 +535,33 @@ func (w *blockingWriter) Write(data []byte) (int, error) {
 	<-w.release
 	return len(data), nil
 }
+func (w *blockingWriter) Close() error {
+	w.once.Do(func() { close(w.started) })
+	select {
+	case <-w.release:
+	default:
+		close(w.release)
+	}
+	return nil
+}
+
+type snapshotCountWriter struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (w *snapshotCountWriter) Write(data []byte) (int, error) {
+	w.once.Do(func() { close(w.started) })
+	<-w.release
+	return len(data) + 1, nil
+}
 func qualifiedScreenFact() ScreenBinary {
-	return ScreenBinary{Path: ScreenPath, SHA256: ScreenSHA256, Version: ScreenVersion, Mode: 0o755, UID: 0, GID: 0, Links: 1}
+	fact, err := hostx.AdmitScreen(hostx.PathFact{Exists: true, Regular: true, Mode: 0o755, UID: 0, GID: 0, Links: 1, SHA256: ScreenSHA256}, ScreenVersion)
+	if err != nil {
+		panic(err)
+	}
+	return fact
 }
 func mustJSON(t *testing.T, value any) string {
 	t.Helper()
@@ -420,8 +582,8 @@ func sameStrings(a, b []string) bool {
 	}
 	return true
 }
-func sameScreenSpec(a, b ScreenSpec) bool {
-	return a.Path == b.Path && a.Stdin == b.Stdin && sameStrings(a.Args, b.Args)
+func testScreenEvidence() ScreenEvidence {
+	return ScreenEvidence{pid: 1, started: time.Unix(1, 0), token: [16]byte{1}}
 }
 
 var _ io.Writer = (*recordingWriter)(nil)

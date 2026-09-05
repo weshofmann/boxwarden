@@ -16,6 +16,12 @@ type Runtime struct {
 	TartMaster, OperatorMaster *os.File
 	Screen                     ScreenChild
 	generationDir              string
+	root, generationRoot       *os.Root
+	tartLink, operatorLink     endpointIdentity
+}
+type endpointIdentity struct {
+	name, target string
+	dev, ino     uint64
 }
 type ptyAllocator interface {
 	Allocate() (*os.File, *os.File, error)
@@ -40,16 +46,29 @@ func createRuntime(ctx context.Context, root Root, generation string, screen Scr
 	if allocator == nil {
 		return Runtime{}, fmt.Errorf("PTY allocator is required")
 	}
-	directory := filepath.Join(root, generation)
-	if _, err := os.Lstat(directory); err == nil {
+	rootHandle, err := os.OpenRoot(root)
+	if err != nil {
+		return Runtime{}, fmt.Errorf("open runtime root: %w", err)
+	}
+	if _, err := rootHandle.Lstat(generation); err == nil {
+		rootHandle.Close()
 		return Runtime{}, fmt.Errorf("generation directory already exists")
 	} else if !os.IsNotExist(err) {
+		rootHandle.Close()
 		return Runtime{}, fmt.Errorf("inspect generation directory: %w", err)
 	}
-	if err := os.Mkdir(directory, 0o700); err != nil {
+	if err := rootHandle.Mkdir(generation, 0o700); err != nil {
+		rootHandle.Close()
 		return Runtime{}, fmt.Errorf("create generation directory: %w", err)
 	}
-	runtime := Runtime{generationDir: directory}
+	generationRoot, err := rootHandle.OpenRoot(generation)
+	if err != nil {
+		rootHandle.Remove(generation)
+		rootHandle.Close()
+		return Runtime{}, fmt.Errorf("open generation directory: %w", err)
+	}
+	directory := filepath.Join(root, generation)
+	runtime := Runtime{generationDir: directory, root: rootHandle, generationRoot: generationRoot}
 	cleanup := func(err error) (Runtime, error) { _ = runtime.Close(); return Runtime{}, err }
 	tartMaster, tartSlave, err := allocator.Allocate()
 	if err != nil {
@@ -72,13 +91,21 @@ func createRuntime(ctx context.Context, root Root, generation string, screen Scr
 	}
 	runtime.TartSlave = filepath.Join(directory, "tart-serial")
 	runtime.OperatorSlave = filepath.Join(directory, "operator-console")
-	if err := os.Symlink(tartSlave.Name(), runtime.TartSlave); err != nil {
+	if err := generationRoot.Symlink(tartSlave.Name(), "tart-serial"); err != nil {
 		return cleanup(fmt.Errorf("link Tart slave: %w", err))
 	}
-	if err := os.Symlink(operatorSlave.Name(), runtime.OperatorSlave); err != nil {
+	runtime.tartLink, err = identityForEndpoint("tart-serial", tartSlave.Name())
+	if err != nil {
+		return cleanup(err)
+	}
+	if err := generationRoot.Symlink(operatorSlave.Name(), "operator-console"); err != nil {
 		return cleanup(fmt.Errorf("link operator slave: %w", err))
 	}
-	child, err := StartScreen(ctx, starter, screen, runtime.OperatorSlave, "boxwarden-"+generation)
+	runtime.operatorLink, err = identityForEndpoint("operator-console", operatorSlave.Name())
+	if err != nil {
+		return cleanup(err)
+	}
+	child, err := StartScreen(ctx, starter, screen, operatorSlave, "boxwarden-"+generation)
 	if err != nil {
 		return cleanup(fmt.Errorf("start Screen: %w", err))
 	}
@@ -86,7 +113,23 @@ func createRuntime(ctx context.Context, root Root, generation string, screen Scr
 	return runtime, nil
 }
 func (r Runtime) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), ExchangeDeadline)
+	defer cancel()
+	return r.Shutdown(ctx)
+}
+
+// Shutdown stops and reaps only the Screen child returned by this runtime's
+// exact starter evidence before closing endpoints and attempting cleanup.
+func (r Runtime) Shutdown(ctx context.Context) error {
 	var first error
+	if r.Screen != nil {
+		if err := r.Screen.Stop(ctx); err != nil && first == nil {
+			first = err
+		}
+		if err := r.Screen.Wait(ctx); err != nil && first == nil {
+			first = err
+		}
+	}
 	for _, file := range []*os.File{r.TartMaster, r.OperatorMaster} {
 		if file != nil {
 			if err := file.Close(); err != nil && first == nil {
@@ -94,19 +137,72 @@ func (r Runtime) Close() error {
 			}
 		}
 	}
-	if r.generationDir != "" {
-		for _, path := range []string{r.TartSlave, r.OperatorSlave} {
-			if path != "" {
-				if err := os.Remove(path); err != nil && !os.IsNotExist(err) && first == nil {
+	if r.generationRoot != nil && r.root != nil {
+		for _, endpoint := range []endpointIdentity{r.tartLink, r.operatorLink} {
+			if err := r.revalidateEndpoint(endpoint); err != nil {
+				if first == nil {
 					first = err
 				}
+				continue
+			}
+			if err := r.generationRoot.Remove(endpoint.name); err != nil && first == nil {
+				first = err
 			}
 		}
-		if err := os.Remove(r.generationDir); err != nil && !os.IsNotExist(err) && first == nil {
+		if err := r.generationRoot.Close(); err != nil && first == nil {
+			first = err
+		}
+		if first == nil {
+			if err := r.root.Remove(filepath.Base(r.generationDir)); err != nil && first == nil {
+				first = err
+			}
+		}
+		if err := r.root.Close(); err != nil && first == nil {
 			first = err
 		}
 	}
 	return first
+}
+
+func identityForEndpoint(name, target string) (endpointIdentity, error) {
+	info, err := os.Stat(target)
+	if err != nil {
+		return endpointIdentity{}, fmt.Errorf("inspect PTY endpoint: %w", err)
+	}
+	dev, ino, ok := deviceIdentity(info)
+	if !ok {
+		return endpointIdentity{}, fmt.Errorf("PTY endpoint identity unavailable")
+	}
+	return endpointIdentity{name: name, target: target, dev: dev, ino: ino}, nil
+}
+func (r Runtime) revalidateEndpoint(endpoint endpointIdentity) error {
+	if endpoint.name == "" {
+		return fmt.Errorf("endpoint identity missing")
+	}
+	info, err := r.generationRoot.Lstat(endpoint.name)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return fmt.Errorf("endpoint link changed")
+	}
+	target, err := r.generationRoot.Readlink(endpoint.name)
+	if err != nil || target != endpoint.target {
+		return fmt.Errorf("endpoint link target changed")
+	}
+	actual, err := os.Stat(target)
+	if err != nil {
+		return fmt.Errorf("endpoint target unavailable: %w", err)
+	}
+	dev, ino, ok := deviceIdentity(actual)
+	if !ok || dev != endpoint.dev || ino != endpoint.ino {
+		return fmt.Errorf("endpoint target identity changed")
+	}
+	return nil
+}
+func deviceIdentity(info os.FileInfo) (uint64, uint64, bool) {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, 0, false
+	}
+	return uint64(stat.Dev), uint64(stat.Ino), true
 }
 
 // WatchScreen binds broker health to this exact direct child. The caller owns
@@ -116,7 +212,7 @@ func (r Runtime) WatchScreen(broker *Broker) {
 	if r.Screen == nil || broker == nil {
 		return
 	}
-	go func() { broker.ChildLost(r.Screen.Wait()) }()
+	go func() { broker.ChildLost(r.Screen.Wait(context.Background())) }()
 }
 
 func safeRuntimeRoot(root string) error {

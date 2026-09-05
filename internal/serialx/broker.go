@@ -2,6 +2,7 @@
 package serialx
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -48,6 +49,7 @@ type Broker struct {
 	leaseID, activeLeaseID uint64
 	changed                chan struct{}
 	poisonCause            error
+	closeOnce              sync.Once
 }
 
 func NewBroker(config BrokerConfig) *Broker {
@@ -69,6 +71,7 @@ func (b *Broker) OperatorInput(input []byte) {
 	}
 	if err := writeAll(b.tart, input); err != nil {
 		b.poisonLocked(fmt.Errorf("forward console input: %w", err))
+		b.closeEndpoints()
 	}
 }
 func (b *Broker) TartOutput(output []byte) error {
@@ -77,15 +80,25 @@ func (b *Broker) TartOutput(output []byte) error {
 	if b.state == StateFailed {
 		return ErrPoisoned
 	}
+	// Control-looking output is legal only while the exact active exchange owns
+	// the parser. A delayed/duplicate result must never become harmless console
+	// text after Exchange releases its lease.
+	if b.state != StateAutomation && bytes.Contains(output, []byte("BOXWARDEN-")) {
+		b.poisonLocked(fmt.Errorf("serial control frame outside active exchange"))
+		b.closeEndpoints()
+		return ErrPoisoned
+	}
 	if err := b.enqueueScreenLocked(output); err != nil {
 		b.failExchangeLocked(err)
 		b.poisonLocked(err)
+		b.closeEndpoints()
 		return ErrPoisoned
 	}
 	if b.state == StateAutomation && b.exchange != nil {
 		if err := b.feedParserLocked(b.exchange, output); err != nil {
 			b.failExchangeLocked(err)
 			b.poisonLocked(err)
+			b.closeEndpoints()
 			return ErrPoisoned
 		}
 	}
@@ -98,7 +111,26 @@ func (b *Broker) ChildLost(err error) {
 	if err == nil {
 		err = errors.New("screen child exited")
 	}
-	b.poison(fmt.Errorf("screen child lost: %w", err))
+	b.CloseWithError(fmt.Errorf("screen child lost: %w", err))
+}
+
+// CloseWithError closes the exact endpoint descriptors without acquiring the
+// broker mutex first, so it can interrupt a blocked console or Screen write.
+func (b *Broker) CloseWithError(err error) {
+	b.closeEndpoints()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.poisonLocked(err)
+}
+func (b *Broker) Close() error { b.CloseWithError(errors.New("serial broker closed")); return nil }
+func (b *Broker) closeEndpoints() {
+	b.closeOnce.Do(func() {
+		for _, writer := range []io.Writer{b.tart, b.screen} {
+			if closer, ok := writer.(io.Closer); ok && closer != nil {
+				_ = closer.Close()
+			}
+		}
+	})
 }
 func (b *Broker) poison(err error) { b.mu.Lock(); defer b.mu.Unlock(); b.poisonLocked(err) }
 func (b *Broker) poisonLocked(err error) {
@@ -149,7 +181,7 @@ func (b *Broker) drainScreen() {
 
 		n, err := screen.Write(queued)
 		b.mu.Lock()
-		if n < 0 || n > len(b.screenQueue) {
+		if n < 0 || n > len(queued) {
 			b.poisonLocked(fmt.Errorf("invalid screen write count %d", n))
 			b.mu.Unlock()
 			return

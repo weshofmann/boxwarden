@@ -117,13 +117,27 @@ func TestDoctorNeverExecutesConfiguredTartAndGatesScreenVersionOnExactIdentity(t
 	}
 }
 
-func TestQualifiedScreenFactExposesExactAdmittedScreen(t *testing.T) {
-	fact := QualifiedScreenFact()
-	if !fact.Qualified() {
-		t.Fatalf("QualifiedScreenFact() = %#v, want exact admitted Screen fact", fact)
+func TestAdmitScreenRequiresObservedExactMetadataAndVersion(t *testing.T) {
+	good := PathFact{Exists: true, Regular: true, Mode: 0o755, UID: 0, GID: 0, Links: 1, SHA256: ScreenExecutableSHA256}
+	admission, err := AdmitScreen(good, ScreenVersionOutput)
+	if err != nil {
+		t.Fatalf("AdmitScreen() error = %v", err)
 	}
-	if fact.Path != ScreenPath || fact.SHA256 != ScreenExecutableSHA256 || fact.Version != ScreenVersionOutput {
-		t.Fatalf("QualifiedScreenFact() = %#v, want current doctor Screen identity", fact)
+	if admission.Path() != ScreenPath || !admission.ValidForRuntime() {
+		t.Fatalf("AdmitScreen() = %#v, want opaque exact admission", admission)
+	}
+	for name, mutate := range map[string]func(*PathFact, *string){
+		"digest drift":  func(f *PathFact, _ *string) { f.SHA256 = "bad" },
+		"mode drift":    func(f *PathFact, _ *string) { f.Mode = 0o777 },
+		"version drift": func(_ *PathFact, version *string) { *version = "other" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			fact, version := good, ScreenVersionOutput
+			mutate(&fact, &version)
+			if _, err := AdmitScreen(fact, version); err == nil {
+				t.Fatal("AdmitScreen() error = nil, want drift refusal")
+			}
+		})
 	}
 }
 

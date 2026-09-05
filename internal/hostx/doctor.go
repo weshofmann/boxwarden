@@ -15,21 +15,25 @@ const (
 	ScreenVersionOutput    = "Screen version 4.00.03 (FAU) 23-Oct-06"
 )
 
-// ScreenFact is the exact immutable Screen identity already checked by Doctor.
-// Runtime construction consumes this value instead of accepting a mutable path.
-type ScreenFact struct {
-	Path, SHA256, Version string
-	Mode                  uint32
-	UID, GID              int
-	Links                 uint64
+// ScreenAdmission is an opaque capability minted only after observed metadata
+// and version output match the qualified system Screen identity.
+type ScreenAdmission struct{ fact screenAdmissionFact }
+type screenAdmissionFact struct {
+	path, digest, version string
+	mode                  uint32
+	uid, gid              int
+	links                 uint64
 }
 
-func QualifiedScreenFact() ScreenFact {
-	return ScreenFact{Path: ScreenPath, SHA256: ScreenExecutableSHA256, Version: ScreenVersionOutput, Mode: 0o755, UID: 0, GID: 0, Links: 1}
+func AdmitScreen(fact PathFact, version string) (ScreenAdmission, error) {
+	if !fact.Exists || !fact.Regular || fact.Mode != 0o755 || fact.UID != 0 || fact.GID != 0 || fact.Links != 1 || fact.SHA256 != ScreenExecutableSHA256 || strings.TrimSpace(version) != ScreenVersionOutput {
+		return ScreenAdmission{}, fmt.Errorf("Screen metadata or version is not qualified")
+	}
+	return ScreenAdmission{fact: screenAdmissionFact{path: ScreenPath, digest: fact.SHA256, version: strings.TrimSpace(version), mode: fact.Mode, uid: fact.UID, gid: fact.GID, links: fact.Links}}, nil
 }
-
-func (f ScreenFact) Qualified() bool {
-	return f == QualifiedScreenFact()
+func (a ScreenAdmission) Path() string { return a.fact.path }
+func (a ScreenAdmission) ValidForRuntime() bool {
+	return a.fact == screenAdmissionFact{path: ScreenPath, digest: ScreenExecutableSHA256, version: ScreenVersionOutput, mode: 0o755, uid: 0, gid: 0, links: 1}
 }
 
 type Status string
@@ -248,7 +252,9 @@ func (s SystemDoctor) Doctor(_ context.Context, request Request) Report {
 	screenFact, screenInspectable := checkTool(inspector, &report, "screen", ScreenPath, ScreenExecutableSHA256, 0o755, 0, 0)
 	screenOK := screenInspectable && exactToolFact(screenFact, ScreenExecutableSHA256, 0o755, 0, 0)
 	if screenOK {
-		if output, err := inspector.CommandOutput(ScreenPath, "--version"); err != nil || strings.TrimSpace(output) != ScreenVersionOutput {
+		if output, err := inspector.CommandOutput(ScreenPath, "--version"); err != nil {
+			add("screen.version", Drifted, "version did not match", ScreenVersionOutput, "use the exact qualified system Screen")
+		} else if _, err := AdmitScreen(screenFact, output); err != nil {
 			add("screen.version", Drifted, "version did not match", ScreenVersionOutput, "use the exact qualified system Screen")
 		}
 	}
