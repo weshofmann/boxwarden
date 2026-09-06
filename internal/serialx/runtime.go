@@ -195,8 +195,14 @@ func (r Runtime) Close() error {
 	return r.Shutdown(ctx)
 }
 
-// Shutdown stops and reaps only the Screen child returned by this runtime's
-// exact starter evidence before closing endpoints and attempting cleanup.
+// Shutdown requires its caller to hold exclusive per-session/generation
+// lifetime ownership: no Boxwarden component may replace endpoint or generation
+// names while cleanup runs. Retained handles and rooted revalidation detect
+// replacements present when validation runs, including same-target inode reuse;
+// they do not make pathname unlink safe against an actively racing same-UID
+// trusted-host process. Shutdown then stops and reaps only the Screen child
+// returned by this runtime's exact starter evidence before closing endpoints
+// and attempting cleanup.
 func (r Runtime) Shutdown(ctx context.Context) error {
 	var first error
 	if r.screen != nil {

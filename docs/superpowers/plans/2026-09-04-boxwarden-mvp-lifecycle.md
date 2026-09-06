@@ -132,6 +132,17 @@ func (b *Broker) AcquireConsole(context.Context) (Lease, error)
 
 `hostx.SystemDoctor.CurrentScreen` is the sole public admission-minting path. Create one private generation directory, two Darwin PTY pairs, exact private endpoint links, and direct `/usr/bin/screen -D -m -S <derived-name>` with the already-open operator slave as stdin. `serialx` alone owns the direct `exec.Cmd`, captures its kernel PID/birth identity immediately after Start, and retains wait/reap state; no caller supplies a starter, child, PID, or birth evidence. Runtime exposes only read-only evidence/check/watch and owned shutdown for the next supervisor task. Root safety is bound to the exact pre-open identity cross-checked against its opened descriptor; generation creation does the same before any endpoint mutation. Supervisor-owned readers pass Tart-master output to broker and operator-master input only to `OperatorInput`. The broker has exactly idle/console/automation/failed states; fixed queue, line, frame, aggregate and deadline bounds; operator data outside console is counted/discarded; overflow, interleaving, timeout, child loss, observer error, or identity mismatch poisons the generation.
 
+The Task 3 cleanup contract relies on the trusted host, not the guest, for its
+namespace boundary: guest root has no path to the owner-private generation.
+Retained endpoint handles and rooted identity checks reject a replacement that
+is present when cleanup validates it, including same-target inode reuse. They
+cannot make Darwin/Linux pathname unlink compare the expected inode. Tasks 4-8
+must therefore preserve exclusive per-session/generation lifetime ownership
+through endpoint and generation/rollback cleanup; no cooperating Boxwarden
+operation may hot-replace those names while an owner cleans them. MVP completion
+does not claim preservation against a malicious or actively racing trusted-host
+same-UID process.
+
 - [ ] **RED:** `TestCreateRuntimeRejectsExistingOrUnsafeGenerationPath`, `TestCreateRuntimeUsesTwoOwnerOnlyPTYSlavesAndFixedScreenSpec`, `TestBrokerDiscardsOperatorInputOutsideConsole`, `TestExchangeAcceptsOnlyOneCanonicalAssociatedFrame`, `TestExchangePoisonsOnOverflowInterleavingAndTimeout`, `TestConsoleEOFDoesNotCloseScreenOrTartEndpoint`. Fakes cover platform-independent behavior; Darwin allocation gets a Darwin-tagged integration test.
 - [ ] **Run RED:** `go test ./internal/serialx -count=1`. Expected: missing package.
 - [ ] **GREEN:** Adapt `6ca97e782`, implement missing Darwin allocator and exact cleanup. The broker consumes Task 2 `DecodeSerialEndLine` so PTY CR normalization is limited to one frame-line boundary before strict correlation validation. Use fixed 128 KiB physical-line and frame bounds: Task 2 permits a 64 KiB decoded result, whose canonical base64 end frame cannot fit the preserved 8 KiB line bound. No socat, generic broker protocol, or Screen hardcopy/log/stuff/paste/control.
@@ -155,6 +166,13 @@ type Launcher interface { Launch(context.Context, LaunchRequest) error }
 ```
 
 Start writes an owner-only immutable supervisor request in its fresh runtime directory, starts fixed `boxwarden internal session-supervisor <request-path>`, and waits only for authenticated starting/ready response. Supervisor does not exec-replace: it owns Tart handle, PTYs, broker, Screen, readers, client key/cert, and a `0600` Unix socket. Its manifest records binding, an owner-private random control key, supervisor PID plus Darwin process-start evidence, endpoint file identities, direct child evidence, and poison state. Each request uses fresh challenge + HMAC over canonical bytes; client validates socket/manifest ownership, process-start evidence, and binding. PID reuse, stale socket, wrong key, missing child, stale snapshot = no ownership.
+
+Task 4 establishes the long-lived exclusive generation owner, and Tasks 5-8
+must serialize retries, readiness failures, stop, and destroy with that owner
+until its endpoint and generation/rollback cleanup completes. This is a
+trusted-host cooperative-lifetime requirement, not a pathname-unlink primitive:
+the recorded identity checks detect pre-validation replacement but cannot close
+an active same-UID mutation between validation and unlink.
 
 - [ ] **RED:** `TestSupervisorLaunchPersistsNoBarePIDOwnership`, `TestControlRejectsWrongBindingChallengeOrMAC`, `TestControllerRejectsPIDReuseAndStaleManifest`, `TestSupervisorReapsDirectChildrenOnBackendExit`, `TestSnapshotIsBoundedAndCannotReportReadyAfterBrokerPoison`.
 - [ ] **Run RED:** `go test ./internal/supervisor -count=1`. Expected: missing package.

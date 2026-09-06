@@ -25,6 +25,16 @@ than the maximum evidence age. It never creates credentials, applies a zone, or
 repairs state. A stale/expired/authentication failure, poisoned broker, failed
 probe, or host/guest-zone mismatch is non-ready.
 
+Runtime namespace cleanup is also generation-owned: the exclusive per-session/
+generation owner holds that ownership through endpoint creation, use, and
+endpoint plus generation/rollback cleanup, and no Boxwarden component may
+hot-replace those names while that owner cleans them. Retained endpoint handles
+and rooted identity checks detect substitutions already present when cleanup
+validates them, including same-target inode reuse. They do not make Darwin or
+Linux pathname unlink conditional on the expected inode, so this contract does
+not claim resistance to a malicious or actively racing process already running
+as the trusted host UID; the guest has no path to this owner-private namespace.
+
 Start/retry reconciliation is executable and conservative:
 
 - `stopped` + backend stopped + no owned runtime creates and persists a fresh

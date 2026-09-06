@@ -244,8 +244,9 @@ func TestRuntimeShutdownRefusesTamperedEndpointReplacement(t *testing.T) {
 	}
 }
 
-// A replacement with the same target is still not owned by this runtime: link
-// identity, not just target text, prevents cleanup of a concurrent replacement.
+// A same-target replacement installed before Shutdown is not owned by this
+// runtime: link identity, not just target text, prevents its cleanup. This does
+// not exercise a concurrent mutation between validation and unlink.
 func TestRuntimeShutdownRefusesSameTargetEndpointLinkReplacement(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Chmod(root, 0o700); err != nil {
