@@ -81,12 +81,22 @@ type BrokerEvidence struct {
 	Poisoned bool `json:"poisoned"`
 }
 
-// RuntimeStartEvidence is returned by the held-capability runtime owner. It
-// records only exact direct children and endpoints that it created.
+// RuntimeStartEvidence records only exact direct children and endpoints that a
+// held-capability runtime owner created.
 type RuntimeStartEvidence struct {
 	Children  []NamedProcessEvidence `json:"children"`
 	Endpoints []NamedFileEvidence    `json:"endpoints"`
 	Broker    BrokerEvidence         `json:"broker"`
+}
+
+// RuntimeStartResult makes ownership after Start explicit. On an error,
+// Owned=false means the owner made no mutation (or completed its rollback),
+// while Owned=true means the supervisor must retain and reap the owner before
+// it may remove any generation namespace evidence. A successful Start always
+// returns Owned=true with valid Evidence.
+type RuntimeStartResult struct {
+	Evidence RuntimeStartEvidence
+	Owned    bool
 }
 type RuntimeEvidence struct {
 	Supervisor       ProcessIdentity        `json:"supervisor"`
@@ -246,6 +256,9 @@ func readLaunchRequest(path string) (LaunchRequest, error) {
 	return request, nil
 }
 func writeManifest(path string, manifest Manifest) error {
+	if filepath.Dir(path) != manifest.RuntimeDirectory || filepath.Base(path) != manifestName {
+		return fmt.Errorf("manifest path is not the fixed runtime manifest path")
+	}
 	if err := validManifest(manifest); err != nil {
 		return err
 	}
@@ -272,6 +285,9 @@ func readManifest(path string) (Manifest, error) {
 	}
 	if err := validManifest(manifest); err != nil {
 		return Manifest{}, err
+	}
+	if filepath.Dir(path) != manifest.RuntimeDirectory {
+		return Manifest{}, fmt.Errorf("manifest is outside declared runtime directory")
 	}
 	return manifest, nil
 }

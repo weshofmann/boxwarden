@@ -48,6 +48,39 @@ func TestSupervisorLaunchPersistsNoBarePIDOwnership(t *testing.T) {
 	}
 }
 
+func TestManifestRejectsPathOutsideDeclaredRuntimeDirectory(t *testing.T) {
+	dir := privateRuntime(t)
+	other := privateRuntime(t)
+	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(101, 0).UTC(), Unique: 8}
+	owner := newTestOwner(identity)
+	requestPath := filepath.Join(dir, requestName)
+	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}); err != nil {
+		t.Fatal(err)
+	}
+	runtimeIdentity, err := capturePrivateDirectory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, _, err := prepare(context.Background(), requestPath, owner, testInspector(identity), runtimeIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(other, manifestName)
+	if err := writeManifest(path, manifest); err == nil {
+		t.Fatal("writeManifest accepted a manifest outside its declared runtime directory")
+	}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writePrivateFile(path, raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readManifest(path); err == nil {
+		t.Fatal("readManifest accepted a manifest outside its declared runtime directory")
+	}
+}
+
 func TestControlRejectsWrongBindingChallengeOrMAC(t *testing.T) {
 	service, controller, cancel := runningService(t, false)
 	defer cancel()
@@ -188,6 +221,59 @@ func TestSetupFailureAfterStartRetainsOwnershipUntilReaped(t *testing.T) {
 	}
 }
 
+func TestRunCleansUpUnownedStartFailureWithoutStoppingOwner(t *testing.T) {
+	dir := privateRuntime(t)
+	requestPath := filepath.Join(dir, requestName)
+	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}); err != nil {
+		t.Fatal(err)
+	}
+	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(601, 0).UTC(), Unique: 61}
+	owner := startResultOwner{testOwner: newTestOwner(identity), result: RuntimeStartResult{}, err: errors.New("start performed no mutation")}
+	err := Run(context.Background(), requestPath, owner, testInspector(identity))
+	if err == nil || !strings.Contains(err.Error(), "start performed no mutation") {
+		t.Fatalf("Run() error = %v, want unowned start failure", err)
+	}
+	if owner.stopCalls() != 0 || owner.closeCalls() != 0 {
+		t.Fatalf("unowned start called Stop=%d Close=%d", owner.stopCalls(), owner.closeCalls())
+	}
+	if _, statErr := os.Lstat(requestPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("unowned start left request namespace: %v", statErr)
+	}
+}
+
+func TestRunReapsPartialStartFailureBeforeClosingNamespace(t *testing.T) {
+	setLifecycleDeadline(t, 25*time.Millisecond)
+	dir := privateRuntime(t)
+	requestPath := filepath.Join(dir, requestName)
+	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}); err != nil {
+		t.Fatal(err)
+	}
+	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(602, 0).UTC(), Unique: 62}
+	owner := startResultOwner{testOwner: newTestOwner(identity), result: RuntimeStartResult{Owned: true}, err: errors.New("start retained runtime ownership")}
+	done := make(chan error, 1)
+	go func() { done <- Run(context.Background(), requestPath, owner, testInspector(identity)) }()
+	select {
+	case err := <-done:
+		t.Fatalf("partial start returned before exact reaping: %v", err)
+	case <-time.After(2 * lifecycleDeadline()):
+	}
+	if owner.closeCalls() != 0 {
+		t.Fatal("partial start closed before its reaper completed")
+	}
+	owner.exit(nil)
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "start retained runtime ownership") {
+			t.Fatalf("Run() error=%v, want partial start cause", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("partial start did not complete after reaping")
+	}
+	if owner.stopCalls() != 1 || owner.closeCalls() != 1 {
+		t.Fatalf("partial start Stop=%d Close=%d, want one each", owner.stopCalls(), owner.closeCalls())
+	}
+}
+
 func TestSnapshotIsBoundedAndCannotReportReadyAfterBrokerPoison(t *testing.T) {
 	service, controller, cancel := runningService(t, true)
 	defer cancel()
@@ -251,11 +337,25 @@ func TestDetachedLauncherUsesFixedInternalArgvAndClosedEnvironment(t *testing.T)
 type testLaunchChild struct {
 	released, stopped bool
 	releaseErr        error
-	stopErr           error
+	waitErr           error
+	waitRelease       chan struct{}
+	stopCalls         int
+	waitCalls         int
 }
 
-func (c *testLaunchChild) release() error                 { c.released = true; return c.releaseErr }
-func (c *testLaunchChild) stopReap(context.Context) error { c.stopped = true; return c.stopErr }
+func (c *testLaunchChild) release() error { c.released = true; return c.releaseErr }
+func (c *testLaunchChild) stop() error {
+	c.stopped = true
+	c.stopCalls++
+	return nil
+}
+func (c *testLaunchChild) wait() error {
+	c.waitCalls++
+	if c.waitRelease != nil {
+		<-c.waitRelease
+	}
+	return c.waitErr
+}
 
 func TestControlFramesSplitReadsAndReturnsStopFailure(t *testing.T) {
 	owner := newTestOwner(ProcessIdentity{PID: 1, StartedAt: time.Unix(1, 0), Unique: 1})
@@ -340,6 +440,42 @@ func TestSuccessfulStopWaitsForHeldOwnerBeforeClosingNamespace(t *testing.T) {
 	}
 }
 
+func TestFinalCleanupContinuesAfterStopFailureOnceReaped(t *testing.T) {
+	setLifecycleDeadline(t, 25*time.Millisecond)
+	service, _, cancel := runningService(t, false)
+	service.owner.stopFailure = errors.New("stop failed")
+	cancel()
+	select {
+	case <-service.done:
+		t.Fatal("stop failure ended ownership before reaping")
+	case <-time.After(2 * lifecycleDeadline()):
+	}
+	service.owner.exit(nil)
+	select {
+	case <-service.done:
+	case <-time.After(time.Second):
+		t.Fatal("final cleanup did not continue after reaping")
+	}
+	if service.owner.stopCalls() != 1 || service.owner.closeCalls() != 1 {
+		t.Fatalf("Stop=%d Close=%d, want one exact final cleanup sequence", service.owner.stopCalls(), service.owner.closeCalls())
+	}
+}
+
+func TestFinishStartedClosesExactlyOnceAfterStopFailureAndReap(t *testing.T) {
+	owner := newTestOwner(ProcessIdentity{PID: 1, StartedAt: time.Unix(603, 0).UTC(), Unique: 63})
+	owner.stopFailure = errors.New("stop failed")
+	reaper := &ownerReaper{owner: &onceOwner{owner: owner}, done: make(chan struct{})}
+	reaper.start()
+	owner.exit(nil)
+	err := finishStarted(errors.New("initial failure"), reaper.owner, reaper, true, lifecycleResources{})
+	if err == nil || !strings.Contains(err.Error(), "stop failed") {
+		t.Fatalf("finishStarted error=%v, want retained Stop failure", err)
+	}
+	if owner.stopCalls() != 1 || owner.closeCalls() != 1 {
+		t.Fatalf("Stop=%d Close=%d, want one after proof of reap", owner.stopCalls(), owner.closeCalls())
+	}
+}
+
 func TestDetachedLauncherReapsOnlyUnauthenticatedChildAndOwnRequest(t *testing.T) {
 	dir := privateRuntime(t)
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(400, 0).UTC(), Unique: 40}
@@ -388,7 +524,7 @@ func TestDetachedLauncherRefusesCancelledContextBeforeRequestOrSpawn(t *testing.
 func TestDetachedLauncherJoinsReleaseAndCleanupFailures(t *testing.T) {
 	dir := privateRuntime(t)
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(402, 0).UTC(), Unique: 42}
-	child := &testLaunchChild{releaseErr: errors.New("release failed"), stopErr: errors.New("reap failed")}
+	child := &testLaunchChild{releaseErr: errors.New("release failed"), waitErr: errors.New("reap failed")}
 	launcher := newDetachedLauncher(launcherDeps{
 		executable: func() (string, error) { return "/private/boxwarden", nil },
 		inspector:  testInspector(identity),
@@ -401,6 +537,43 @@ func TestDetachedLauncherJoinsReleaseAndCleanupFailures(t *testing.T) {
 	}
 	if _, statErr := os.Lstat(filepath.Join(dir, requestName)); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("failed release request remains: %v", statErr)
+	}
+}
+
+func TestDetachedLauncherRetainsRequestUntilBlockedReaperCompletes(t *testing.T) {
+	setLifecycleDeadline(t, 25*time.Millisecond)
+	dir := privateRuntime(t)
+	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(403, 0).UTC(), Unique: 43}
+	child := &testLaunchChild{waitRelease: make(chan struct{})}
+	launcher := newDetachedLauncher(launcherDeps{
+		executable: func() (string, error) { return "/private/boxwarden", nil },
+		inspector:  testInspector(identity),
+		start:      func(context.Context, LaunchCommand) (launchChild, error) { return child, nil },
+		await:      func(context.Context, *Client, Binding) error { return errors.New("no authenticated evidence") },
+	})
+	done := make(chan error, 1)
+	go func() {
+		done <- launcher.Launch(context.Background(), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"})
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("Launch returned before the retained reaper completed: %v", err)
+	case <-time.After(2 * lifecycleDeadline()):
+	}
+	if _, err := os.Lstat(filepath.Join(dir, requestName)); err != nil {
+		t.Fatalf("blocked reaper lost exact request ownership: %v", err)
+	}
+	close(child.waitRelease)
+	select {
+	case err := <-done:
+		if err == nil || !child.stopped || child.stopCalls != 1 || child.waitCalls != 1 {
+			t.Fatalf("Launch result=%v child=%#v, want causal error after exact reap", err, child)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Launch did not complete after its one reaper completed")
+	}
+	if _, err := os.Lstat(filepath.Join(dir, requestName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("request remains after reaper completion: %v", err)
 	}
 }
 
@@ -523,7 +696,7 @@ func TestRuntimeEvidenceRejectsUnassociatedOrNonEndpointForms(t *testing.T) {
 func TestListenerCloseAndIdentityCleanupPreserveSocketReplacement(t *testing.T) {
 	dir := privateRuntime(t)
 	path := filepath.Join(dir, socketName)
-	listener, err := listenSocket(path)
+	listener, _, err := listenSocket(path)
 	if err != nil {
 		if strings.Contains(err.Error(), "operation not permitted") {
 			t.Skipf("sandbox denies Unix socket: %v", err)
@@ -539,7 +712,7 @@ func TestListenerCloseAndIdentityCleanupPreserveSocketReplacement(t *testing.T) 
 		_ = listener.Close()
 		t.Fatal(err)
 	}
-	replacement, err := listenSocket(path)
+	replacement, _, err := listenSocket(path)
 	if err != nil {
 		_ = listener.Close()
 		t.Fatal(err)
@@ -553,6 +726,57 @@ func TestListenerCloseAndIdentityCleanupPreserveSocketReplacement(t *testing.T) 
 	}
 	if _, err := os.Lstat(path); err != nil {
 		t.Fatalf("listener close or cleanup removed socket replacement: %v", err)
+	}
+}
+
+func TestListenSocketPostBindFailurePreservesReplacement(t *testing.T) {
+	dir := privateRuntime(t)
+	path := filepath.Join(dir, socketName)
+	socketAdmissionHook = func() {
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("remove just-bound socket: %v", err)
+		}
+		if err := writePrivateFile(path, []byte("replacement")); err != nil {
+			t.Fatalf("install socket replacement: %v", err)
+		}
+	}
+	t.Cleanup(func() { socketAdmissionHook = nil })
+	listener, _, err := listenSocket(path)
+	if err != nil {
+		if strings.Contains(err.Error(), "operation not permitted") {
+			t.Skipf("sandbox denies Unix socket: %v", err)
+		}
+		if !strings.Contains(err.Error(), "preserve replacement") {
+			t.Fatalf("post-bind replacement error=%v, want visible preservation", err)
+		}
+	} else {
+		_ = listener.Close()
+		t.Fatal("post-bind replacement was admitted")
+	}
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("post-bind cleanup removed replacement: %v", err)
+	}
+}
+
+func TestListenSocketChmodFailureRemovesOnlyCapturedSocket(t *testing.T) {
+	dir := privateRuntime(t)
+	path := filepath.Join(dir, socketName)
+	socketChmod = func(string, os.FileMode) error { return errors.New("chmod denied") }
+	t.Cleanup(func() { socketChmod = os.Chmod })
+	listener, _, err := listenSocket(path)
+	if err != nil {
+		if strings.Contains(err.Error(), "operation not permitted") {
+			t.Skipf("sandbox denies Unix socket: %v", err)
+		}
+		if !strings.Contains(err.Error(), "chmod denied") {
+			t.Fatalf("chmod failure error=%v, want original cause", err)
+		}
+	} else {
+		_ = listener.Close()
+		t.Fatal("chmod failure admitted a listener")
+	}
+	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("chmod rollback socket=%v, want exact original absent", err)
 	}
 }
 
@@ -686,14 +910,15 @@ func runningService(t *testing.T, poisoned bool) (testService, *Client, context.
 	if manifest.ControlKey == "" || !socketIsPrivate(filepath.Join(dir, socketName)) {
 		info, statErr := os.Lstat(filepath.Join(dir, socketName))
 		cancel()
+		owner.exit(nil)
 		select {
 		case err := <-runErr:
 			if err != nil && strings.Contains(err.Error(), "operation not permitted") {
 				t.Skipf("sandbox denies owner-private Unix socket: %v", err)
 			}
 			t.Fatalf("supervisor did not publish manifest: %v (socket=%#v stat=%v)", err, info, statErr)
-		default:
-			t.Fatalf("supervisor did not publish manifest (socket=%#v stat=%v)", info, statErr)
+		case <-time.After(time.Second):
+			t.Fatalf("supervisor did not finish failed publication cleanup (socket=%#v stat=%v)", info, statErr)
 		}
 	}
 	key, err := decodeKey(manifest.ControlKey)
@@ -806,14 +1031,27 @@ type testOwner struct {
 
 type invalidEvidenceOwner struct{ *testOwner }
 
-func (invalidEvidenceOwner) Start(context.Context, LaunchRequest) (RuntimeStartEvidence, error) {
-	return RuntimeStartEvidence{}, nil
+func (invalidEvidenceOwner) Start(context.Context, LaunchRequest) (RuntimeStartResult, error) {
+	return RuntimeStartResult{Owned: true}, nil
+}
+
+type startResultOwner struct {
+	*testOwner
+	result RuntimeStartResult
+	err    error
+}
+
+func (o startResultOwner) Start(context.Context, LaunchRequest) (RuntimeStartResult, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.didStart = true
+	return o.result, o.err
 }
 
 func newTestOwner(identity ProcessIdentity) *testOwner {
 	return &testOwner{identity: identity, healthy: true, exitCh: make(chan error, 1)}
 }
-func (o *testOwner) Start(_ context.Context, request LaunchRequest) (RuntimeStartEvidence, error) {
+func (o *testOwner) Start(_ context.Context, request LaunchRequest) (RuntimeStartResult, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.didStart = true
@@ -822,19 +1060,19 @@ func (o *testOwner) Start(_ context.Context, request LaunchRequest) (RuntimeStar
 		target := filepath.Join(request.RuntimeDirectory, name+"-target")
 		endpoint := filepath.Join(request.RuntimeDirectory, name)
 		if err := writePrivateFile(target, []byte(name)); err != nil {
-			return RuntimeStartEvidence{}, err
+			return RuntimeStartResult{}, err
 		}
 		if err := os.Symlink(filepath.Base(target), endpoint); err != nil {
-			return RuntimeStartEvidence{}, err
+			return RuntimeStartResult{}, err
 		}
 		identity, _, err := captureIdentity(endpoint)
 		if err != nil {
-			return RuntimeStartEvidence{}, err
+			return RuntimeStartResult{}, err
 		}
 		endpoints = append(endpoints, NamedFileEvidence{Role: name, Identity: identity})
 		o.endpoints = append(o.endpoints, endpoint, target)
 	}
-	return RuntimeStartEvidence{Children: []NamedProcessEvidence{{Role: "backend", Identity: ProcessIdentity{PID: 72, StartedAt: time.Unix(201, 0).UTC(), Unique: 10}}, {Role: "screen", Identity: ProcessIdentity{PID: 73, StartedAt: time.Unix(202, 0).UTC(), Unique: 11}}}, Endpoints: endpoints, Broker: BrokerEvidence{Healthy: true}}, nil
+	return RuntimeStartResult{Owned: true, Evidence: RuntimeStartEvidence{Children: []NamedProcessEvidence{{Role: "backend", Identity: ProcessIdentity{PID: 72, StartedAt: time.Unix(201, 0).UTC(), Unique: 10}}, {Role: "screen", Identity: ProcessIdentity{PID: 73, StartedAt: time.Unix(202, 0).UTC(), Unique: 11}}}, Endpoints: endpoints, Broker: BrokerEvidence{Healthy: true}}}, nil
 }
 func (o *testOwner) Snapshot() Snapshot {
 	o.mu.Lock()

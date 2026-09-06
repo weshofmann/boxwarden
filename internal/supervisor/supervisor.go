@@ -35,7 +35,7 @@ var lockAdmissionHook func()
 // derive RuntimeStartEvidence read-only from its held backend and serial-runtime
 // capabilities; it must not reconstruct a control target from this evidence.
 type RuntimeOwner interface {
-	Start(context.Context, LaunchRequest) (RuntimeStartEvidence, error)
+	Start(context.Context, LaunchRequest) (RuntimeStartResult, error)
 	Snapshot() Snapshot
 	Wait(context.Context) error
 	Stop(context.Context) error
@@ -53,7 +53,8 @@ type LaunchCommand struct {
 }
 type launchChild interface {
 	release() error
-	stopReap(context.Context) error
+	stop() error
+	wait() error
 }
 type launcherDeps struct {
 	executable func() (string, error)
@@ -107,9 +108,19 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 		return errors.Join(fmt.Errorf("supervisor child is unavailable"), cleanupRequest())
 	}
 	cleanupChild := func(cause error) error {
-		stopCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline())
-		defer cancel()
-		return errors.Join(cause, child.stopReap(stopCtx), cleanupRequest())
+		reaper := &launchChildReaper{child: child, done: make(chan struct{})}
+		stopErr := child.stop()
+		reaper.start()
+		waitCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline())
+		waitErr := reaper.await(waitCtx)
+		cancel()
+		if waitErr != nil {
+			// A timeout is diagnostic only. Retain this request and this launch
+			// call until the sole held child has actually been reaped.
+			<-reaper.done
+			waitErr = errors.Join(waitErr, reaper.result())
+		}
+		return errors.Join(cause, stopErr, waitErr, cleanupRequest())
 	}
 	client := &Client{RuntimeDirectory: request.RuntimeDirectory, Inspector: l.deps.inspector, MaxSnapshotAge: time.Minute}
 	if err := l.deps.await(ctx, client, request.Binding); err != nil {
@@ -152,19 +163,17 @@ func (c *exactChild) release() error {
 	}
 	return c.cmd.Process.Release()
 }
-func (c *exactChild) stopReap(ctx context.Context) error {
+func (c *exactChild) stop() error {
 	if c == nil || c.cmd == nil || c.cmd.Process == nil {
 		return nil
 	}
-	_ = c.cmd.Process.Kill()
-	done := make(chan error, 1)
-	go func() { done <- c.cmd.Wait() }()
-	select {
-	case err := <-done:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
+	return c.cmd.Process.Kill()
+}
+func (c *exactChild) wait() error {
+	if c == nil || c.cmd == nil {
+		return nil
 	}
+	return c.cmd.Wait()
 }
 
 // RunRequest is deliberately unavailable until Task 5 supplies admitted
@@ -176,8 +185,8 @@ func RunRequest(ctx context.Context, requestPath string) error {
 
 type unavailableOwner struct{}
 
-func (unavailableOwner) Start(context.Context, LaunchRequest) (RuntimeStartEvidence, error) {
-	return RuntimeStartEvidence{}, fmt.Errorf("supervisor runtime composition is unavailable")
+func (unavailableOwner) Start(context.Context, LaunchRequest) (RuntimeStartResult, error) {
+	return RuntimeStartResult{}, fmt.Errorf("supervisor runtime composition is unavailable")
 }
 func (unavailableOwner) Snapshot() Snapshot { return Snapshot{} }
 func (unavailableOwner) Wait(context.Context) error {
@@ -209,9 +218,12 @@ func prepare(ctx context.Context, requestPath string, owner RuntimeOwner, inspec
 	}
 	start, err := owner.Start(ctx, request)
 	if err != nil {
-		return Manifest{}, false, err
+		return Manifest{}, start.Owned, err
 	}
-	if err := validStartEvidence(start, request.RuntimeDirectory); err != nil {
+	if !start.Owned {
+		return Manifest{}, false, fmt.Errorf("runtime start succeeded without retained ownership")
+	}
+	if err := validStartEvidence(start.Evidence, request.RuntimeDirectory); err != nil {
 		return Manifest{}, true, err
 	}
 	key, encoded, err := newControlKey()
@@ -219,7 +231,7 @@ func prepare(ctx context.Context, requestPath string, owner RuntimeOwner, inspec
 		return Manifest{}, true, err
 	}
 	_ = key
-	manifest := Manifest{Version: 1, Binding: request.Binding, RuntimeDirectory: request.RuntimeDirectory, SocketPath: filepath.Join(request.RuntimeDirectory, socketName), ControlKey: encoded, Evidence: RuntimeEvidence{Supervisor: supervisor, Children: start.Children, Endpoints: start.Endpoints, RuntimeDirectory: runtimeIdentity, Broker: start.Broker}, CreatedAt: time.Now().UTC()}
+	manifest := Manifest{Version: 1, Binding: request.Binding, RuntimeDirectory: request.RuntimeDirectory, SocketPath: filepath.Join(request.RuntimeDirectory, socketName), ControlKey: encoded, Evidence: RuntimeEvidence{Supervisor: supervisor, Children: start.Evidence.Children, Endpoints: start.Evidence.Endpoints, RuntimeDirectory: runtimeIdentity, Broker: start.Evidence.Broker}, CreatedAt: time.Now().UTC()}
 	if err := writeManifest(filepath.Join(request.RuntimeDirectory, manifestName), manifest); err != nil {
 		return Manifest{}, true, err
 	}
@@ -288,15 +300,11 @@ func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector 
 	if err != nil {
 		return finishStarted(err, owned, reaper, true, resources)
 	}
-	listener, err := listenSocket(manifest.SocketPath)
+	listener, socketIdentity, err := listenSocket(manifest.SocketPath)
 	if err != nil {
 		return finishStarted(fmt.Errorf("open control socket: %w", err), owned, reaper, true, resources)
 	}
-	resources.socket, err = captureSocket(manifest.SocketPath)
-	if err != nil {
-		_ = listener.Close()
-		return finishStarted(err, owned, reaper, true, resources)
-	}
+	resources.socket = socketIdentity
 	controlCtx, cancelControl := context.WithCancel(context.Background())
 	defer cancelControl()
 	stopped := make(chan struct{}, 1)
@@ -333,24 +341,14 @@ func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector 
 	case <-time.After(lifecycleDeadline()):
 		cause = errors.Join(cause, fmt.Errorf("control server did not stop"))
 	}
-	return finishStarted(cause, owned, reaper, true, resources, stop)
+	return finishStarted(cause, owned, reaper, true, resources)
 }
 
 // finishStarted never abandons a live retained capability. A bounded timeout
 // is observable to the control caller, but the supervisor remains the owner
 // until the one reaper has a result and ordinary ordered cleanup can finish.
-func finishStarted(cause error, owner RuntimeOwner, reaper *ownerReaper, started bool, resources lifecycleResources, stopFns ...func() error) error {
-	cleanup := terminateAndCleanup(owner, reaper, started, resources, stopFns...)
-	if cleanup != nil && started {
-		select {
-		case <-reaper.done:
-			cleanup = errors.Join(cleanup, terminateAndCleanup(owner, reaper, started, resources, stopFns...))
-		default:
-			<-reaper.done
-			cleanup = errors.Join(cleanup, terminateAndCleanup(owner, reaper, started, resources, stopFns...))
-		}
-	}
-	return errors.Join(cause, cleanup)
+func finishStarted(cause error, owner RuntimeOwner, reaper *ownerReaper, started bool, resources lifecycleResources) error {
+	return errors.Join(cause, terminateAndCleanup(owner, reaper, started, resources))
 }
 
 type onceOwner struct {
@@ -361,7 +359,7 @@ type onceOwner struct {
 	closeErr  error
 }
 
-func (o *onceOwner) Start(ctx context.Context, request LaunchRequest) (RuntimeStartEvidence, error) {
+func (o *onceOwner) Start(ctx context.Context, request LaunchRequest) (RuntimeStartResult, error) {
 	return o.owner.Start(ctx, request)
 }
 func (o *onceOwner) Snapshot() Snapshot             { return o.owner.Snapshot() }
@@ -442,6 +440,37 @@ type ownerReaper struct {
 	err   error
 }
 
+// launchChildReaper owns the only Wait for a failed detached launch. A launch
+// retains both the exact command and request name until this result exists.
+type launchChildReaper struct {
+	child launchChild
+	done  chan struct{}
+	once  sync.Once
+	mu    sync.Mutex
+	err   error
+}
+
+func (r *launchChildReaper) start() {
+	r.once.Do(func() {
+		go func() {
+			err := r.child.wait()
+			r.mu.Lock()
+			r.err = err
+			r.mu.Unlock()
+			close(r.done)
+		}()
+	})
+}
+func (r *launchChildReaper) result() error { r.mu.Lock(); defer r.mu.Unlock(); return r.err }
+func (r *launchChildReaper) await(ctx context.Context) error {
+	select {
+	case <-r.done:
+		return r.result()
+	case <-ctx.Done():
+		return fmt.Errorf("supervisor child did not reap before cleanup deadline: %w", ctx.Err())
+	}
+}
+
 func (r *ownerReaper) start() {
 	r.once.Do(func() {
 		go func() {
@@ -466,26 +495,24 @@ func (r *ownerReaper) await(ctx context.Context) error {
 	}
 }
 
-func terminateAndCleanup(owner RuntimeOwner, reaper *ownerReaper, started bool, resources lifecycleResources, stopFns ...func() error) error {
-	var result error
+func terminateAndCleanup(owner RuntimeOwner, reaper *ownerReaper, started bool, resources lifecycleResources) error {
 	if !started {
 		return cleanupNamespace(resources)
 	}
-	if len(stopFns) > 0 {
-		result = errors.Join(result, stopFns[0]())
-	} else {
-		stopCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline())
-		result = errors.Join(result, owner.Stop(stopCtx))
-		cancel()
-	}
-	if result != nil {
-		return result
-	}
+	var result error
+	stopCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline())
+	result = errors.Join(result, owner.Stop(stopCtx))
+	cancel()
 	waitCtx, cancelWait := context.WithTimeout(context.Background(), lifecycleDeadline())
-	result = errors.Join(result, reaper.await(waitCtx))
+	waitErr := reaper.await(waitCtx)
 	cancelWait()
-	if result != nil {
-		return result
+	result = errors.Join(result, waitErr)
+	if waitErr != nil {
+		// The bounded wait is returned to the caller as diagnostic evidence, but
+		// this supervisor must retain its generation until the sole reaper proves
+		// that the held runtime is no longer live.
+		<-reaper.done
+		result = errors.Join(result, reaper.result())
 	}
 	closeCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline())
 	result = errors.Join(result, owner.Close(closeCtx))

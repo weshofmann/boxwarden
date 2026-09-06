@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -15,6 +16,11 @@ import (
 	"strings"
 	"time"
 )
+
+// These private seams make the narrow post-bind admission boundary
+// deterministic in tests. Production retains the exact os.Chmod behavior.
+var socketChmod = os.Chmod
+var socketAdmissionHook func()
 
 type controlRequest struct {
 	Version   int     `json:"version"`
@@ -54,35 +60,61 @@ func mac(key, data []byte) []byte {
 	return sum.Sum(nil)
 }
 
-func listenSocket(path string) (*net.UnixListener, error) {
+func listenSocket(path string) (*net.UnixListener, FileIdentity, error) {
 	if filepath.Base(path) != socketName || !privateDirectory(filepath.Dir(path)) {
-		return nil, fmt.Errorf("unsafe control socket path")
+		return nil, FileIdentity{}, fmt.Errorf("unsafe control socket path")
 	}
 	if _, err := os.Lstat(path); err == nil {
-		return nil, fmt.Errorf("control socket already exists")
+		return nil, FileIdentity{}, fmt.Errorf("control socket already exists")
 	} else if !os.IsNotExist(err) {
-		return nil, err
+		return nil, FileIdentity{}, err
 	}
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
-		return nil, err
+		return nil, FileIdentity{}, err
 	}
 	// Listener close must not unlink a name that may have been replaced. The
 	// generation owner removes only its captured socket identity during cleanup.
 	listener.SetUnlinkOnClose(false)
-	if err := os.Chmod(path, 0o600); err != nil {
-		listener.Close()
-		return nil, err
+	identity, err := captureBoundSocket(path)
+	if err != nil {
+		return nil, FileIdentity{}, errors.Join(err, closeAndRemoveBoundSocket(listener, identity))
 	}
-	info, err := os.Lstat(path)
-	if err != nil || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info) {
-		listener.Close()
-		return nil, fmt.Errorf("control socket is not owner-private")
+	if err := socketChmod(path, 0o600); err != nil {
+		return nil, FileIdentity{}, errors.Join(fmt.Errorf("chmod control socket: %w", err), closeAndRemoveBoundSocket(listener, identity))
 	}
-	return listener, nil
+	if socketAdmissionHook != nil {
+		socketAdmissionHook()
+	}
+	current, err := captureSocket(path)
+	if err != nil || !identity.matches(current) {
+		if err == nil {
+			err = fmt.Errorf("control socket was replaced during post-bind admission")
+		}
+		return nil, FileIdentity{}, errors.Join(err, closeAndRemoveBoundSocket(listener, identity))
+	}
+	return listener, identity, nil
+}
+
+func captureBoundSocket(path string) (FileIdentity, error) {
+	identity, info, err := captureIdentity(path)
+	if err != nil || info.Mode()&os.ModeSocket == 0 || !ownedByCurrentUser(info) {
+		return FileIdentity{}, fmt.Errorf("bound control socket identity unavailable")
+	}
+	return identity, nil
+}
+
+func closeAndRemoveBoundSocket(listener *net.UnixListener, identity FileIdentity) error {
+	var result error
+	if listener != nil {
+		result = errors.Join(result, listener.Close())
+	}
+	if identity.Path == "" {
+		return errors.Join(result, fmt.Errorf("bound control socket identity unavailable for cleanup"))
+	}
+	return errors.Join(result, removeExact(identity, false))
 }
 func serveControl(ctx context.Context, listener *net.UnixListener, manifest Manifest, key []byte, owner interface{ Snapshot() Snapshot }, stop func() error) error {
-	defer listener.Close()
 	for {
 		listener.SetDeadline(time.Now().Add(100 * time.Millisecond))
 		connection, err := listener.AcceptUnix()
