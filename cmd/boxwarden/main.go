@@ -11,13 +11,14 @@ import (
 	"github.com/weshofmann/boxwarden/internal/execx"
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/sshx"
+	"github.com/weshofmann/boxwarden/internal/supervisor"
 )
 
 type rootInstaller func(context.Context, []byte) ([]byte, error)
 
 func main() {
 	ctx := context.Background()
-	handled, err := runInternal(ctx, os.Args[1:], os.Stdin, os.Stdout, hostx.RunRootHostInstall)
+	handled, err := runInternal(ctx, os.Args[1:], os.Stdin, os.Stdout, hostx.RunRootHostInstall, supervisor.RunRequest)
 	if handled {
 		finish(err)
 		return
@@ -44,9 +45,19 @@ func main() {
 	finish(err)
 }
 
-func runInternal(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, install rootInstaller) (bool, error) {
+func runInternal(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, install rootInstaller, supervisorRun ...func(context.Context, string) error) (bool, error) {
 	if len(args) == 0 || args[0] != "internal" {
 		return false, nil
+	}
+	if len(args) == 3 && args[1] == "session-supervisor" {
+		if len(supervisorRun) > 1 || (len(supervisorRun) == 1 && supervisorRun[0] == nil) {
+			return true, fmt.Errorf("supervisor dependencies are required")
+		}
+		run := supervisor.RunRequest
+		if len(supervisorRun) == 1 {
+			run = supervisorRun[0]
+		}
+		return true, run(ctx, args[2])
 	}
 	if len(args) != 2 || args[1] != "host-install" {
 		return true, fmt.Errorf("unsupported internal command")

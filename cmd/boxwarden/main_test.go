@@ -59,6 +59,20 @@ func TestRunInternalLeavesPublicArgvAndStdinUntouched(t *testing.T) {
 	}
 }
 
+func TestRunInternalDispatchesOnlyExactSessionSupervisor(t *testing.T) {
+	called := ""
+	handled, err := runInternal(context.Background(), []string{"internal", "session-supervisor", "/private/runtime/supervisor-request.json"}, strings.NewReader("ignored"), &bytes.Buffer{}, nil, func(_ context.Context, path string) error { called = path; return nil })
+	if err != nil || !handled || called != "/private/runtime/supervisor-request.json" {
+		t.Fatalf("session supervisor dispatch = handled %t path %q err %v", handled, called, err)
+	}
+	for _, args := range [][]string{{"internal", "session-supervisor"}, {"internal", "session-supervisor", "x", "extra"}, {"internal", "session-supervisor", "x", "y", "z"}} {
+		handled, err := runInternal(context.Background(), args, strings.NewReader("ignored"), &bytes.Buffer{}, nil, func(context.Context, string) error { t.Fatal("invalid internal argv dispatched"); return nil })
+		if !handled || err == nil {
+			t.Fatalf("runInternal(%q) = handled %t error %v, want refusal", args, handled, err)
+		}
+	}
+}
+
 func TestRunInternalPropagatesBoundedReadInstallAndWriteFailures(t *testing.T) {
 	tooLarge := strings.Repeat("x", 16<<10+1)
 	handled, err := runInternal(context.Background(), []string{"internal", "host-install"}, strings.NewReader(tooLarge), &bytes.Buffer{}, func(context.Context, []byte) ([]byte, error) {
