@@ -27,6 +27,56 @@ type ProcessInspector interface {
 	Observe(context.Context, int) (ProcessIdentity, error)
 }
 
+// DetachedLauncher is the concrete controller-side launch foundation. Its
+// private starter seam exists solely to make fixed argv/environment ownership
+// testable; production composition supplies an exec-backed starter in Task 5.
+type DetachedLauncher struct {
+	Executable string
+	Inspector  ProcessInspector
+	Start      func(context.Context, LaunchCommand) (ReleasedChild, error)
+	Await      func(context.Context, *Client, Binding) error
+}
+type LaunchCommand struct {
+	Path      string
+	Args, Env []string
+	Dir       string
+}
+type ReleasedChild interface{ Release() error }
+
+func (l DetachedLauncher) Launch(ctx context.Context, request LaunchRequest) error {
+	if l.Inspector == nil || !l.Inspector.Supported() {
+		return fmt.Errorf("supervisor process identity is unsupported on this platform")
+	}
+	if err := validLaunchRequest(request); err != nil {
+		return err
+	}
+	if !canonicalAbsolute(l.Executable) || l.Start == nil || l.Await == nil {
+		return fmt.Errorf("fixed supervisor launcher dependencies are required")
+	}
+	path := filepath.Join(request.RuntimeDirectory, requestName)
+	if err := writeLaunchRequest(path, request); err != nil {
+		return err
+	}
+	child, err := l.Start(ctx, LaunchCommand{Path: l.Executable, Args: []string{"internal", "session-supervisor", path}, Env: []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C"}, Dir: request.RuntimeDirectory})
+	if err != nil {
+		_ = os.Remove(path)
+		return err
+	}
+	if child == nil {
+		_ = os.Remove(path)
+		return fmt.Errorf("supervisor child is unavailable")
+	}
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, Inspector: l.Inspector, MaxSnapshotAge: time.Minute}
+	if err := l.Await(ctx, client, request.Binding); err != nil {
+		_ = child.Release()
+		_ = os.Remove(path)
+		return err
+	}
+	return nil
+}
+
+var _ Launcher = DetachedLauncher{}
+
 // RunRequest is the fixed internal command entrypoint. Runtime composition is
 // intentionally unavailable until Task 5 supplies admitted host/backend facts;
 // refusing it is safer than synthesizing a handle from request data.
@@ -105,7 +155,8 @@ func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector 
 		return err
 	}
 	defer generationLock.Close()
-	manifest, err := prepare(ctx, requestPath, owner, inspector)
+	owned := &onceOwner{owner: owner}
+	manifest, err := prepare(ctx, requestPath, owned, inspector)
 	if err != nil {
 		return err
 	}
@@ -115,7 +166,7 @@ func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector 
 	}
 	listener, err := listenSocket(manifest.SocketPath)
 	if err != nil {
-		cleanupErr := cleanup(owner, manifest)
+		cleanupErr := cleanup(owned, manifest)
 		if cleanupErr != nil {
 			return fmt.Errorf("open control socket: %w; cleanup: %v", err, cleanupErr)
 		}
@@ -123,13 +174,15 @@ func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector 
 	}
 	controlCtx, cancel := context.WithCancel(context.Background())
 	controlDone := make(chan error, 1)
-	go func() { controlDone <- serveControl(controlCtx, listener, manifest, key, owner) }()
+	stopped := make(chan struct{}, 1)
+	go func() { controlDone <- serveControl(controlCtx, listener, manifest, key, owned, stopped) }()
 	waitDone := make(chan error, 1)
-	go func() { waitDone <- owner.Wait(context.Background()) }()
+	go func() { waitDone <- owned.Wait(context.Background()) }()
 	select {
 	case <-ctx.Done():
 	case <-waitDone:
 	case <-controlDone:
+	case <-stopped:
 	}
 	cancel()
 	_ = listener.Close()
@@ -137,11 +190,38 @@ func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector 
 	case <-controlDone:
 	case <-time.After(time.Second):
 	}
-	return cleanup(owner, manifest)
+	return cleanup(owned, manifest)
+}
+
+type onceOwner struct {
+	owner     RuntimeOwner
+	stopOnce  sync.Once
+	stopErr   error
+	closeOnce sync.Once
+	closeErr  error
+}
+
+func (o *onceOwner) Start(ctx context.Context, r LaunchRequest) ([]ProcessIdentity, error) {
+	return o.owner.Start(ctx, r)
+}
+func (o *onceOwner) Snapshot() Snapshot             { return o.owner.Snapshot() }
+func (o *onceOwner) Wait(ctx context.Context) error { return o.owner.Wait(ctx) }
+func (o *onceOwner) Stop(ctx context.Context) error {
+	o.stopOnce.Do(func() { o.stopErr = o.owner.Stop(ctx) })
+	return o.stopErr
+}
+func (o *onceOwner) Close(ctx context.Context) error {
+	o.closeOnce.Do(func() { o.closeErr = o.owner.Close(ctx) })
+	return o.closeErr
 }
 func acquireGenerationLock(runtime string) (*os.File, error) {
 	path := filepath.Join(runtime, "generation.lock")
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if info, err := os.Lstat(path); err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info)) {
+		return nil, fmt.Errorf("generation lock is unsafe")
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open generation lock: %w", err)
 	}

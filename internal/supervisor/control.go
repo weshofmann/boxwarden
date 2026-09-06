@@ -29,6 +29,7 @@ type controlResponse struct {
 	Challenge string   `json:"challenge"`
 	Snapshot  Snapshot `json:"snapshot"`
 	MAC       string   `json:"mac"`
+	Error     string   `json:"error"`
 }
 
 func requestMAC(key []byte, request controlRequest) (string, error) {
@@ -77,7 +78,7 @@ func listenSocket(path string) (*net.UnixListener, error) {
 	}
 	return listener, nil
 }
-func serveControl(ctx context.Context, listener *net.UnixListener, manifest Manifest, key []byte, owner RuntimeOwner) error {
+func serveControl(ctx context.Context, listener *net.UnixListener, manifest Manifest, key []byte, owner RuntimeOwner, stopped chan<- struct{}) error {
 	defer listener.Close()
 	for {
 		listener.SetDeadline(time.Now().Add(100 * time.Millisecond))
@@ -94,10 +95,10 @@ func serveControl(ctx context.Context, listener *net.UnixListener, manifest Mani
 			}
 			return err
 		}
-		go handleControl(connection, manifest, key, owner)
+		go handleControl(connection, manifest, key, owner, stopped)
 	}
 }
-func handleControl(connection *net.UnixConn, manifest Manifest, key []byte, owner RuntimeOwner) {
+func handleControl(connection net.Conn, manifest Manifest, key []byte, owner RuntimeOwner, stopped chan<- struct{}) {
 	defer connection.Close()
 	_ = connection.SetDeadline(time.Now().Add(2 * time.Second))
 	request, err := readControlRequest(connection)
@@ -123,16 +124,23 @@ func handleControl(connection *net.UnixConn, manifest Manifest, key []byte, owne
 		snapshot.ZoneMatches = false
 	}
 	response := controlResponse{Version: 1, Binding: manifest.Binding, Challenge: request.Challenge, Snapshot: snapshot}
+	if request.Action == "stop" {
+		if err := owner.Stop(context.Background()); err != nil {
+			response.Error = boundedDiagnostic(err.Error())
+		} else if stopped != nil {
+			select {
+			case stopped <- struct{}{}:
+			default:
+			}
+		}
+	}
 	response.MAC, err = responseMAC(key, response)
 	if err != nil {
 		return
 	}
 	_ = writeControl(connection, response)
-	if request.Action == "stop" {
-		go owner.Stop(context.Background())
-	}
 }
-func readControlRequest(connection *net.UnixConn) (controlRequest, error) {
+func readControlRequest(connection net.Conn) (controlRequest, error) {
 	var request controlRequest
 	data, err := readBounded(connection)
 	if err != nil {
@@ -143,7 +151,7 @@ func readControlRequest(connection *net.UnixConn) (controlRequest, error) {
 	}
 	return request, nil
 }
-func writeControl(connection *net.UnixConn, value controlResponse) error {
+func writeControl(connection net.Conn, value controlResponse) error {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -153,7 +161,7 @@ func writeControl(connection *net.UnixConn, value controlResponse) error {
 	}
 	return writeFrame(connection, data)
 }
-func readBounded(connection *net.UnixConn) ([]byte, error) {
+func readBounded(connection net.Conn) ([]byte, error) {
 	var size uint32
 	if err := binary.Read(connection, binary.BigEndian, &size); err != nil {
 		return nil, err
@@ -295,6 +303,9 @@ func (c *Client) call(ctx context.Context, binding Binding, action, challenge st
 	}
 	if len(response.Snapshot.Diagnostic) > maxDiagnosticBytes || response.Snapshot.Binding != binding {
 		return controlResponse{}, fmt.Errorf("invalid bounded snapshot")
+	}
+	if response.Error != "" {
+		return controlResponse{}, fmt.Errorf("supervisor stop failed: %s", response.Error)
 	}
 	return response, nil
 }

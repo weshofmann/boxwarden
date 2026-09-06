@@ -2,7 +2,9 @@ package supervisor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,6 +138,69 @@ func TestPrepareRejectsUnsupportedPlatformBeforeRuntimeStart(t *testing.T) {
 	}
 }
 
+func TestDetachedLauncherUsesFixedInternalArgvAndClosedEnvironment(t *testing.T) {
+	dir := privateRuntime(t)
+	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(300, 0), Unique: 30}
+	var got LaunchCommand
+	launcher := DetachedLauncher{Executable: "/private/boxwarden", Inspector: testInspector(identity), Start: func(_ context.Context, command LaunchCommand) (ReleasedChild, error) {
+		got = command
+		return releaseChild{}, nil
+	}, Await: func(context.Context, *Client, Binding) error { return nil }}
+	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}
+	if err := launcher.Launch(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if got.Path != "/private/boxwarden" || got.Dir != dir || len(got.Args) != 3 || got.Args[0] != "internal" || got.Args[1] != "session-supervisor" || got.Args[2] != filepath.Join(dir, requestName) {
+		t.Fatalf("launch command=%#v", got)
+	}
+	if len(got.Env) != 3 || got.Env[0] != "PATH=/usr/bin:/bin" {
+		t.Fatalf("launch env=%#v", got.Env)
+	}
+}
+
+type releaseChild struct{}
+
+func (releaseChild) Release() error { return nil }
+
+func TestControlFramesSplitReadsAndReturnsStopFailure(t *testing.T) {
+	owner := newTestOwner(ProcessIdentity{PID: 1, StartedAt: time.Unix(1, 0), Unique: 1})
+	owner.stopFailure = errors.New("stop refused")
+	key := make([]byte, 32)
+	key[0] = 1
+	manifest := Manifest{Binding: testBinding()}
+	client, server := net.Pipe()
+	defer client.Close()
+	go handleControl(server, manifest, key, owner, nil)
+	request := controlRequest{Version: 1, Action: "stop", Binding: testBinding(), Challenge: "fresh"}
+	var err error
+	request.MAC, err = requestMAC(key, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame := append([]byte{0, 0, 0, byte(len(data))}, data...)
+	if _, err := client.Write(frame[:2]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Write(frame[2:]); err != nil {
+		t.Fatal(err)
+	}
+	responseData, err := readBounded(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response controlResponse
+	if err := decodeExact(responseData, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Error != "stop refused" || owner.stopCalls() != 1 {
+		t.Fatalf("stop response=%#v calls=%d", response, owner.stopCalls())
+	}
+}
+
 type testService struct {
 	dir       string
 	key       []byte
@@ -256,6 +321,7 @@ type testOwner struct {
 	poisoned, healthy, didStart bool
 	exitCh                      chan error
 	stopped, closed             int
+	stopFailure                 error
 }
 
 func newTestOwner(identity ProcessIdentity) *testOwner {
@@ -277,7 +343,7 @@ func (o *testOwner) Stop(context.Context) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.stopped++
-	return nil
+	return o.stopFailure
 }
 func (o *testOwner) Close(context.Context) error {
 	o.mu.Lock()
