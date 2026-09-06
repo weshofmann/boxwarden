@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"net"
@@ -22,15 +23,19 @@ func TestSupervisorLaunchPersistsNoBarePIDOwnership(t *testing.T) {
 	if err := writeLaunchRequest(filepath.Join(dir, requestName), request); err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := prepare(context.Background(), filepath.Join(dir, requestName), owner, testInspector(identity))
+	runtimeIdentity, err := capturePrivateDirectory(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Supervisor.PID != identity.PID || manifest.Supervisor.Unique == 0 || manifest.Supervisor.StartedAt.IsZero() {
-		t.Fatalf("manifest supervisor evidence = %#v, want full kernel identity", manifest.Supervisor)
+	manifest, err := prepare(context.Background(), filepath.Join(dir, requestName), owner, testInspector(identity), runtimeIdentity)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(manifest.Children) != 1 || manifest.Children[0].Unique == 0 {
-		t.Fatalf("manifest children = %#v, want direct-child identity", manifest.Children)
+	if manifest.Evidence.Supervisor.PID != identity.PID || manifest.Evidence.Supervisor.Unique == 0 || manifest.Evidence.Supervisor.StartedAt.IsZero() {
+		t.Fatalf("manifest supervisor evidence = %#v, want full kernel identity", manifest.Evidence.Supervisor)
+	}
+	if len(manifest.Evidence.Children) != 2 || manifest.Evidence.Children[0].Identity.Unique == 0 || len(manifest.Evidence.Endpoints) != 2 {
+		t.Fatalf("manifest runtime evidence = %#v, want complete named evidence", manifest.Evidence)
 	}
 	for _, path := range []string{filepath.Join(dir, requestName), filepath.Join(dir, manifestName)} {
 		info, err := os.Lstat(path)
@@ -72,10 +77,15 @@ func TestControllerRejectsPIDReuseAndStaleManifest(t *testing.T) {
 	}
 	service.inspector.set(service.identity.PID, service.identity)
 	manifestPath := filepath.Join(service.dir, manifestName)
+	stale, err := readManifest(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale.Binding.Generation = "other-generation"
 	if err := os.Remove(manifestPath); err != nil {
 		t.Fatal(err)
 	}
-	if err := writePrivateFile(manifestPath, []byte("{}")); err != nil {
+	if err := writeManifest(manifestPath, stale); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.Snapshot(context.Background(), testBinding()); err == nil {
@@ -127,7 +137,11 @@ func TestPrepareRejectsUnsupportedPlatformBeforeRuntimeStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	owner := newTestOwner(ProcessIdentity{PID: 1, StartedAt: time.Unix(1, 0), Unique: 1})
-	if _, err := prepare(context.Background(), requestPath, owner, unsupportedInspector{}); err == nil {
+	runtimeIdentity, err := capturePrivateDirectory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prepare(context.Background(), requestPath, owner, unsupportedInspector{}, runtimeIdentity); err == nil {
 		t.Fatal("unsupported platform prepared a runtime")
 	}
 	if owner.started() {
@@ -142,10 +156,11 @@ func TestDetachedLauncherUsesFixedInternalArgvAndClosedEnvironment(t *testing.T)
 	dir := privateRuntime(t)
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(300, 0), Unique: 30}
 	var got LaunchCommand
-	launcher := DetachedLauncher{Executable: "/private/boxwarden", Inspector: testInspector(identity), Start: func(_ context.Context, command LaunchCommand) (ReleasedChild, error) {
+	child := &testLaunchChild{}
+	launcher := newDetachedLauncher(launcherDeps{executable: func() (string, error) { return "/private/boxwarden", nil }, inspector: testInspector(identity), start: func(_ context.Context, command LaunchCommand) (launchChild, error) {
 		got = command
-		return releaseChild{}, nil
-	}, Await: func(context.Context, *Client, Binding) error { return nil }}
+		return child, nil
+	}, await: func(context.Context, *Client, Binding) error { return nil }})
 	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}
 	if err := launcher.Launch(context.Background(), request); err != nil {
 		t.Fatal(err)
@@ -153,14 +168,15 @@ func TestDetachedLauncherUsesFixedInternalArgvAndClosedEnvironment(t *testing.T)
 	if got.Path != "/private/boxwarden" || got.Dir != dir || len(got.Args) != 3 || got.Args[0] != "internal" || got.Args[1] != "session-supervisor" || got.Args[2] != filepath.Join(dir, requestName) {
 		t.Fatalf("launch command=%#v", got)
 	}
-	if len(got.Env) != 3 || got.Env[0] != "PATH=/usr/bin:/bin" {
+	if len(got.Env) != 3 || got.Env[0] != "PATH=/usr/bin:/bin" || !child.released {
 		t.Fatalf("launch env=%#v", got.Env)
 	}
 }
 
-type releaseChild struct{}
+type testLaunchChild struct{ released, stopped bool }
 
-func (releaseChild) Release() error { return nil }
+func (c *testLaunchChild) release() error                 { c.released = true; return nil }
+func (c *testLaunchChild) stopReap(context.Context) error { c.stopped = true; return nil }
 
 func TestControlFramesSplitReadsAndReturnsStopFailure(t *testing.T) {
 	owner := newTestOwner(ProcessIdentity{PID: 1, StartedAt: time.Unix(1, 0), Unique: 1})
@@ -170,7 +186,7 @@ func TestControlFramesSplitReadsAndReturnsStopFailure(t *testing.T) {
 	manifest := Manifest{Binding: testBinding()}
 	client, server := net.Pipe()
 	defer client.Close()
-	go handleControl(server, manifest, key, owner, nil)
+	go handleControl(server, manifest, key, owner, func() error { return owner.Stop(context.Background()) })
 	request := controlRequest{Version: 1, Action: "stop", Binding: testBinding(), Challenge: "fresh"}
 	var err error
 	request.MAC, err = requestMAC(key, request)
@@ -199,6 +215,196 @@ func TestControlFramesSplitReadsAndReturnsStopFailure(t *testing.T) {
 	if response.Error != "stop refused" || owner.stopCalls() != 1 {
 		t.Fatalf("stop response=%#v calls=%d", response, owner.stopCalls())
 	}
+}
+
+func TestCleanupPreservesSameModeManifestReplacement(t *testing.T) {
+	service, _, cancel := runningService(t, false)
+	manifestPath := filepath.Join(service.dir, manifestName)
+	if err := os.Remove(manifestPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePrivateFile(manifestPath, []byte("replacement")); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	select {
+	case <-service.done:
+	case <-time.After(time.Second):
+		t.Fatal("supervisor did not finish cleanup")
+	}
+	if _, err := os.Lstat(manifestPath); err != nil {
+		t.Fatalf("same-mode replacement was removed: %v", err)
+	}
+}
+
+func TestSuccessfulStopWaitsForHeldOwnerBeforeClosingNamespace(t *testing.T) {
+	service, controller, cancel := runningService(t, false)
+	defer cancel()
+	if err := controller.Stop(context.Background(), testBinding()); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(100 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if service.owner.closeCalls() != 0 {
+			t.Fatal("supervisor closed runtime before held owner was reaped")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	service.owner.exit(nil)
+	select {
+	case <-service.done:
+	case <-time.After(time.Second):
+		t.Fatal("supervisor did not close after owner exit")
+	}
+}
+
+func TestDetachedLauncherReapsOnlyUnauthenticatedChildAndOwnRequest(t *testing.T) {
+	dir := privateRuntime(t)
+	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(400, 0).UTC(), Unique: 40}
+	child := &testLaunchChild{}
+	launcher := newDetachedLauncher(launcherDeps{
+		executable: func() (string, error) { return "/private/boxwarden", nil },
+		inspector:  testInspector(identity),
+		start:      func(context.Context, LaunchCommand) (launchChild, error) { return child, nil },
+		await:      func(context.Context, *Client, Binding) error { return errors.New("no authenticated evidence") },
+	})
+	err := launcher.Launch(context.Background(), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"})
+	if err == nil || !child.stopped || child.released {
+		t.Fatalf("failed launch = %v, stopped=%t released=%t; want reaped but not released", err, child.stopped, child.released)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, requestName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed launch request remains: %v", err)
+	}
+}
+
+func TestDetachedLauncherRefusesUnsupportedPlatformBeforeRequestMutation(t *testing.T) {
+	dir := privateRuntime(t)
+	launcher := newDetachedLauncher(launcherDeps{inspector: unsupportedInspector{}})
+	err := launcher.Launch(context.Background(), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"})
+	if err == nil {
+		t.Fatal("unsupported platform launched")
+	}
+	if _, err := os.Lstat(filepath.Join(dir, requestName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unsupported platform wrote request: %v", err)
+	}
+}
+
+func TestGenerationLockRejectsSameUIDSymlinkAndContention(t *testing.T) {
+	dir := privateRuntime(t)
+	target := filepath.Join(dir, "same-uid-target")
+	if err := writePrivateFile(target, []byte("target")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, lockName)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := acquireGenerationLock(dir); err == nil {
+		t.Fatal("same-UID 0600 lock symlink was admitted")
+	}
+	if err := os.Remove(filepath.Join(dir, lockName)); err != nil {
+		t.Fatal(err)
+	}
+	first, _, err := acquireGenerationLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	if _, _, err := acquireGenerationLock(dir); err == nil {
+		t.Fatal("second lock owner was admitted")
+	}
+}
+
+func TestRuntimeEvidenceRequiresEachNamedRoleAndOneBrokerState(t *testing.T) {
+	identity := ProcessIdentity{PID: 1, StartedAt: time.Unix(1, 0).UTC(), Unique: 1}
+	if err := validStartEvidence(RuntimeStartEvidence{Children: []NamedProcessEvidence{{Role: "backend", Identity: identity}, {Role: "backend", Identity: identity}}, Endpoints: []NamedFileEvidence{{Role: "tart-endpoint", Identity: FileIdentity{Path: "/private/tart", Device: 1, Inode: 1}}, {Role: "operator-endpoint", Identity: FileIdentity{Path: "/private/operator", Device: 1, Inode: 2}}}, Broker: BrokerEvidence{Healthy: true}}); err == nil {
+		t.Fatal("duplicate direct-child role was admitted")
+	}
+	if err := validStartEvidence(RuntimeStartEvidence{Children: []NamedProcessEvidence{{Role: "backend", Identity: identity}, {Role: "screen", Identity: identity}}, Endpoints: []NamedFileEvidence{{Role: "tart-endpoint", Identity: FileIdentity{Path: "/private/tart", Device: 1, Inode: 1}}, {Role: "operator-endpoint", Identity: FileIdentity{Path: "/private/operator", Device: 1, Inode: 2}}}, Broker: BrokerEvidence{}}); err == nil {
+		t.Fatal("unknown initial broker state was admitted")
+	}
+}
+
+func TestControlHandlerAuthenticatesDirectFramesAndRejectsUnknownActions(t *testing.T) {
+	key := make([]byte, 32)
+	key[0] = 9
+	owner := newTestOwner(ProcessIdentity{PID: 1, StartedAt: time.Unix(1, 0).UTC(), Unique: 1})
+	manifest := Manifest{Binding: testBinding()}
+	valid := controlRequest{Version: 1, Action: "snapshot", Binding: testBinding(), Challenge: "fresh"}
+	var err error
+	valid.MAC, err = requestMAC(key, valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, request := range map[string]controlRequest{
+		"wrong-binding":  func() controlRequest { r := valid; r.Binding.Generation = "other"; return r }(),
+		"wrong-mac":      func() controlRequest { r := valid; r.MAC = "wrong"; return r }(),
+		"unknown-action": func() controlRequest { r := valid; r.Action = "repair"; r.MAC, _ = requestMAC(key, r); return r }(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			client, server := net.Pipe()
+			defer client.Close()
+			go handleControl(server, manifest, key, owner, func() error { return nil })
+			data, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := writeFrame(client, data); err != nil {
+				t.Fatal(err)
+			}
+			_ = client.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			if _, err := readBounded(client); err == nil {
+				t.Fatal("unauthenticated or unknown action received a response")
+			}
+		})
+	}
+	client, server := net.Pipe()
+	defer client.Close()
+	go handleControl(server, manifest, key, owner, func() error { return nil })
+	data, err := json.Marshal(valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFrame(client, data); err != nil {
+		t.Fatal(err)
+	}
+	responseData, err := readBounded(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response controlResponse
+	if err := decodeExact(responseData, &response); err != nil {
+		t.Fatal(err)
+	}
+	want, err := responseMAC(key, response)
+	if err != nil || response.Challenge != "fresh" || response.MAC != want {
+		t.Fatalf("response was not challenge/MAC bound: %#v", response)
+	}
+}
+
+func TestWriteFrameCompletesShortWrites(t *testing.T) {
+	writer := &shortFrameWriter{limit: 2}
+	if err := writeFrame(writer, []byte("frame-body")); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := binary.BigEndian.Uint32(writer.data[:4]), uint32(len("frame-body")); got != want {
+		t.Fatalf("frame size=%d, want=%d", got, want)
+	}
+	if got := string(writer.data[4:]); got != "frame-body" {
+		t.Fatalf("frame body=%q", got)
+	}
+}
+
+type shortFrameWriter struct {
+	limit int
+	data  []byte
+}
+
+func (w *shortFrameWriter) Write(data []byte) (int, error) {
+	if len(data) > w.limit {
+		data = data[:w.limit]
+	}
+	w.data = append(w.data, data...)
+	return len(data), nil
 }
 
 type testService struct {
@@ -290,7 +496,7 @@ type mutableInspector struct {
 }
 
 func testInspector(identity ProcessIdentity) *mutableInspector {
-	return &mutableInspector{entries: map[int]ProcessIdentity{identity.PID: identity, 72: {PID: 72, StartedAt: time.Unix(201, 0).UTC(), Unique: 10}}}
+	return &mutableInspector{entries: map[int]ProcessIdentity{identity.PID: identity, 72: {PID: 72, StartedAt: time.Unix(201, 0).UTC(), Unique: 10}, 73: {PID: 73, StartedAt: time.Unix(202, 0).UTC(), Unique: 11}}}
 }
 func (i *mutableInspector) Supported() bool { return true }
 func (i *mutableInspector) Observe(_ context.Context, pid int) (ProcessIdentity, error) {
@@ -322,16 +528,34 @@ type testOwner struct {
 	exitCh                      chan error
 	stopped, closed             int
 	stopFailure                 error
+	endpoints                   []string
 }
 
 func newTestOwner(identity ProcessIdentity) *testOwner {
 	return &testOwner{identity: identity, healthy: true, exitCh: make(chan error, 1)}
 }
-func (o *testOwner) Start(context.Context, LaunchRequest) ([]ProcessIdentity, error) {
+func (o *testOwner) Start(_ context.Context, request LaunchRequest) (RuntimeStartEvidence, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.didStart = true
-	return []ProcessIdentity{{PID: 72, StartedAt: time.Unix(201, 0).UTC(), Unique: 10}}, nil
+	tartPath := filepath.Join(request.RuntimeDirectory, "test-tart-endpoint")
+	operatorPath := filepath.Join(request.RuntimeDirectory, "test-operator-endpoint")
+	if err := writePrivateFile(tartPath, []byte("tart")); err != nil {
+		return RuntimeStartEvidence{}, err
+	}
+	if err := writePrivateFile(operatorPath, []byte("operator")); err != nil {
+		return RuntimeStartEvidence{}, err
+	}
+	tart, err := capturePrivateRegular(tartPath)
+	if err != nil {
+		return RuntimeStartEvidence{}, err
+	}
+	operator, err := capturePrivateRegular(operatorPath)
+	if err != nil {
+		return RuntimeStartEvidence{}, err
+	}
+	o.endpoints = []string{tartPath, operatorPath}
+	return RuntimeStartEvidence{Children: []NamedProcessEvidence{{Role: "backend", Identity: ProcessIdentity{PID: 72, StartedAt: time.Unix(201, 0).UTC(), Unique: 10}}, {Role: "screen", Identity: ProcessIdentity{PID: 73, StartedAt: time.Unix(202, 0).UTC(), Unique: 11}}}, Endpoints: []NamedFileEvidence{{Role: "tart-endpoint", Identity: tart}, {Role: "operator-endpoint", Identity: operator}}, Broker: BrokerEvidence{Healthy: true}}, nil
 }
 func (o *testOwner) Snapshot() Snapshot {
 	o.mu.Lock()
@@ -349,6 +573,9 @@ func (o *testOwner) Close(context.Context) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.closed++
+	for _, path := range o.endpoints {
+		_ = os.Remove(path)
+	}
 	return nil
 }
 func (o *testOwner) exit(err error)    { o.exitCh <- err }

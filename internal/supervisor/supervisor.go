@@ -6,17 +6,22 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
 )
 
+const lifecycleDeadline = 250 * time.Millisecond
+
 // RuntimeOwner is supplied only by the future trusted-host launch composition.
-// It keeps opaque direct handles; no caller can reconstruct a signal target
-// from the evidence persisted in Manifest.
+// Its retained capabilities, rather than persisted evidence, are the only
+// objects that may stop, wait for, or close the direct children. Task 5 must
+// derive RuntimeStartEvidence read-only from its held backend and serial-runtime
+// capabilities; it must not reconstruct a control target from this evidence.
 type RuntimeOwner interface {
-	Start(context.Context, LaunchRequest) ([]ProcessIdentity, error)
+	Start(context.Context, LaunchRequest) (RuntimeStartEvidence, error)
 	Snapshot() Snapshot
 	Wait(context.Context) error
 	Stop(context.Context) error
@@ -27,67 +32,129 @@ type ProcessInspector interface {
 	Observe(context.Context, int) (ProcessIdentity, error)
 }
 
-// DetachedLauncher is the concrete controller-side launch foundation. Its
-// private starter seam exists solely to make fixed argv/environment ownership
-// testable; production composition supplies an exec-backed starter in Task 5.
-type DetachedLauncher struct {
-	Executable string
-	Inspector  ProcessInspector
-	Start      func(context.Context, LaunchCommand) (ReleasedChild, error)
-	Await      func(context.Context, *Client, Binding) error
-}
 type LaunchCommand struct {
 	Path      string
 	Args, Env []string
 	Dir       string
 }
-type ReleasedChild interface{ Release() error }
+type launchChild interface {
+	release() error
+	stopReap(context.Context) error
+}
+type launcherDeps struct {
+	executable func() (string, error)
+	inspector  ProcessInspector
+	start      func(context.Context, LaunchCommand) (launchChild, error)
+	await      func(context.Context, *Client, Binding) error
+}
+type detachedLauncher struct{ deps launcherDeps }
 
-func (l DetachedLauncher) Launch(ctx context.Context, request LaunchRequest) error {
-	if l.Inspector == nil || !l.Inspector.Supported() {
+// NewDetachedLauncher has no caller-controlled executable, process, or
+// authentication dependencies. It derives the exact current Boxwarden binary.
+func NewDetachedLauncher() (Launcher, error) {
+	return newDetachedLauncher(launcherDeps{executable: os.Executable, inspector: systemInspector{}, start: startExactChild, await: awaitAuthenticated}), nil
+}
+func newDetachedLauncher(deps launcherDeps) Launcher { return detachedLauncher{deps: deps} }
+func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) error {
+	// Unsupported platforms fail before creating a request or process.
+	if l.deps.inspector == nil || !l.deps.inspector.Supported() {
 		return fmt.Errorf("supervisor process identity is unsupported on this platform")
 	}
 	if err := validLaunchRequest(request); err != nil {
 		return err
 	}
-	if !canonicalAbsolute(l.Executable) || l.Start == nil || l.Await == nil {
+	if l.deps.executable == nil || l.deps.start == nil || l.deps.await == nil {
 		return fmt.Errorf("fixed supervisor launcher dependencies are required")
 	}
-	path := filepath.Join(request.RuntimeDirectory, requestName)
-	if err := writeLaunchRequest(path, request); err != nil {
+	executable, err := l.deps.executable()
+	if err != nil || !canonicalAbsolute(executable) {
+		return fmt.Errorf("resolve exact boxwarden executable: %w", err)
+	}
+	requestPath := filepath.Join(request.RuntimeDirectory, requestName)
+	if err := writeLaunchRequest(requestPath, request); err != nil {
 		return err
 	}
-	child, err := l.Start(ctx, LaunchCommand{Path: l.Executable, Args: []string{"internal", "session-supervisor", path}, Env: []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C"}, Dir: request.RuntimeDirectory})
+	requestIdentity, err := capturePrivateRegular(requestPath)
 	if err != nil {
-		_ = os.Remove(path)
+		return err
+	}
+	cleanupRequest := func() error { return removeExact(requestIdentity, false) }
+	child, err := l.deps.start(ctx, LaunchCommand{Path: executable, Args: []string{"internal", "session-supervisor", requestPath}, Env: []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C"}, Dir: request.RuntimeDirectory})
+	if err != nil {
+		_ = cleanupRequest()
 		return err
 	}
 	if child == nil {
-		_ = os.Remove(path)
+		_ = cleanupRequest()
 		return fmt.Errorf("supervisor child is unavailable")
 	}
-	client := &Client{RuntimeDirectory: request.RuntimeDirectory, Inspector: l.Inspector, MaxSnapshotAge: time.Minute}
-	if err := l.Await(ctx, client, request.Binding); err != nil {
-		_ = child.Release()
-		_ = os.Remove(path)
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, Inspector: l.deps.inspector, MaxSnapshotAge: time.Minute}
+	if err := l.deps.await(ctx, client, request.Binding); err != nil {
+		stopCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline)
+		defer cancel()
+		stopErr := child.stopReap(stopCtx)
+		removeErr := cleanupRequest()
+		return errors.Join(err, stopErr, removeErr)
+	}
+	if err := child.release(); err != nil {
 		return err
 	}
 	return nil
 }
+func awaitAuthenticated(ctx context.Context, client *Client, binding Binding) error {
+	snapshot, err := client.Snapshot(ctx, binding)
+	if err != nil {
+		return err
+	}
+	if !snapshotReady(snapshot) {
+		return fmt.Errorf("supervisor authenticated snapshot is not ready")
+	}
+	return nil
+}
 
-var _ Launcher = DetachedLauncher{}
+type exactChild struct{ cmd *exec.Cmd }
 
-// RunRequest is the fixed internal command entrypoint. Runtime composition is
-// intentionally unavailable until Task 5 supplies admitted host/backend facts;
-// refusing it is safer than synthesizing a handle from request data.
+func startExactChild(_ context.Context, command LaunchCommand) (launchChild, error) {
+	cmd := exec.Command(command.Path, command.Args...)
+	cmd.Env = append([]string(nil), command.Env...)
+	cmd.Dir = command.Dir
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return &exactChild{cmd: cmd}, nil
+}
+func (c *exactChild) release() error {
+	if c == nil || c.cmd == nil || c.cmd.Process == nil {
+		return fmt.Errorf("exact child unavailable")
+	}
+	return c.cmd.Process.Release()
+}
+func (c *exactChild) stopReap(ctx context.Context) error {
+	if c == nil || c.cmd == nil || c.cmd.Process == nil {
+		return nil
+	}
+	_ = c.cmd.Process.Kill()
+	done := make(chan error, 1)
+	go func() { done <- c.cmd.Wait() }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// RunRequest is deliberately unavailable until Task 5 supplies admitted
+// host/backend facts. The launcher only treats an authenticated ready response
+// as success; this refusal never fabricates an owner from request bytes.
 func RunRequest(ctx context.Context, requestPath string) error {
 	return Run(ctx, requestPath, unavailableOwner{}, systemInspector{})
 }
 
 type unavailableOwner struct{}
 
-func (unavailableOwner) Start(context.Context, LaunchRequest) ([]ProcessIdentity, error) {
-	return nil, fmt.Errorf("supervisor runtime composition is unavailable")
+func (unavailableOwner) Start(context.Context, LaunchRequest) (RuntimeStartEvidence, error) {
+	return RuntimeStartEvidence{}, fmt.Errorf("supervisor runtime composition is unavailable")
 }
 func (unavailableOwner) Snapshot() Snapshot { return Snapshot{} }
 func (unavailableOwner) Wait(context.Context) error {
@@ -96,7 +163,12 @@ func (unavailableOwner) Wait(context.Context) error {
 func (unavailableOwner) Stop(context.Context) error  { return nil }
 func (unavailableOwner) Close(context.Context) error { return nil }
 
-func prepare(ctx context.Context, requestPath string, owner RuntimeOwner, inspector ProcessInspector) (Manifest, error) {
+type lifecycleResources struct {
+	runtime, request, manifest, socket, lock FileIdentity
+	lockHandle                               *os.File
+}
+
+func prepare(ctx context.Context, requestPath string, owner RuntimeOwner, inspector ProcessInspector, runtimeIdentity FileIdentity) (Manifest, error) {
 	if inspector == nil || !inspector.Supported() {
 		return Manifest{}, fmt.Errorf("supervisor process identity is unsupported on this platform")
 	}
@@ -107,41 +179,31 @@ func prepare(ctx context.Context, requestPath string, owner RuntimeOwner, inspec
 	if owner == nil {
 		return Manifest{}, fmt.Errorf("runtime owner is unavailable")
 	}
-	// Platform and request admission precede every runtime mutation/start.
-	identity, err := inspector.Observe(ctx, os.Getpid())
-	if err != nil || !identity.valid() {
+	supervisor, err := inspector.Observe(ctx, os.Getpid())
+	if err != nil || !supervisor.valid() {
 		return Manifest{}, fmt.Errorf("observe supervisor process identity: %w", err)
 	}
-	children, err := owner.Start(ctx, request)
+	start, err := owner.Start(ctx, request)
 	if err != nil {
 		return Manifest{}, err
 	}
-	if len(children) == 0 {
-		return Manifest{}, fmt.Errorf("runtime owner returned no direct child evidence")
-	}
-	for _, child := range children {
-		if !child.valid() {
-			return Manifest{}, fmt.Errorf("runtime owner returned invalid direct child evidence")
-		}
+	if err := validStartEvidence(start); err != nil {
+		return Manifest{}, err
 	}
 	key, encoded, err := newControlKey()
 	if err != nil {
 		return Manifest{}, err
 	}
 	_ = key
-	manifest := Manifest{Version: 1, Binding: request.Binding, RuntimeDirectory: request.RuntimeDirectory, SocketPath: filepath.Join(request.RuntimeDirectory, socketName), ControlKey: encoded, Supervisor: identity, Children: children, CreatedAt: time.Now().UTC()}
+	manifest := Manifest{Version: 1, Binding: request.Binding, RuntimeDirectory: request.RuntimeDirectory, SocketPath: filepath.Join(request.RuntimeDirectory, socketName), ControlKey: encoded, Evidence: RuntimeEvidence{Supervisor: supervisor, Children: start.Children, Endpoints: start.Endpoints, RuntimeDirectory: runtimeIdentity, Broker: start.Broker}, CreatedAt: time.Now().UTC()}
 	if err := writeManifest(filepath.Join(request.RuntimeDirectory, manifestName), manifest); err != nil {
-		_ = owner.Stop(context.Background())
-		_ = owner.Close(context.Background())
 		return Manifest{}, err
 	}
 	return manifest, nil
 }
 
-// Run is the detached supervisor lifetime. It closes its only socket and acts
-// through held runtime handles once, whether backend exit, stop, or context
-// cancellation ends the generation. It never scans process tables or signals
-// a manifest PID.
+// Run owns one generation. Every outcome converges through one bounded
+// stop/wait/close/identity-cleanup sequence; evidence is never used to signal.
 func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector ProcessInspector) error {
 	if inspector == nil || !inspector.Supported() {
 		return fmt.Errorf("supervisor process identity is unsupported on this platform")
@@ -150,47 +212,82 @@ func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector 
 	if err != nil {
 		return err
 	}
-	generationLock, err := acquireGenerationLock(request.RuntimeDirectory)
+	resources := lifecycleResources{}
+	if resources.runtime, err = capturePrivateDirectory(request.RuntimeDirectory); err != nil {
+		return err
+	}
+	if resources.request, err = capturePrivateRegular(requestPath); err != nil {
+		return err
+	}
+	lock, lockIdentity, err := acquireGenerationLock(request.RuntimeDirectory)
 	if err != nil {
 		return err
 	}
-	defer generationLock.Close()
+	resources.lock, resources.lockHandle = lockIdentity, lock
 	owned := &onceOwner{owner: owner}
-	manifest, err := prepare(ctx, requestPath, owned, inspector)
+	manifest, err := prepare(ctx, requestPath, owned, inspector, resources.runtime)
 	if err != nil {
-		return err
+		return errors.Join(err, terminateAndCleanup(owned, nil, resources))
+	}
+	resources.manifest, err = capturePrivateRegular(filepath.Join(request.RuntimeDirectory, manifestName))
+	if err != nil {
+		return errors.Join(err, terminateAndCleanup(owned, nil, resources))
 	}
 	key, err := decodeKey(manifest.ControlKey)
 	if err != nil {
-		return cleanup(owner, manifest)
+		return errors.Join(err, terminateAndCleanup(owned, nil, resources))
 	}
 	listener, err := listenSocket(manifest.SocketPath)
 	if err != nil {
-		cleanupErr := cleanup(owned, manifest)
-		if cleanupErr != nil {
-			return fmt.Errorf("open control socket: %w; cleanup: %v", err, cleanupErr)
-		}
-		return fmt.Errorf("open control socket: %w", err)
+		return errors.Join(fmt.Errorf("open control socket: %w", err), terminateAndCleanup(owned, nil, resources))
 	}
-	controlCtx, cancel := context.WithCancel(context.Background())
-	controlDone := make(chan error, 1)
+	resources.socket, err = captureSocket(manifest.SocketPath)
+	if err != nil {
+		_ = listener.Close()
+		return errors.Join(err, terminateAndCleanup(owned, nil, resources))
+	}
+	controlCtx, cancelControl := context.WithCancel(context.Background())
+	defer cancelControl()
 	stopped := make(chan struct{}, 1)
-	go func() { controlDone <- serveControl(controlCtx, listener, manifest, key, owned, stopped) }()
-	waitDone := make(chan error, 1)
-	go func() { waitDone <- owned.Wait(context.Background()) }()
-	select {
-	case <-ctx.Done():
-	case <-waitDone:
-	case <-controlDone:
-	case <-stopped:
+	stop := func() error {
+		stopCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline)
+		defer cancel()
+		err := owned.Stop(stopCtx)
+		if err == nil {
+			select {
+			case stopped <- struct{}{}:
+			default:
+			}
+		}
+		return err
 	}
-	cancel()
+	controlDone := make(chan error, 1)
+	go func() { controlDone <- serveControl(controlCtx, listener, manifest, key, owned, stop) }()
+	waitCtx, cancelWait := context.WithCancel(context.Background())
+	defer cancelWait()
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- owned.Wait(waitCtx) }()
+	var cause error
+	waitObserved := false
+	select {
+	case cause = <-waitDone:
+		waitObserved = true
+	case <-stopped:
+	case cause = <-controlDone:
+	case <-ctx.Done():
+		cause = ctx.Err()
+	}
+	cancelControl()
 	_ = listener.Close()
 	select {
 	case <-controlDone:
-	case <-time.After(time.Second):
+	case <-time.After(lifecycleDeadline):
+		cause = errors.Join(cause, fmt.Errorf("control server did not stop"))
 	}
-	return cleanup(owned, manifest)
+	if waitObserved {
+		waitDone = nil
+	}
+	return errors.Join(cause, terminateAndCleanup(owned, waitDone, resources, stop))
 }
 
 type onceOwner struct {
@@ -201,8 +298,8 @@ type onceOwner struct {
 	closeErr  error
 }
 
-func (o *onceOwner) Start(ctx context.Context, r LaunchRequest) ([]ProcessIdentity, error) {
-	return o.owner.Start(ctx, r)
+func (o *onceOwner) Start(ctx context.Context, request LaunchRequest) (RuntimeStartEvidence, error) {
+	return o.owner.Start(ctx, request)
 }
 func (o *onceOwner) Snapshot() Snapshot             { return o.owner.Snapshot() }
 func (o *onceOwner) Wait(ctx context.Context) error { return o.owner.Wait(ctx) }
@@ -214,66 +311,94 @@ func (o *onceOwner) Close(ctx context.Context) error {
 	o.closeOnce.Do(func() { o.closeErr = o.owner.Close(ctx) })
 	return o.closeErr
 }
-func acquireGenerationLock(runtime string) (*os.File, error) {
-	path := filepath.Join(runtime, "generation.lock")
+
+func acquireGenerationLock(runtime string) (*os.File, FileIdentity, error) {
+	path := filepath.Join(runtime, lockName)
 	if info, err := os.Lstat(path); err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info)) {
-		return nil, fmt.Errorf("generation lock is unsafe")
+		return nil, FileIdentity{}, fmt.Errorf("generation lock is unsafe")
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
+		return nil, FileIdentity{}, err
 	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
-		return nil, fmt.Errorf("open generation lock: %w", err)
+		return nil, FileIdentity{}, fmt.Errorf("open generation lock: %w", err)
 	}
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info) {
-		file.Close()
-		return nil, fmt.Errorf("generation lock is unsafe")
+		_ = file.Close()
+		return nil, FileIdentity{}, fmt.Errorf("generation lock is unsafe")
+	}
+	identity, err := identityFor(path, info)
+	if err != nil {
+		_ = file.Close()
+		return nil, FileIdentity{}, err
 	}
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		file.Close()
-		return nil, fmt.Errorf("acquire generation lock: %w", err)
+		_ = file.Close()
+		return nil, FileIdentity{}, fmt.Errorf("acquire generation lock: %w", err)
 	}
-	return file, nil
+	return file, identity, nil
 }
-func cleanup(owner RuntimeOwner, manifest Manifest) error {
-	var once sync.Once
+func captureSocket(path string) (FileIdentity, error) {
+	identity, info, err := captureIdentity(path)
+	if err != nil || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info) {
+		return FileIdentity{}, fmt.Errorf("owner-private socket identity unavailable")
+	}
+	return identity, nil
+}
+func terminateAndCleanup(owner RuntimeOwner, waitDone <-chan error, resources lifecycleResources, stopFns ...func() error) error {
 	var result error
-	once.Do(func() {
-		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		if err := owner.Stop(stopCtx); err != nil {
-			result = err
+	if len(stopFns) > 0 {
+		result = errors.Join(result, stopFns[0]())
+	} else {
+		stopCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline)
+		result = errors.Join(result, owner.Stop(stopCtx))
+		cancel()
+	}
+	if waitDone != nil {
+		select {
+		case err := <-waitDone:
+			result = errors.Join(result, err)
+		case <-time.After(lifecycleDeadline):
+			result = errors.Join(result, fmt.Errorf("owner did not reap before cleanup deadline"))
 		}
-		if err := owner.Close(stopCtx); err != nil && result == nil {
-			result = err
+	}
+	closeCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline)
+	result = errors.Join(result, owner.Close(closeCtx))
+	cancel()
+	for _, identity := range []FileIdentity{resources.socket, resources.manifest, resources.request, resources.lock} {
+		if identity.Path != "" {
+			result = errors.Join(result, removeExact(identity, identity.Path == resources.socket.Path))
 		}
-		for _, path := range []string{manifest.SocketPath, filepath.Join(manifest.RuntimeDirectory, manifestName), filepath.Join(manifest.RuntimeDirectory, requestName)} {
-			if err := removeOwned(path); err != nil && result == nil {
-				result = err
-			}
-		}
-	})
+	}
+	if resources.lockHandle != nil {
+		result = errors.Join(result, resources.lockHandle.Close())
+	}
+	if resources.runtime.Path != "" {
+		result = errors.Join(result, removeExactDirectory(resources.runtime))
+	}
 	return result
 }
-func removeOwned(path string) error {
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
+func removeExact(identity FileIdentity, allowMissing bool) error {
+	err := identityStillMatches(identity, func(info os.FileInfo) bool { return ownedByCurrentUser(info) })
+	if errors.Is(err, os.ErrNotExist) && allowMissing {
 		return nil
 	}
 	if err != nil {
+		return fmt.Errorf("preserve replacement during cleanup: %w", err)
+	}
+	if err := os.Remove(identity.Path); err != nil {
 		return err
 	}
-	if filepath.Base(path) == socketName {
-		if info.Mode()&os.ModeSocket == 0 || !ownedByCurrentUser(info) || info.Mode().Perm() != 0o600 {
-			return fmt.Errorf("refuse cleanup of unproven control socket")
-		}
-	} else if !privateRegular(path) {
-		return fmt.Errorf("refuse cleanup of unproven manifest")
+	return nil
+}
+func removeExactDirectory(identity FileIdentity) error {
+	if err := identityStillMatches(identity, func(info os.FileInfo) bool {
+		return info.IsDir() && info.Mode().Perm() == 0o700 && ownedByCurrentUser(info)
+	}); err != nil {
+		return fmt.Errorf("preserve runtime replacement during cleanup: %w", err)
 	}
-	return os.Remove(path)
+	return os.Remove(identity.Path)
 }
 
-// Compile-time guard: the control socket is always a Unix endpoint, never a
-// network service.
 var _ *net.UnixListener

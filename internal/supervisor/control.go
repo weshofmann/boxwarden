@@ -78,7 +78,7 @@ func listenSocket(path string) (*net.UnixListener, error) {
 	}
 	return listener, nil
 }
-func serveControl(ctx context.Context, listener *net.UnixListener, manifest Manifest, key []byte, owner RuntimeOwner, stopped chan<- struct{}) error {
+func serveControl(ctx context.Context, listener *net.UnixListener, manifest Manifest, key []byte, owner interface{ Snapshot() Snapshot }, stop func() error) error {
 	defer listener.Close()
 	for {
 		listener.SetDeadline(time.Now().Add(100 * time.Millisecond))
@@ -95,10 +95,10 @@ func serveControl(ctx context.Context, listener *net.UnixListener, manifest Mani
 			}
 			return err
 		}
-		go handleControl(connection, manifest, key, owner, stopped)
+		go handleControl(connection, manifest, key, owner, stop)
 	}
 }
-func handleControl(connection net.Conn, manifest Manifest, key []byte, owner RuntimeOwner, stopped chan<- struct{}) {
+func handleControl(connection net.Conn, manifest Manifest, key []byte, owner interface{ Snapshot() Snapshot }, stop func() error) {
 	defer connection.Close()
 	_ = connection.SetDeadline(time.Now().Add(2 * time.Second))
 	request, err := readControlRequest(connection)
@@ -125,13 +125,10 @@ func handleControl(connection net.Conn, manifest Manifest, key []byte, owner Run
 	}
 	response := controlResponse{Version: 1, Binding: manifest.Binding, Challenge: request.Challenge, Snapshot: snapshot}
 	if request.Action == "stop" {
-		if err := owner.Stop(context.Background()); err != nil {
+		if stop == nil {
+			response.Error = "supervisor stop is unavailable"
+		} else if err := stop(); err != nil {
 			response.Error = boundedDiagnostic(err.Error())
-		} else if stopped != nil {
-			select {
-			case stopped <- struct{}{}:
-			default:
-			}
 		}
 	}
 	response.MAC, err = responseMAC(key, response)
@@ -177,9 +174,14 @@ func writeFrame(writer io.Writer, data []byte) error {
 	if len(data) == 0 || len(data) > maxControlBytes {
 		return fmt.Errorf("control message exceeds bound")
 	}
-	if err := binary.Write(writer, binary.BigEndian, uint32(len(data))); err != nil {
+	header := make([]byte, 4)
+	binary.BigEndian.PutUint32(header, uint32(len(data)))
+	if err := writeAll(writer, header); err != nil {
 		return err
 	}
+	return writeAll(writer, data)
+}
+func writeAll(writer io.Writer, data []byte) error {
 	for len(data) > 0 {
 		count, err := writer.Write(data)
 		if err != nil {
@@ -232,13 +234,13 @@ func (c *Client) authenticated(ctx context.Context, binding Binding, action stri
 	if manifest.Binding != binding {
 		return controlResponse{}, fmt.Errorf("supervisor binding mismatch")
 	}
-	current, err := c.Inspector.Observe(ctx, manifest.Supervisor.PID)
-	if err != nil || !current.matches(manifest.Supervisor) {
+	current, err := c.Inspector.Observe(ctx, manifest.Evidence.Supervisor.PID)
+	if err != nil || !current.matches(manifest.Evidence.Supervisor) {
 		return controlResponse{}, fmt.Errorf("supervisor process identity no longer matches")
 	}
-	for _, child := range manifest.Children {
-		observed, err := c.Inspector.Observe(ctx, child.PID)
-		if err != nil || !observed.matches(child) {
+	for _, child := range manifest.Evidence.Children {
+		observed, err := c.Inspector.Observe(ctx, child.Identity.PID)
+		if err != nil || !observed.matches(child.Identity) {
 			return controlResponse{}, fmt.Errorf("supervisor direct child identity no longer matches")
 		}
 	}
