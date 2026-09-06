@@ -118,15 +118,19 @@ The helper exposes only `serial-bootstrap` and `management`. Canonical bounded J
 **Interfaces:**
 
 ```go
-type Runtime struct { TartSlave, OperatorSlave string; TartMaster, OperatorMaster *os.File; Screen ScreenChild }
-func CreateRuntime(context.Context, Root, Generation, ScreenBinary, ScreenStarter) (Runtime, error)
-type BrokerConfig struct { Tart, Screen io.Writer; Generation string; Clock Clock }
+type Runtime struct { TartSlave, OperatorSlave string; TartMaster, OperatorMaster *os.File; ScreenEvidence ScreenEvidence }
+func (hostx.SystemDoctor) CurrentScreen(context.Context) (hostx.ScreenAdmission, error)
+func CreateRuntime(context.Context, Root, Generation, hostx.ScreenAdmission) (Runtime, error)
+func (Runtime) CheckScreen(context.Context) error
+func (Runtime) WatchScreen(*Broker)
+func (Runtime) Shutdown(context.Context) error
+type BrokerConfig struct { Tart, Screen io.WriteCloser; Generation string; Clock Clock }
 func NewBroker(BrokerConfig) *Broker
 func (b *Broker) Exchange(context.Context, ExchangeRequest) (json.RawMessage, error)
 func (b *Broker) AcquireConsole(context.Context) (Lease, error)
 ```
 
-Create one private generation directory, two Darwin PTY pairs, exact private endpoint links, and direct `/usr/bin/screen -D -m -S <derived-name>` with operator slave stdin. Supervisor-owned readers pass Tart-master output to broker and operator-master input only to `OperatorInput`. The broker has exactly idle/console/automation/failed states; fixed queue, line, frame, aggregate and deadline bounds; operator data outside console is counted/discarded; overflow, interleaving, timeout, or child loss poisons the generation.
+`hostx.SystemDoctor.CurrentScreen` is the sole public admission-minting path. Create one private generation directory, two Darwin PTY pairs, exact private endpoint links, and direct `/usr/bin/screen -D -m -S <derived-name>` with the already-open operator slave as stdin. `serialx` alone owns the direct `exec.Cmd`, captures its kernel PID/birth identity immediately after Start, and retains wait/reap state; no caller supplies a starter, child, PID, or birth evidence. Runtime exposes only read-only evidence/check/watch and owned shutdown for the next supervisor task. Root safety is bound to the exact pre-open identity cross-checked against its opened descriptor; generation creation does the same before any endpoint mutation. Supervisor-owned readers pass Tart-master output to broker and operator-master input only to `OperatorInput`. The broker has exactly idle/console/automation/failed states; fixed queue, line, frame, aggregate and deadline bounds; operator data outside console is counted/discarded; overflow, interleaving, timeout, child loss, observer error, or identity mismatch poisons the generation.
 
 - [ ] **RED:** `TestCreateRuntimeRejectsExistingOrUnsafeGenerationPath`, `TestCreateRuntimeUsesTwoOwnerOnlyPTYSlavesAndFixedScreenSpec`, `TestBrokerDiscardsOperatorInputOutsideConsole`, `TestExchangeAcceptsOnlyOneCanonicalAssociatedFrame`, `TestExchangePoisonsOnOverflowInterleavingAndTimeout`, `TestConsoleEOFDoesNotCloseScreenOrTartEndpoint`. Fakes cover platform-independent behavior; Darwin allocation gets a Darwin-tagged integration test.
 - [ ] **Run RED:** `go test ./internal/serialx -count=1`. Expected: missing package.

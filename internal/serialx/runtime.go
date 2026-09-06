@@ -12,9 +12,12 @@ import (
 // Root is an existing, exact owner-private runtime parent directory.
 type Root = string
 type Runtime struct {
-	TartSlave, OperatorSlave     string
-	TartMaster, OperatorMaster   *os.File
-	Screen                       ScreenChild
+	TartSlave, OperatorSlave   string
+	TartMaster, OperatorMaster *os.File
+	// ScreenEvidence identifies only the Screen child this runtime started.
+	// It is observation, not an authority for callers to adopt a process.
+	ScreenEvidence               ScreenEvidence
+	screen                       *ownedScreen
 	generationDir                string
 	root, generationRoot         *os.Root
 	generationDev, generationIno uint64
@@ -29,32 +32,53 @@ type ptyAllocator interface {
 }
 type systemPTYAllocator struct{}
 
+// runtimeDeps is the deterministic in-package test seam. Production callers
+// receive no process injection surface; only platform-owned dependencies can
+// construct the retained direct Screen child.
+type runtimeDeps struct {
+	allocatePTY     func() (*os.File, *os.File, error)
+	startScreen     func(context.Context, screenLaunch) (*ownedScreen, error)
+	qualifiedScreen func(ScreenBinary) bool
+	lstat           func(string) (os.FileInfo, error)
+	openRoot        func(string) (*os.Root, error)
+	openGeneration  func(*os.Root, string) (*os.Root, error)
+}
+
 func (systemPTYAllocator) Allocate() (*os.File, *os.File, error) { return allocatePTY() }
 
-func CreateRuntime(ctx context.Context, root Root, generation string, screen ScreenBinary, starter ScreenStarter) (Runtime, error) {
-	return createRuntime(ctx, root, generation, screen, starter, systemPTYAllocator{})
+func CreateRuntime(ctx context.Context, root Root, generation string, screen ScreenBinary) (Runtime, error) {
+	deps, err := productionRuntimeDeps()
+	if err != nil {
+		return Runtime{}, err
+	}
+	return createRuntime(ctx, root, generation, screen, deps)
 }
-func createRuntime(ctx context.Context, root Root, generation string, screen ScreenBinary, starter ScreenStarter, allocator ptyAllocator) (Runtime, error) {
+func createRuntime(ctx context.Context, root Root, generation string, screen ScreenBinary, deps runtimeDeps) (Runtime, error) {
 	if err := ctx.Err(); err != nil {
 		return Runtime{}, err
 	}
-	if err := safeRuntimeRoot(root); err != nil {
-		return Runtime{}, err
+	if deps.qualifiedScreen == nil || !deps.qualifiedScreen(screen) {
+		return Runtime{}, fmt.Errorf("screen binary is not qualified")
+	}
+	if deps.allocatePTY == nil || deps.startScreen == nil {
+		return Runtime{}, fmt.Errorf("Screen runtime dependencies are unavailable")
+	}
+	if !safeRuntimeRootPath(root) {
+		return Runtime{}, fmt.Errorf("runtime root must be canonical and non-root")
 	}
 	if !safeGeneration(generation) {
 		return Runtime{}, fmt.Errorf("generation is unsafe")
 	}
-	if allocator == nil {
-		return Runtime{}, fmt.Errorf("PTY allocator is required")
+	before, err := deps.lstatRoot(root)
+	if err != nil {
+		return Runtime{}, fmt.Errorf("inspect runtime root before open: %w", err)
 	}
-	rootHandle, err := os.OpenRoot(root)
+	if !privateDirectory(before) || before.Mode()&os.ModeSymlink != 0 {
+		return Runtime{}, fmt.Errorf("runtime root is unsafe")
+	}
+	rootHandle, err := deps.openRuntimeRoot(root)
 	if err != nil {
 		return Runtime{}, fmt.Errorf("open runtime root: %w", err)
-	}
-	before, err := os.Lstat(root)
-	if err != nil {
-		rootHandle.Close()
-		return Runtime{}, fmt.Errorf("reinspect runtime root: %w", err)
 	}
 	opened, err := rootHandle.Stat(".")
 	if err != nil || !sameFileIdentity(before, opened) || !privateDirectory(opened) {
@@ -72,9 +96,14 @@ func createRuntime(ctx context.Context, root Root, generation string, screen Scr
 		rootHandle.Close()
 		return Runtime{}, fmt.Errorf("create generation directory: %w", err)
 	}
-	generationRoot, err := rootHandle.OpenRoot(generation)
+	created, err := rootHandle.Lstat(generation)
+	if err != nil || !privateDirectory(created) {
+		rootHandle.Close()
+		return Runtime{}, fmt.Errorf("generation entry changed after creation")
+	}
+	generationRoot, err := deps.openGenerationRoot(rootHandle, generation)
 	if err != nil {
-		rootHandle.Remove(generation)
+		removeGenerationIfExact(rootHandle, generation, created)
 		rootHandle.Close()
 		return Runtime{}, fmt.Errorf("open generation directory: %w", err)
 	}
@@ -82,25 +111,30 @@ func createRuntime(ctx context.Context, root Root, generation string, screen Scr
 	genInfo, err := generationRoot.Stat(".")
 	if err != nil {
 		generationRoot.Close()
-		rootHandle.Remove(generation)
+		removeGenerationIfExact(rootHandle, generation, created)
 		rootHandle.Close()
 		return Runtime{}, fmt.Errorf("inspect generation directory: %w", err)
+	}
+	if !sameFileIdentity(created, genInfo) {
+		generationRoot.Close()
+		rootHandle.Close()
+		return Runtime{}, fmt.Errorf("generation changed during open")
 	}
 	dev, ino, ok := deviceIdentity(genInfo)
 	if !ok {
 		generationRoot.Close()
-		rootHandle.Remove(generation)
+		removeGenerationIfExact(rootHandle, generation, created)
 		rootHandle.Close()
 		return Runtime{}, fmt.Errorf("generation identity unavailable")
 	}
 	runtime := Runtime{generationDir: directory, root: rootHandle, generationRoot: generationRoot, generationDev: dev, generationIno: ino}
 	cleanup := func(err error) (Runtime, error) { _ = runtime.Close(); return Runtime{}, err }
-	tartMaster, tartSlave, err := allocator.Allocate()
+	tartMaster, tartSlave, err := deps.allocatePTY()
 	if err != nil {
 		return cleanup(fmt.Errorf("allocate Tart PTY: %w", err))
 	}
 	runtime.TartMaster = tartMaster
-	operatorMaster, operatorSlave, err := allocator.Allocate()
+	operatorMaster, operatorSlave, err := deps.allocatePTY()
 	if err != nil {
 		_ = tartSlave.Close()
 		return cleanup(fmt.Errorf("allocate operator PTY: %w", err))
@@ -136,11 +170,21 @@ func createRuntime(ctx context.Context, root Root, generation string, screen Scr
 	if err := runtime.captureLinkIdentity(&runtime.operatorLink); err != nil {
 		return cleanup(err)
 	}
-	child, err := StartScreen(ctx, starter, screen, operatorSlave, "boxwarden-"+generation)
+	child, err := deps.startScreen(ctx, screenLaunch{path: ScreenPath, args: []string{"-D", "-m", "-S", "boxwarden-" + generation}, stdin: operatorSlave})
 	if err != nil {
 		return cleanup(fmt.Errorf("start Screen: %w", err))
 	}
-	runtime.Screen = child
+	if child == nil || !child.Evidence().valid() {
+		if child != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), ExchangeDeadline)
+			_ = child.Stop(cleanupCtx)
+			_ = child.Wait(cleanupCtx)
+			cancel()
+		}
+		return cleanup(fmt.Errorf("start Screen: direct child evidence is invalid"))
+	}
+	runtime.screen = child
+	runtime.ScreenEvidence = child.Evidence()
 	return runtime, nil
 }
 func (r Runtime) Close() error {
@@ -153,11 +197,11 @@ func (r Runtime) Close() error {
 // exact starter evidence before closing endpoints and attempting cleanup.
 func (r Runtime) Shutdown(ctx context.Context) error {
 	var first error
-	if r.Screen != nil {
-		if err := r.Screen.Stop(ctx); err != nil && first == nil {
+	if r.screen != nil {
+		if err := r.screen.Stop(ctx); err != nil && first == nil {
 			first = err
 		}
-		if err := r.Screen.Wait(ctx); err != nil && first == nil {
+		if err := r.screen.Wait(ctx); err != nil && first == nil {
 			first = err
 		}
 	}
@@ -169,11 +213,13 @@ func (r Runtime) Shutdown(ctx context.Context) error {
 		}
 	}
 	if r.generationRoot != nil && r.root != nil {
+		endpointsSafe := true
 		for _, endpoint := range []endpointIdentity{r.tartLink, r.operatorLink} {
 			if err := r.revalidateEndpoint(endpoint); err != nil {
 				if first == nil {
 					first = err
 				}
+				endpointsSafe = false
 				continue
 			}
 			if err := r.generationRoot.Remove(endpoint.name); err != nil && first == nil {
@@ -183,7 +229,10 @@ func (r Runtime) Shutdown(ctx context.Context) error {
 		if err := r.generationRoot.Close(); err != nil && first == nil {
 			first = err
 		}
-		if first == nil {
+		// A Screen that was already reaped is a lifecycle error, not evidence
+		// that these descriptor-validated filesystem objects became unsafe.
+		// Only endpoint validation can prevent exact generation cleanup.
+		if endpointsSafe {
 			if info, err := r.root.Lstat(filepath.Base(r.generationDir)); err != nil || !sameDeviceIdentity(info, r.generationDev, r.generationIno) || !privateDirectory(info) {
 				first = fmt.Errorf("generation directory changed before cleanup")
 			} else if err := r.root.Remove(filepath.Base(r.generationDir)); err != nil && first == nil {
@@ -271,25 +320,56 @@ func deviceIdentity(info os.FileInfo) (uint64, uint64, bool) {
 // WatchScreen binds broker health to this exact direct child. The caller owns
 // when to install the watcher; no process lookup, PID adoption, or Screen
 // control channel is involved.
-func (r Runtime) WatchScreen(broker *Broker) {
-	if r.Screen == nil || broker == nil {
-		return
+func (r Runtime) CheckScreen(ctx context.Context) error {
+	if r.screen == nil {
+		return fmt.Errorf("direct Screen child is unavailable")
 	}
-	go func() { broker.ChildLost(r.Screen.Wait(context.Background())) }()
+	return r.screen.Check(ctx)
 }
 
-func safeRuntimeRoot(root string) error {
-	if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root || root == "/" {
-		return fmt.Errorf("runtime root must be canonical and non-root")
+func (r Runtime) WatchScreen(broker *Broker) {
+	if r.screen == nil || broker == nil {
+		return
 	}
-	info, err := os.Lstat(root)
-	if err != nil {
-		return fmt.Errorf("inspect runtime root: %w", err)
+	go func() {
+		if err := r.CheckScreen(context.Background()); err != nil {
+			broker.ChildLost(err)
+			return
+		}
+		broker.ChildLost(r.screen.Wait(context.Background()))
+	}()
+}
+
+func (deps runtimeDeps) lstatRoot(path string) (os.FileInfo, error) {
+	if deps.lstat != nil {
+		return deps.lstat(path)
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o700 || !ownedByCurrentUser(info) {
-		return fmt.Errorf("runtime root is unsafe")
+	return os.Lstat(path)
+}
+
+func (deps runtimeDeps) openRuntimeRoot(path string) (*os.Root, error) {
+	if deps.openRoot != nil {
+		return deps.openRoot(path)
 	}
-	return nil
+	return os.OpenRoot(path)
+}
+
+func (deps runtimeDeps) openGenerationRoot(root *os.Root, generation string) (*os.Root, error) {
+	if deps.openGeneration != nil {
+		return deps.openGeneration(root, generation)
+	}
+	return root.OpenRoot(generation)
+}
+
+func removeGenerationIfExact(root *os.Root, generation string, expected os.FileInfo) {
+	current, err := root.Lstat(generation)
+	if err == nil && sameFileIdentity(current, expected) {
+		_ = root.Remove(generation)
+	}
+}
+
+func safeRuntimeRootPath(root string) bool {
+	return root != "" && filepath.IsAbs(root) && filepath.Clean(root) == root && root != "/"
 }
 func safeGeneration(value string) bool {
 	if value == "" || len(value) > 128 || value == "." || value == ".." {

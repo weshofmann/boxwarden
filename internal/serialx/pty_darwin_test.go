@@ -16,7 +16,7 @@ func TestDarwinCreateRuntimeAllocatesOwnerPrivatePTYs(t *testing.T) {
 	if err := os.Chmod(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := CreateRuntime(context.Background(), root, "generation-darwin", qualifiedScreenFact(), &screenStarterFake{})
+	runtime, err := createRuntime(context.Background(), root, "generation-darwin", qualifiedScreenFact(), testRuntimeDeps(&screenStarterFake{}, systemPTYAllocator{}))
 	if err != nil {
 		t.Fatalf("CreateRuntime() error = %v", err)
 	}

@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/weshofmann/boxwarden/internal/guestproto"
-	"github.com/weshofmann/boxwarden/internal/hostx"
 )
 
 const serialTestKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -35,7 +34,7 @@ func TestCreateRuntimeRejectsExistingOrUnsafeGenerationPath(t *testing.T) {
 				}
 			}
 			starter := &screenStarterFake{}
-			if _, err := createRuntime(context.Background(), root, generation, qualifiedScreenFact(), starter, &ptyAllocatorFake{}); err == nil {
+			if _, err := createRuntime(context.Background(), root, generation, qualifiedScreenFact(), testRuntimeDeps(starter, &ptyAllocatorFake{})); err == nil {
 				t.Fatal("CreateRuntime() error = nil, want safe-path refusal")
 			}
 			if starter.called {
@@ -51,7 +50,7 @@ func TestCreateRuntimeRejectsExistingOrUnsafeGenerationPath(t *testing.T) {
 	if err := os.Symlink(target, unsafeRoot); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := createRuntime(context.Background(), unsafeRoot, "generation", qualifiedScreenFact(), &screenStarterFake{}, &ptyAllocatorFake{}); err == nil {
+	if _, err := createRuntime(context.Background(), unsafeRoot, "generation", qualifiedScreenFact(), testRuntimeDeps(&screenStarterFake{}, &ptyAllocatorFake{})); err == nil {
 		t.Fatal("CreateRuntime() accepted symlinked runtime root")
 	}
 }
@@ -63,7 +62,7 @@ func TestCreateRuntimeUsesTwoOwnerOnlyPTYSlavesAndFixedScreenSpec(t *testing.T) 
 	}
 	allocator := &ptyAllocatorFake{}
 	starter := &screenStarterFake{}
-	runtime, err := createRuntime(context.Background(), root, "generation-1", qualifiedScreenFact(), starter, allocator)
+	runtime, err := createRuntime(context.Background(), root, "generation-1", qualifiedScreenFact(), testRuntimeDeps(starter, allocator))
 	if err != nil {
 		t.Fatalf("CreateRuntime() error = %v", err)
 	}
@@ -71,7 +70,7 @@ func TestCreateRuntimeUsesTwoOwnerOnlyPTYSlavesAndFixedScreenSpec(t *testing.T) 
 	if allocator.calls != 2 {
 		t.Fatalf("PTY allocations = %d, want two", allocator.calls)
 	}
-	if got := starter.spec; got.Path != ScreenPath || !sameStrings(got.Args, []string{"-D", "-m", "-S", "boxwarden-generation-1"}) || got.Stdin == nil || got.Stdin.Name() != allocator.slaves[1] {
+	if got := starter.launch; got.path != ScreenPath || !sameStrings(got.args, []string{"-D", "-m", "-S", "boxwarden-generation-1"}) || got.stdin == nil || got.stdin.Name() != allocator.slaves[1] {
 		t.Fatalf("Screen spec = %#v, want exact opened operator slave %q", got, allocator.slaves[1])
 	}
 	for _, link := range []string{runtime.TartSlave, runtime.OperatorSlave} {
@@ -114,7 +113,7 @@ func TestCreateRuntimeRollsBackOnlyItsPartialGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	starter := &screenStarterFake{err: errors.New("screen refused")}
-	if _, err := createRuntime(context.Background(), root, "generation-2", qualifiedScreenFact(), starter, &ptyAllocatorFake{}); err == nil {
+	if _, err := createRuntime(context.Background(), root, "generation-2", qualifiedScreenFact(), testRuntimeDeps(starter, &ptyAllocatorFake{})); err == nil {
 		t.Fatal("CreateRuntime() error = nil, want child-start failure")
 	}
 	if _, err := os.Lstat(filepath.Join(root, "generation-2")); !os.IsNotExist(err) {
@@ -127,16 +126,98 @@ func TestCreateRuntimeRejectsInvalidDirectScreenEvidence(t *testing.T) {
 	if err := os.Chmod(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	child := &invalidScreenChild{}
+	child := &ownedScreen{}
 	starter := &screenStarterFake{child: child}
-	if _, err := createRuntime(context.Background(), root, "generation-invalid", qualifiedScreenFact(), starter, &ptyAllocatorFake{}); err == nil {
+	if _, err := createRuntime(context.Background(), root, "generation-invalid", qualifiedScreenFact(), testRuntimeDeps(starter, &ptyAllocatorFake{})); err == nil {
 		t.Fatal("CreateRuntime() accepted invalid Screen child evidence")
 	}
 	if _, err := os.Lstat(filepath.Join(root, "generation-invalid")); !os.IsNotExist(err) {
 		t.Fatalf("invalid child cleanup left generation: %v", err)
 	}
-	if !child.stopped || !child.waited {
-		t.Fatalf("invalid child cleanup = %#v, want stop and reap", child)
+}
+
+// A regression here would validate one root inode for safety, then admit a
+// different same-looking replacement by taking a second post-admission stat.
+func TestCreateRuntimeRejectsRootReplacementBetweenAdmissionAndOpen(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	staleRoot := root + "-stale"
+	deps := testRuntimeDeps(&screenStarterFake{}, &ptyAllocatorFake{})
+	lstats := 0
+	deps.lstat = func(path string) (os.FileInfo, error) {
+		lstats++
+		return os.Lstat(path)
+	}
+	deps.openRoot = func(path string) (*os.Root, error) {
+		if err := os.Rename(root, staleRoot); err != nil {
+			return nil, err
+		}
+		if err := os.Mkdir(root, 0o700); err != nil {
+			return nil, err
+		}
+		return os.OpenRoot(path)
+	}
+	if _, err := createRuntime(context.Background(), root, "generation-root-replacement", qualifiedScreenFact(), deps); err == nil {
+		t.Fatal("createRuntime() accepted replacement root")
+	}
+	if lstats != 1 {
+		t.Fatalf("root admission lstat calls = %d, want one captured identity", lstats)
+	}
+}
+
+// A regression here would create a generation under the admitted root but
+// then operate through an opened replacement directory.
+func TestCreateRuntimeRejectsGenerationReplacementBetweenCreateAndOpen(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	generation := "generation-replacement"
+	staleGeneration := filepath.Join(root, generation+"-stale")
+	deps := testRuntimeDeps(&screenStarterFake{}, &ptyAllocatorFake{})
+	deps.openGeneration = func(handle *os.Root, name string) (*os.Root, error) {
+		if name != generation {
+			t.Fatalf("open generation = %q, want %q", name, generation)
+		}
+		if err := os.Rename(filepath.Join(root, name), staleGeneration); err != nil {
+			return nil, err
+		}
+		if err := os.Mkdir(filepath.Join(root, name), 0o700); err != nil {
+			return nil, err
+		}
+		return handle.OpenRoot(name)
+	}
+	if _, err := createRuntime(context.Background(), root, generation, qualifiedScreenFact(), deps); err == nil {
+		t.Fatal("createRuntime() accepted replacement generation")
+	}
+}
+
+// A failed open after a concurrent replacement does not prove the path still
+// names our created directory. Failure cleanup must not remove that replacement.
+func TestCreateRuntimeLeavesGenerationReplacementOnOpenFailure(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	generation := "generation-open-failure"
+	staleGeneration := filepath.Join(root, generation+"-stale")
+	deps := testRuntimeDeps(&screenStarterFake{}, &ptyAllocatorFake{})
+	deps.openGeneration = func(_ *os.Root, name string) (*os.Root, error) {
+		if err := os.Rename(filepath.Join(root, name), staleGeneration); err != nil {
+			return nil, err
+		}
+		if err := os.Mkdir(filepath.Join(root, name), 0o700); err != nil {
+			return nil, err
+		}
+		return nil, errors.New("injected generation open failure")
+	}
+	if _, err := createRuntime(context.Background(), root, generation, qualifiedScreenFact(), deps); err == nil {
+		t.Fatal("createRuntime() error = nil, want replacement-safe open failure")
+	}
+	if _, err := os.Lstat(filepath.Join(root, generation)); err != nil {
+		t.Fatalf("createRuntime() removed replacement after open failure: %v", err)
 	}
 }
 
@@ -145,7 +226,7 @@ func TestRuntimeShutdownRefusesTamperedEndpointReplacement(t *testing.T) {
 	if err := os.Chmod(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := createRuntime(context.Background(), root, "generation-tamper", qualifiedScreenFact(), &screenStarterFake{}, &ptyAllocatorFake{})
+	runtime, err := createRuntime(context.Background(), root, "generation-tamper", qualifiedScreenFact(), testRuntimeDeps(&screenStarterFake{}, &ptyAllocatorFake{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,6 +241,72 @@ func TestRuntimeShutdownRefusesTamperedEndpointReplacement(t *testing.T) {
 	}
 	if _, err := os.Lstat(runtime.TartSlave); err != nil {
 		t.Fatalf("Shutdown() removed tampered replacement: %v", err)
+	}
+}
+
+// A replacement with the same target is still not owned by this runtime: link
+// identity, not just target text, prevents cleanup of a concurrent replacement.
+func TestRuntimeShutdownRefusesSameTargetEndpointLinkReplacement(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := createRuntime(context.Background(), root, "generation-same-target", qualifiedScreenFact(), testRuntimeDeps(&screenStarterFake{}, &ptyAllocatorFake{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := os.Readlink(runtime.TartSlave)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(runtime.TartSlave); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, runtime.TartSlave); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.Shutdown(context.Background()); err == nil {
+		t.Fatal("Shutdown() accepted same-target endpoint replacement")
+	}
+	if _, err := os.Lstat(runtime.TartSlave); err != nil {
+		t.Fatalf("Shutdown() removed same-target replacement: %v", err)
+	}
+}
+
+// A watcher may already have reaped the exact direct child. Shutdown must not
+// signal a potentially reused PID, and that lifecycle outcome must not prevent
+// cleanup of the still-validated runtime directory.
+func TestRuntimeShutdownAfterWatcherReapSkipsSignalAndCleansValidatedState(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	child := &screenCommandFake{pid: 73, waitResult: make(chan error, 1)}
+	starter := &screenStarterFake{child: newTestOwnedScreen(screenIdentity{pid: 73, started: time.Unix(73, 0), unique: 73}, child)}
+	runtime, err := createRuntime(context.Background(), root, "generation-reaped", qualifiedScreenFact(), testRuntimeDeps(starter, &ptyAllocatorFake{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	broker := NewBroker(BrokerConfig{})
+	runtime.WatchScreen(broker)
+	child.waitResult <- errors.New("screen exited")
+	deadline := time.After(time.Second)
+	for !broker.Poisoned() {
+		select {
+		case <-deadline:
+			t.Fatal("watcher did not observe direct child exit")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	if err := runtime.Shutdown(context.Background()); err == nil {
+		t.Fatal("Shutdown() error = nil, want recorded child exit")
+	}
+	if child.signals != 0 {
+		t.Fatalf("Shutdown() signals after watcher reap = %d, want none", child.signals)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "generation-reaped")); !os.IsNotExist(err) {
+		t.Fatalf("Shutdown() left validated generation after watcher reap: %v", err)
 	}
 }
 
@@ -262,10 +409,10 @@ func TestScreenChildLossPoisonsGeneration(t *testing.T) {
 }
 
 func TestRuntimeWatchScreenPoisonsOnlyOnItsDirectChildExit(t *testing.T) {
-	child := &waitScreenChild{result: make(chan error, 1)}
+	child := &screenCommandFake{pid: 71, waitResult: make(chan error, 1)}
 	broker := NewBroker(BrokerConfig{})
-	Runtime{Screen: child}.WatchScreen(broker)
-	child.result <- errors.New("screen exited")
+	Runtime{screen: newTestOwnedScreen(screenIdentity{pid: 71, started: time.Unix(71, 0), unique: 71}, child)}.WatchScreen(broker)
+	child.waitResult <- errors.New("screen exited")
 	deadline := time.After(time.Second)
 	for !broker.Poisoned() {
 		select {
@@ -278,13 +425,13 @@ func TestRuntimeWatchScreenPoisonsOnlyOnItsDirectChildExit(t *testing.T) {
 }
 
 func TestRuntimeShutdownStopsAndReapsOnlyItsDirectScreenChild(t *testing.T) {
-	child := &trackedScreenChild{evidence: testScreenEvidence()}
-	runtime := Runtime{Screen: child}
+	child := &screenCommandFake{pid: 72}
+	runtime := Runtime{screen: newTestOwnedScreen(screenIdentity{pid: 72, started: time.Unix(72, 0), unique: 72}, child)}
 	if err := runtime.Shutdown(context.Background()); err != nil {
 		t.Fatalf("Shutdown() error = %v", err)
 	}
-	if !child.stopped || !child.waited {
-		t.Fatalf("Shutdown() child state = %#v, want direct stop and reap", child)
+	if child.signals != 1 || child.waits != 1 {
+		t.Fatalf("Shutdown() child signals/waits = %d/%d, want 1/1", child.signals, child.waits)
 	}
 }
 
@@ -356,6 +503,34 @@ func TestScreenDrainRejectsConcurrentWriteCountBeyondExactSnapshot(t *testing.T)
 		default:
 			time.Sleep(time.Millisecond)
 		}
+	}
+}
+
+func TestScreenDrainFailureWakesActiveExchange(t *testing.T) {
+	request := testRequest()
+	for name, writeErr := range map[string]error{
+		"invalid write count": nil,
+		"write error":         errors.New("screen write failed"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			screen := &snapshotCountWriter{started: make(chan struct{}), release: make(chan struct{}), err: writeErr}
+			tart := &recordingWriter{}
+			broker := NewBroker(BrokerConfig{Tart: tart, Screen: screen, Generation: request.StartGeneration})
+			tart.after = func() { _ = broker.TartOutput([]byte("guest output")); <-screen.started; close(screen.release) }
+			done := make(chan error, 1)
+			go func() {
+				_, err := broker.Exchange(context.Background(), ExchangeRequest{Request: request})
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				if !errors.Is(err, ErrPoisoned) {
+					t.Fatalf("Exchange() = %v, want ErrPoisoned", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("Screen failure did not wake Exchange")
+			}
+		})
 	}
 }
 
@@ -460,49 +635,26 @@ func (c *clockFake) fire()                                { c.ch <- time.Now() }
 
 type screenStarterFake struct {
 	called bool
-	spec   ScreenSpec
-	child  ScreenChild
+	launch screenLaunch
+	child  *ownedScreen
 	err    error
 }
 
-func (s *screenStarterFake) StartScreen(_ context.Context, spec ScreenSpec) (ScreenChild, error) {
+func (s *screenStarterFake) start(_ context.Context, launch screenLaunch) (*ownedScreen, error) {
 	s.called = true
-	s.spec = spec
+	s.launch = launch
 	if s.err != nil {
 		return nil, s.err
 	}
 	if s.child == nil {
-		s.child = screenChildFake{}
+		s.child = newTestOwnedScreen(screenIdentity{pid: 61, started: time.Unix(61, 0), unique: 61})
 	}
 	return s.child, nil
 }
 
-type screenChildFake struct{}
-
-func (screenChildFake) Stop(context.Context) error { return nil }
-func (screenChildFake) Wait(context.Context) error { return nil }
-func (screenChildFake) Evidence() ScreenEvidence   { return testScreenEvidence() }
-
-type invalidScreenChild struct{ stopped, waited bool }
-
-func (c *invalidScreenChild) Stop(context.Context) error { c.stopped = true; return nil }
-func (c *invalidScreenChild) Wait(context.Context) error { c.waited = true; return nil }
-func (c *invalidScreenChild) Evidence() ScreenEvidence   { return ScreenEvidence{} }
-
-type waitScreenChild struct{ result chan error }
-
-func (c *waitScreenChild) Stop(context.Context) error { return nil }
-func (c *waitScreenChild) Wait(context.Context) error { return <-c.result }
-func (c *waitScreenChild) Evidence() ScreenEvidence   { return testScreenEvidence() }
-
-type trackedScreenChild struct {
-	evidence        ScreenEvidence
-	stopped, waited bool
+func testRuntimeDeps(starter *screenStarterFake, allocator ptyAllocator) runtimeDeps {
+	return runtimeDeps{allocatePTY: allocator.Allocate, startScreen: starter.start, qualifiedScreen: func(ScreenBinary) bool { return true }}
 }
-
-func (c *trackedScreenChild) Stop(context.Context) error { c.stopped = true; return nil }
-func (c *trackedScreenChild) Wait(context.Context) error { c.waited = true; return nil }
-func (c *trackedScreenChild) Evidence() ScreenEvidence   { return c.evidence }
 
 type ptyAllocatorFake struct {
 	calls  int
@@ -553,12 +705,16 @@ func (w *blockingWriter) Close() error {
 type snapshotCountWriter struct {
 	started chan struct{}
 	release chan struct{}
+	err     error
 	once    sync.Once
 }
 
 func (w *snapshotCountWriter) Write(data []byte) (int, error) {
 	w.once.Do(func() { close(w.started) })
 	<-w.release
+	if w.err != nil {
+		return 0, w.err
+	}
 	return len(data) + 1, nil
 }
 func (w *snapshotCountWriter) Close() error {
@@ -579,11 +735,7 @@ type discardCloser struct{}
 func (discardCloser) Write(data []byte) (int, error) { return len(data), nil }
 func (discardCloser) Close() error                   { return nil }
 func qualifiedScreenFact() ScreenBinary {
-	fact, err := hostx.AdmitScreen(hostx.PathFact{Exists: true, Regular: true, Mode: 0o755, UID: 0, GID: 0, Links: 1, SHA256: ScreenSHA256}, ScreenVersion)
-	if err != nil {
-		panic(err)
-	}
-	return fact
+	return ScreenBinary{}
 }
 func mustJSON(t *testing.T, value any) string {
 	t.Helper()
@@ -603,9 +755,6 @@ func sameStrings(a, b []string) bool {
 		}
 	}
 	return true
-}
-func testScreenEvidence() ScreenEvidence {
-	return ScreenEvidence{pid: 1, started: time.Unix(1, 0), token: [16]byte{1}}
 }
 
 var _ io.Writer = (*recordingWriter)(nil)

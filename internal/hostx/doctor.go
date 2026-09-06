@@ -25,12 +25,6 @@ type screenAdmissionFact struct {
 	links                 uint64
 }
 
-func AdmitScreen(fact PathFact, version string) (ScreenAdmission, error) {
-	if !fact.Exists || !fact.Regular || fact.Mode != 0o755 || fact.UID != 0 || fact.GID != 0 || fact.Links != 1 || fact.SHA256 != ScreenExecutableSHA256 || strings.TrimSpace(version) != ScreenVersionOutput {
-		return ScreenAdmission{}, fmt.Errorf("Screen metadata or version is not qualified")
-	}
-	return ScreenAdmission{fact: screenAdmissionFact{path: ScreenPath, digest: fact.SHA256, version: strings.TrimSpace(version), mode: fact.Mode, uid: fact.UID, gid: fact.GID, links: fact.Links}}, nil
-}
 func (a ScreenAdmission) Path() string { return a.fact.path }
 func (a ScreenAdmission) ValidForRuntime() bool {
 	return a.fact == screenAdmissionFact{path: ScreenPath, digest: ScreenExecutableSHA256, version: ScreenVersionOutput, mode: 0o755, uid: 0, gid: 0, links: 1}
@@ -138,7 +132,76 @@ func NewSystemDoctor() SystemDoctor {
 	return SystemDoctor{inspector: NewOSDoctorInspector()}
 }
 
-func (s SystemDoctor) Doctor(_ context.Context, request Request) Report {
+// CurrentScreen returns an opaque read-only capability only after inspecting
+// and probing the fixed qualified system Screen installation in the current
+// host state. Callers cannot provide or mint the facts represented by it.
+func (s SystemDoctor) CurrentScreen(ctx context.Context) (ScreenAdmission, error) {
+	inspector := s.inspector
+	if inspector == nil {
+		inspector = NewOSDoctorInspector()
+	}
+	result := inspectCurrentScreen(ctx, inspector)
+	return result.admission, result.err
+}
+
+type screenInspectionResult struct {
+	admission ScreenAdmission
+	findings  []Finding
+	err       error
+}
+
+func inspectCurrentScreen(ctx context.Context, inspector DoctorInspector) screenInspectionResult {
+	report := Report{}
+	if err := ctx.Err(); err != nil {
+		report.Findings = append(report.Findings, Finding{
+			Code:     "screen.metadata",
+			Category: Drifted,
+			Observed: "path safety inspection unavailable",
+			Expected: "single-link regular file without ACL",
+			Remedy:   "inspect host tool state manually",
+		})
+		return screenInspectionResult{findings: report.Findings, err: fmt.Errorf("Screen admission canceled: %w", err)}
+	}
+
+	fact, inspectable := checkTool(inspector, &report, "screen", ScreenPath, ScreenExecutableSHA256, 0o755, 0, 0)
+	if !inspectable || !exactToolFact(fact, ScreenExecutableSHA256, 0o755, 0, 0) {
+		return screenInspectionResult{findings: report.Findings, err: errors.New("current Screen metadata is not qualified")}
+	}
+	if err := ctx.Err(); err != nil {
+		report.Findings = append(report.Findings, Finding{
+			Code:     "screen.version",
+			Category: Drifted,
+			Observed: "version did not match",
+			Expected: ScreenVersionOutput,
+			Remedy:   "use the exact qualified system Screen",
+		})
+		return screenInspectionResult{findings: report.Findings, err: fmt.Errorf("Screen admission canceled: %w", err)}
+	}
+	output, err := inspector.CommandOutput(ScreenPath, "--version")
+	if err != nil || strings.TrimSpace(output) != ScreenVersionOutput {
+		report.Findings = append(report.Findings, Finding{
+			Code:     "screen.version",
+			Category: Drifted,
+			Observed: "version did not match",
+			Expected: ScreenVersionOutput,
+			Remedy:   "use the exact qualified system Screen",
+		})
+		return screenInspectionResult{findings: report.Findings, err: errors.New("current Screen version is not qualified")}
+	}
+
+	admission := ScreenAdmission{fact: screenAdmissionFact{
+		path:    ScreenPath,
+		digest:  fact.SHA256,
+		version: strings.TrimSpace(output),
+		mode:    fact.Mode,
+		uid:     fact.UID,
+		gid:     fact.GID,
+		links:   fact.Links,
+	}}
+	return screenInspectionResult{admission: admission}
+}
+
+func (s SystemDoctor) Doctor(ctx context.Context, request Request) Report {
 	inspector := s.inspector
 	if inspector == nil {
 		inspector = NewOSDoctorInspector()
@@ -249,15 +312,8 @@ func (s SystemDoctor) Doctor(_ context.Context, request Request) Report {
 	for _, tool := range []struct{ code, path string }{{"ssh", "/usr/bin/ssh"}, {"ssh-keygen", "/usr/bin/ssh-keygen"}} {
 		checkTool(inspector, &report, tool.code, tool.path, "", 0o755, 0, 0)
 	}
-	screenFact, screenInspectable := checkTool(inspector, &report, "screen", ScreenPath, ScreenExecutableSHA256, 0o755, 0, 0)
-	screenOK := screenInspectable && exactToolFact(screenFact, ScreenExecutableSHA256, 0o755, 0, 0)
-	if screenOK {
-		if output, err := inspector.CommandOutput(ScreenPath, "--version"); err != nil {
-			add("screen.version", Drifted, "version did not match", ScreenVersionOutput, "use the exact qualified system Screen")
-		} else if _, err := AdmitScreen(screenFact, output); err != nil {
-			add("screen.version", Drifted, "version did not match", ScreenVersionOutput, "use the exact qualified system Screen")
-		}
-	}
+	screen := inspectCurrentScreen(ctx, inspector)
+	report.Findings = append(report.Findings, screen.findings...)
 	homebrew, err := inspector.HomebrewSoftnet()
 	if err != nil {
 		add("homebrew.scan", Drifted, "scan unavailable", "complete read-only mutable Homebrew scan", "inspect mutable Homebrew privilege state manually")

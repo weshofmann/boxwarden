@@ -213,18 +213,26 @@ func (b *Broker) drainScreen() {
 		n, err := screen.Write(queued)
 		b.mu.Lock()
 		if n < 0 || n > len(queued) {
-			b.poisonLocked(fmt.Errorf("invalid screen write count %d", n))
+			err := fmt.Errorf("invalid screen write count %d", n)
+			b.failExchangeLocked(err)
+			b.poisonLocked(err)
+			b.closeEndpoints()
 			b.mu.Unlock()
 			return
 		}
 		b.screenQueue = b.screenQueue[n:]
 		if err != nil {
-			b.poisonLocked(fmt.Errorf("write screen output: %w", err))
+			err = fmt.Errorf("write screen output: %w", err)
+			b.failExchangeLocked(err)
+			b.poisonLocked(err)
+			b.closeEndpoints()
 			b.mu.Unlock()
 			return
 		}
 		if n == 0 {
+			b.failExchangeLocked(io.ErrShortWrite)
 			b.poisonLocked(io.ErrShortWrite)
+			b.closeEndpoints()
 			b.mu.Unlock()
 			return
 		}

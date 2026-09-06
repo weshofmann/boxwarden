@@ -2,11 +2,16 @@ package hostx
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -117,27 +122,142 @@ func TestDoctorNeverExecutesConfiguredTartAndGatesScreenVersionOnExactIdentity(t
 	}
 }
 
-func TestAdmitScreenRequiresObservedExactMetadataAndVersion(t *testing.T) {
-	good := PathFact{Exists: true, Regular: true, Mode: 0o755, UID: 0, GID: 0, Links: 1, SHA256: ScreenExecutableSHA256}
-	admission, err := AdmitScreen(good, ScreenVersionOutput)
+func TestCurrentScreenInspectsAndExecutesOnlyTheFixedQualifiedPathInOrder(t *testing.T) {
+	inspector, _ := healthyDoctorFixture(t)
+	doctor := SystemDoctor{inspector: inspector}
+
+	admission, err := doctor.CurrentScreen(t.Context())
 	if err != nil {
-		t.Fatalf("AdmitScreen() error = %v", err)
+		t.Fatalf("CurrentScreen() error = %v", err)
 	}
 	if admission.Path() != ScreenPath || !admission.ValidForRuntime() {
-		t.Fatalf("AdmitScreen() = %#v, want opaque exact admission", admission)
+		t.Fatalf("CurrentScreen() = %#v, want opaque exact admission", admission)
 	}
-	for name, mutate := range map[string]func(*PathFact, *string){
-		"digest drift":  func(f *PathFact, _ *string) { f.SHA256 = "bad" },
-		"mode drift":    func(f *PathFact, _ *string) { f.Mode = 0o777 },
-		"version drift": func(_ *PathFact, version *string) { *version = "other" },
+	want := []string{"inspect:" + ScreenPath, "command:" + commandKey(ScreenPath, "--version")}
+	if fmt.Sprint(inspector.operations) != fmt.Sprint(want) {
+		t.Fatalf("CurrentScreen() operations = %v, want %v", inspector.operations, want)
+	}
+}
+
+func TestCurrentScreenNeverExecutesScreenAfterMetadataFailure(t *testing.T) {
+	for name, mutate := range map[string]func(*doctorInspectorFake){
+		"inspection error": func(inspector *doctorInspectorFake) {
+			inspector.failures[ScreenPath] = errors.New("sensitive inspection detail")
+		},
+		"missing": func(inspector *doctorInspectorFake) {
+			delete(inspector.paths, ScreenPath)
+		},
+		"not regular": func(inspector *doctorInspectorFake) {
+			fact := inspector.paths[ScreenPath]
+			fact.Regular = false
+			inspector.paths[ScreenPath] = fact
+		},
+		"mode drift": func(inspector *doctorInspectorFake) {
+			fact := inspector.paths[ScreenPath]
+			fact.Mode = 0o4755
+			inspector.paths[ScreenPath] = fact
+		},
+		"owner drift": func(inspector *doctorInspectorFake) {
+			fact := inspector.paths[ScreenPath]
+			fact.UID = 501
+			inspector.paths[ScreenPath] = fact
+		},
+		"hard link": func(inspector *doctorInspectorFake) {
+			fact := inspector.paths[ScreenPath]
+			fact.Links = 2
+			inspector.paths[ScreenPath] = fact
+		},
+		"extended ACL": func(inspector *doctorInspectorFake) {
+			fact := inspector.paths[ScreenPath]
+			fact.ExtendedACL = true
+			inspector.paths[ScreenPath] = fact
+		},
+		"digest drift": func(inspector *doctorInspectorFake) {
+			fact := inspector.paths[ScreenPath]
+			fact.SHA256 = "bad"
+			inspector.paths[ScreenPath] = fact
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			fact, version := good, ScreenVersionOutput
-			mutate(&fact, &version)
-			if _, err := AdmitScreen(fact, version); err == nil {
-				t.Fatal("AdmitScreen() error = nil, want drift refusal")
+			inspector, _ := healthyDoctorFixture(t)
+			mutate(inspector)
+
+			if admission, err := (SystemDoctor{inspector: inspector}).CurrentScreen(t.Context()); err == nil || admission.ValidForRuntime() {
+				t.Fatalf("CurrentScreen() = %#v, %v; want refusal", admission, err)
+			}
+			if len(inspector.commands) != 0 {
+				t.Fatalf("CurrentScreen() executed unsafe Screen: %v", inspector.commands)
+			}
+			if len(inspector.operations) != 1 || inspector.operations[0] != "inspect:"+ScreenPath {
+				t.Fatalf("CurrentScreen() operations = %v, want only fixed-path inspection", inspector.operations)
 			}
 		})
+	}
+}
+
+func TestCurrentScreenAdmissionAgreesWithDoctorScreenFindings(t *testing.T) {
+	for name, mutate := range map[string]func(*doctorInspectorFake){
+		"qualified": func(*doctorInspectorFake) {},
+		"metadata drift": func(inspector *doctorInspectorFake) {
+			fact := inspector.paths[ScreenPath]
+			fact.Mode = 0o777
+			inspector.paths[ScreenPath] = fact
+		},
+		"version drift": func(inspector *doctorInspectorFake) {
+			inspector.outputs[commandKey(ScreenPath, "--version")] = "other"
+		},
+		"version inspection error": func(inspector *doctorInspectorFake) {
+			inspector.commandFailures[commandKey(ScreenPath, "--version")] = errors.New("sensitive command detail")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			admissionInspector, _ := healthyDoctorFixture(t)
+			doctorInspector, request := healthyDoctorFixture(t)
+			mutate(admissionInspector)
+			mutate(doctorInspector)
+
+			admission, err := (SystemDoctor{inspector: admissionInspector}).CurrentScreen(t.Context())
+			report := (SystemDoctor{inspector: doctorInspector}).Doctor(t.Context(), request)
+			doctorAccepted := !hasFindingPrefix(report, "screen.")
+			if admitted := err == nil && admission.ValidForRuntime(); admitted != doctorAccepted {
+				t.Fatalf("CurrentScreen() admitted=%t error=%v, Doctor()=%#v", admitted, err, report)
+			}
+		})
+	}
+}
+
+func TestScreenAdmissionPublicSurfaceHasNoCallerFactMintingAPI(t *testing.T) {
+	var currentScreen func(SystemDoctor, context.Context) (ScreenAdmission, error) = SystemDoctor.CurrentScreen
+	if currentScreen == nil {
+		t.Fatal("SystemDoctor.CurrentScreen is nil")
+	}
+
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller() failed")
+	}
+	files, err := filepath.Glob(filepath.Join(filepath.Dir(testFile), "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, declaration := range file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || !ast.IsExported(function.Name.Name) || !returnsNamedType(function.Type.Results, "ScreenAdmission") {
+				continue
+			}
+			if function.Recv == nil || function.Name.Name != "CurrentScreen" || !fieldListNamesType(function.Recv, "SystemDoctor") {
+				t.Fatalf("exported %s can mint ScreenAdmission outside SystemDoctor.CurrentScreen", function.Name.Name)
+			}
+		}
 	}
 }
 
@@ -400,6 +520,34 @@ func hasFinding(report Report, code string) bool {
 	return false
 }
 
+func hasFindingPrefix(report Report, prefix string) bool {
+	for _, finding := range report.Findings {
+		if strings.HasPrefix(finding.Code, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func returnsNamedType(results *ast.FieldList, name string) bool {
+	return fieldListNamesType(results, name)
+}
+
+func fieldListNamesType(fields *ast.FieldList, name string) bool {
+	if fields == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(fields, func(node ast.Node) bool {
+		identifier, ok := node.(*ast.Ident)
+		if ok && identifier.Name == name {
+			found = true
+		}
+		return !found
+	})
+	return found
+}
+
 func healthyDoctorFixture(t *testing.T) (*doctorInspectorFake, Request) {
 	t.Helper()
 	request := Request{ConfiguredStateRoots: []string{"/Users/wes/state/work"}, TartPath: "/opt/qualified/tart", TartHome: "/Users/wes/tart", SoftnetPath: "/opt/homebrew/Cellar/softnet/0.19.0/bin/softnet"}
@@ -437,7 +585,8 @@ func healthyDoctorFixture(t *testing.T) (*doctorInspectorFake, Request) {
 			commandKey(request.TartPath, "--version"): TartVersion,
 			commandKey(ScreenPath, "--version"):       ScreenVersionOutput,
 		},
-		failures: map[string]error{},
+		failures:        map[string]error{},
+		commandFailures: map[string]error{},
 	}, request
 }
 
@@ -450,12 +599,15 @@ type doctorInspectorFake struct {
 	outputs         map[string]string
 	homebrew        []HomebrewSoftnet
 	failures        map[string]error
+	commandFailures map[string]error
 	commands        []string
+	operations      []string
 	mutations       int
 }
 
 func (f *doctorInspectorFake) Platform() PlatformFact { return f.platform }
 func (f *doctorInspectorFake) InspectPath(path string) (PathFact, error) {
+	f.operations = append(f.operations, "inspect:"+path)
 	if err := f.failures[path]; err != nil {
 		return f.paths[path], err
 	}
@@ -472,8 +624,10 @@ func (f *doctorInspectorFake) EffectiveGroups() ([]int, error) {
 	return append([]int(nil), f.effectiveGroups...), nil
 }
 func (f *doctorInspectorFake) CommandOutput(path string, args ...string) (string, error) {
-	f.commands = append(f.commands, commandKey(path, args...))
-	return f.outputs[commandKey(path, args...)], nil
+	key := commandKey(path, args...)
+	f.commands = append(f.commands, key)
+	f.operations = append(f.operations, "command:"+key)
+	return f.outputs[key], f.commandFailures[key]
 }
 func (f *doctorInspectorFake) HomebrewSoftnet() ([]HomebrewSoftnet, error) {
 	return append([]HomebrewSoftnet(nil), f.homebrew...), nil
