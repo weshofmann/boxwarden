@@ -67,6 +67,9 @@ func listenSocket(path string) (*net.UnixListener, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Listener close must not unlink a name that may have been replaced. The
+	// generation owner removes only its captured socket identity during cleanup.
+	listener.SetUnlinkOnClose(false)
 	if err := os.Chmod(path, 0o600); err != nil {
 		listener.Close()
 		return nil, err
@@ -95,12 +98,15 @@ func serveControl(ctx context.Context, listener *net.UnixListener, manifest Mani
 			}
 			return err
 		}
-		go handleControl(connection, manifest, key, owner, stop)
+		// A supervisor owns one generation, not an unbounded connection pool.
+		// Inline handling gives every connection the existing deadline and makes
+		// listener shutdown join the last handler before namespace cleanup.
+		handleControl(connection, manifest, key, owner, stop)
 	}
 }
 func handleControl(connection net.Conn, manifest Manifest, key []byte, owner interface{ Snapshot() Snapshot }, stop func() error) {
 	defer connection.Close()
-	_ = connection.SetDeadline(time.Now().Add(2 * time.Second))
+	_ = connection.SetDeadline(time.Now().Add(lifecycleDeadline()))
 	request, err := readControlRequest(connection)
 	if err != nil {
 		return

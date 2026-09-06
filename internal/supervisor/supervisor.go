@@ -9,11 +9,25 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
 
-const lifecycleDeadline = 250 * time.Millisecond
+// Production allows a real owned Tart runtime a meaningful graceful-reap
+// interval. Tests narrow this through the package-private seam below.
+var lifecycleDeadlineNanos atomic.Int64
+
+func init() { lifecycleDeadlineNanos.Store(int64(5 * time.Second)) }
+func lifecycleDeadline() time.Duration {
+	return time.Duration(lifecycleDeadlineNanos.Load())
+}
+
+// Admission hooks are test-only deterministic race seams. Production leaves
+// them nil; they never create authority or alter the accepted same-UID
+// post-validation race non-claim.
+var runtimeAdmissionHook func()
+var lockAdmissionHook func()
 
 // RuntimeOwner is supplied only by the future trusted-host launch composition.
 // Its retained capabilities, rather than persisted evidence, are the only
@@ -56,6 +70,9 @@ func NewDetachedLauncher() (Launcher, error) {
 }
 func newDetachedLauncher(deps launcherDeps) Launcher { return detachedLauncher{deps: deps} }
 func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Unsupported platforms fail before creating a request or process.
 	if l.deps.inspector == nil || !l.deps.inspector.Supported() {
 		return fmt.Errorf("supervisor process identity is unsupported on this platform")
@@ -79,25 +96,27 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 		return err
 	}
 	cleanupRequest := func() error { return removeExact(requestIdentity, false) }
+	if err := ctx.Err(); err != nil {
+		return errors.Join(err, cleanupRequest())
+	}
 	child, err := l.deps.start(ctx, LaunchCommand{Path: executable, Args: []string{"internal", "session-supervisor", requestPath}, Env: []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C"}, Dir: request.RuntimeDirectory})
 	if err != nil {
-		_ = cleanupRequest()
-		return err
+		return errors.Join(err, cleanupRequest())
 	}
 	if child == nil {
-		_ = cleanupRequest()
-		return fmt.Errorf("supervisor child is unavailable")
+		return errors.Join(fmt.Errorf("supervisor child is unavailable"), cleanupRequest())
+	}
+	cleanupChild := func(cause error) error {
+		stopCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline())
+		defer cancel()
+		return errors.Join(cause, child.stopReap(stopCtx), cleanupRequest())
 	}
 	client := &Client{RuntimeDirectory: request.RuntimeDirectory, Inspector: l.deps.inspector, MaxSnapshotAge: time.Minute}
 	if err := l.deps.await(ctx, client, request.Binding); err != nil {
-		stopCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline)
-		defer cancel()
-		stopErr := child.stopReap(stopCtx)
-		removeErr := cleanupRequest()
-		return errors.Join(err, stopErr, removeErr)
+		return cleanupChild(err)
 	}
 	if err := child.release(); err != nil {
-		return err
+		return cleanupChild(err)
 	}
 	return nil
 }
@@ -114,10 +133,14 @@ func awaitAuthenticated(ctx context.Context, client *Client, binding Binding) er
 
 type exactChild struct{ cmd *exec.Cmd }
 
-func startExactChild(_ context.Context, command LaunchCommand) (launchChild, error) {
+func startExactChild(ctx context.Context, command LaunchCommand) (launchChild, error) {
 	cmd := exec.Command(command.Path, command.Args...)
 	cmd.Env = append([]string(nil), command.Env...)
 	cmd.Dir = command.Dir
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
@@ -166,40 +189,41 @@ func (unavailableOwner) Close(context.Context) error { return nil }
 type lifecycleResources struct {
 	runtime, request, manifest, socket, lock FileIdentity
 	lockHandle                               *os.File
+	root                                     *os.Root
 }
 
-func prepare(ctx context.Context, requestPath string, owner RuntimeOwner, inspector ProcessInspector, runtimeIdentity FileIdentity) (Manifest, error) {
+func prepare(ctx context.Context, requestPath string, owner RuntimeOwner, inspector ProcessInspector, runtimeIdentity FileIdentity) (Manifest, bool, error) {
 	if inspector == nil || !inspector.Supported() {
-		return Manifest{}, fmt.Errorf("supervisor process identity is unsupported on this platform")
+		return Manifest{}, false, fmt.Errorf("supervisor process identity is unsupported on this platform")
 	}
 	request, err := readLaunchRequest(requestPath)
 	if err != nil {
-		return Manifest{}, err
+		return Manifest{}, false, err
 	}
 	if owner == nil {
-		return Manifest{}, fmt.Errorf("runtime owner is unavailable")
+		return Manifest{}, false, fmt.Errorf("runtime owner is unavailable")
 	}
 	supervisor, err := inspector.Observe(ctx, os.Getpid())
 	if err != nil || !supervisor.valid() {
-		return Manifest{}, fmt.Errorf("observe supervisor process identity: %w", err)
+		return Manifest{}, false, fmt.Errorf("observe supervisor process identity: %w", err)
 	}
 	start, err := owner.Start(ctx, request)
 	if err != nil {
-		return Manifest{}, err
+		return Manifest{}, false, err
 	}
-	if err := validStartEvidence(start); err != nil {
-		return Manifest{}, err
+	if err := validStartEvidence(start, request.RuntimeDirectory); err != nil {
+		return Manifest{}, true, err
 	}
 	key, encoded, err := newControlKey()
 	if err != nil {
-		return Manifest{}, err
+		return Manifest{}, true, err
 	}
 	_ = key
 	manifest := Manifest{Version: 1, Binding: request.Binding, RuntimeDirectory: request.RuntimeDirectory, SocketPath: filepath.Join(request.RuntimeDirectory, socketName), ControlKey: encoded, Evidence: RuntimeEvidence{Supervisor: supervisor, Children: start.Children, Endpoints: start.Endpoints, RuntimeDirectory: runtimeIdentity, Broker: start.Broker}, CreatedAt: time.Now().UTC()}
 	if err := writeManifest(filepath.Join(request.RuntimeDirectory, manifestName), manifest); err != nil {
-		return Manifest{}, err
+		return Manifest{}, true, err
 	}
-	return manifest, nil
+	return manifest, true, nil
 }
 
 // Run owns one generation. Every outcome converges through one bounded
@@ -216,43 +240,73 @@ func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector 
 	if resources.runtime, err = capturePrivateDirectory(request.RuntimeDirectory); err != nil {
 		return err
 	}
-	if resources.request, err = capturePrivateRegular(requestPath); err != nil {
+	if resources.root, err = os.OpenRoot(request.RuntimeDirectory); err != nil {
 		return err
 	}
-	lock, lockIdentity, err := acquireGenerationLock(request.RuntimeDirectory)
+	if runtimeAdmissionHook != nil {
+		runtimeAdmissionHook()
+	}
+	rootInfo, err := resources.root.Lstat(".")
 	if err != nil {
+		_ = resources.root.Close()
+		return err
+	}
+	rootIdentity, err := identityFor(request.RuntimeDirectory, rootInfo)
+	if err != nil || !resources.runtime.matches(rootIdentity) {
+		_ = resources.root.Close()
+		return fmt.Errorf("runtime directory changed during rooted admission")
+	}
+	currentRuntime, err := capturePrivateDirectory(request.RuntimeDirectory)
+	if err != nil || !resources.runtime.matches(currentRuntime) {
+		_ = resources.root.Close()
+		return fmt.Errorf("runtime directory path was replaced during rooted admission")
+	}
+	if resources.request, err = capturePrivateRegular(requestPath); err != nil {
+		_ = resources.root.Close()
+		return err
+	}
+	lock, lockIdentity, err := acquireGenerationLockInRoot(resources.root, request.RuntimeDirectory)
+	if err != nil {
+		_ = resources.root.Close()
 		return err
 	}
 	resources.lock, resources.lockHandle = lockIdentity, lock
 	owned := &onceOwner{owner: owner}
-	manifest, err := prepare(ctx, requestPath, owned, inspector, resources.runtime)
+	reaper := &ownerReaper{owner: owned, done: make(chan struct{})}
+	manifest, started, err := prepare(ctx, requestPath, owned, inspector, resources.runtime)
+	if started {
+		reaper.start()
+	}
 	if err != nil {
-		return errors.Join(err, terminateAndCleanup(owned, nil, resources))
+		return finishStarted(err, owned, reaper, started, resources)
 	}
 	resources.manifest, err = capturePrivateRegular(filepath.Join(request.RuntimeDirectory, manifestName))
 	if err != nil {
-		return errors.Join(err, terminateAndCleanup(owned, nil, resources))
+		return finishStarted(err, owned, reaper, true, resources)
 	}
 	key, err := decodeKey(manifest.ControlKey)
 	if err != nil {
-		return errors.Join(err, terminateAndCleanup(owned, nil, resources))
+		return finishStarted(err, owned, reaper, true, resources)
 	}
 	listener, err := listenSocket(manifest.SocketPath)
 	if err != nil {
-		return errors.Join(fmt.Errorf("open control socket: %w", err), terminateAndCleanup(owned, nil, resources))
+		return finishStarted(fmt.Errorf("open control socket: %w", err), owned, reaper, true, resources)
 	}
 	resources.socket, err = captureSocket(manifest.SocketPath)
 	if err != nil {
 		_ = listener.Close()
-		return errors.Join(err, terminateAndCleanup(owned, nil, resources))
+		return finishStarted(err, owned, reaper, true, resources)
 	}
 	controlCtx, cancelControl := context.WithCancel(context.Background())
 	defer cancelControl()
 	stopped := make(chan struct{}, 1)
 	stop := func() error {
-		stopCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline)
+		stopCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline())
 		defer cancel()
 		err := owned.Stop(stopCtx)
+		if err == nil {
+			err = reaper.await(stopCtx)
+		}
 		if err == nil {
 			select {
 			case stopped <- struct{}{}:
@@ -263,15 +317,10 @@ func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector 
 	}
 	controlDone := make(chan error, 1)
 	go func() { controlDone <- serveControl(controlCtx, listener, manifest, key, owned, stop) }()
-	waitCtx, cancelWait := context.WithCancel(context.Background())
-	defer cancelWait()
-	waitDone := make(chan error, 1)
-	go func() { waitDone <- owned.Wait(waitCtx) }()
 	var cause error
-	waitObserved := false
 	select {
-	case cause = <-waitDone:
-		waitObserved = true
+	case <-reaper.done:
+		cause = reaper.result()
 	case <-stopped:
 	case cause = <-controlDone:
 	case <-ctx.Done():
@@ -281,13 +330,27 @@ func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector 
 	_ = listener.Close()
 	select {
 	case <-controlDone:
-	case <-time.After(lifecycleDeadline):
+	case <-time.After(lifecycleDeadline()):
 		cause = errors.Join(cause, fmt.Errorf("control server did not stop"))
 	}
-	if waitObserved {
-		waitDone = nil
+	return finishStarted(cause, owned, reaper, true, resources, stop)
+}
+
+// finishStarted never abandons a live retained capability. A bounded timeout
+// is observable to the control caller, but the supervisor remains the owner
+// until the one reaper has a result and ordinary ordered cleanup can finish.
+func finishStarted(cause error, owner RuntimeOwner, reaper *ownerReaper, started bool, resources lifecycleResources, stopFns ...func() error) error {
+	cleanup := terminateAndCleanup(owner, reaper, started, resources, stopFns...)
+	if cleanup != nil && started {
+		select {
+		case <-reaper.done:
+			cleanup = errors.Join(cleanup, terminateAndCleanup(owner, reaper, started, resources, stopFns...))
+		default:
+			<-reaper.done
+			cleanup = errors.Join(cleanup, terminateAndCleanup(owner, reaper, started, resources, stopFns...))
+		}
 	}
-	return errors.Join(cause, terminateAndCleanup(owned, waitDone, resources, stop))
+	return errors.Join(cause, cleanup)
 }
 
 type onceOwner struct {
@@ -313,13 +376,24 @@ func (o *onceOwner) Close(ctx context.Context) error {
 }
 
 func acquireGenerationLock(runtime string) (*os.File, FileIdentity, error) {
+	root, err := os.OpenRoot(runtime)
+	if err != nil {
+		return nil, FileIdentity{}, err
+	}
+	defer root.Close()
+	return acquireGenerationLockInRoot(root, runtime)
+}
+func acquireGenerationLockInRoot(root *os.Root, runtime string) (*os.File, FileIdentity, error) {
+	if root == nil {
+		return nil, FileIdentity{}, fmt.Errorf("runtime root is unavailable")
+	}
 	path := filepath.Join(runtime, lockName)
-	if info, err := os.Lstat(path); err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info)) {
+	if info, err := root.Lstat(lockName); err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info)) {
 		return nil, FileIdentity{}, fmt.Errorf("generation lock is unsafe")
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, FileIdentity{}, err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+	file, err := root.OpenFile(lockName, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return nil, FileIdentity{}, fmt.Errorf("open generation lock: %w", err)
 	}
@@ -332,6 +406,19 @@ func acquireGenerationLock(runtime string) (*os.File, FileIdentity, error) {
 	if err != nil {
 		_ = file.Close()
 		return nil, FileIdentity{}, err
+	}
+	if lockAdmissionHook != nil {
+		lockAdmissionHook()
+	}
+	current, err := root.Lstat(lockName)
+	if err != nil {
+		_ = file.Close()
+		return nil, FileIdentity{}, err
+	}
+	currentIdentity, err := identityFor(path, current)
+	if err != nil || !identity.matches(currentIdentity) || current.Mode()&os.ModeSymlink != 0 || !current.Mode().IsRegular() || current.Mode().Perm() != 0o600 || !ownedByCurrentUser(current) {
+		_ = file.Close()
+		return nil, FileIdentity{}, fmt.Errorf("generation lock was replaced during rooted admission")
 	}
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		_ = file.Close()
@@ -346,33 +433,91 @@ func captureSocket(path string) (FileIdentity, error) {
 	}
 	return identity, nil
 }
-func terminateAndCleanup(owner RuntimeOwner, waitDone <-chan error, resources lifecycleResources, stopFns ...func() error) error {
+
+type ownerReaper struct {
+	owner RuntimeOwner
+	done  chan struct{}
+	once  sync.Once
+	mu    sync.Mutex
+	err   error
+}
+
+func (r *ownerReaper) start() {
+	r.once.Do(func() {
+		go func() {
+			err := r.owner.Wait(context.Background())
+			r.mu.Lock()
+			r.err = err
+			r.mu.Unlock()
+			close(r.done)
+		}()
+	})
+}
+func (r *ownerReaper) result() error { r.mu.Lock(); defer r.mu.Unlock(); return r.err }
+func (r *ownerReaper) await(ctx context.Context) error {
+	if r == nil {
+		return fmt.Errorf("owner reaper is unavailable")
+	}
+	select {
+	case <-r.done:
+		return r.result()
+	case <-ctx.Done():
+		return fmt.Errorf("owner did not reap before cleanup deadline: %w", ctx.Err())
+	}
+}
+
+func terminateAndCleanup(owner RuntimeOwner, reaper *ownerReaper, started bool, resources lifecycleResources, stopFns ...func() error) error {
 	var result error
+	if !started {
+		return cleanupNamespace(resources)
+	}
 	if len(stopFns) > 0 {
 		result = errors.Join(result, stopFns[0]())
 	} else {
-		stopCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline)
+		stopCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline())
 		result = errors.Join(result, owner.Stop(stopCtx))
 		cancel()
 	}
-	if waitDone != nil {
-		select {
-		case err := <-waitDone:
-			result = errors.Join(result, err)
-		case <-time.After(lifecycleDeadline):
-			result = errors.Join(result, fmt.Errorf("owner did not reap before cleanup deadline"))
-		}
+	if result != nil {
+		return result
 	}
-	closeCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline)
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), lifecycleDeadline())
+	result = errors.Join(result, reaper.await(waitCtx))
+	cancelWait()
+	if result != nil {
+		return result
+	}
+	closeCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline())
 	result = errors.Join(result, owner.Close(closeCtx))
 	cancel()
-	for _, identity := range []FileIdentity{resources.socket, resources.manifest, resources.request, resources.lock} {
+	return errors.Join(result, cleanupNamespace(resources))
+}
+func cleanupNamespace(resources lifecycleResources) error {
+	var result error
+	for _, identity := range []FileIdentity{resources.socket, resources.manifest, resources.request} {
 		if identity.Path != "" {
 			result = errors.Join(result, removeExact(identity, identity.Path == resources.socket.Path))
 		}
 	}
+	if resources.lock.Path != "" {
+		if resources.root != nil {
+			info, err := resources.root.Lstat(lockName)
+			if err != nil {
+				result = errors.Join(result, fmt.Errorf("preserve lock replacement during cleanup: %w", err))
+			} else if current, err := identityFor(resources.lock.Path, info); err != nil || !resources.lock.matches(current) || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info) {
+				result = errors.Join(result, fmt.Errorf("preserve lock replacement during cleanup"))
+			} else {
+				result = errors.Join(result, resources.root.Remove(lockName))
+			}
+		} else {
+			result = errors.Join(result, removeExact(resources.lock, false))
+		}
+	}
 	if resources.lockHandle != nil {
 		result = errors.Join(result, resources.lockHandle.Close())
+	}
+	if resources.root != nil {
+		result = errors.Join(result, resources.root.Close())
 	}
 	if resources.runtime.Path != "" {
 		result = errors.Join(result, removeExactDirectory(resources.runtime))

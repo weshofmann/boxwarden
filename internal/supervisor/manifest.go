@@ -275,14 +275,14 @@ func readManifest(path string) (Manifest, error) {
 	}
 	return manifest, nil
 }
-func validStartEvidence(evidence RuntimeStartEvidence) error {
+func validStartEvidence(evidence RuntimeStartEvidence, runtime string) error {
 	if len(evidence.Children) != 2 || len(evidence.Endpoints) != 2 || len(evidence.Children) > maxEvidenceItems || len(evidence.Endpoints) > maxEvidenceItems || evidence.Broker.Healthy == evidence.Broker.Poisoned {
 		return fmt.Errorf("invalid runtime start evidence")
 	}
 	if err := validProcessRoles(evidence.Children); err != nil {
 		return err
 	}
-	return validFileRoles(evidence.Endpoints)
+	return validFileRoles(evidence.Endpoints, runtime)
 }
 func validProcessRoles(values []NamedProcessEvidence) error {
 	seen := map[string]bool{}
@@ -297,15 +297,20 @@ func validProcessRoles(values []NamedProcessEvidence) error {
 	}
 	return nil
 }
-func validFileRoles(values []NamedFileEvidence) error {
+func validFileRoles(values []NamedFileEvidence, runtime string) error {
 	seen := map[string]bool{}
 	for _, value := range values {
-		if (value.Role != "tart-endpoint" && value.Role != "operator-endpoint") || !value.Identity.valid() || seen[value.Role] {
+		if (value.Role != "tart-serial" && value.Role != "operator-console") || !value.Identity.valid() || seen[value.Role] || value.Identity.Path != filepath.Join(runtime, value.Role) {
 			return fmt.Errorf("invalid endpoint evidence")
+		}
+		if err := identityStillMatches(value.Identity, func(info os.FileInfo) bool {
+			return info.Mode()&os.ModeSymlink != 0 && ownedByCurrentUser(info)
+		}); err != nil {
+			return fmt.Errorf("endpoint evidence: %w", err)
 		}
 		seen[value.Role] = true
 	}
-	if !seen["tart-endpoint"] || !seen["operator-endpoint"] {
+	if !seen["tart-serial"] || !seen["operator-console"] {
 		return fmt.Errorf("missing endpoint evidence")
 	}
 	return nil
@@ -314,18 +319,13 @@ func validEvidence(evidence RuntimeEvidence, runtime string) error {
 	if !evidence.Supervisor.valid() || evidence.RuntimeDirectory.Path != runtime || !evidence.RuntimeDirectory.valid() || evidence.Broker.Healthy == evidence.Broker.Poisoned {
 		return fmt.Errorf("invalid supervisor runtime evidence")
 	}
-	if err := validStartEvidence(RuntimeStartEvidence{Children: evidence.Children, Endpoints: evidence.Endpoints, Broker: evidence.Broker}); err != nil {
+	if err := validStartEvidence(RuntimeStartEvidence{Children: evidence.Children, Endpoints: evidence.Endpoints, Broker: evidence.Broker}, runtime); err != nil {
 		return err
 	}
 	if err := identityStillMatches(evidence.RuntimeDirectory, func(info os.FileInfo) bool {
 		return info.IsDir() && info.Mode().Perm() == 0o700 && ownedByCurrentUser(info)
 	}); err != nil {
 		return fmt.Errorf("runtime directory evidence: %w", err)
-	}
-	for _, endpoint := range evidence.Endpoints {
-		if err := identityStillMatches(endpoint.Identity, func(os.FileInfo) bool { return true }); err != nil {
-			return fmt.Errorf("endpoint evidence: %w", err)
-		}
 	}
 	return nil
 }
