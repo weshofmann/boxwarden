@@ -26,6 +26,7 @@ type Runtime struct {
 type endpointIdentity struct {
 	name, target               string
 	dev, ino, linkDev, linkIno uint64
+	linkHandle                 *os.File
 }
 type ptyAllocator interface {
 	Allocate() (*os.File, *os.File, error)
@@ -42,6 +43,7 @@ type runtimeDeps struct {
 	lstat           func(string) (os.FileInfo, error)
 	openRoot        func(string) (*os.Root, error)
 	openGeneration  func(*os.Root, string) (*os.Root, error)
+	openLink        func(string) (*os.File, error)
 }
 
 func (systemPTYAllocator) Allocate() (*os.File, *os.File, error) { return allocatePTY() }
@@ -157,7 +159,7 @@ func createRuntime(ctx context.Context, root Root, generation string, screen Scr
 	if err != nil {
 		return cleanup(err)
 	}
-	if err := runtime.captureLinkIdentity(&runtime.tartLink); err != nil {
+	if err := runtime.captureLinkIdentity(&runtime.tartLink, deps.openEndpoint); err != nil {
 		return cleanup(err)
 	}
 	if err := generationRoot.Symlink(operatorSlave.Name(), "operator-console"); err != nil {
@@ -167,7 +169,7 @@ func createRuntime(ctx context.Context, root Root, generation string, screen Scr
 	if err != nil {
 		return cleanup(err)
 	}
-	if err := runtime.captureLinkIdentity(&runtime.operatorLink); err != nil {
+	if err := runtime.captureLinkIdentity(&runtime.operatorLink, deps.openEndpoint); err != nil {
 		return cleanup(err)
 	}
 	child, err := deps.startScreen(ctx, screenLaunch{path: ScreenPath, args: []string{"-D", "-m", "-S", "boxwarden-" + generation}, stdin: operatorSlave})
@@ -243,6 +245,15 @@ func (r Runtime) Shutdown(ctx context.Context) error {
 			first = err
 		}
 	}
+	// Keep the original inodes pinned through validation and removal. Even
+	// when cleanup refuses a replacement, release every retained handle.
+	for _, endpoint := range []endpointIdentity{r.tartLink, r.operatorLink} {
+		if endpoint.linkHandle != nil {
+			if err := endpoint.linkHandle.Close(); err != nil && first == nil {
+				first = err
+			}
+		}
+	}
 	return first
 }
 
@@ -261,11 +272,18 @@ func (r Runtime) revalidateEndpoint(endpoint endpointIdentity) error {
 	if endpoint.name == "" {
 		return fmt.Errorf("endpoint identity missing")
 	}
+	if endpoint.linkHandle == nil {
+		return fmt.Errorf("endpoint link handle missing")
+	}
+	held, err := endpoint.linkHandle.Stat()
+	if err != nil || held.Mode()&os.ModeSymlink == 0 || !sameDeviceIdentity(held, endpoint.linkDev, endpoint.linkIno) {
+		return fmt.Errorf("retained endpoint link identity unavailable")
+	}
 	info, err := r.generationRoot.Lstat(endpoint.name)
 	if err != nil || info.Mode()&os.ModeSymlink == 0 {
 		return fmt.Errorf("endpoint link changed")
 	}
-	if !sameDeviceIdentity(info, endpoint.linkDev, endpoint.linkIno) {
+	if !sameFileIdentity(info, held) || !sameDeviceIdentity(info, endpoint.linkDev, endpoint.linkIno) {
 		return fmt.Errorf("endpoint link identity changed")
 	}
 	target, err := r.generationRoot.Readlink(endpoint.name)
@@ -282,12 +300,32 @@ func (r Runtime) revalidateEndpoint(endpoint endpointIdentity) error {
 	}
 	return nil
 }
-func (r Runtime) captureLinkIdentity(endpoint *endpointIdentity) error {
+func (r Runtime) captureLinkIdentity(endpoint *endpointIdentity, openLink func(string) (*os.File, error)) error {
 	info, err := r.generationRoot.Lstat(endpoint.name)
-	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+	if err != nil {
 		return fmt.Errorf("inspect endpoint link: %w", err)
 	}
-	dev, ino, ok := deviceIdentity(info)
+	if info.Mode()&os.ModeSymlink == 0 {
+		return fmt.Errorf("endpoint is not a symlink")
+	}
+	endpoint.linkHandle, err = openLink(filepath.Join(r.generationDir, endpoint.name))
+	if err != nil {
+		return fmt.Errorf("retain endpoint link: %w", err)
+	}
+	if endpoint.linkHandle == nil {
+		return fmt.Errorf("endpoint link handle unavailable")
+	}
+	// The path-based open is not authority: it must resolve to the exact
+	// symlink in the retained generation Root, before and after opening.
+	held, err := endpoint.linkHandle.Stat()
+	if err != nil || held.Mode()&os.ModeSymlink == 0 || !sameFileIdentity(info, held) {
+		return fmt.Errorf("endpoint link changed during open")
+	}
+	current, err := r.generationRoot.Lstat(endpoint.name)
+	if err != nil || current.Mode()&os.ModeSymlink == 0 || !sameFileIdentity(current, held) {
+		return fmt.Errorf("endpoint link changed after open")
+	}
+	dev, ino, ok := deviceIdentity(held)
 	if !ok {
 		return fmt.Errorf("endpoint link identity unavailable")
 	}
@@ -359,6 +397,13 @@ func (deps runtimeDeps) openGenerationRoot(root *os.Root, generation string) (*o
 		return deps.openGeneration(root, generation)
 	}
 	return root.OpenRoot(generation)
+}
+
+func (deps runtimeDeps) openEndpoint(path string) (*os.File, error) {
+	if deps.openLink != nil {
+		return deps.openLink(path)
+	}
+	return openEndpointLink(path)
 }
 
 func removeGenerationIfExact(root *os.Root, generation string, expected os.FileInfo) {
