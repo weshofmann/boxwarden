@@ -112,9 +112,10 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 		stopErr := child.stop()
 		reaper.start()
 		waitCtx, cancel := context.WithTimeout(context.Background(), lifecycleDeadline())
-		waitErr := reaper.await(waitCtx)
+		awaited := reaper.await(waitCtx)
 		cancel()
-		if waitErr != nil {
+		waitErr := awaited.err
+		if !awaited.completed {
 			// A timeout is diagnostic only. Retain this request and this launch
 			// call until the sole held child has actually been reaped.
 			<-reaper.done
@@ -313,7 +314,7 @@ func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector 
 		defer cancel()
 		err := owned.Stop(stopCtx)
 		if err == nil {
-			err = reaper.await(stopCtx)
+			err = reaper.await(stopCtx).err
 		}
 		if err == nil {
 			select {
@@ -328,7 +329,8 @@ func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector 
 	var cause error
 	select {
 	case <-reaper.done:
-		cause = reaper.result()
+		// terminateAndCleanup joins the retained terminal result once.
+		cause = nil
 	case <-stopped:
 	case cause = <-controlDone:
 	case <-ctx.Done():
@@ -450,6 +452,11 @@ type launchChildReaper struct {
 	err   error
 }
 
+type reapAwait struct {
+	completed bool
+	err       error
+}
+
 func (r *launchChildReaper) start() {
 	r.once.Do(func() {
 		go func() {
@@ -462,12 +469,12 @@ func (r *launchChildReaper) start() {
 	})
 }
 func (r *launchChildReaper) result() error { r.mu.Lock(); defer r.mu.Unlock(); return r.err }
-func (r *launchChildReaper) await(ctx context.Context) error {
+func (r *launchChildReaper) await(ctx context.Context) reapAwait {
 	select {
 	case <-r.done:
-		return r.result()
+		return reapAwait{completed: true, err: r.result()}
 	case <-ctx.Done():
-		return fmt.Errorf("supervisor child did not reap before cleanup deadline: %w", ctx.Err())
+		return reapAwait{err: fmt.Errorf("supervisor child did not reap before cleanup deadline: %w", ctx.Err())}
 	}
 }
 
@@ -483,15 +490,15 @@ func (r *ownerReaper) start() {
 	})
 }
 func (r *ownerReaper) result() error { r.mu.Lock(); defer r.mu.Unlock(); return r.err }
-func (r *ownerReaper) await(ctx context.Context) error {
+func (r *ownerReaper) await(ctx context.Context) reapAwait {
 	if r == nil {
-		return fmt.Errorf("owner reaper is unavailable")
+		return reapAwait{completed: true, err: fmt.Errorf("owner reaper is unavailable")}
 	}
 	select {
 	case <-r.done:
-		return r.result()
+		return reapAwait{completed: true, err: r.result()}
 	case <-ctx.Done():
-		return fmt.Errorf("owner did not reap before cleanup deadline: %w", ctx.Err())
+		return reapAwait{err: fmt.Errorf("owner did not reap before cleanup deadline: %w", ctx.Err())}
 	}
 }
 
@@ -504,10 +511,11 @@ func terminateAndCleanup(owner RuntimeOwner, reaper *ownerReaper, started bool, 
 	result = errors.Join(result, owner.Stop(stopCtx))
 	cancel()
 	waitCtx, cancelWait := context.WithTimeout(context.Background(), lifecycleDeadline())
-	waitErr := reaper.await(waitCtx)
+	awaited := reaper.await(waitCtx)
 	cancelWait()
+	waitErr := awaited.err
 	result = errors.Join(result, waitErr)
-	if waitErr != nil {
+	if !awaited.completed {
 		// The bounded wait is returned to the caller as diagnostic evidence, but
 		// this supervisor must retain its generation until the sole reaper proves
 		// that the held runtime is no longer live.

@@ -22,6 +22,23 @@ import (
 var socketChmod = os.Chmod
 var socketAdmissionHook func()
 
+const controlIOTimeout = 2 * time.Second
+
+func boundedControlIOTimeout() time.Duration {
+	if lifecycle := lifecycleDeadline(); lifecycle < controlIOTimeout {
+		return lifecycle
+	}
+	return controlIOTimeout
+}
+
+func controlClientTimeout(action string) time.Duration {
+	overhead := 2 * boundedControlIOTimeout()
+	if action == "stop" {
+		return lifecycleDeadline() + overhead
+	}
+	return overhead
+}
+
 type controlRequest struct {
 	Version   int     `json:"version"`
 	Action    string  `json:"action"`
@@ -138,7 +155,9 @@ func serveControl(ctx context.Context, listener *net.UnixListener, manifest Mani
 }
 func handleControl(connection net.Conn, manifest Manifest, key []byte, owner interface{ Snapshot() Snapshot }, stop func() error) {
 	defer connection.Close()
-	_ = connection.SetDeadline(time.Now().Add(lifecycleDeadline()))
+	if err := connection.SetDeadline(time.Now().Add(boundedControlIOTimeout())); err != nil {
+		return
+	}
 	request, err := readControlRequest(connection)
 	if err != nil {
 		return
@@ -163,6 +182,12 @@ func handleControl(connection net.Conn, manifest Manifest, key []byte, owner int
 	}
 	response := controlResponse{Version: 1, Binding: manifest.Binding, Challenge: request.Challenge, Snapshot: snapshot}
 	if request.Action == "stop" {
+		// The stop callback has its own lifecycle bound. Keep the connection
+		// bounded as well, while leaving a complete I/O interval after that
+		// inner deadline in which to authenticate and return its result.
+		if err := connection.SetDeadline(time.Now().Add(lifecycleDeadline() + boundedControlIOTimeout())); err != nil {
+			return
+		}
 		if stop == nil {
 			response.Error = "supervisor stop is unavailable"
 		} else if err := stop(); err != nil {
@@ -171,6 +196,9 @@ func handleControl(connection net.Conn, manifest Manifest, key []byte, owner int
 	}
 	response.MAC, err = responseMAC(key, response)
 	if err != nil {
+		return
+	}
+	if err := connection.SetDeadline(time.Now().Add(boundedControlIOTimeout())); err != nil {
 		return
 	}
 	_ = writeControl(connection, response)
@@ -262,6 +290,9 @@ func (c *Client) Stop(ctx context.Context, binding Binding) error {
 	return err
 }
 func (c *Client) authenticated(ctx context.Context, binding Binding, action string) (controlResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return controlResponse{}, err
+	}
 	if c == nil || !binding.valid() || !privateDirectory(c.RuntimeDirectory) || c.Inspector == nil || !c.Inspector.Supported() {
 		return controlResponse{}, fmt.Errorf("supervisor ownership unavailable")
 	}
@@ -310,12 +341,22 @@ func (c *Client) call(ctx context.Context, binding Binding, action, challenge st
 	if err != nil || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info) {
 		return controlResponse{}, fmt.Errorf("control socket is not owner-private: %v", err)
 	}
-	connection, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: socket, Net: "unix"})
+	operationCtx, cancel := context.WithTimeout(ctx, controlClientTimeout(action))
+	defer cancel()
+	connection, err := (&net.Dialer{}).DialContext(operationCtx, "unix", socket)
 	if err != nil {
 		return controlResponse{}, err
 	}
 	defer connection.Close()
-	_ = connection.SetDeadline(time.Now().Add(2 * time.Second))
+	deadline, ok := operationCtx.Deadline()
+	if !ok {
+		return controlResponse{}, fmt.Errorf("control operation deadline is unavailable")
+	}
+	if err := connection.SetDeadline(deadline); err != nil {
+		return controlResponse{}, err
+	}
+	stopCancellation := context.AfterFunc(operationCtx, func() { _ = connection.SetDeadline(time.Now()) })
+	defer stopCancellation()
 	data, err := json.Marshal(request)
 	if err != nil {
 		return controlResponse{}, err
@@ -324,11 +365,11 @@ func (c *Client) call(ctx context.Context, binding Binding, action, challenge st
 		return controlResponse{}, fmt.Errorf("control request exceeds bound")
 	}
 	if err := writeFrame(connection, data); err != nil {
-		return controlResponse{}, err
+		return controlResponse{}, controlOperationError(operationCtx, err)
 	}
 	responseData, err := readBounded(connection)
 	if err != nil {
-		return controlResponse{}, err
+		return controlResponse{}, controlOperationError(operationCtx, err)
 	}
 	var response controlResponse
 	if err := decodeExact(responseData, &response); err != nil {
@@ -348,6 +389,13 @@ func (c *Client) call(ctx context.Context, binding Binding, action, challenge st
 		return controlResponse{}, fmt.Errorf("supervisor stop failed: %s", response.Error)
 	}
 	return response, nil
+}
+
+func controlOperationError(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return errors.Join(ctxErr, err)
+	}
+	return err
 }
 
 var _ Controller = (*Client)(nil)

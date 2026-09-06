@@ -161,6 +161,27 @@ func TestBackendExitUsesOneStoredReaperResult(t *testing.T) {
 	}
 }
 
+func TestBackendExitReturnsTerminalWaitErrorOnce(t *testing.T) {
+	service, _, cancel := runningService(t, false)
+	defer cancel()
+	waitErr := errors.New("backend terminal wait failure")
+	service.owner.exit(waitErr)
+	select {
+	case err := <-service.result:
+		if err == nil || strings.Count(err.Error(), waitErr.Error()) != 1 {
+			t.Fatalf("Run() error = %v, want one terminal Wait result", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("backend-exit cleanup did not return")
+	}
+	if service.owner.stopCalls() != 1 || service.owner.closeCalls() != 1 {
+		t.Fatalf("Stop=%d Close=%d, want one each", service.owner.stopCalls(), service.owner.closeCalls())
+	}
+	if _, err := os.Lstat(filepath.Join(service.dir, manifestName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("manifest after terminal Wait result = %v, want absent", err)
+	}
+}
+
 func TestWaitTimeoutPreservesRuntimeNamespace(t *testing.T) {
 	setLifecycleDeadline(t, 25*time.Millisecond)
 	service, _, cancel := runningService(t, false)
@@ -396,6 +417,67 @@ func TestControlFramesSplitReadsAndReturnsStopFailure(t *testing.T) {
 	}
 }
 
+func TestControlStopLeavesBoundedResponseWindow(t *testing.T) {
+	setLifecycleDeadline(t, 120*time.Millisecond)
+	owner := newTestOwner(ProcessIdentity{PID: 1, StartedAt: time.Unix(1, 0), Unique: 1})
+	key := make([]byte, 32)
+	key[0] = 2
+	manifest := Manifest{Binding: testBinding()}
+	client, server := net.Pipe()
+	defer client.Close()
+	go handleControl(server, manifest, key, owner, func() error {
+		time.Sleep(90 * time.Millisecond)
+		return nil
+	})
+	request := controlRequest{Version: 1, Action: "stop", Binding: testBinding(), Challenge: "fresh"}
+	var err error
+	request.MAC, err = requestMAC(key, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(60 * time.Millisecond)
+	if err := writeFrame(client, data); err != nil {
+		t.Fatal(err)
+	}
+	_ = client.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	responseData, err := readBounded(client)
+	if err != nil {
+		t.Fatalf("read stop response after bounded parsing and stop: %v", err)
+	}
+	var response controlResponse
+	if err := decodeExact(responseData, &response); err != nil {
+		t.Fatal(err)
+	}
+	want, err := responseMAC(key, response)
+	if err != nil || response.MAC != want || response.Error != "" {
+		t.Fatalf("stop response = %#v, MAC error = %v", response, err)
+	}
+}
+
+func TestStopClientDeadlineCoversServerLifecycleWindow(t *testing.T) {
+	setLifecycleDeadline(t, 3*time.Second)
+	service, controller, cancel := runningService(t, false)
+	defer cancel()
+	go func() {
+		time.Sleep(2200 * time.Millisecond)
+		service.owner.exit(nil)
+	}()
+	ctx, cancelStop := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelStop()
+	if err := controller.Stop(ctx, testBinding()); err != nil {
+		t.Fatalf("Stop() expired before the server lifecycle window: %v", err)
+	}
+	select {
+	case <-service.done:
+	case <-time.After(time.Second):
+		t.Fatal("supervisor did not finish after valid stop")
+	}
+}
+
 func TestCleanupPreservesSameModeManifestReplacement(t *testing.T) {
 	service, _, cancel := runningService(t, false)
 	manifestPath := filepath.Join(service.dir, manifestName)
@@ -537,6 +619,29 @@ func TestDetachedLauncherJoinsReleaseAndCleanupFailures(t *testing.T) {
 	}
 	if _, statErr := os.Lstat(filepath.Join(dir, requestName)); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("failed release request remains: %v", statErr)
+	}
+}
+
+func TestDetachedLauncherReturnsTerminalWaitErrorOnce(t *testing.T) {
+	dir := privateRuntime(t)
+	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(404, 0).UTC(), Unique: 44}
+	waitErr := errors.New("detached child terminal wait failure")
+	child := &testLaunchChild{waitErr: waitErr}
+	launcher := newDetachedLauncher(launcherDeps{
+		executable: func() (string, error) { return "/private/boxwarden", nil },
+		inspector:  testInspector(identity),
+		start:      func(context.Context, LaunchCommand) (launchChild, error) { return child, nil },
+		await:      func(context.Context, *Client, Binding) error { return errors.New("authentication failed") },
+	})
+	err := launcher.Launch(context.Background(), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"})
+	if err == nil || strings.Count(err.Error(), waitErr.Error()) != 1 {
+		t.Fatalf("Launch() error = %v, want one terminal Wait result", err)
+	}
+	if child.stopCalls != 1 || child.waitCalls != 1 || child.released {
+		t.Fatalf("child lifecycle = %#v, want one Stop, one Wait, and no release", child)
+	}
+	if _, statErr := os.Lstat(filepath.Join(dir, requestName)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("failed launch request remains: %v", statErr)
 	}
 }
 
@@ -870,6 +975,7 @@ type testService struct {
 	owner     *testOwner
 	inspector *mutableInspector
 	done      <-chan struct{}
+	result    <-chan error
 }
 
 func runningService(t *testing.T, poisoned bool) (testService, *Client, context.CancelFunc) {
@@ -926,7 +1032,7 @@ func runningService(t *testing.T, poisoned bool) (testService, *Client, context.
 		cancel()
 		t.Fatal(err)
 	}
-	return testService{dir: dir, key: key, identity: identity, owner: owner, inspector: inspector, done: done}, client, cancel
+	return testService{dir: dir, key: key, identity: identity, owner: owner, inspector: inspector, done: done, result: runErr}, client, cancel
 }
 func socketIsPrivate(path string) bool {
 	info, err := os.Lstat(path)
