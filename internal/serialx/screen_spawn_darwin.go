@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"syscall"
 )
 
@@ -28,7 +29,7 @@ func productionRuntimeDeps() (runtimeDeps, error) {
 func productionRuntimeSupported() bool { return true }
 
 func startProductionScreen(ctx context.Context, launch screenLaunch) (*ownedScreen, error) {
-	if launch.path != ScreenPath || len(launch.args) != 4 || !sameStrings(launch.args[:3], []string{"-D", "-m", "-S"}) || launch.args[3] == "" || launch.stdin == nil {
+	if launch.path != ScreenPath || len(launch.args) != 4 || !slices.Equal(launch.args[:3], []string{"-D", "-m", "-S"}) || launch.args[3] == "" || launch.stdin == nil {
 		return nil, fmt.Errorf("invalid fixed Screen launch")
 	}
 	return startOwnedScreen(ctx, launch, screenStartDeps{

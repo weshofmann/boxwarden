@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -70,7 +71,7 @@ func TestCreateRuntimeUsesTwoOwnerOnlyPTYSlavesAndFixedScreenSpec(t *testing.T) 
 	if allocator.calls != 2 {
 		t.Fatalf("PTY allocations = %d, want two", allocator.calls)
 	}
-	if got := starter.launch; got.path != ScreenPath || !sameStrings(got.args, []string{"-D", "-m", "-S", "boxwarden-generation-1"}) || got.stdin == nil || got.stdin.Name() != allocator.slaves[1] {
+	if got := starter.launch; got.path != ScreenPath || !slices.Equal(got.args, []string{"-D", "-m", "-S", "boxwarden-generation-1"}) || got.stdin == nil || got.stdin.Name() != allocator.slaves[1] {
 		t.Fatalf("Screen spec = %#v, want exact opened operator slave %q", got, allocator.slaves[1])
 	}
 	for _, link := range []string{runtime.TartSlave, runtime.OperatorSlave} {
@@ -353,7 +354,7 @@ func TestExchangeAcceptsOnlyOneCanonicalAssociatedFrame(t *testing.T) {
 	if got, want := broker.InputDiscarded(), uint64(len("operator-must-not-replay")); got != want {
 		t.Fatalf("automation discarded input = %d, want %d", got, want)
 	}
-	if got, want := tart.values(), []string{bootstrapCommand, mustJSON(t, request) + "\n"}; !sameStrings(got, want) {
+	if got, want := tart.values(), []string{bootstrapCommand, mustJSON(t, request) + "\n"}; !slices.Equal(got, want) {
 		t.Fatalf("Tart writes = %#v, want %#v", got, want)
 	}
 }
@@ -745,17 +746,6 @@ func mustJSON(t *testing.T, value any) string {
 		t.Fatal(err)
 	}
 	return string(raw)
-}
-func sameStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 var _ io.Writer = (*recordingWriter)(nil)

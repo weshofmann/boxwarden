@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -31,7 +32,7 @@ func TestCreateRuntimePassesFixedScreenLaunchToPrivateStarter(t *testing.T) {
 		t.Fatalf("createRuntime() error = %v", err)
 	}
 	defer runtime.Close()
-	if got.path != ScreenPath || !sameStrings(got.args, []string{"-D", "-m", "-S", "boxwarden-generation-launch"}) {
+	if got.path != ScreenPath || !slices.Equal(got.args, []string{"-D", "-m", "-S", "boxwarden-generation-launch"}) {
 		t.Fatalf("screen launch = %#v, want fixed Screen argv", got)
 	}
 	if got.stdin == nil || got.stdin.Name() != allocator.slaves[1] {
@@ -60,7 +61,7 @@ func TestStartOwnedScreenStartsBeforeObservingExactChild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startOwnedScreen() error = %v", err)
 	}
-	if !sameStrings(events, []string{"start", "observe"}) || owned.Evidence().PID() != 82 {
+	if !slices.Equal(events, []string{"start", "observe"}) || owned.Evidence().PID() != 82 {
 		t.Fatalf("events/evidence = %#v/%#v, want start then exact observation", events, owned.Evidence())
 	}
 }
