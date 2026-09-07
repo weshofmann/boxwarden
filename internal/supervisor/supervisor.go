@@ -142,13 +142,6 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 	if child == nil {
 		return errors.Join(fmt.Errorf("supervisor child is unavailable"), cleanupRequest())
 	}
-	// exec.Cmd.Start has duplicated the fixed ExtraFiles entry into the child.
-	// Close only the parent's copy now: the inherited open-file description
-	// keeps the flock continuous across a parent crash while avoiding a second
-	// long-lived parent owner.
-	if err := lockArtifact.close(); err != nil {
-		return errors.Join(err, cleanupRequest())
-	}
 	cleanupChild := func(cause error) error {
 		reaper := &launchChildReaper{child: child, done: make(chan struct{})}
 		stopErr := child.stop()
@@ -164,6 +157,13 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 			waitErr = errors.Join(waitErr, reaper.result())
 		}
 		return errors.Join(cause, stopErr, waitErr, cleanupRequest())
+	}
+	// exec.Cmd.Start has duplicated the fixed ExtraFiles entry into the child.
+	// Close only the parent's copy now: the inherited open-file description
+	// keeps the flock continuous across a parent crash while avoiding a second
+	// long-lived parent owner.
+	if err := lockArtifact.close(); err != nil {
+		return cleanupChild(err)
 	}
 	client := &Client{RuntimeDirectory: request.RuntimeDirectory, Inspector: l.deps.inspector, MaxSnapshotAge: time.Minute}
 	if err := l.deps.await(ctx, client, request.Binding); err != nil {

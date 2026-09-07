@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -429,6 +430,118 @@ func TestDetachedLauncherClosesParentLockAfterStartWhileInheritedCopyRetainsClai
 	}
 }
 
+func TestDetachedLauncherReapsChildBeforeCleanupWhenParentLockCloseFails(t *testing.T) {
+	setLifecycleDeadline(t, 25*time.Millisecond)
+	dir := privateLaunchRuntime(t)
+	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(303, 0), Unique: 33}
+	child := &testLaunchChild{waitRelease: make(chan struct{}), stopSignal: make(chan struct{})}
+	var inherited *os.File
+	launcher := newDetachedLauncher(launcherDeps{
+		executable: func() (string, error) { return "/private/boxwarden", nil }, inspector: testInspector(identity),
+		start: func(_ context.Context, command LaunchCommand) (launchChild, error) {
+			dup, err := syscall.Dup(int(command.GenerationLock.Fd()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			inherited = os.NewFile(uintptr(dup), "inherited-generation-lock")
+			if err := command.GenerationLock.Close(); err != nil {
+				t.Fatal(err)
+			}
+			return child, nil
+		},
+		await: func(context.Context, *Client, Binding) error { return nil },
+	})
+	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
+	done := make(chan error, 1)
+	go func() { done <- launcher.Launch(context.Background(), request) }()
+	select {
+	case <-child.stopSignal:
+	case <-time.After(time.Second):
+		t.Fatal("parent-close failure did not stop exact child")
+	}
+	if _, err := os.Lstat(filepath.Join(dir, requestName)); err != nil {
+		t.Fatalf("cleanup ran before child reap: %v", err)
+	}
+	close(child.waitRelease)
+	err := <-done
+	if err == nil {
+		t.Fatal("parent lock close failure was lost")
+	}
+	if child.waitCalls != 1 {
+		t.Fatalf("Wait calls=%d, want one", child.waitCalls)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, requestName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("request remained after reap cleanup: %v", err)
+	}
+	if inherited == nil {
+		t.Fatal("child did not retain inherited lock")
+	}
+	_ = inherited.Close()
+}
+
+func TestStartExactChildPassesClaimedGenerationLockAsFD3(t *testing.T) {
+	dir := privateRuntime(t)
+	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
+	path := filepath.Join(dir, lockName)
+	if err := writeBoundGenerationLock(path, request); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	info, err := lock.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := identityFor(path, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := startExactChild(context.Background(), LaunchCommand{Path: executable, Args: []string{"-test.run=TestStartExactChildFD3Helper"}, Env: []string{"BW_FD3_HELPER=1", "BW_FD3_PATH=" + path, fmt.Sprintf("BW_FD3_DEVICE=%d", identity.Device), fmt.Sprintf("BW_FD3_INODE=%d", identity.Inode)}, Dir: dir, GenerationLock: lock})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := child.wait(); err != nil {
+		t.Fatalf("fd3 helper failed: %v", err)
+	}
+}
+
+func TestStartExactChildFD3Helper(t *testing.T) {
+	if os.Getenv("BW_FD3_HELPER") != "1" {
+		return
+	}
+	file := os.NewFile(uintptr(3), "generation-lock-fd3")
+	info, err := file.Stat()
+	if err != nil {
+		os.Exit(10)
+	}
+	identity, err := identityFor(os.Getenv("BW_FD3_PATH"), info)
+	if err != nil {
+		os.Exit(11)
+	}
+	if fmt.Sprintf("%d", identity.Device) != os.Getenv("BW_FD3_DEVICE") || fmt.Sprintf("%d", identity.Inode) != os.Getenv("BW_FD3_INODE") {
+		os.Exit(12)
+	}
+	contender, err := os.OpenFile(os.Getenv("BW_FD3_PATH"), os.O_RDONLY, 0)
+	if err != nil {
+		os.Exit(13)
+	}
+	defer contender.Close()
+	if err := syscall.Flock(int(contender.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+		os.Exit(14)
+	}
+	os.Exit(0)
+}
+
 func TestDetachedLauncherReturnsOwnedGenerationWithoutSpawnOrCleanupOnLockContention(t *testing.T) {
 	dir := privateRuntime(t)
 	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
@@ -559,6 +672,8 @@ type testLaunchChild struct {
 	releaseErr        error
 	waitErr           error
 	waitRelease       chan struct{}
+	stopSignal        chan struct{}
+	stopOnce          sync.Once
 	stopCalls         int
 	waitCalls         int
 }
@@ -567,6 +682,9 @@ func (c *testLaunchChild) release() error { c.released = true; return c.releaseE
 func (c *testLaunchChild) stop() error {
 	c.stopped = true
 	c.stopCalls++
+	if c.stopSignal != nil {
+		c.stopOnce.Do(func() { close(c.stopSignal) })
+	}
 	return nil
 }
 func (c *testLaunchChild) wait() error {

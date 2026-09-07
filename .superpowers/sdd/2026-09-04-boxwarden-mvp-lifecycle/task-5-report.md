@@ -163,6 +163,30 @@ RED: unheld exact descriptor was admitted
 GREEN: PASS
 ```
 
+### Task 5.2b2 corrective close-error ordering and real fd-3 transport
+
+`cleanupChild` is now established as soon as `Start` returns a child, before
+the parent closes its copied descriptor. Therefore a close error after a child
+is live follows the same exact stop, one reaper wait, and identity cleanup
+sequence as await/release failure. The regression closes the parent fd inside
+fake `start` after duplicating its child copy, blocks `Wait`, and proves the
+request remains until stop/reap completes.
+
+`startExactChild` also has a real subprocess regression. The helper receives
+only the configured `ExtraFiles` entry as fd 3, checks its device/inode against
+the parent’s lock, and proves a separately opened contender remains blocked.
+Removing or reordering `ExtraFiles` therefore fails the test.
+
+RED/GREEN:
+
+```text
+go test ./internal/supervisor -run TestDetachedLauncherReapsChildBeforeCleanupWhenParentLockCloseFails -count=1
+RED: parent-close failure did not stop exact child
+GREEN: PASS
+go test ./internal/supervisor -run TestStartExactChildPassesClaimedGenerationLockAsFD3 -count=1
+GREEN: PASS
+```
+
 ## Task 5.2b2 — gap-free inherited generation-lock handoff
 
 The detached parent now takes `LOCK_EX|LOCK_NB` on its retained exact bound
