@@ -143,12 +143,17 @@ before B; a green foundation alone does not authorize beginning B.
 - [x] Support realistic Darwin runtime paths through a transient owner-private
   short bind/connect alias while keeping the real socket and its inode authority
   in the canonical exact generation.
+- [x] Make post-reap outer cleanup crash-recoverable: atomically rename exact G
+  to a deterministic same-parent residue while retaining its lock, fsync the
+  durable namespace phases, recover only exact admitted interruption stages,
+  and fail closed on active, coexisting, foreign, malformed, or unexpected state.
 
-Deterministic persistence, retry, process-boundary retention, exact cleanup,
-long-path transport, and configured-namespace tests are complete. The bounded
-controlled real-host exact-start check is the next controller-owned gate and has
-not yet run; it is product evidence, not formal qualification. Do not begin C or
-infer READY from this completed Slice B implementation boundary.
+Deterministic persistence, retry, process-boundary retention, exact cleanup with
+rename/unlink/fsync interruption injection, long-path transport, and
+configured-namespace tests are complete. The bounded controlled real-host
+exact-start check is the next controller-owned gate and has not yet run; it is
+product evidence, not formal qualification. Do not begin C or infer READY from
+this completed Slice B implementation boundary.
 
 ### C — Boot and serial bootstrap composition
 

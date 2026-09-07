@@ -72,7 +72,7 @@ func Run(ctx context.Context, path string, owner RuntimeOwner) error {
 		if errors.Is(err, ErrRuntimeCleanupUnproven) {
 			return err
 		}
-		return errors.Join(err, removeExactGeneration(request))
+		return errors.Join(err, removeExactGeneration(request, lock))
 	}
 
 	reaped := make(chan struct{})
@@ -101,7 +101,7 @@ func Run(ctx context.Context, path string, owner RuntimeOwner) error {
 	}
 	listener, err := listenSocket(filepath.Join(request.RuntimeDirectory, socketName))
 	if err != nil {
-		return errors.Join(finish(err), removeExactGeneration(request))
+		return errors.Join(finish(err), removeExactGeneration(request, lock))
 	}
 	serveCtx, cancelServe := context.WithCancel(context.Background())
 	serveDone := make(chan error, 1)
@@ -128,7 +128,7 @@ func Run(ctx context.Context, path string, owner RuntimeOwner) error {
 		// cleanup authority. Preserve request/lock for reconciliation.
 		return result
 	}
-	return errors.Join(result, removeExactGeneration(request))
+	return errors.Join(result, removeExactGeneration(request, lock))
 }
 
 type detachedLauncher struct{}

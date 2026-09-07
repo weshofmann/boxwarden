@@ -80,16 +80,33 @@ func (c *exactStartController) startExact(ctx context.Context, request LaunchReq
 	if err := ctx.Err(); err != nil {
 		return Snapshot{}, err
 	}
+	policy := c.policy
+	if policy.timeout <= 0 || policy.interval <= 0 {
+		policy = productionStartupPolicy
+	}
+	ctx, cancel := context.WithTimeout(ctx, policy.timeout)
+	defer cancel()
 	state, err := classifyExactGeneration(request)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	if state != exactGenerationLive {
-		if err := c.launcher.Launch(ctx, request); err != nil && !errors.Is(err, errGenerationAlreadyOwned) {
-			return Snapshot{}, err
+		for {
+			if err := c.launcher.Launch(ctx, request); err == nil {
+				break
+			} else if !errors.Is(err, errGenerationAlreadyOwned) {
+				return Snapshot{}, err
+			}
+			timer := time.NewTimer(policy.interval)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return Snapshot{}, ctx.Err()
+			case <-timer.C:
+			}
 		}
 	}
-	return awaitSnapshot(ctx, request.Binding, c.policy, c.controller.Snapshot)
+	return awaitSnapshot(ctx, request.Binding, policy, c.controller.Snapshot)
 }
 func awaitSnapshot(ctx context.Context, binding Binding, policy startupPolicy, snapshot func(context.Context, Binding) (Snapshot, error)) (Snapshot, error) {
 	if policy.timeout <= 0 || policy.interval <= 0 {

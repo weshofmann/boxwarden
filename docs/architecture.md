@@ -97,6 +97,20 @@ construction. It retains the exact Tart handle and one `serialx` runtime, proves
 the exact backend running and drain healthy, and leaves the durable record at
 `starting + generation G`.
 
+After actual retained-handle reap, serial close, and exact listener-socket
+removal, outer cleanup first validates the complete canonical generation and
+atomically renames it to the deterministic same-parent `.<G>.cleanup` residue.
+The generation lock moves with that rename and remains locked while cleanup is
+active; its inode is moved to an exact sibling lock marker for the final
+empty-directory phase. Directory fsyncs durably separate publication, marker,
+empty-directory, and completed phases; a crash may expose only an admitted
+stage. A same-G retry validates and finishes only the exact residue before
+republishing G. Canonical/residue coexistence, foreign bindings, malformed
+state, unsafe modes or symlinks, unexpected entries, and lock contention all
+fail closed.
+Cleanup remains nonrecursive and the deterministic names are correlation, not
+generic deletion authority.
+
 The mode-`0600` control socket and its inode authority remain in the canonical
 exact generation. Realistic macOS state-root hierarchies can exceed Darwin's
 AF_UNIX address capacity, so bind/connect may use a transient owner-private short

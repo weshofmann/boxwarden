@@ -118,7 +118,12 @@ func runProcessOwner(path string) error {
 	if err := supervisor.Run(ctx, path, owner); err != nil {
 		return err
 	}
-	return os.WriteFile(request.HostConfigPath+".reaped", []byte(strings.Join(trace.all(), ",")), 0600)
+	marker := request.HostConfigPath + ".reaped"
+	temporary := marker + ".tmp"
+	if err := os.WriteFile(temporary, []byte(strings.Join(trace.all(), ",")), 0600); err != nil {
+		return err
+	}
+	return os.Rename(temporary, marker)
 }
 
 func TestInitiatingProcessReturnsWhileDetachedSupervisorRetainsRuntime(t *testing.T) {

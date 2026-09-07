@@ -105,6 +105,17 @@ func openPrivateFile(path string) (*os.File, error) {
 	return os.NewFile(uintptr(fd), path), nil
 }
 func readLaunchRequest(path string) (LaunchRequest, error) {
+	r, err := readExactRequestFile(path)
+	if err != nil {
+		return r, err
+	}
+	if r.RuntimeDirectory != filepath.Dir(path) {
+		return r, fmt.Errorf("request runtime directory mismatch")
+	}
+	return r, nil
+}
+
+func readExactRequestFile(path string) (LaunchRequest, error) {
 	var r LaunchRequest
 	if filepath.Base(path) != requestName || !privateDirectory(filepath.Dir(path)) {
 		return r, fmt.Errorf("unsafe launch request path")
@@ -126,9 +137,6 @@ func readLaunchRequest(path string) (LaunchRequest, error) {
 	}
 	if err = validLaunchRequest(r); err != nil {
 		return r, err
-	}
-	if r.RuntimeDirectory != filepath.Dir(path) {
-		return r, fmt.Errorf("request runtime directory mismatch")
 	}
 	return r, nil
 }

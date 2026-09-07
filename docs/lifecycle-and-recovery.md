@@ -64,18 +64,27 @@ Implemented Slice B start/retry reconciliation is conservative:
 - Socket cleanup authority belongs only to the exact retained listener. A changed
   or residual socket preserves the complete request/lock/generation for explicit
   reconciliation; generic cleanup cannot unlink it.
-- Outer cleanup validates the complete exact generation before unlinking only the
-  request, empty lock, and then empty generation. It never recursively removes
-  unexpected state. Durable `starting + G` remains unchanged on start failure.
+- Outer cleanup validates the complete exact generation, atomically renames it
+  to the same-parent `.<G>.cleanup` residue, and fsyncs the parent before
+  unlinking contents. The held generation-lock inode moves with cleanup and is
+  retained through an exact sibling marker until the cleanup directory is gone.
+  A same-G retry contends with a still-finishing owner, or identity-validates and
+  completes request+lock, lock-only, marker, or empty interrupted stages before
+  republishing G. Canonical/residue coexistence and foreign, malformed,
+  symlinked, unsafe-mode, or unexpectedly populated residue fail closed without
+  mutation. Cleanup never recurses. Durable `starting + G` remains unchanged on
+  start failure.
 - Durable `running` and READY publication remain Slice D behavior. The existing
   future-ready reconciliation seam is not reached by a successful stopped or
   starting Slice B transition.
 
 Cancellation before intent fsync leaves the prior durable record. Cancellation
 after `starting` fsync leaves that exact generation for retry. Cancellation
-during exact owned cleanup leaves durable `starting + G`; actual retained-handle
-reap and serial cleanup still precede any outer-generation removal. A future
-`running` fsync may occur only after all Slice D readiness evidence is current.
+during exact owned cleanup leaves durable `starting + G` and either the
+canonical generation or its exact resumable cleanup residue. Actual
+retained-handle reap and serial cleanup still precede the atomic outer rename.
+A future `running` fsync may occur only after all Slice D readiness evidence is
+current.
 
 V2 creates a stopped copy-on-write Tart clone from the selected generic golden and returns only after the randomized-MAC clone is observed stopped. It does not boot the guest, initialize domain trust, obtain a host key, or converge the time zone.
 

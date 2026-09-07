@@ -20,6 +20,10 @@ const (
 	exactGenerationLive
 )
 
+type exactCleanupResidue struct {
+	directory, request, lock, marker bool
+}
+
 // publishOrAdmitRequest is called under the common session operation lock.
 // Stage a complete request and ordinary empty lock before publishing the
 // generation. Never create serial/: that subtree belongs exclusively to serialx.
@@ -31,9 +35,23 @@ func publishOrAdmitRequest(r LaunchRequest) (string, bool, error) {
 	if err := ensurePrivateParents(parent); err != nil {
 		return "", false, err
 	}
-	for _, p := range []string{parent, filepath.Dir(parent), filepath.Dir(filepath.Dir(parent))} {
-		if !privateDirectory(p) {
-			return "", false, fmt.Errorf("runtime/domain/session parent is not private")
+	if err := validatePrivateRuntimeParents(parent); err != nil {
+		return "", false, err
+	}
+	canonicalExists, err := pathExists(r.RuntimeDirectory)
+	if err != nil {
+		return "", false, err
+	}
+	cleanup, err := admitExactCleanupResidue(r)
+	if err != nil {
+		return "", false, err
+	}
+	if canonicalExists && cleanup.present() {
+		return "", false, fmt.Errorf("canonical generation and exact cleanup residue coexist")
+	}
+	if cleanup.present() {
+		if err := finishExactGenerationCleanup(r, nil); err != nil {
+			return "", false, err
 		}
 	}
 	path := filepath.Join(r.RuntimeDirectory, requestName)
@@ -84,6 +102,26 @@ func publishOrAdmitRequest(r LaunchRequest) (string, bool, error) {
 		return "", false, err
 	}
 	return path, true, nil
+}
+
+func validatePrivateRuntimeParents(parent string) error {
+	for _, p := range []string{parent, filepath.Dir(parent), filepath.Dir(filepath.Dir(parent))} {
+		if !privateDirectory(p) {
+			return fmt.Errorf("runtime/domain/session parent is not private")
+		}
+	}
+	return nil
+}
+
+func pathExists(path string) (bool, error) {
+	_, err := os.Lstat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
 }
 func writePrivateFile(path string, data []byte) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
@@ -187,10 +225,19 @@ func classifyExactGeneration(r LaunchRequest) (exactGenerationState, error) {
 	if err := validLaunchRequest(r); err != nil {
 		return 0, err
 	}
-	if _, err := os.Lstat(r.RuntimeDirectory); os.IsNotExist(err) {
-		return exactGenerationAbsent, nil
-	} else if err != nil {
+	canonicalExists, err := pathExists(r.RuntimeDirectory)
+	if err != nil {
 		return 0, err
+	}
+	cleanup, err := admitExactCleanupResidue(r)
+	if err != nil {
+		return 0, err
+	}
+	if canonicalExists && cleanup.present() {
+		return 0, fmt.Errorf("canonical generation and exact cleanup residue coexist")
+	}
+	if !canonicalExists {
+		return exactGenerationAbsent, nil
 	}
 	later, err := admitGeneration(r)
 	if err != nil {
@@ -217,14 +264,47 @@ func classifyExactGeneration(r LaunchRequest) (exactGenerationState, error) {
 	return exactGenerationResumable, nil
 }
 
+type generationCleanupOperations interface {
+	Rename(string, string) error
+	Remove(string) error
+	SyncDirectory(string) error
+}
+
+type filesystemGenerationCleanupOperations struct{}
+
+func (filesystemGenerationCleanupOperations) Rename(oldPath, newPath string) error {
+	return os.Rename(oldPath, newPath)
+}
+
+func (filesystemGenerationCleanupOperations) Remove(path string) error {
+	return os.Remove(path)
+}
+
+func (filesystemGenerationCleanupOperations) SyncDirectory(path string) error {
+	return syncDirectory(path)
+}
+
 // removeExactGeneration removes only the supervisor-owned outer namespace.
 // RuntimeOwner must finish serial and other runtime cleanup before this runs.
 // The control listener must already have removed its exact socket; a residual
 // socket is never authority for this generic cleanup to unlink it.
-// Validate the complete directory before unlinking anything and never recurse.
-func removeExactGeneration(r LaunchRequest) error {
+// Validate the complete directory before atomically moving it to the exact
+// cleanup name. The caller still holds generation.lock across this transaction,
+// so a same-G retry can contend on the moved inode rather than race cleanup.
+// Every subsequent residue is exact and resumable; cleanup never recurses.
+func removeExactGeneration(r LaunchRequest, retainedLock *os.File) error {
+	return removeExactGenerationWithOperations(r, retainedLock, filesystemGenerationCleanupOperations{})
+}
+
+func removeExactGenerationWithOperations(r LaunchRequest, retainedLock *os.File, operations generationCleanupOperations) error {
+	if retainedLock == nil || operations == nil {
+		return fmt.Errorf("retained generation lock and cleanup operations are required")
+	}
 	if _, err := admitGeneration(r); err != nil {
 		return fmt.Errorf("admit exact generation for cleanup: %w", err)
+	}
+	if err := validatePrivateRuntimeParents(filepath.Dir(r.RuntimeDirectory)); err != nil {
+		return err
 	}
 	entries, err := os.ReadDir(r.RuntimeDirectory)
 	if err != nil {
@@ -248,16 +328,255 @@ func removeExactGeneration(r LaunchRequest) error {
 	if !foundRequest || !foundLock {
 		return fmt.Errorf("exact generation cleanup requires request and lock")
 	}
-	for _, name := range []string{requestName, lockName} {
-		path := filepath.Join(r.RuntimeDirectory, name)
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	lockPath := filepath.Join(r.RuntimeDirectory, lockName)
+	lockInfo, err := retainedLock.Stat()
+	if err != nil {
+		return err
+	}
+	pathLockInfo, err := os.Lstat(lockPath)
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(lockInfo, pathLockInfo) {
+		return fmt.Errorf("retained generation lock does not match exact cleanup lock")
+	}
+	cleanup, err := admitExactCleanupResidue(r)
+	if err != nil {
+		return err
+	}
+	if cleanup.present() {
+		return fmt.Errorf("exact cleanup residue already exists")
+	}
+	residue := exactCleanupDirectory(r)
+	if err := operations.Rename(r.RuntimeDirectory, residue); err != nil {
+		return err
+	}
+	parent := filepath.Dir(r.RuntimeDirectory)
+	if err := operations.SyncDirectory(parent); err != nil {
+		return err
+	}
+	return finishExactGenerationCleanupWithOperations(r, lockInfo, operations)
+}
+
+func (s exactCleanupResidue) present() bool {
+	return s.directory || s.marker
+}
+
+func exactCleanupDirectory(r LaunchRequest) string {
+	return filepath.Join(filepath.Dir(r.RuntimeDirectory), "."+r.Binding.Generation+".cleanup")
+}
+
+func exactCleanupLockMarker(r LaunchRequest) string {
+	return exactCleanupDirectory(r) + ".lock"
+}
+
+func admitExactCleanupResidue(r LaunchRequest) (exactCleanupResidue, error) {
+	var state exactCleanupResidue
+	if err := validLaunchRequest(r); err != nil {
+		return state, err
+	}
+	parent := filepath.Dir(r.RuntimeDirectory)
+	parentExists, err := pathExists(parent)
+	if err != nil {
+		return state, err
+	}
+	if !parentExists {
+		return state, nil
+	}
+	if err := safeParents(parent); err != nil {
+		return state, err
+	}
+	if err := validatePrivateRuntimeParents(parent); err != nil {
+		return state, err
+	}
+	directory := exactCleanupDirectory(r)
+	marker := exactCleanupLockMarker(r)
+	state.directory, err = pathExists(directory)
+	if err != nil {
+		return state, err
+	}
+	state.marker, err = pathExists(marker)
+	if err != nil {
+		return state, err
+	}
+	if state.marker {
+		if err := validateCleanupLock(marker); err != nil {
+			return state, err
+		}
+	}
+	if !state.directory {
+		return state, nil
+	}
+	if !privateDirectory(directory) {
+		return state, fmt.Errorf("exact cleanup residue is not an owner-private directory")
+	}
+	if err := safeParents(directory); err != nil {
+		return state, err
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return state, err
+	}
+	for _, entry := range entries {
+		if err := validateGenerationEntry(directory, entry.Name()); err != nil {
+			return state, err
+		}
+		switch entry.Name() {
+		case requestName:
+			got, err := readExactRequestFile(filepath.Join(directory, requestName))
+			if err != nil || got != r {
+				return state, fmt.Errorf("cleanup request is missing, malformed or foreign: %w", err)
+			}
+			state.request = true
+		case lockName:
+			state.lock = true
+		default:
+			return state, fmt.Errorf("unexpected exact cleanup entry %q", entry.Name())
+		}
+	}
+	if state.request && !state.lock {
+		return state, fmt.Errorf("exact cleanup request exists without its lock")
+	}
+	if state.lock && state.marker {
+		return state, fmt.Errorf("exact cleanup has two lock paths")
+	}
+	return state, nil
+}
+
+func validateCleanupLock(path string) error {
+	if filepath.Base(path) == "" || !privateDirectory(filepath.Dir(path)) {
+		return fmt.Errorf("unsafe exact cleanup lock path")
+	}
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || info.Size() != 0 || !ownedByCurrentUser(info) {
+		return fmt.Errorf("invalid exact cleanup lock")
+	}
+	return nil
+}
+
+func acquireCleanupLock(path string) (*os.File, error) {
+	if err := validateCleanupLock(path); err != nil {
+		return nil, err
+	}
+	f, err := openPrivateFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return nil, errGenerationAlreadyOwned
+		}
+		return nil, err
+	}
+	return f, nil
+}
+
+// finishExactGenerationCleanup admits and completes only the deterministic
+// residue for r. ownedLock identifies the already-held lock inode used by Run;
+// retry callers pass nil and must acquire the residue's reachable lock first.
+func finishExactGenerationCleanup(r LaunchRequest, ownedLock os.FileInfo) error {
+	return finishExactGenerationCleanupWithOperations(r, ownedLock, filesystemGenerationCleanupOperations{})
+}
+
+func finishExactGenerationCleanupWithOperations(r LaunchRequest, ownedLock os.FileInfo, operations generationCleanupOperations) error {
+	if operations == nil {
+		return fmt.Errorf("generation cleanup operations are unavailable")
+	}
+	canonicalExists, err := pathExists(r.RuntimeDirectory)
+	if err != nil {
+		return err
+	}
+	state, err := admitExactCleanupResidue(r)
+	if err != nil {
+		return err
+	}
+	if canonicalExists && state.present() {
+		return fmt.Errorf("canonical generation and exact cleanup residue coexist")
+	}
+	if canonicalExists || !state.present() {
+		return nil
+	}
+
+	directory := exactCleanupDirectory(r)
+	marker := exactCleanupLockMarker(r)
+	lockPath := ""
+	if state.marker {
+		lockPath = marker
+	} else if state.lock {
+		lockPath = filepath.Join(directory, lockName)
+	}
+	var acquired *os.File
+	if lockPath != "" {
+		if ownedLock == nil {
+			acquired, err = acquireCleanupLock(lockPath)
+			if err != nil {
+				return err
+			}
+			defer acquired.Close()
+			ownedLock, err = acquired.Stat()
+			if err != nil {
+				return err
+			}
+		} else {
+			info, err := os.Lstat(lockPath)
+			if err != nil || !os.SameFile(info, ownedLock) {
+				return fmt.Errorf("cleanup lock does not match retained owner descriptor")
+			}
+		}
+		state, err = admitExactCleanupResidue(r)
+		if err != nil {
 			return err
 		}
 	}
-	if err := os.Remove(r.RuntimeDirectory); err != nil {
-		return err
+	if state.request {
+		if err := operations.Remove(filepath.Join(directory, requestName)); err != nil {
+			return err
+		}
+		state.request = false
 	}
-	return syncDirectory(filepath.Dir(r.RuntimeDirectory))
+	if state.lock {
+		if state.marker {
+			return fmt.Errorf("exact cleanup has two lock paths")
+		}
+		if err := operations.Rename(filepath.Join(directory, lockName), marker); err != nil {
+			return err
+		}
+		state.lock = false
+		state.marker = true
+		if err := operations.SyncDirectory(directory); err != nil {
+			return err
+		}
+		if err := operations.SyncDirectory(filepath.Dir(directory)); err != nil {
+			return err
+		}
+	}
+	if state.directory {
+		entries, err := os.ReadDir(directory)
+		if err != nil {
+			return err
+		}
+		if len(entries) != 0 {
+			return fmt.Errorf("exact cleanup directory is not empty")
+		}
+		if err := operations.Remove(directory); err != nil {
+			return err
+		}
+		state.directory = false
+		if err := operations.SyncDirectory(filepath.Dir(directory)); err != nil {
+			return err
+		}
+	}
+	if state.marker {
+		info, err := os.Lstat(marker)
+		if err != nil || ownedLock == nil || !os.SameFile(info, ownedLock) {
+			return fmt.Errorf("cleanup lock marker does not match retained owner descriptor")
+		}
+		if err := operations.Remove(marker); err != nil {
+			return err
+		}
+	}
+	return operations.SyncDirectory(filepath.Dir(r.RuntimeDirectory))
 }
 
 // The descriptor is the lifetime ownership lock, never persisted process evidence.
