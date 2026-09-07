@@ -353,6 +353,44 @@ func TestRunCancellationStopsAndReapsOnce(t *testing.T) {
 	}
 }
 
+type listenerFailureRuntime struct{ runtimeFixture }
+
+func (o *listenerFailureRuntime) Start(ctx context.Context, request LaunchRequest) error {
+	if err := o.runtimeFixture.Start(ctx, request); err != nil {
+		return err
+	}
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(request.RuntimeDirectory, socketName), Net: "unix"})
+	if err != nil {
+		return err
+	}
+	listener.SetUnlinkOnClose(false)
+	if err := os.Chmod(filepath.Join(request.RuntimeDirectory, socketName), 0600); err != nil {
+		listener.Close()
+		return err
+	}
+	return listener.Close()
+}
+
+// Production break: the listener-failure return used to stop and reap the
+// owner but bypass exact outer-generation cleanup.
+func TestRunRemovesExactGenerationAfterListenerFailureAndActualReap(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &listenerFailureRuntime{runtimeFixture: runtimeFixture{done: make(chan struct{})}}
+	if err := Run(context.Background(), path, owner); err == nil || !strings.Contains(err.Error(), "control socket already exists") {
+		t.Fatalf("Run() error = %v, want listener failure", err)
+	}
+	if owner.starts.Load() != 1 || owner.stops.Load() != 1 || owner.waits.Load() != 1 {
+		t.Fatalf("start/stop/wait = %d/%d/%d, want 1/1/1", owner.starts.Load(), owner.stops.Load(), owner.waits.Load())
+	}
+	if _, err := os.Lstat(request.RuntimeDirectory); !os.IsNotExist(err) {
+		t.Fatalf("listener-failed generation retained after reap: %v", err)
+	}
+}
+
 type startFailureRuntime struct {
 	err   error
 	start func(LaunchRequest) error

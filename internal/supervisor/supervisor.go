@@ -91,7 +91,7 @@ func Run(ctx context.Context, path string, owner RuntimeOwner) error {
 	}
 	listener, err := listenSocket(filepath.Join(request.RuntimeDirectory, socketName))
 	if err != nil {
-		return finish(err)
+		return errors.Join(finish(err), removeExactGeneration(request))
 	}
 	serveCtx, cancelServe := context.WithCancel(context.Background())
 	serveDone := make(chan error, 1)
