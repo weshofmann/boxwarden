@@ -50,10 +50,15 @@ isolation beyond the Task 0 claims. Pending runtime evidence limits those
 claims but is not automatically a software-merge blocker absent a known unsafe
 defect.
 
-V4 start, supervisor/broker, serial bootstrap, and READY behavior remain
-normative future design and pending qualification; no start, readiness, stop,
-destroy, or operational-readiness claim is made. This plan stops after V4.
-File transfer, provider authentication, and other later work remain deferred.
+MVP Slice A establishes a minimal detached supervisor and one private serial
+PTY for bounded bootstrap followed by continuous draining. The host/session
+contracts no longer require Screen or an operator console. Live Tart launch,
+guest bootstrap, strict SSH/READY, stop, and destroy composition remain pending;
+the default supervisor entry point fails explicitly until composition exists.
+No operational-readiness or new host qualification claim is made. The
+[A–H implementation plan](docs/superpowers/plans/2026-09-04-boxwarden-mvp-lifecycle.md)
+starts controlled product checks at Slice B's exact VM launch. File transfer,
+provider authentication, and operator-console UX remain deferred.
 
 ## Model
 
@@ -192,8 +197,8 @@ current tree.
   non-final forensic evidence and exposed harness assumptions that are being
   corrected; the complete fresh-run runtime qualification remains pending;
   no completed runtime qualification result is claimed
-- ADR 017 requalification for the V4 supervisor broker (replaces Task 0 socat
-  harness)
+- ADR 017 requalification for the MVP single serial PTY (supersedes the
+  historical Task 0 socat/Screen harness)
 - V2 real-host register/clone gate (requires artifact from corrected generic
   guest definition)
 

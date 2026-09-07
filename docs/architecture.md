@@ -40,22 +40,13 @@ Host-issued management SSH disables password and keyboard-interactive login,
 direct root login, agent forwarding, X11 forwarding, stream-local forwarding,
 TCP forwarding, tunnels, and local commands; successful management login as
 the workstation account may elevate inside the guest without another secret.
-Every M1A VM also starts with Tart's host-local serial hardware attached. Its
-`hvc0` getty automatically logs in the same workstation account, providing a
-recovery shell when guest networking or SSH is broken. Production V4 retains
-ADR 017's two-PTY topology but replaces opaque socat forwarding with a bounded
-supervisor-owned broker, so the implementation must requalify ADR 017. The
-supervisor owns both PTY pairs and masters; Tart opens only the Tart slave.
-Exact `/usr/bin/screen -D -m` (qualified system Screen 4.00.03) is a direct
-waitable child and sole reader of the operator slave. The broker alone reads
-the Tart master, queues output to Screen, and arms a fixed-memory raw frame
-parser only during automation. It forwards operator-master input only in
-console mode; every other mode, including `idle` and `automation`, discards and
-counts it without buffering or replay. Automation never opens
-the operator PTY or uses Screen log, hardcopy, paste, `stuff`, or control paths.
-One serialized broker state machine owns `idle`, `console`, `automation`, and
-`failed`; fixed bounds and deadlines make flood, overflow, Screen/broker loss,
-or ambiguous framing poison the generation with no hot repair.
+MVP serial hardware uses ADR 017's amended single supervisor-owned PTY.
+The guest `hvc0` getty logs in the workstation account so the fixed bootstrap
+helper can run with passwordless sudo. `serialx` exclusively creates the private
+`<generation>/serial/` subtree and one mode-`0600` PTY slave for Tart.
+One master read pump owns the bounded, correlated bootstrap exchange and then
+permanently drains output with bounded memory. Operator-console UX is deferred.
+The earlier two-PTY/Screen Task 0 harness remains historical evidence only.
 
 The host-side `boxwarden` program is a small Go control plane split at one narrow backend seam.
 
@@ -91,22 +82,29 @@ obtains the clone's fresh SSH host key for an exact host-side pin. Only after
 that sequence may Boxwarden issue a short-lived no-extension certificate and
 attempt strict SSH. No TOFU or network bootstrap path exists.
 
-Backend state and workstation readiness are separate. `tart list` may prove
-that the VM process is running while Boxwarden still reports `starting`,
-`drift`, or non-ready. A long-lived same-user supervisor holds the generation
-lock and authenticated owner-only control socket for its lifetime and keeps
-Tart, broker, and Screen as direct/owned children. It never `exec`-replaces
-itself with Tart or uses the initiating CLI's cancellation. Later CLIs reconnect
-by a nonce challenge/response tied to manifest and process-start evidence. The
-supervisor owns the generation client key/certificate, revalidates CA metadata
-before fixed-threshold renewal, and refreshes a strict read-only SSH probe on a
-fixed cadence. READY requires an authenticated bounded health snapshot within
-the maximum evidence age, healthy broker/Screen state, exact pin, current
-certificate, recent probe, and guest-zone agreement. Status observes backend
-and host zone and challenges the supervisor only; it never mints, applies, or
-repairs. A host-zone mismatch is non-ready until idempotent start on the exactly
-proven generation reconverges it. Unproven running ownership is drift/non-ready
-with no mutation or adoption.
+Backend state and workstation readiness are separate. A running VM can remain
+starting or non-ready. The trusted host and cooperating host processes use a
+lightweight detached supervisor, ordinary generation lock, and private bounded
+typed Unix socket bound to the exact domain/session/backend/generation.
+The supervisor retains the actual Tart handle in memory with one stop/wait/reap
+path; it never reconstructs process authority from persisted PID/inode data.
+The minimal launch request holds only binding and configuration/record locators.
+Later composition reloads those authoritative records and rechecks host/CA
+admission before runtime construction.
+
+Slice A implements these supervisor and serial foundations with deterministic
+tests. Live launch, bootstrap, SSH, and lifecycle composition remain pending;
+the default supervisor entry point explicitly refuses unavailable composition.
+The A–H plan in `docs/superpowers/plans/2026-09-04-boxwarden-mvp-lifecycle.md`
+defines those next slices and early controlled product checks, beginning in B.
+
+The eventual supervisor owns generation SSH credentials, renews short-lived
+no-extension certificates after CA revalidation, and refreshes strict read-only
+SSH probes. READY requires a fresh bounded exact-generation health snapshot,
+running backend, healthy serial drain, exact pin, current certificate, recent
+probe, and host/guest-zone agreement. Status reads backend/host-zone and
+supervisor observations only; it never mints, applies, or repairs. Ambiguous
+ownership remains drift/non-ready with no adoption or mutation.
 
 Host-wide prerequisites and domain-owned trust have separate lifetimes.
 `boxwarden init` runs once per trusted host, outside the security-domain

@@ -18,8 +18,8 @@ import (
 
 const maxReadySnapshotAge = 90 * time.Second
 
-// RuntimeAdmission is hostx's public projection. Session cannot access its
-// opaque Screen capability; the future child composition owns that boundary.
+// RuntimeAdmission contains inspected public host prerequisites.
+// The later child composition must independently reload and verify them.
 type RuntimeAdmission = hostx.RuntimeExpectation
 
 type RuntimeChecker interface {
@@ -147,7 +147,7 @@ func (s *Service) reconcileReady(ctx context.Context, record Record) (Record, er
 func (s *Service) persistReady(record Record, snapshot supervisor.Snapshot) (Record, error) {
 	want := supervisor.Binding{Domain: string(record.Domain), SessionID: record.ID, BackendKind: record.Backend.Kind, BackendObject: record.Backend.ObjectID, Generation: record.StartGeneration}
 	now := s.start.Now()
-	if snapshot.Binding != want || !snapshot.BackendRunning || !snapshot.BrokerHealthy || !snapshot.ScreenHealthy || !snapshot.PinPresent || !snapshot.CertificateCurrent || !snapshot.ProbeOK || !snapshot.ZoneMatches || snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || now.Sub(snapshot.ObservedAt) > maxReadySnapshotAge {
+	if snapshot.Binding != want || !snapshot.BackendRunning || !snapshot.SerialHealthy || !snapshot.PinPresent || !snapshot.CertificateCurrent || !snapshot.ProbeOK || !snapshot.ZoneMatches || snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || now.Sub(snapshot.ObservedAt) > maxReadySnapshotAge {
 		return Record{}, fmt.Errorf("supervisor did not provide a fresh exact ready snapshot")
 	}
 	record.IntendedState = StateRunning

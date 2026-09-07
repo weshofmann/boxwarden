@@ -6,13 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
-	"reflect"
-	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -25,6 +20,37 @@ func TestNewSystemDoctorConstructsAStandaloneReadOnlyDoctor(t *testing.T) {
 	doctor.inspector = inspector
 	if report := doctor.Doctor(t.Context(), request); report.Status != Healthy {
 		t.Fatalf("Doctor() status = %q, want healthy", report.Status)
+	}
+}
+
+// MVP admission depends on the qualified VM/SSH toolchain, without a console program.
+func TestRuntimeAdmissionDoesNotRequireOperatorConsole(t *testing.T) {
+	inspector, request := healthyDoctorFixture(t)
+	delete(inspector.paths, "/usr/bin/screen")
+	doctor := SystemDoctor{inspector: inspector}
+	if report := doctor.Doctor(t.Context(), request); report.Status != Healthy {
+		t.Fatalf("Doctor() without operator console = %#v", report)
+	}
+	if _, err := doctor.CheckRuntime(t.Context(), request); err != nil {
+		t.Fatalf("CheckRuntime() without operator console: %v", err)
+	}
+	for _, operation := range inspector.operations {
+		if strings.Contains(operation, "/usr/bin/screen") {
+			t.Fatalf("runtime admission accessed an operator console: %s", operation)
+		}
+	}
+}
+
+func TestRuntimeAdmissionHonorsCancellation(t *testing.T) {
+	inspector, request := healthyDoctorFixture(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	doctor := SystemDoctor{inspector: inspector}
+	if _, err := doctor.CheckRuntime(ctx, request); err == nil {
+		t.Fatal("CheckRuntime() admitted a canceled inspection")
+	}
+	if len(inspector.operations) != 0 {
+		t.Fatalf("canceled admission inspected host state: %v", inspector.operations)
 	}
 }
 
@@ -92,197 +118,23 @@ func TestDoctorReportsUnqualifiedBuildAndUnsupportedManifestSchema(t *testing.T)
 	}
 }
 
-func TestDoctorNeverExecutesConfiguredTartAndGatesScreenVersionOnExactIdentity(t *testing.T) {
-	inspector, request := healthyDoctorFixture(t)
-	if report := (SystemService{inspector: inspector}).Doctor(t.Context(), request); report.Status != Healthy {
-		t.Fatalf("healthy Doctor() = %#v", report)
-	}
-	if containsString(inspector.commands, commandKey(request.TartPath, "--version")) {
-		t.Fatalf("doctor executed configured Tart: %v", inspector.commands)
-	}
-	if !containsString(inspector.commands, commandKey(ScreenPath, "--version")) {
-		t.Fatalf("doctor did not verify safe Screen: %v", inspector.commands)
-	}
-
-	for name, mutate := range map[string]func(*PathFact){
-		"digest": func(fact *PathFact) { fact.SHA256 = strings.Repeat("0", 64) },
-		"owner":  func(fact *PathFact) { fact.UID = 501 },
-		"setuid": func(fact *PathFact) { fact.Mode = 0o4755 },
-		"links":  func(fact *PathFact) { fact.Links = 2 },
-	} {
-		t.Run("screen "+name, func(t *testing.T) {
-			inspector, request := healthyDoctorFixture(t)
-			fact := inspector.paths[ScreenPath]
-			mutate(&fact)
-			inspector.paths[ScreenPath] = fact
-			_ = (SystemService{inspector: inspector}).Doctor(t.Context(), request)
-			if containsString(inspector.commands, commandKey(ScreenPath, "--version")) {
-				t.Fatalf("doctor executed unsafe Screen after %s drift", name)
-			}
-		})
-	}
-}
-
-func TestCurrentScreenInspectsAndExecutesOnlyTheFixedQualifiedPathInOrder(t *testing.T) {
-	inspector, _ := healthyDoctorFixture(t)
-	admission, err := currentScreenForTest(t.Context(), inspector)
-	if err != nil {
-		t.Fatalf("currentScreen() error = %v", err)
-	}
-	if admission.Path() != ScreenPath || !admission.ValidForRuntime() {
-		t.Fatalf("currentScreen() = %#v, want opaque exact admission", admission)
-	}
-	want := []string{"inspect:" + ScreenPath, "command:" + commandKey(ScreenPath, "--version")}
-	if fmt.Sprint(inspector.operations) != fmt.Sprint(want) {
-		t.Fatalf("currentScreen() operations = %v, want %v", inspector.operations, want)
-	}
-}
-
-func TestCurrentScreenNeverExecutesScreenAfterMetadataFailure(t *testing.T) {
-	for name, mutate := range map[string]func(*doctorInspectorFake){
-		"inspection error": func(inspector *doctorInspectorFake) {
-			inspector.failures[ScreenPath] = errors.New("sensitive inspection detail")
-		},
-		"missing": func(inspector *doctorInspectorFake) {
-			delete(inspector.paths, ScreenPath)
-		},
-		"not regular": func(inspector *doctorInspectorFake) {
-			fact := inspector.paths[ScreenPath]
-			fact.Regular = false
-			inspector.paths[ScreenPath] = fact
-		},
-		"mode drift": func(inspector *doctorInspectorFake) {
-			fact := inspector.paths[ScreenPath]
-			fact.Mode = 0o4755
-			inspector.paths[ScreenPath] = fact
-		},
-		"owner drift": func(inspector *doctorInspectorFake) {
-			fact := inspector.paths[ScreenPath]
-			fact.UID = 501
-			inspector.paths[ScreenPath] = fact
-		},
-		"hard link": func(inspector *doctorInspectorFake) {
-			fact := inspector.paths[ScreenPath]
-			fact.Links = 2
-			inspector.paths[ScreenPath] = fact
-		},
-		"extended ACL": func(inspector *doctorInspectorFake) {
-			fact := inspector.paths[ScreenPath]
-			fact.ExtendedACL = true
-			inspector.paths[ScreenPath] = fact
-		},
-		"digest drift": func(inspector *doctorInspectorFake) {
-			fact := inspector.paths[ScreenPath]
-			fact.SHA256 = "bad"
-			inspector.paths[ScreenPath] = fact
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			inspector, _ := healthyDoctorFixture(t)
-			mutate(inspector)
-
-			if admission, err := currentScreenForTest(t.Context(), inspector); err == nil || admission.ValidForRuntime() {
-				t.Fatalf("currentScreen() = %#v, %v; want refusal", admission, err)
-			}
-			if len(inspector.commands) != 0 {
-				t.Fatalf("currentScreen() executed unsafe Screen: %v", inspector.commands)
-			}
-			if len(inspector.operations) != 1 || inspector.operations[0] != "inspect:"+ScreenPath {
-				t.Fatalf("currentScreen() operations = %v, want only fixed-path inspection", inspector.operations)
-			}
-		})
-	}
-}
-
-func TestCurrentScreenAdmissionAgreesWithDoctorScreenFindings(t *testing.T) {
-	for name, mutate := range map[string]func(*doctorInspectorFake){
-		"qualified": func(*doctorInspectorFake) {},
-		"metadata drift": func(inspector *doctorInspectorFake) {
-			fact := inspector.paths[ScreenPath]
-			fact.Mode = 0o777
-			inspector.paths[ScreenPath] = fact
-		},
-		"version drift": func(inspector *doctorInspectorFake) {
-			inspector.outputs[commandKey(ScreenPath, "--version")] = "other"
-		},
-		"version inspection error": func(inspector *doctorInspectorFake) {
-			inspector.commandFailures[commandKey(ScreenPath, "--version")] = errors.New("sensitive command detail")
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			admissionInspector, _ := healthyDoctorFixture(t)
-			doctorInspector, request := healthyDoctorFixture(t)
-			mutate(admissionInspector)
-			mutate(doctorInspector)
-
-			admission, err := currentScreenForTest(t.Context(), admissionInspector)
-			report := (SystemDoctor{inspector: doctorInspector}).Doctor(t.Context(), request)
-			doctorAccepted := !hasFindingPrefix(report, "screen.")
-			if admitted := err == nil && admission.ValidForRuntime(); admitted != doctorAccepted {
-				t.Fatalf("currentScreen() admitted=%t error=%v, Doctor()=%#v", admitted, err, report)
-			}
-		})
-	}
-}
-
-// Production break: admitting Screen separately from Doctor could pair a
-// healthy capability with a drifted manifest/toolchain report.
 func TestCheckRuntimeRequiresCompleteHealthyDoctorReport(t *testing.T) {
 	inspector, request := healthyDoctorFixture(t)
 	doctor := SystemDoctor{inspector: inspector}
 	expectation, err := doctor.CheckRuntime(context.Background(), request)
 	if err != nil {
-		t.Fatalf("CheckRuntime() error = %v", err)
-	}
-	if expectation.Manifest.Version != ManifestVersion || expectation.ScreenPath != ScreenPath || expectation.SoftnetBinDir != filepath.Dir(QualifiedSoftnetPath) {
-		t.Fatalf("CheckRuntime() expectation = %#v, want public facts", expectation)
-	}
-	admission, err := doctor.AdmitRuntime(context.Background(), request)
-	if err != nil || !admission.Screen.ValidForRuntime() || !reflect.DeepEqual(admission.RuntimeExpectation, expectation) {
-		t.Fatalf("AdmitRuntime() admission/error = %#v/%v, want matching opaque admission", admission, err)
-	}
-	inspector.paths[ScreenPath] = PathFact{}
-	if _, err := doctor.CheckRuntime(context.Background(), request); err == nil {
-		t.Fatal("CheckRuntime() admitted a doctor report with a Screen finding")
-	}
-}
-
-func TestScreenAdmissionPublicSurfaceHasNoCallerFactMintingAPI(t *testing.T) {
-	_, testFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller() failed")
-	}
-	files, err := filepath.Glob(filepath.Join(filepath.Dir(testFile), "*.go"))
-	if err != nil {
 		t.Fatal(err)
 	}
-	fset := token.NewFileSet()
-	for _, path := range files {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, declaration := range file.Decls {
-			function, ok := declaration.(*ast.FuncDecl)
-			if !ok || !ast.IsExported(function.Name.Name) {
-				continue
-			}
-			if returnsNamedType(function.Type.Results, "ScreenAdmission") {
-				t.Fatalf("exported %s can mint ScreenAdmission", function.Name.Name)
-			}
-			if returnsNamedType(function.Type.Results, "RuntimeAdmission") && (function.Recv == nil || function.Name.Name != "AdmitRuntime" || !fieldListNamesType(function.Recv, "SystemDoctor")) {
-				t.Fatalf("exported %s can mint RuntimeAdmission outside SystemDoctor.AdmitRuntime", function.Name.Name)
-			}
-		}
+	if expectation.Manifest.Version != ManifestVersion || expectation.SoftnetBinDir != filepath.Dir(QualifiedSoftnetPath) {
+		t.Fatalf("CheckRuntime() expectation = %#v, want inspected toolchain facts", expectation)
 	}
-}
-
-func currentScreenForTest(ctx context.Context, inspector DoctorInspector) (ScreenAdmission, error) {
-	result := inspectCurrentScreen(ctx, inspector)
-	return result.admission, result.err
+	if containsString(inspector.commands, commandKey(request.TartPath, "--version")) {
+		t.Fatalf("doctor executed configured Tart: %v", inspector.commands)
+	}
+	inspector.paths[QualifiedSoftnetPath] = PathFact{}
+	if _, err := doctor.CheckRuntime(context.Background(), request); err == nil {
+		t.Fatal("CheckRuntime() admitted a doctor report with a Softnet finding")
+	}
 }
 
 func TestDoctorTartAdmissionRequiresExactSafeExecutableMetadata(t *testing.T) {
@@ -553,25 +405,6 @@ func hasFindingPrefix(report Report, prefix string) bool {
 	return false
 }
 
-func returnsNamedType(results *ast.FieldList, name string) bool {
-	return fieldListNamesType(results, name)
-}
-
-func fieldListNamesType(fields *ast.FieldList, name string) bool {
-	if fields == nil {
-		return false
-	}
-	found := false
-	ast.Inspect(fields, func(node ast.Node) bool {
-		identifier, ok := node.(*ast.Ident)
-		if ok && identifier.Name == name {
-			found = true
-		}
-		return !found
-	})
-	return found
-}
-
 func healthyDoctorFixture(t *testing.T) (*doctorInspectorFake, Request) {
 	t.Helper()
 	request := Request{ConfiguredStateRoots: []string{"/Users/wes/state/work"}, TartPath: "/opt/qualified/tart", TartHome: "/Users/wes/tart", SoftnetPath: "/opt/homebrew/Cellar/softnet/0.19.0/bin/softnet"}
@@ -598,7 +431,6 @@ func healthyDoctorFixture(t *testing.T) (*doctorInspectorFake, Request) {
 	paths[request.TartHome] = PathFact{Exists: true, Directory: true, Mode: 0o700, UID: 501, GID: 20, Links: 1}
 	paths["/usr/bin/ssh"] = PathFact{Exists: true, Regular: true, Mode: 0o755, UID: 0, GID: 0, Links: 1}
 	paths["/usr/bin/ssh-keygen"] = PathFact{Exists: true, Regular: true, Mode: 0o755, UID: 0, GID: 0, Links: 1}
-	paths[ScreenPath] = PathFact{Exists: true, Regular: true, Mode: 0o755, UID: 0, GID: 0, Links: 1, SHA256: ScreenExecutableSHA256}
 	return &doctorInspectorFake{
 		platform:        PlatformFact{OS: QualifiedPlatform, Arch: QualifiedArch, Release: QualifiedMacOS, Build: QualifiedMacOSBuild},
 		paths:           paths,
@@ -607,7 +439,6 @@ func healthyDoctorFixture(t *testing.T) (*doctorInspectorFake, Request) {
 		effectiveGroups: []int{group.ID},
 		outputs: map[string]string{
 			commandKey(request.TartPath, "--version"): TartVersion,
-			commandKey(ScreenPath, "--version"):       ScreenVersionOutput,
 		},
 		failures:        map[string]error{},
 		commandFailures: map[string]error{},

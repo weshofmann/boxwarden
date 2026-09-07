@@ -391,7 +391,7 @@ func (o *runtimeFixture) Start(_ context.Context, r LaunchRequest) error {
 	return nil
 }
 func (o *runtimeFixture) Snapshot() Snapshot {
-	return Snapshot{Binding: o.binding, BackendRunning: true, BrokerHealthy: true, ScreenHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true}
+	return Snapshot{Binding: o.binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true}
 }
 func (o *runtimeFixture) Stop(context.Context) error {
 	o.stops.Add(1)

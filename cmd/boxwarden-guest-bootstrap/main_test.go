@@ -33,7 +33,7 @@ func (w *secondWriteError) Write(data []byte) (int, error) {
 }
 
 // This fails if helper success is reported after the serial response could not
-// reach the host broker.
+// reach the host serial parser.
 func TestMainPropagatesOutputFailure(t *testing.T) {
 	bootstrapper, input := managementFixture(t)
 	if err := run([]string{"management"}, input, errorWriter{}, &bytes.Buffer{}, bootstrapper); err == nil {
@@ -51,7 +51,7 @@ func TestMainPropagatesShortOutputFailure(t *testing.T) {
 }
 
 // This fails if a complete begin frame makes a failed end-frame write appear
-// successful to the serial broker.
+// successful to the serial parser.
 func TestMainPropagatesSecondSerialFrameWriteFailure(t *testing.T) {
 	bootstrapper, input := serialFixture(t)
 	writer := &secondWriteError{}

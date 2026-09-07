@@ -1,5 +1,11 @@
 # V3 attended host and domain initialization evidence
 
+> **Historical evidence scope:** Screen/relay/operator-console and related
+> process observations in this record describe the original attended harness,
+> not the current MVP contract. Amended ADR 017 supersedes that console for MVP
+> with one supervisor-owned bootstrap/drain PTY. These observations do not
+> qualify the new serial implementation or impose a Screen admission requirement.
+
 ## Result
 
 **HOST INIT, DOCTOR, DOMAIN INIT, AND UNSAFE-HOMEBREW INIT REFUSAL PASS;

@@ -1,8 +1,10 @@
 # Boxwarden v0.1 V1-V4 Implementation Plan
 
-> **Execution boundary:** V1 and V2 are completed historical slices. Implement
-> V3 and then V4 with TDD and their independent review gates. Stop after V4.
-> V5 and later are roadmap only and are not authorized by this plan.
+> **Historical plan.** V1–V3 history remains useful; its remaining V4 execution
+> instructions are superseded by the approved MVP A–H plan in
+> `2026-09-04-boxwarden-mvp-lifecycle.md` and amended ADR 017. Old Screen,
+> two-PTY, lease, challenge/HMAC, ownership-manifest, and persisted-process
+> requirements below are historical design, not current policy or qualification.
 
 **Goal:** Complete the smallest trustworthy path from a registered generic
 golden to a READY M1A workstation: explicit host-global and domain-specific

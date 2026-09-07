@@ -1,6 +1,13 @@
 # Supervisor Generation Ownership Design
 
-**Status:** Approved implementation refinement for MVP lifecycle Task 5.
+**Status: HISTORICAL / SUPERSEDED** by the approved 2026-09-07 MVP
+simplification, amended ADR 017, and the A–H plan in
+`docs/superpowers/plans/2026-09-04-boxwarden-mvp-lifecycle.md`.
+This document records the previous design; its manifest, persisted-process,
+authenticated-control, Screen/operator-PTY, and descriptor-attestation
+requirements are not current instructions. The supervisor-owned outer namespace
+and exclusively serial-owned new subtree remain, under the simpler current
+contracts.
 
 **Scope:** This design resolves the ownership cycle between the detached
 supervisor introduced by Task 4 and the `serialx` generation invariant

@@ -31,10 +31,10 @@ type LaunchRequest struct {
 	SessionRecordName string  `json:"session_record_name"`
 }
 type Snapshot struct {
-	Binding                                                                                            Binding `json:"binding"`
-	BackendRunning, BrokerHealthy, ScreenHealthy, PinPresent, CertificateCurrent, ProbeOK, ZoneMatches bool
-	ObservedAt                                                                                         time.Time `json:"observed_at"`
-	Diagnostic                                                                                         string    `json:"diagnostic"`
+	Binding                                                                             Binding `json:"binding"`
+	BackendRunning, SerialHealthy, PinPresent, CertificateCurrent, ProbeOK, ZoneMatches bool
+	ObservedAt                                                                          time.Time `json:"observed_at"`
+	Diagnostic                                                                          string    `json:"diagnostic"`
 }
 type Controller interface {
 	Snapshot(context.Context, Binding) (Snapshot, error)
@@ -152,5 +152,5 @@ func decodeExact(data []byte, value any) error {
 	return nil
 }
 func snapshotReady(s Snapshot) bool {
-	return s.BackendRunning && s.BrokerHealthy && s.ScreenHealthy && s.PinPresent && s.CertificateCurrent && s.ProbeOK && s.ZoneMatches
+	return s.BackendRunning && s.SerialHealthy && s.PinPresent && s.CertificateCurrent && s.ProbeOK && s.ZoneMatches
 }

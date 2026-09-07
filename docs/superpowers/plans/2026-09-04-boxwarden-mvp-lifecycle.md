@@ -1,354 +1,237 @@
 # Boxwarden MVP Lifecycle Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Execute serially on the single `weshofmann/feat/mvp-lifecycle` worktree; do not create sub-branches, stacked PRs, or modify PR #3/#4.
+Status: Slice A complete; Slices B–H pending. Stop after A for human inspection.
 
-**Goal:** Deliver one controlled, domain-scoped M1A workflow: `session create` → `session start` → concrete `READY` → reconciled `session status` → exact owned `session stop` → `session destroy --allow-data-loss`.
+## Goal and authority
 
-**Architecture:** Retain V2 creation and landed V3 host/domain foundation. Add the narrow backend launch/address/delete seam; a detached same-user supervisor is the only owner of Tart, the two-PTY serial broker, Screen, and runtime SSH credentials. A session service persists intent before every mutation; serial establishes binding and host-key pin before typed strict-SSH probe and time-zone convergence may produce READY. Status observes/challenges only.
+Deliver one controlled, domain-scoped M1A workflow:
+`create → start → READY → status → stop → destroy --allow-data-loss`.
 
-**Tech Stack:** Go (standard library first), Tart/Softnet on macOS, system GNU Screen, strict OpenSSH, `os.Root` state handling, deterministic fake backend, and a committed static Linux/arm64 guest-helper artifact.
+The approved 2026-09-07 threat-model simplification supersedes the old remaining
+Task 5–9 plan and same-UID ownership design. The accepted checkpoint
+`baeea7ed2991448c483593cf39d3e39d9420de8d` remains permanent history.
+Do not rewrite published history. Continue on
+`weshofmann/feat/mvp-lifecycle` and the existing Draft PR, with focused commits
+and review checkpoints. Smaller slices do not imply stacked branches or PRs.
+No merge without human approval.
 
-**Spec:** `/Users/wes/.codex/attachments/520988fe-e463-46dd-91d8-432c60568f4f/pasted-text.txt`; `docs/superpowers/specs/2026-09-06-boxwarden-supervisor-generation-ownership-design.md`; `docs/architecture.md`, `docs/state-model.md`, `docs/lifecycle-and-recovery.md`, `docs/operations/ssh-management.md`, ADRs 012/017/019, and `AGENTS.md`.
+The source approval is retained in the initiating task attachment; this plan,
+ADR 017, and the current architecture/security/state documents record the
+repository-facing decisions. Earlier implementation reports and abandoned
+Task 5/OFD work are not execution instructions.
 
-## Global Constraints
+## Architecture and invariants
 
-- Work from base `7d58540bc7cbda4e48bdaed5dff8309b7cf45b15` in the one branch/worktree: `weshofmann/feat/mvp-lifecycle` at `/private/tmp/boxwarden-mvp-lifecycle`.
-- The preserved refs `0045e205`, `2e711d617`, `75763d58`, and `6ca97e782` are read-only source material. Manually port cohesive code only; do not cherry-pick their branch-wide diffs or restore qualification machinery.
-- Keep the backend seam small. Common code owns domains, locks, state, readiness, credentials/pins, project-loss gate, and destructive policy; Tart owns VM mechanics only.
-- Start uses the admitted absolute Tart path, canonical configured Tart home, generation-private `TMPDIR`, and a closed environment. Its complete environment is `PATH=<qualified-softnet-digest-dir>`, `HOME=<admitted-home>`, `USER=<admitted-user>`, `LOGNAME=<admitted-user>`, `TART_HOME=<configured-home>`, `TMPDIR=<generation-dir>`, `LANG=C`, and `LC_ALL=C`. No shell, sudo, ambient proxy/telemetry/loader variables, clipboard, audio, share, bridge, host networking, port publication, or Softnet allow flag.
-- Serial is host-local inside the fixed supervisor-owned `<generation>/serial/` subtree: `serialx` creates that owner-private subtree itself, creates two exact `0600` PTY slaves, exposes only Tart's slave to Tart, and starts `/usr/bin/screen -D -m -S <session>` as a direct owned child holding the operator slave. Never pre-create or adopt `serial/`; never use a serial network service, socat, or Screen control/data paths for automation.
-- Bootstrap is serial-first and canonical. The generic golden receives only selected-domain public CA, durable binding, and derived principal. Generation/nonce are runtime correlation only. Pin fresh guest Ed25519 host key before issuing a certificate; no TOFU and no network bootstrap.
-- READY requires current authenticated supervisor ownership, exact running backend, healthy broker/Screen, exact pin, fresh literal address, current no-extension certificate, strict typed probe, and exact host/guest IANA-zone agreement. A record bit or Tart-running alone is non-ready.
-- Stop/destroy never trust a PID alone: each mutable action proves control challenge, manifest, process-start evidence, current generation, exact binding, and backend object. Unproven runtime is drift/no mutation.
-- Until project registry exists, destroy requires `--allow-data-loss`; without it, fail before state, runtime, or backend mutation. Never delete a golden or cross-domain object.
-- Controlled disposable guest development is not V4/hostile-guest qualification. Do not claim qualification.
+The host and cooperating Boxwarden host processes are trusted. Guest-originated
+data remains hostile. Common Go code owns domains, state, locks, readiness,
+trust, credentials, and destructive policy; the Tart adapter owns VM mechanics.
 
-## Preflight, archaeology, and dependency map
+- Durable identity is the exact domain/session UUID/backend object binding.
+  Persist intent and start generation under the session operation lock before
+  runtime mutation. Retrying must reconcile that same durable generation.
+- One lightweight detached supervisor holds an ordinary generation ownership
+  lock, retains the actual Tart handle in memory, and follows one stop/wait/reap
+  path. The private bounded typed Unix socket binds each request and response
+  to the exact domain/session/backend/generation.
+- The minimal persisted request contains only binding, runtime/configuration
+  locators, and canonical session-record name. It is an expected binding
+  record, not authority. Child composition reloads configured domain and durable
+  record and independently checks host/CA prerequisites before runtime creation.
+- The supervisor owns the generation namespace; `serialx` alone creates and
+  cleans a new `<generation>/serial/` subtree. It owns one PTY pair; Tart gets
+  only the mode-`0600` slave. One master pump owns the exclusive bounded
+  bootstrap exchange and permanently transitions to bounded discard/drain.
+- No Screen, operator endpoint, console lease, generalized console arbitration,
+  HMAC/control key, ownership manifest, persisted process authority, libproc
+  reconstruction, or retained-descriptor/OFD attestation is part of MVP.
+  Ordinary safe path/type/no-follow hygiene and exact retry validation remain.
+- Guest bootstrap uses a fixed command and exactly one canonical bounded JSON
+  line without waiting for PTY EOF. Validate nonce/generation/domain/session/
+  backend correlation, public CA/principal binding, sshd settings, and host key.
+  The CA private key remains host-only.
+- Guest trust publication is atomic absent-or-exact: publish a complete validated
+  tree only when absent, accept exact existing bytes/modes idempotently, and
+  reject every conflict without replacing active trust.
+- Pin the serial-observed fresh Ed25519 host key with no TOFU before certificate
+  SSH. Use one narrow generation client key, short no-extension certificates,
+  fixed strict SSH and fixed helper commands; no forwarding, agent, proxy,
+  ambient SSH configuration, or generic command execution.
+- Preserve the exact admitted Tart/Softnet pair and default containment mapping.
+  Use admitted absolute Tart, configured canonical Tart home, generation-private
+  TMPDIR, and the closed environment: `PATH=<qualified-softnet-digest-dir>`,
+  `HOME=<admitted-home>`, `USER=<admitted-user>`, `LOGNAME=<admitted-user>`,
+  `TART_HOME=<configured-home>`, `TMPDIR=<generation-dir>`, `LANG=C`, `LC_ALL=C`.
+  No sudo, host mounts, clipboard, audio, credential/runtime sockets, bridges,
+  host networking, port publication, or Softnet allow flags.
+- READY requires fresh exact-generation live evidence: running backend, healthy
+  serial drain, exact pin, current certificate, strict typed SSH probe, and exact
+  host/guest IANA-zone agreement. Status observes only.
+- Until project durability can be established, destroy requires explicit
+  `--allow-data-loss` before any mutation and targets only the exact session
+  object and state. Never a golden, prefix match, or other domain.
 
-| Source | Classification | Current/WIP target | Decision |
+## Existing foundations
+
+V2 stopped-clone creation and V3 explicit host/domain admission remain.
+The branch adds narrow backend launch/address/delete and owned-handle seams,
+guest bootstrap protocol/helper and atomic trust publication, strict SSH
+primitives, minimal supervisor, and single-PTY serial foundations.
+These independently tested pieces are not a composed operational lifecycle:
+`supervisor.RunRequest` explicitly fails until a concrete owner is supplied.
+
+The old source refs `0045e205`, `2e711d617`, `75763d58`, and
+`6ca97e782` remain historical source material only. The former generation
+ownership design is superseded by this plan and amended ADR 017. Do not import
+their old console or same-UID fortification machinery.
+
+## Vertical slices and estimates
+
+Estimates are additional production Go physical lines and bounded focused
+engineering effort, excluding tests, documentation, review, and external
+qualification delays. They are sizing guides, not acceptance gates. Each slice
+must preserve the full deterministic suite; G integrates coverage and does not
+defer testing from earlier slices.
+
+| Slice | Status | Production estimate | Focused effort |
 | --- | --- | --- | --- |
-| `0045e205` / `2e711d617`: `internal/backend/start.go`, `internal/backend/tart/{launch,address}.go`, `internal/timezonex/*` | ADAPT | new current-tree backend/tart/timezonex files | Preserve narrow contracts, exact argv/closed env, literal address, and zone convergence; recompose with current V3 admission. |
-| Same refs: fake start/address/owned handle | ADAPT | `internal/backend/fake/*` | Required deterministic lifecycle testing; preserve current V2 clone semantics. |
-| `75763d58`: guest helper, `internal/guestproto/*`, artifact/autoinstall | ADAPT | same new current-tree paths | Required immutable generic helper and binding protocol; regenerate artifact, never copy preserved binary. |
-| `6ca97e782`: `internal/serialx/*` | ADAPT | `internal/serialx/*` + Darwin PTY + supervisor | Retain bounded broker/wire model; checkpoint lacks native PTY and direct-child lifecycle. |
-| Branch-wide docs, qualification observer, historical evidence, stale V4 app/session edits | DROP | none | Not MVP product work; would overwrite landed V2/V3 policy. |
-| Console attach UI, project registry, profile/credential injection, private CIDR, checkpoints | DEFER | none | Valid later scope; not required for MVP lifecycle. Certificate renewal and the 30-second health probe remain required because READY evidence must not silently expire during an ordinary session. |
-
-| Gate | Command/evidence | Requirement |
-| --- | --- | --- |
-| Baseline | `git fetch origin`; `git rev-parse origin/main`; `git status --short --branch` | Remote main is exact base; one clean MVP worktree. |
-| Source refs | `git show -s --format='%H %s' 0045e205 2e711d617 75763d58 6ca97e782` | Exact archaeology refs above, read only. |
-| Baseline deterministic suite | `go test ./...`; `go test -race ./...`; `go vet ./...`; `go build ./cmd/boxwarden`; `bash guest/ubuntu-24.04-arm64/tests/bootstrap.sh` | Green before Task 1. |
-| V3 boundary | test `hostx.Report.Status == hostx.Healthy` and selected `sshx.CAStore.Check` | Start does not lazy-run host/domain initialization. |
-| Integration order | Tasks 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 | One implementation writer; reviews may overlap only with read-only preparation. The controller pushes each verified commit after its task review. |
-
-## Tasks
-
-### Task 1: Backend start/address/stop/delete contracts
-
-**Files:**
-- Create: `internal/backend/{start,delete}.go`, `internal/backend/{start,delete}_test.go`.
-- Create: `internal/backend/tart/{launch,address,delete,launch_test,address_test,delete_test,process_group_darwin,process_group_other}.go`.
-- Modify: `internal/backend/fake/{fake,fake_test}.go`.
-
-**Interfaces:**
-
-```go
-type StartRequest struct { ObjectID, SerialDevice, GenerationDirectory string }
-type Handle interface { Stop(context.Context) error; Wait(context.Context) error }
-type Starter interface { Start(context.Context, StartRequest) (Handle, error) }
-type AddressResolver interface { Resolve(context.Context, objectID string) (string, error) }
-type Deleter interface { Delete(context.Context, objectID string) error }
-type LaunchConfig struct {
-    TartPath, TartHome, SoftnetBinDir, OperatorHome, OperatorName string
-    ProcessStarter ProcessStarter
-}
-```
-
-`ValidateStartRequest` admits a valid object ID plus canonical absolute non-root serial/generation paths. `tart.Launcher.Start` builds exactly:
-
-```go
-[]string{"run", "--net-softnet", "--no-audio", "--no-clipboard",
-  "--serial-path", request.SerialDevice, request.ObjectID}
-```
-
-The direct child has a new process group. `Handle.Stop` sends graceful termination only to that exact group; `Wait` reaps it. `Resolve` uses bounded `tart ip --resolver=dhcp --wait=60 <object>` and returns exactly one literal IP. `Delete` executes only `tart delete <object>`. Launch, address, and delete use the configured absolute Tart path and canonical `TART_HOME`; none may fall back to ambient PATH or environment.
-
-- [ ] **RED:** Add `TestValidateStartRequestRejectsNonCanonicalPaths`, `TestLauncherUsesClosedQualifiedTartInvocation`, `TestLauncherRejectsAmbientOrUnqualifiedConfiguration`, `TestAddressResolverReturnsOneLiteralIP`, `TestOwnedHandleStopsOnlyItsProcessGroup`, and `TestDeleteUsesOneValidatedObjectID`. Use a recording process starter and assert full argv and full environment equality.
-- [ ] **Run RED:** `go test ./internal/backend ./internal/backend/tart -run 'Test(ValidateStartRequest|Launcher|AddressResolver|OwnedHandle|Delete)' -count=1`. Expected: missing start/delete types.
-- [ ] **GREEN:** Manually adapt preserved narrow code, deriving launch facts from current V3-admitted host facts, not old host-init code. Extend fake with recorded Start/Resolve/Delete and owned handles.
-- [ ] **Verify:** `go test ./internal/backend/... -count=1 && go test ./internal/architecture -count=1 && gofmt -w internal/backend`.
-- [ ] **Commit:** `git add docs/superpowers/plans/2026-09-04-boxwarden-mvp-lifecycle.md internal/backend && git commit -m "feat(backend): add exact owned Tart lifecycle seams" -m "Add closed-policy start, fresh address lookup, graceful owned stop, and exact deletion without widening the control-plane backend contract. Record the single-branch MVP execution plan derived from preserved V4 archaeology."`
-- [ ] **Controller publish checkpoint after clean task review:** `git push -u origin weshofmann/feat/mvp-lifecycle`, then create the single Draft PR to `main`. Later verified task commits use `git push`; implementer subagents never push.
-
-### Task 2: Generic guest helper and canonical serial protocol
-
-**Files:**
-- Create: `internal/guestproto/{protocol,bootstrap,rename_noreplace_linux,rename_noreplace_other}.go` and tests.
-- Create: `cmd/boxwarden-guest-bootstrap/{main,artifact_test}.go`.
-- Create: `guest/ubuntu-24.04-arm64/artifacts.lock.json`, `guest/ubuntu-24.04-arm64/artifacts/boxwarden-guest-bootstrap`.
-- Modify: `guest/ubuntu-24.04-arm64/autoinstall/user-data`, `guest/ubuntu-24.04-arm64/tests/bootstrap.sh`.
-- Modify: `scripts/spike/bootstrap-tart.sh` to map only the verified current-tree helper into the remastered ISO staging tree.
-
-**Interfaces:**
-
-```go
-type Association struct { Domain, SessionID, BackendKind, BackendObject string }
-type SerialRequest struct { Version int; Nonce, StartGeneration string; Association; CAPublicKey, CAFingerprint, Principal string }
-type SerialResult struct { Version int; StartGeneration string; Association; CAFingerprint, Principal string; InstalledSHA256, SSHD map[string]string; HostPublicKey string }
-func DecodeSerialRequest(io.Reader) (SerialRequest, error)
-func DecodeManagementRequest(io.Reader) (ManagementRequest, error)
-func EncodeSerialFrame(SerialRequest, SerialResult) (begin, end string, err error)
-```
-
-The helper exposes only `serial-bootstrap` and `management`. Canonical bounded JSON is carried in `BOXWARDEN-BEGIN <nonce> <session-id>` / `BOXWARDEN-END <nonce> <session-id> <base64-json>` frames. It atomically publishes only `/etc/ssh/boxwarden/active` with CA public key, derived principal, and durable binding; exact repeat is idempotent, conflict fails. It checks effective sshd and returns fresh Ed25519 public host key. Management accepts exactly existing typed `probe`, `apply_zone`, `read_zone`.
-
-- [ ] **RED:** `TestSerialRequestRejectsUnknownOrMismatchedFields`, `TestEncodeSerialFrameRoundTripsExactGenerationAndNonce`, `TestSerialFrameIsUnambiguousWithPTYCRLF`, `TestSerialBootstrapPublishesOnlyDurableBinding`, `TestSerialBootstrapRejectsUnexpectedActiveEntries`, `TestSerialBootstrapIsIdempotentAndRejectsConflictingBinding`, `TestManagementRejectsRemoteCommandSurface`, `TestMainPropagatesOutputFailure`, `TestCommittedGuestHelperMatchesLockAndStaticARM64Contract`, and an executable remaster-mapping test proving the locked helper is the installed input.
-- [ ] **Run RED:** `go test ./internal/guestproto ./cmd/boxwarden-guest-bootstrap -count=1`. Expected: missing packages.
-- [ ] **GREEN:** Adapt `c9a178e` plus required UUID correction `75763d58`, never the integer-generation state or preserved binary. Build twice with exactly `CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags=-buildid=`; compare bytes; update committed artifact, SHA-256 lock, remaster mapping, and autoinstall checksum/install to root-owned `0755` `/usr/local/libexec/boxwarden-guest-bootstrap`. Every helper write is checked; exact active-tree validation rejects unexpected entries; PTY CRLF is normalized only at the frame-line boundary and never inside decoded JSON.
-- [ ] **Verify:** `go test ./internal/guestproto ./cmd/boxwarden-guest-bootstrap -count=1 && bash guest/ubuntu-24.04-arm64/tests/bootstrap.sh`.
-- [ ] **Commit:** `git add docs/superpowers/plans/2026-09-04-boxwarden-mvp-lifecycle.md internal/guestproto cmd/boxwarden-guest-bootstrap guest/ubuntu-24.04-arm64 scripts/spike/bootstrap-tart.sh && git commit -m "feat(guest): add generic serial bootstrap helper" -m "Install a reproducible static arm64 helper that atomically binds one clone to selected public trust without a network bootstrap path."`
-
-### Task 3: Bounded two-PTY, Screen, and serial exchange
-
-**Files:**
-- Create: `internal/serialx/{broker,exchange,lease,screen,clock,pty_darwin,pty_other,runtime}.go` and tests.
-- Modify: `internal/hostx/{doctor,doctor_test}.go` only to expose/check the already-admitted exact Screen fact.
-
-**Interfaces:**
-
-```go
-type Runtime struct { TartSlave, OperatorSlave string; TartMaster, OperatorMaster *os.File; ScreenEvidence ScreenEvidence }
-func (hostx.SystemDoctor) CurrentScreen(context.Context) (hostx.ScreenAdmission, error)
-func CreateRuntime(context.Context, Root, Generation, hostx.ScreenAdmission) (Runtime, error)
-func (Runtime) CheckScreen(context.Context) error
-func (Runtime) WatchScreen(*Broker)
-func (Runtime) Shutdown(context.Context) error
-type BrokerConfig struct { Tart, Screen io.WriteCloser; Generation string; Clock Clock }
-func NewBroker(BrokerConfig) *Broker
-func (b *Broker) Exchange(context.Context, ExchangeRequest) (json.RawMessage, error)
-func (b *Broker) AcquireConsole(context.Context) (Lease, error)
-```
-
-`hostx.SystemDoctor.CurrentScreen` is the sole public admission-minting path. Create one private serial runtime directory, two Darwin PTY pairs, exact private endpoint links, and direct `/usr/bin/screen -D -m -S <derived-name>` with the already-open operator slave as stdin. `serialx` alone owns the direct `exec.Cmd`, captures its kernel PID/birth identity immediately after Start, and retains wait/reap state; no caller supplies a starter, child, PID, or birth evidence. Runtime exposes only read-only evidence/check/watch and owned shutdown for the next supervisor task. Root safety is bound to the exact pre-open identity cross-checked against its opened descriptor; serial-subtree creation does the same before any endpoint mutation. Supervisor-owned readers pass Tart-master output to broker and operator-master input only to `OperatorInput`. The broker has exactly idle/console/automation/failed states; fixed queue, line, frame, aggregate and deadline bounds; operator data outside console is counted/discarded; overflow, interleaving, timeout, child loss, observer error, or identity mismatch poisons the generation.
-
-The Task 3 cleanup contract relies on the trusted host, not the guest, for its
-namespace boundary: guest root has no path to the owner-private generation.
-Retained endpoint handles and rooted identity checks reject a replacement that
-is present when cleanup validates it, including same-target inode reuse. They
-cannot make Darwin/Linux pathname unlink compare the expected inode. Tasks 4-8
-must therefore preserve exclusive per-session/generation lifetime ownership
-through endpoint and generation/rollback cleanup; no cooperating Boxwarden
-operation may hot-replace those names while an owner cleans them. MVP completion
-does not claim preservation against a malicious or actively racing trusted-host
-same-UID process.
-
-- [ ] **RED:** `TestCreateRuntimeRejectsExistingOrUnsafeGenerationPath`, `TestCreateRuntimeUsesTwoOwnerOnlyPTYSlavesAndFixedScreenSpec`, `TestBrokerDiscardsOperatorInputOutsideConsole`, `TestExchangeAcceptsOnlyOneCanonicalAssociatedFrame`, `TestExchangePoisonsOnOverflowInterleavingAndTimeout`, `TestConsoleEOFDoesNotCloseScreenOrTartEndpoint`. Fakes cover platform-independent behavior; Darwin allocation gets a Darwin-tagged integration test.
-- [ ] **Run RED:** `go test ./internal/serialx -count=1`. Expected: missing package.
-- [ ] **GREEN:** Adapt `6ca97e782`, implement missing Darwin allocator and exact cleanup. The broker consumes Task 2 `DecodeSerialEndLine` so PTY CR normalization is limited to one frame-line boundary before strict correlation validation. Use fixed 128 KiB physical-line and frame bounds: Task 2 permits a 64 KiB decoded result, whose canonical base64 end frame cannot fit the preserved 8 KiB line bound. No socat, generic broker protocol, or Screen hardcopy/log/stuff/paste/control.
-- [ ] **Verify:** `go test ./internal/serialx -count=1 && go test -race ./internal/serialx -count=1 && go test ./internal/hostx -run 'TestDoctor.*Screen' -count=1`.
-- [ ] **Commit:** `git add internal/serialx internal/hostx && git commit -m "feat(serial): add bounded owned PTY and Screen transport" -m "Port canonical bootstrap framing into a two-PTY runtime whose fixed bounds and direct-child ownership fail closed on ambiguity."`
-
-### Task 4: Detached authenticated supervisor
-
-**Files:**
-- Create: `internal/supervisor/{supervisor,control,manifest,runtime,process_darwin,process_other}.go` and tests.
-- Modify: `cmd/boxwarden/main.go`, `internal/backend/fake/{fake,fake_test}.go`.
-
-**Interfaces:**
-
-```go
-type Binding struct { Domain, SessionID, BackendKind, BackendObject, Generation string }
-type Snapshot struct { Binding Binding; BackendRunning, BrokerHealthy, ScreenHealthy, PinPresent, CertificateCurrent, ProbeOK, ZoneMatches bool; ObservedAt time.Time; Diagnostic string }
-type Controller interface { Snapshot(context.Context, Binding) (Snapshot, error); Stop(context.Context, Binding) error }
-type LaunchRequest struct { Binding Binding; RuntimeDirectory, HostConfigPath string }
-type Launcher interface { Launch(context.Context, LaunchRequest) error }
-```
-
-Start writes an owner-only immutable supervisor request in its fresh runtime directory, starts fixed `boxwarden internal session-supervisor <request-path>`, and waits only for authenticated starting/ready response. Supervisor does not exec-replace: it owns Tart handle, PTYs, broker, Screen, readers, client key/cert, and a `0600` Unix socket. Its manifest records binding, an owner-private random control key, supervisor PID plus Darwin process-start evidence, endpoint file identities, direct child evidence, and poison state. Each request uses fresh challenge + HMAC over canonical bytes; client validates socket/manifest ownership, process-start evidence, and binding. PID reuse, stale socket, wrong key, missing child, stale snapshot = no ownership.
-
-Task 4 establishes the long-lived exclusive generation owner, and Tasks 5-8
-must serialize retries, readiness failures, stop, and destroy with that owner
-until serial and outer-namespace rollback/cleanup completes. The detached child
-owns live runtime capabilities and may remove outer artifacts after its
-supervised runtime and serial subtree are conclusively terminated, immediately
-before the child exits; it never claims to reap itself. On failed launch before
-detachment, the controller/parent retains, stops, and reaps the exact child
-before removing the outer namespace. Both roles belong to the supervisor
-subsystem. This is a
-trusted-host cooperative-lifetime requirement, not a pathname-unlink primitive:
-the recorded identity checks detect pre-validation replacement but cannot close
-an active same-UID mutation between validation and unlink.
-
-- [ ] **RED:** `TestSupervisorLaunchPersistsNoBarePIDOwnership`, `TestControlRejectsWrongBindingChallengeOrMAC`, `TestControllerRejectsPIDReuseAndStaleManifest`, `TestSupervisorReapsDirectChildrenOnBackendExit`, `TestSnapshotIsBoundedAndCannotReportReadyAfterBrokerPoison`.
-- [ ] **Run RED:** `go test ./internal/supervisor -count=1`. Expected: missing package.
-- [ ] **GREEN:** Implement fixed internal parser plus injected process/clock/socket seams. On exit/poison, close socket/readers, stop/reap only exact handle, remove only proven runtime tree; never scan or signal by process name/PID.
-- [ ] **Verify:** `go test ./internal/supervisor -count=1 && go test -race ./internal/supervisor -count=1 && go test ./cmd/boxwarden -count=1`.
-- [ ] **Commit:** `git add internal/supervisor internal/backend/fake cmd/boxwarden && git commit -m "feat(supervisor): own lifecycle runtime through authenticated control" -m "Make mutable running-session actions prove recorded generation and direct-child ownership rather than trusting a bare PID."`
-
-### Task 5A: Close Task 4 control/reaper prerequisites
-
-Before composing a concrete runtime owner, close the two load-bearing findings
-carried by the Task 4 five-round review breaker. This is a supervisor-only TDD
-slice; the exact behavioral brief and evidence contract are in
-`.superpowers/sdd/2026-09-04-boxwarden-mvp-lifecycle/task-5a-supervisor-prerequisite.md`.
-
-- [ ] **RED:** Add a real delayed-dial regression proving pre-accept time does
-  not consume the valid post-connect stop window. Add deterministic repeated
-  owner and detached-child reaper tests with completion and cancellation both
-  ready, proving observable completion wins the tie and the terminal result is
-  returned once.
-- [ ] **GREEN:** Bound Unix dialing separately, then start a fresh action budget
-  after connection. Centralize a completion-preferred reaper await pattern with
-  a completion precheck and a final recheck after the deadline branch.
-- [ ] **Verify:** Run the focused tests in an environment that permits the
-  owner-private Unix socket, then supervisor/cmd repetition, race, repository
-  test/race/vet, and native cgo/native no-cgo/Linux arm64 builds. Do not begin
-  runtime composition until an independent scoped review is clean.
-- [ ] **Commit:** one focused supervisor correction; no Task 5 runtime/session
-  composition in this commit.
-
-### Task 5: Start through serial trust, pin, strict SSH, and zone convergence
-
-**Files:**
-- Create: `internal/timezonex/{host,guest}.go` and tests; `internal/session/{start,runtime}.go` and tests; `internal/hostx/runtime_admission.go` and tests.
-- Modify: `internal/session/{record,record_test,store}.go`; `internal/sshx/{ca,cert,pin,client}.go` only to expose existing typed operations to supervisor; `internal/app/{app,app_test}.go`; `cmd/boxwarden/{main,main_test}.go`.
-
-**Interfaces:**
-
-```go
-type RuntimeAdmission struct { Manifest hostx.Manifest; ScreenPath, ScreenSHA256, ScreenVersion, SoftnetBinDir string }
-type RuntimeChecker interface { CheckRuntime(context.Context, hostx.Request) (RuntimeAdmission, error) }
-type SupervisorControl interface {
-    StartExact(context.Context, supervisor.LaunchRequest) (supervisor.Snapshot, error)
-    Snapshot(context.Context, supervisor.Binding) (supervisor.Snapshot, error)
-    Stop(context.Context, supervisor.Binding) error
-}
-type ClientKeyCreator interface { Create(context.Context, sshx.ClientKeyRequest) (sshx.ClientKey, error) }
-type StartDependencies struct { Observer backend.Observer; Host RuntimeChecker; CA CAValidator; Supervisor SupervisorControl; RuntimeRoot string; NewGeneration func() (string, error) }
-func (s *Service) Start(context.Context, string) (Record, error)
-func DetectHost() (string, error)
-func Converge(context.Context, ZoneClient, sshx.Connection, string) error
-```
-
-Start acquires the per-session lock, validates only selected-domain V3 host/CA prerequisites, loads exact record/object, persists `StateStarting` + fresh UUID generation + `ReadinessStarting` before launch. `CheckRuntime` reuses doctor-equivalent inspection and returns the exact validated manifest/Screen/Softnet facts rather than duplicating path trust in session code. Start supplies the focused supervisor control with the exact canonical outer path and an expected-contract request containing the binding, canonical session-record name, and non-secret host/CA admission facts. It supplies no private key, control key, open descriptor, process handle, or preconstructed runtime capability.
-
-The supervisor subsystem atomically publishes a first-launch outer namespace containing its exact immutable request. On retry it admits only a canonical, owner-private, non-symlinked generation whose request, fixed entry set, optional live manifest/control authentication, and durable `starting`/`running` record all prove the same domain/session UUID/backend/generation. Empty, request-less, foreign, malformed, unexpectedly populated, or unauthenticated-live state is drift and is never adopted. A retry retains the exact persisted generation rather than allocating another.
-
-After claiming the generation lock, the detached child reloads the configured domain and durable session record by canonical name; compares the exact UUID/backend/generation binding; reruns host admission; reruns configured-domain CA admission without weakening its duplicate/partial-state checks; and compares the resulting public facts with the request. Only after all authoritative checks pass does it construct its backend, serial, SSH, and health capabilities. It calls `serialx.CreateRuntime(ctx, outerGeneration, "serial", screenAdmission)`, so `serialx` exclusively creates/adopts nothing outside its fixed subtree and supervisor endpoint evidence is bound to `<generation>/serial/...`.
-
-Supervisor exchanges exact serial request/result, validates nonce/generation/association/CA/principal/sshd/host key, admits pin, asks the narrow `sshx` client-key creator for one fixed generation-private Ed25519 management key, resolves a fresh literal address, issues the runtime certificate, probes strict SSH, and applies and reads back `DetectHost()`. The key creator owns fixed `/usr/bin/ssh-keygen` argv/environment, exact path/type/mode validation, and atomic publication; the supervisor receives no generic command-execution capability. Only a fresh healthy snapshot fsyncs `StateRunning` / `ReadinessReady`; failures remain non-ready or settle stopped only after exact owned serial cleanup, backend termination, supervisor outer cleanup, and stopped observation. Failed pre-detach launch cleanup additionally reaps the exact retained child before parent/controller namespace removal.
-
-The supervisor revalidates immutable CA metadata, renews the 15-minute no-extension certificate when five minutes remain, and runs a typed read-only probe every 30 seconds. It publishes only a bounded authenticated health snapshot. Evidence older than 90 seconds, an expired certificate, failed probe/challenge, poisoned broker, missing child, or zone mismatch is non-ready. Status consumes this evidence but never renews, probes, or repairs.
-
-- [ ] **RED:** `TestStartPersistsGenerationBeforeRuntimeMutation`, `TestSupervisorPublishesOnlyBoundGenerationNamespace`, `TestStartRejectsUnhealthyHostOrMissingSelectedDomainCA`, `TestStartDoesNotAdoptAlreadyRunningObject`, `TestStartRejectsEmptyForeignMalformedOrUnexpectedGenerationState`, `TestChildRevalidatesRequestAgainstConfigRecordHostAndCA`, `TestSerialRuntimeCreatesOnlyNestedSerialSubtree`, `TestStartPinsSerialHostKeyBeforeClientKeyCertificateAndSSH`, `TestClientKeyCreatorHasOnlyExactTypedSurface`, `TestStartRequiresExactZoneReadbackBeforeReady`, `TestStartRetryResumesOnlyExactLiveGeneration`, `TestStartFailureCleansOnlyProvenOwnedRuntimeAfterChildReap`.
-- [ ] **Run RED:** `go test ./internal/session ./internal/timezonex -run 'Test(Start|DetectHost|Converge)' -count=1`.
-- [ ] **GREEN:** Adapt preserved backend/timezone/guestproto code and implement the approved ownership refinement in `docs/superpowers/specs/2026-09-06-boxwarden-supervisor-generation-ownership-design.md`. Preserve record compatibility: starting/running require generation; stopped clears it. No IP in record/pin; no generic SSH command, lazy init, credential/profile injection, or repair.
-- [ ] **Verify:** `go test ./internal/session ./internal/timezonex ./internal/sshx -count=1 && go test -race ./internal/session ./internal/timezonex -count=1`.
-- [ ] **Commit:** `git add internal/session internal/timezonex internal/sshx internal/hostx internal/app cmd/boxwarden && git commit -m "feat(session): start owned sessions through serial readiness" -m "Persist a start generation before launch and require admitted host facts, serial trust, exact host-key pinning, strict SSH, and time-zone convergence before READY."`
-
-### Task 6: Read-only reconciled status
-
-**Files:**
-- Create: `internal/session/{status,status_test}.go`.
-- Modify: `internal/lifecycle/{reconcile,reconcile_test}.go`, `internal/app/{app,app_test}.go`, `cmd/boxwarden/main_test.go`.
-
-**Interfaces:**
-
-```go
-type Status struct { Record Record; Backend backend.Observation; Consistency lifecycle.Reconciliation; Snapshot supervisor.Snapshot; Ready bool; Diagnostic string }
-func (s *Service) Status(context.Context, string) (Status, error)
-```
-
-Stopped is true only with observed stopped. Running requires backend observation, host-zone detection, and fresh authenticated supervisor snapshot with all READY predicates. Otherwise print STARTING/STOPPING/DELETING/DRIFT/NON_READY. No status operation may issue certs, apply zone, bootstrap, stop, or mutate persisted state.
-
-- [ ] **RED:** `TestStatusReportsReadyOnlyForFreshAuthenticatedSnapshot`, `TestStatusDoesNotInferReadyFromRunningBackendOrRecord`, `TestStatusReportsDriftForUnprovenRuntime`, `TestStatusReportsZoneMismatchWithoutRepair`, `TestStatusIsReadOnly`.
-- [ ] **Run RED:** `go test ./internal/session ./internal/lifecycle ./internal/app -run 'TestStatus' -count=1`.
-- [ ] **GREEN:** Compose `session status <name>`; retain existing output fields and append `lifecycle: READY|STOPPED|STARTING|STOPPING|DELETING|DRIFT|NON_READY` plus bounded diagnostic.
-- [ ] **Verify/commit:** `go test ./internal/session ./internal/lifecycle ./internal/app ./cmd/boxwarden -count=1 && git add internal/session internal/lifecycle internal/app cmd/boxwarden && git commit -m "feat(session): report reconciled lifecycle readiness" -m "Expose READY only from fresh authenticated supervisor evidence while preserving read-only status and visible drift."`.
-
-### Task 7: Exact graceful stop
-
-**Files:**
-- Create: `internal/session/{stop,stop_test}.go`.
-- Modify: `internal/session/{record,record_test}.go`, `internal/app/{app,app_test}.go`, `cmd/boxwarden/main_test.go`.
-
-**Interface:**
-
-```go
-func (s *Service) Stop(context.Context, string) (Record, error)
-```
-
-Stop locks session, proves record/backend/supervisor binding, fsyncs `StateStopping` plus non-ready before authenticated control. Supervisor sends SIGINT only through the exact owned Tart handle and waits a fixed bound for that handle to reap. A wait timeout returns without SIGKILL, PID fallback, or other escalation; the record remains `StateStopping` and non-ready for later reconciliation. Service observes the exact object stopped before fsyncing `StateStopped` and clearing generation. Unproven runtime is drift/no signal.
-
-- [ ] **RED:** `TestStopPersistsStoppingBeforeControlRequest`, `TestStopRefusesBarePIDOrMismatchedGeneration`, `TestStopSignalsOnlyOwnedBackendGroup`, `TestStopWaitsForStoppedObservationBeforeClearingGeneration`, `TestStopTimeoutLeavesStoppingNonReadyWithoutEscalation`, `TestStopIsIdempotentForExactStoppedRecord`, `TestStopLeavesDriftUntouched`.
-- [ ] **Run RED:** `go test ./internal/session ./internal/app -run 'TestStop' -count=1`.
-- [ ] **GREEN:** Add fixed `session stop <name>` parser and reuse Task 4 controller/Task 1 handle; SIGINT plus bounded handle `Wait` is the only shutdown action. No escalation, process search, orphan adoption, signal flag, or PID fallback.
-- [ ] **Verify/commit:** `go test ./internal/session ./internal/app ./cmd/boxwarden -count=1 && go test -race ./internal/session ./internal/supervisor -count=1 && git add internal/session internal/app cmd/boxwarden && git commit -m "feat(session): stop only exact owned runtimes" -m "Require authenticated generation ownership before graceful bounded shutdown and settle stopped only after backend and runtime cleanup are observed."`.
-
-### Task 8: Explicit-loss-gated exact destroy
-
-**Files:**
-- Create: `internal/session/{destroy,destroy_test}.go`.
-- Modify: `internal/app/{app,app_test}.go`, `cmd/boxwarden/main_test.go`, `internal/session/{store,store_test}.go`, `internal/sshx/{pin,pin_test}.go`.
-
-**Interfaces:**
-
-```go
-type DestroyOptions struct { AllowDataLoss bool }
-func (s *Service) Destroy(context.Context, string, DestroyOptions) error
-```
-
-CLI is exactly `boxwarden --domain <D> session destroy --allow-data-loss <name>`. Absent/duplicate/unknown flags are parser errors. Without allow flag: no record write, supervisor control, backend mutation, or cleanup. With flag: lock, persist deleting, exact owned stop if needed, observe stopped, `Deleter.Delete(record.Backend.ObjectID)`, verify exact object absent, then remove only session runtime, the exact binding-bound pin through a new `PinStore.Remove`, and the exact record through a rooted `RemoveRecord` operation. Never resolve/delete golden or another session/domain.
-
-- [ ] **RED:** `TestDestroyRequiresExplicitAllowDataLossBeforeMutation`, `TestDestroyStopsExactOwnedRunningSessionThenDeletesItsObject`, `TestDestroyRefusesUnprovenRunningOwnership`, `TestDestroyNeverDeletesGoldenOrOtherDomainObject`, `TestDestroyRetryDoesNotBroadenTarget`, `TestDestroyRemovesOnlyExactSessionStateAfterBackendAbsence`.
-- [ ] **Run RED:** `go test ./internal/session ./internal/app -run 'TestDestroy' -count=1`.
-- [ ] **GREEN:** Reuse exact Stop; add no speculative project registry. Retried deletion re-reads exact record/object association; no name/prefix resolution.
-- [ ] **Verify/commit:** `go test ./internal/session ./internal/app ./cmd/boxwarden -count=1 && go test -race ./internal/session -count=1 && git add internal/session internal/sshx internal/app cmd/boxwarden && git commit -m "feat(session): destroy exact sessions with explicit loss override" -m "Keep deletion MVP-sized and fail closed on project durability until a registry can establish safer normal destroy."`.
-
-### Task 9: End-to-end verification, controlled attempt, and Draft PR update
-
-**Files:**
-- Modify: `internal/app/app_test.go`.
-- Modify only if implementation changes documented interface: `README.md`, `docs/lifecycle-and-recovery.md`.
-
-- [ ] **RED/GREEN CLI test:** Add `TestMVPLifecycleCreateStartReadyStatusStopDestroy` with deterministic fake backend/supervisor/SSH facts. Assert create stopped; start ready; status emits `lifecycle: READY`; stop stopped; destroy without override errors without mutation; destroy with override removes only selected record/object.
-- [ ] **Run deterministic release gate:**
-
-```sh
-gofmt -w cmd internal
-git diff --check
-go test ./...
-go test -race ./...
-go vet ./...
-go build ./cmd/boxwarden
-bash guest/ubuntu-24.04-arm64/tests/bootstrap.sh
-```
-
-Expected: all green and no generated runtime/credential/private-host data in `git status`.
-
-- [ ] **One controlled real-host lifecycle attempt only after green:** Preflight exact resolved argv/env, Tart home, domain/name/object, TMPDIR, serial modes/links, forbidden integrations, state transition, and cleanup association. With a known-good disposable golden and initialized selected domain:
-
-```sh
-boxwarden --config "$BW_CONFIG" doctor
-boxwarden --config "$BW_CONFIG" --domain "$BW_DOMAIN" domain init
-boxwarden --config "$BW_CONFIG" --domain "$BW_DOMAIN" session create mvpcheck
-boxwarden --config "$BW_CONFIG" --domain "$BW_DOMAIN" session start mvpcheck
-boxwarden --config "$BW_CONFIG" --domain "$BW_DOMAIN" session status mvpcheck
-boxwarden --config "$BW_CONFIG" --domain "$BW_DOMAIN" session stop mvpcheck
-boxwarden --config "$BW_CONFIG" --domain "$BW_DOMAIN" session destroy --allow-data-loss mvpcheck
-```
-
-Record only redacted product observations: exit status, lifecycle state, domain/session/backend object, and cleanup result. Stop if a hostile workload/adversarial probe, real credential, host share, or unproven destructive target would be required.
-
-- [ ] **Commit:** `git add README.md docs/lifecycle-and-recovery.md internal/app/app_test.go && git commit -m "test(session): verify MVP lifecycle composition" -m "Demonstrate the controlled create-to-destroy path with deterministic fakes and document implemented product behavior, not qualification claims."`. Omit paths with no actual change.
-- [ ] **Controller publish/update:** push the verified commit and update the single Draft PR with cumulative scope, deterministic results, redacted controlled result if run, `--allow-data-loss` limitation, no qualification claim, and deferred project registry/console-attach work. Before Ready: fetch actual base, `git diff --check`, review `git diff <actual-base>...HEAD`, wait for fresh green `verify`; never merge/auto-merge.
-
-## Acceptance Checklist
-
-- Deterministic test proves create → start → READY → status → stop → destroy and proves no mutation without `--allow-data-loss`.
-- V2 create retains durable intent, exact reserved clone identity, randomized MAC, stopped result, and retry safety.
-- Start enforces healthy host/selected-domain CA, admitted Tart/closed environment, serial-first binding/pin, strict SSH, and zone convergence.
-- Status is read-only and refuses READY from Tart/record alone.
-- Stop/delete require complete identity-bound ownership proof; no bare PID, process scan, or broad delete.
-- Any controlled disposable run is product evidence only; V4 qualification remains explicitly unclaimed.
+| A — Simplified trusted-host foundation | Complete | Net reduction measured at checkpoint | 3 focused implementation/review units |
+| B — Durable create/start/retry and exact VM launch | Pending | 300–550 lines | 1–2 days |
+| C — Boot and serial bootstrap composition | Pending | 180–350 lines | 1–2 days |
+| D — Strict SSH management and READY | Pending | 350–650 lines | 2–3 days |
+| E — Exact stop and explicit-loss destroy | Pending | 250–450 lines | 1–2 days |
+| F — CLI, read-only status, and output | Pending | 180–320 lines | 1–2 days |
+| G — Deterministic integration validation | Pending | 0–100 corrective lines | 1 day |
+| H — Controlled-host qualification and release evidence | Pending | 0–150 corrective lines | 1–2 days plus attended qualification availability |
+
+### A — Simplified trusted-host foundation
+
+- [x] Replace supervisor same-UID fortification with minimal exact binding,
+  ordinary generation lock, typed private control, and retained runtime handles.
+- [x] Replace two-PTY/Screen arbitration with one exclusive bootstrap/drain PTY;
+  serial request decoding consumes one canonical bounded line without EOF.
+- [x] Preserve strict guest correlation, atomic absent-or-exact publication,
+  host-only CA private key, no-TOFU SSH, and unchanged containment.
+- [x] Remove current Screen admission/readiness and stale ownership contracts;
+  amend ADR 017 and related documents in place.
+- [x] Complete deterministic verification and measure production/branch text LOC.
+
+Acceptance: materially smaller architecture, retained supported behavior,
+explicit refusal for unavailable composition, and measured reduction.
+This slice performs no Tart/Softnet/VM runtime work. Stop for human inspection
+before B; a green foundation alone does not authorize beginning B.
+
+### B — Durable create/start/retry and exact VM launch
+
+Compose `internal/session → internal/supervisor → internal/backend/tart`.
+Retain V2's intent-first stopped creation. Implement child authoritative reload,
+exact record/config/backend comparison, current host/CA admission, and actual
+retained Tart handle ownership. Split successful process launch from READY:
+`session start <name>` must launch the exact disposable VM and report starting
+while management evidence is incomplete.
+
+Retry reconnects to a matching live generation or relaunches only a valid
+exact stopped generation. Reject foreign/malformed/symlinked/unexpected runtime
+state and preserve durable intent on partial failure. Never adopt an unowned
+running object or infer ownership from a PID.
+
+Acceptance: deterministic persistence/retry/failure tests and a bounded
+controlled real-host exact-start check. Verify actual launch as soon as this
+boundary exists; do not wait for READY. The check must use the one-PTY ownership
+foundation needed by the backend, without adding C's bootstrap composition.
+
+### C — Boot and serial bootstrap composition
+
+Connect the retained Tart launch to the `serialx` pump and
+`guestproto` helper. Compose exclusive bootstrap, exact host-key/public trust
+validation, atomic absent-or-exact guest publication, and permanent drain.
+The one-line decoder and pump exist from A; C connects them to a real VM.
+Bootstrap errors keep the generation non-ready and preserve an exact cleanup
+or retry path without adopting stale serial state.
+
+Acceptance: deterministic composition/failure cases plus one controlled
+real-VM bootstrap check using a corrected generic guest image. Record public,
+redacted binding outcomes only. No generic console or host integration.
+
+### D — Strict SSH management and READY
+
+Pin the serial-observed key, create the narrow generation Ed25519 client key,
+issue the short no-extension certificate, resolve a fresh literal guest address,
+and invoke the fixed management helper over strict SSH. Apply/read back the
+trusted host's validated current IANA zone. Publish READY only after all live
+predicates hold. The supervisor owns CA revalidation, certificate renewal
+(15-minute lifetime, renew at five minutes remaining), and the read-only probe
+every 30 seconds. Evidence older than 90 seconds is non-ready.
+
+Acceptance: deterministic no-TOFU/ordering/expiry/zone/error tests and a
+controlled strict SSH management probe through READY. An IP address is a
+locator, never identity. Status must not mint, probe, renew, apply, or repair.
+
+### E — Exact stop and explicit-loss destroy
+
+Persist stopping/deleting under the operation lock. Stop only the exact current
+generation through typed control and the supervisor's retained Tart handle;
+wait/reap once, retain ownership until termination, and observe backend stopped
+before clearing generation. Timeout leaves non-ready durable intent; no PID
+fallback, signal escalation, process search, or ambiguous cleanup.
+
+Destroy refuses without `--allow-data-loss` before mutation. With it, perform
+exact owned stop if needed, delete only the record's backend object, observe
+absence, then remove only exact bound runtime/pin/session state. Retry never
+broadens the target.
+
+Acceptance: deterministic cancellation/idempotence/wrong-generation/loss-gate
+tests and bounded controlled stop/destroy checks on the exact disposable object.
+
+### F — CLI, read-only status, and output
+
+Complete `internal/app` and `cmd/boxwarden` wiring across all lifecycle actions.
+Status combines record, backend, exact supervisor snapshot, and current host
+zone, preserving read-only behavior. Report READY only from live complete
+evidence; distinguish STOPPED, STARTING, STOPPING, DELETING, DRIFT, and NON_READY.
+Bound diagnostics and avoid guest-controlled terminal sequences, private
+material, or misleading successful output on partial failure.
+
+Acceptance: CLI parsing/output/exit-code tests and controlled status observation
+at the available lifecycle boundaries. Earlier B–E slices wire their own
+minimum action surface; F completes consistent output and read-only reporting.
+
+### G — Deterministic integration validation
+
+Exercise create → start → READY → status → stop → destroy with real local
+components and fake external VM/SSH boundaries. Cover interruption, exact retry,
+stale health, corrupted/foreign namespace, partial bootstrap/trust conflict,
+stop timeout, and destroy refusal without mutation. Keep tests behavioral.
+
+Run the CI `verify` equivalent: tracked shell syntax, gofmt, `go test ./...`,
+`go test -race ./...`, `go vet ./...`, `go build ./cmd/boxwarden`, and
+`git diff --check`. Use targeted cross-builds where platform code changes.
+No live Tart/Softnet/VM/provider/host qualification runs in hosted CI.
+
+### H — Controlled-host qualification and release evidence
+
+After green deterministic verification, repeat the full controlled lifecycle
+against one exact disposable VM and corrected generic guest artifact. Reuse
+the early B–F product checks, record redacted outcomes and cleanup, and resolve
+composition failures with focused verified corrections.
+
+Product development checks are not formal qualification. Track separately the
+attended V2 artifact/clone gate, ADR 024 Softnet runtime gate, and amended
+ADR 017 one-PTY qualification. Do not transfer old Screen recovery-console
+evidence to the new implementation or claim unsupported IPv6 environments.
+No hostile workload, intentional compromise, escape testing, credential-store
+probing, real secrets, or hostile/raw network fuzzing is authorized.
+
+Update the single Draft PR with cumulative scope, exact verification/evidence,
+remaining gates, and loss-override limitations. Review the cumulative diff
+against its actual base and require fresh green CI before Ready. Formal
+release/qualification claims require their own completed evidence; no merge or
+auto-merge by an agent.
+
+## Checkpoint measurement
+
+At the Slice A stop point report exact HEAD, production Go physical LOC before
+and after simplification (excluding tests and isolated qualification code),
+deleted/materially simplified files, and exact text additions/deletions versus
+`7d58540bc7cbda4e48bdaed5dff8309b7cf45b15`. Record deterministic test/race/vet/
+build results, guest-security preservation, remaining estimates, and any
+architecture blocker. Do not start B until the human inspects this checkpoint.

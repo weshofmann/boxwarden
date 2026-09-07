@@ -171,11 +171,11 @@ if [[ -f "${user_data}" ]]; then
   require_absent "'boxwarden-task0' > /target/etc/ssh" "${user_data}" \
     "autoinstall retains a fixed management SSH principal"
   grep -Fq 'serial-getty@hvc0.service.d/10-boxwarden-autologin.conf' "${user_data}" || \
-    fail "autoinstall does not configure the qualified Tart hvc0 recovery console"
+    fail "autoinstall does not configure the Tart hvc0 bootstrap getty"
   grep -Fq -- '--autologin boxwarden' "${user_data}" || \
-    fail "autoinstall serial recovery console does not automatically log in the workstation account"
+    fail "autoinstall serial bootstrap getty does not automatically log in the workstation account"
   grep -Fq 'systemctl enable serial-getty@hvc0.service' "${user_data}" || \
-    fail "autoinstall does not enable the serial recovery getty"
+    fail "autoinstall does not enable the serial bootstrap getty"
   grep -Fq 'idle-delay=uint32 0' "${user_data}" || \
     fail "autoinstall does not disable GNOME idle blanking"
   grep -Fq 'idle-activation-enabled=false' "${user_data}" || \
@@ -302,6 +302,9 @@ EOF
     "candidate launch uses physical host bridging instead of shared NAT"
   require_absent '--net-host' "${repo_root}/scripts/spike/bootstrap-tart.sh" \
     "candidate launch uses host networking instead of shared NAT"
+  # Historical Task 0 console/host-tree harness checks, not MVP dependencies.
+  # Opt in separately to reproduce the superseded socat/Screen topology.
+  if [[ "${BW_RUN_HISTORICAL_SERIAL_TESTS:-0}" == 1 ]]; then
   require_absent '    --serial \' "${repo_root}/scripts/spike/bootstrap-tart.sh" \
     "candidate launch still relies on Tart's unreadable one-shot host PTY"
   grep -Fq 'require_command socat' "${repo_root}/scripts/spike/bootstrap-tart.sh" || \
@@ -473,6 +476,8 @@ EOF
     fail "socat is required for the Task 0 managed serial-relay test"
   fi
 
+  fi
+
   cat >"${test_tmp}/grub.cfg" <<'EOF'
 menuentry "Try or Install Ubuntu" {
 	linux	/casper/vmlinuz  --- quiet splash console=tty0
@@ -494,7 +499,7 @@ if [[ -f "${repo_root}/scripts/spike/finalize-clone.sh" ]]; then
   require_executable "${repo_root}/scripts/spike/finalize-clone.sh"
   require_absent 'systemctl mask "serial-getty@${serial_device}.service"' \
     "${repo_root}/scripts/spike/finalize-clone.sh" \
-    "clone finalization disables the approved host-local recovery shell"
+    "clone finalization disables the host-local bootstrap getty"
 fi
 
 if [[ -f "${evidence_file}" ]]; then

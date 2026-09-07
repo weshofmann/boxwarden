@@ -9,7 +9,7 @@ Claims in this document draw on evidence from several source scopes:
   intended for `main`.
 - **Historical qualification evidence on `main`:** Task 0 and independent architecture
   review evidence committed to `main`.
-- **Future design:** normative V4 supervisor/broker and lifecycle design that is
+- **Future design:** accepted MVP supervisor/serial and lifecycle design that is
   not current operational behavior and still requires implementation and
   qualification.
 - **Pending:** the required evidence does not yet exist in any branch.
@@ -120,7 +120,7 @@ those properties can be claimed as qualified for the new version.
 | Host OS | Apple Silicon (arm64), macOS 26.6.2 build 25G83 |
 | VM backend | Tart 2.32.1; executable SHA-256 `05b65d5c14e8b41e8e44b6d9fd1278de4bedbc8b735d9b99f3c748f76f75862d`; archive SHA-256 `8554ab4f7fc12afe52f9b7e3093a935673cbac737a83973d2db7a0683c814529` |
 | Network shim | Softnet 0.19.0; executable SHA-256 `ab333619fc8bd7277837545e49a771baa994c01c3e8c14904ae4cc4c1f37269e`; archive SHA-256 `1612e1296834aae0b6389650c7c5190add1ee8d71474e328691e67679ecda53c` |
-| Serial holder | GNU Screen 4.00.03 (FAU, 23-Oct-06); SHA-256 `07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add` |
+| Historical Task 0 serial holder (superseded for MVP) | GNU Screen 4.00.03 (FAU, 23-Oct-06); SHA-256 `07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add` |
 | Guest OS | Ubuntu 24.04.4 Desktop ARM64; ISO SHA-256 `c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe` |
 
 Tart and Softnet are qualified as one pair. A change to either requires
@@ -133,7 +133,7 @@ to the pair.
 management SSH path, and serial recovery. Three network environments remain
 `NOT YET PROVEN` (`ipv6_only_upstream`, `ipv4_only_destination`,
 `ipv6_only_destination`). Task 0 used a foreground harness, not the V4
-supervisor; properties it observed must be requalified if the V4 broker changes
+supervisor; properties it observed must be requalified if the MVP serial implementation changes
 the relevant execution path.
 
 Evidence: [`docs/evidence/m1a-task0-final-summary.md`](evidence/m1a-task0-final-summary.md)
@@ -168,10 +168,12 @@ Evidence: [`docs/reviews/2026-08-30-independent-architecture-review.md`](reviews
   from the corrected generic guest definition (no embedded domain CA). An
   unchanged Task 0 artifact built under the domain-bound design is not
   grandfathered.
-- **ADR 017 requalification:** V4 replaces the Task 0 socat harness with a
-  supervisor-owned broker. The two-PTY relay, Screen retention/exit/cleanup, and
-  serial bootstrap behavior must be re-exercised for the production
-  implementation.
+- **ADR 017 requalification:** MVP replaces the historical Task 0
+  socat/two-PTY/Screen harness with one private supervisor-owned serial PTY.
+  Exclusive bounded bootstrap, permanent draining, shutdown/cleanup, and
+  behavior under guest output must earn new evidence. Slice A runs only
+  deterministic tests; controlled product checks begin in Slice B and do not
+  themselves constitute formal qualification.
 
 ---
 
@@ -203,7 +205,7 @@ codes when the evidence is multi-dimensional.
 | H7 | No port exposure | D, T | `docs/architecture.md`; backend seam test | — |
 | H8 | No nested virtualization | D, T | `docs/architecture.md`; backend seam test | — |
 | H9 | No Rosetta share | D, T | `docs/architecture.md`; backend seam test | — |
-| H10 | The serial PTY is not reachable through guest networking | D, Q, I | Design basis: `docs/security-model.md`, `docs/decisions/017-host-local-serial-recovery-shell.md`; Task 0 qualified PTY isolation | V4 supervisor uses a different broker; ADR 017 requalification pending |
+| H10 | The serial PTY is not reachable through guest networking | D, Q, I | Design basis: `docs/security-model.md`, `docs/decisions/017-host-local-serial-recovery-shell.md`; Task 0 qualified PTY isolation | V4 supervisor uses a one-PTY serial path; ADR 017 requalification pending |
 | H11 | Guest-local runtimes (Docker group, etc.) are not treated as a substitute for VM isolation | D | `docs/security-model.md` | — |
 | H12 | Future V4 launch must prohibit `--net-softnet-allow=0.0.0.0/0` | D, P | ADR 015; `docs/architecture.md`; `docs/security-model.md` (normative future V4 design) | It disables bridge isolation; no production launch enforcement or runtime qualification exists yet |
 
@@ -256,7 +258,7 @@ properties (S10–S13) remain pending.
 | M6 | Short-lived no-extension certificates: exact validity window (`-5m:+15m`), exact principal format (`boxwarden-session-<uuid>`), no certificate extensions | D, T | `docs/credentials.md`; `internal/sshx/cert_test.go`: exact argv, validity, `-O clear` | Not yet exercised by a real SSH login (V4 pending) |
 | M7 | SSH client configuration disables all forwarding: `ForwardAgent=no`, `ForwardX11=no`, `ClearAllForwardings=yes`, `Tunnel=no`, `ControlMaster=no`, `ProxyCommand=none`, `ProxyJump=none`, `IdentityAgent=none` (full 23-option policy) | D, T | `docs/credentials.md`; `internal/sshx/client_test.go`; `internal/sshx/adversarial_test.go` | Not yet exercised against a real sshd (V4 pending) |
 | M8 | `StrictHostKeyChecking=yes`; ambient SSH config neutralized (`-F /dev/null`); no TOFU | D, T | `docs/credentials.md`; `internal/sshx/client_test.go`; `internal/sshx/adversarial_test.go` | — |
-| M9 | Guest host key observed via serial channel (ADR 017 path); no network TOFU | D, Q, I | ADR 012; ADR 017; Task 0 serial-to-scan host-key agreement, clone fingerprint comparison: `docs/evidence/m1a-task0-final-summary.md` | V4 supervisor uses different broker than Task 0 socat harness; ADR 017 requalification pending |
+| M9 | Guest host key observed via serial channel (ADR 017 path); no network TOFU | D, Q, I | ADR 012; ADR 017; Task 0 serial-to-scan host-key agreement, clone fingerprint comparison: `docs/evidence/m1a-task0-final-summary.md` | V4 supervisor uses one-PTY serial path than Task 0 socat harness; ADR 017 requalification pending |
 | M10 | Only typed management operations (probe, timezone-apply, timezone-read); no generic remote-shell API | D, T | `docs/credentials.md`; `docs/operations/ssh-management.md`; `internal/sshx/` typed request tests | Not yet exercised against a real guest (V4 pending) |
 | M11 | Cross-domain CA fallback is prohibited; no CA from another domain is ever used | D, T | `docs/credentials.md`; `internal/sshx/ca_test.go`: absent-selected-domain with valid other-domain CA returns `ErrCAMissing` | — |
 
@@ -314,7 +316,7 @@ status.
 | F4 | Checkpoint and resume | N, P | `docs/lifecycle-and-recovery.md` explicit deferral; any future design must separately address identity, lineage, taint, and compromise containment. |
 | F5 | Provider authentication (AWS, GCP, GitHub, Bitbucket, Jira, Claude Teams) | P | `docs/credentials.md` explicit deferral beyond V1–V4. |
 | F6 | Session stop, destroy, file transfer | P | Deferred beyond V4 per v0.1 plan. |
-| F7 | ADR 017 requalification for V4 broker | P | V4 replaces the Task 0 socat harness with a supervisor-owned broker. Two-PTY relay, Screen retention/exit/cleanup, and serial bootstrap must be re-exercised. |
+| F7 | ADR 017 requalification for MVP one-PTY serial | P | Exclusive bounded bootstrap, permanent drain, lifecycle cleanup, and guest-output behavior require new evidence; historical Screen recovery-console qualification does not transfer. |
 | F8 | V2 real-host register/clone gate | P | Requires artifact rebuilt from corrected generic guest definition (no embedded domain CA). |
 | F9 | IPv6-only upstream environments | N | ADR 020; `NOT YET PROVEN` in evidence matrix. |
 
@@ -327,13 +329,15 @@ available evidence supports, where evidence exists but is not surfaced, or where
 important limitations should be more visible. They are documentation improvement
 targets, not implementation defects.
 
-**EG-1 — V4 supervisor specification remains normative, not operational**
+**EG-1 — MVP foundations are deterministic, not an operational lifecycle**
 
-`docs/security-model.md` now marks its V4 supervisor, two-PTY broker,
-generation-locking, and nonce/challenge-response text as normative future
-design. `docs/architecture.md` still needs equivalent wording. V4 is not
-implemented or qualified; the assurance matrix marks all
-V4-supervisor-dependent properties as pending where applicable.
+Slice A implements the ordinary generation lock, minimal expected launch binding,
+private bounded typed socket, retained runtime-owner seam, and exclusive
+bootstrap/drain PTY. Host admission and READY predicates have no operator-console
+dependency. Live Tart/bootstrap/SSH composition remains pending, and the default
+entry point explicitly refuses unavailable runtime composition. The updated
+architecture and security model distinguish these implemented foundations from
+future lifecycle behavior. No Slice A host qualification is claimed.
 
 **EG-2 — PROPOSED ADR status requires attention when reading the decisions index**
 
@@ -352,10 +356,12 @@ but not under real root-owned file conditions. The V3 attended gate provides
 real-host cross-UID evidence for the manifest itself (the `sudo -u nobody` SHA-256 read).
 Claims labeled T where this applies note the same-UID limitation.
 
-**EG-4 — ADR 017 requalification scope not yet specified**
+**EG-4 — ADR 017 production qualification remains pending**
 
-The requirement to requalify ADR 017 for the V4 broker is noted in
-`docs/architecture.md` and `docs/tool-provenance.md` but the specific
-gate procedure is not yet documented. The gate must cover the two-PTY relay,
-Screen retention across attach/detach, unattended output, reboot survival,
-and cleanup.
+ADR 017 now specifies the single-PTY MVP design. Slice B begins bounded
+controlled-host product checks at actual Tart launch, C checks serial bootstrap,
+and D checks strict SSH/READY. Slice H consolidates controlled lifecycle and
+release evidence. The eventual formal qualification must cover exclusive
+framing, hostile guest output, continuous bounded drain, lifetime/cleanup, and
+the fixed containment mapping. Historical Screen attach/detach evidence cannot
+satisfy that gate.

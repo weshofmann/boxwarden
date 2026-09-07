@@ -1,5 +1,12 @@
 # ADR024 Claim-Driven Qualification Implementation Plan
 
+> **Separate qualification plan; not MVP execution authority.** The Screen,
+> relay, process-evidence, and network-challenge machinery below belongs only
+> to the historical/proposed attended qualification harness. The approved MVP
+> simplification removes those production ownership/console requirements;
+> amended ADR 017 and the A–H MVP plan govern current lifecycle work.
+> This plan does not qualify the one-PTY MVP or authorize Slice A host work.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the over-constrained ADR024 attended Bash harness with a claim-driven qualification system that keeps immutable trust and evidence strict, validates trusted mutable state semantically, and directly exercises the malicious-guest-root boundary with host-authoritative evidence.

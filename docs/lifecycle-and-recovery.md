@@ -12,37 +12,41 @@ older Task 0 artifact that contains a pre-baked domain CA anchor or principal
 cannot satisfy the gate merely because the earlier domain-bound design was
 previously qualified.
 
-Session lifecycle is reconciled rather than optimistic. Host state records the security domain, immutable session UUID, selected generic-golden revision, backend kind/object identity, intended state `creating`, `stopped`, `starting`, `running`, `stopping`, `deleting`, or `failed`, and a start-generation correlation token before external mutation. Per-session locks serialize conflicting operations. The backend reports actual process state; the M1A Tart adapter uses `tart list --format json` and other documented Tart inspection commands. Runtime metadata records a supervisor instance, PID/process-start evidence, authenticated control socket, broker health, both PTY identities, Screen child/socket evidence, overflow/poison state, and lease mode, but none replace durable identity.
+Session lifecycle is reconciled rather than optimistic. Host state records the security domain, immutable session UUID, selected generic-golden revision, backend kind/object identity, intended state `creating`, `stopped`, `starting`, `running`, `stopping`, `deleting`, or `failed`, and a start-generation correlation token before external mutation. Per-session locks serialize conflicting operations. The backend reports actual process state; the M1A Tart adapter uses `tart list --format json` and other documented Tart inspection commands. The minimal runtime request binds domain/session/backend/generation and configuration/record locators. Actual process and serial handles remain in the owning supervisor's memory, with one wait/reap path.
 
-Backend-running and READY are separate. A long-lived same-user supervisor holds
-the generation lock and owner-only control socket, survives the initiating CLI,
-and keeps Tart, the two-PTY broker, and Screen as direct/owned children. It never
-`exec`-replaces itself with Tart. The supervisor owns the generation client key
-and certificate, revalidates CA metadata before renewing the no-extension cert,
-and refreshes a strict read-only SSH probe on fixed cadence. Status challenges
-the supervisor and accepts only a bounded authenticated health snapshot younger
-than the maximum evidence age. It never creates credentials, applies a zone, or
-repairs state. A stale/expired/authentication failure, poisoned broker, failed
-probe, or host/guest-zone mismatch is non-ready.
+Backend-running and READY are separate. A detached supervisor holds an ordinary
+generation lock and a private bounded typed Unix socket. It retains the actual
+Tart handle and one serial PTY, with one stop/wait/reap path. The host and
+cooperating host processes are trusted; runtime authority is not reconstructed
+from persisted process metadata.
 
-Runtime namespace cleanup is also generation-owned: the exclusive per-session/
-generation owner holds that ownership through endpoint creation, use, and
-endpoint plus generation/rollback cleanup, and no Boxwarden component may
-hot-replace those names while that owner cleans them. Retained endpoint handles
-and rooted identity checks detect substitutions already present when cleanup
-validates them, including same-target inode reuse. They do not make Darwin or
-Linux pathname unlink conditional on the expected inode, so this contract does
-not claim resistance to a malicious or actively racing process already running
-as the trusted host UID; the guest has no path to this owner-private namespace.
+Slice A provides these foundations only. The production entry point fails
+explicitly until later slices compose an authoritative configured-domain and
+durable-record reload with a real runtime owner. Controlled product checks begin
+with Slice B's exact launch and continue at the serial and SSH boundaries.
+They are not formal qualification.
 
-Start/retry reconciliation is executable and conservative:
+The eventual supervisor owns generation SSH credentials, CA-validated renewal,
+and periodic strict read-only probes. READY requires a fresh exact-generation
+snapshot with running backend, healthy serial drain, exact pin, current
+certificate, strict probe, and host/guest-zone agreement. Status reads current
+observations without creating credentials, applying configuration, or repairing.
+
+The supervisor owns the outer generation namespace; `serialx` exclusively
+creates, validates, and cleans its new `serial/` subtree. Ownership stays held
+through actual runtime termination and cleanup. Ordinary safe path/type/no-follow
+hygiene rejects invalid state. Same-UID pathname-race fortification is outside
+the approved trusted-host model.
+
+Pending Slice B start/retry reconciliation must remain conservative:
 
 - `stopped` + backend stopped + no owned runtime creates and persists a fresh
   generation before launch.
 - `starting` + backend running + exact live supervisor generation reconnects and
   resumes that same generation.
-- `starting` + backend stopped + no live owned runtime atomically persists
-  `stopped`, clears the generation, and only then begins a fresh retry.
+- `starting` + backend stopped + no live owner may retry the same structurally
+  valid namespace only if its minimal request and durable binding match exactly.
+  Stale serial/live artifacts require explicit reconciliation; they are not adopted.
 - `running` + backend running + exact live supervisor idempotently ensures the
   same generation; it may renew/reprobe through the supervisor and reconverge a
   changed host zone.
@@ -58,8 +62,7 @@ Cancellation before intent fsync leaves the prior durable record. Cancellation
 after `starting` fsync leaves that exact generation for retry. Cancellation
 during proven owned cleanup leaves `starting` until stop and cleanup are
 observed; only the final stopped-record fsync clears the generation. A final
-`running` fsync occurs only after all readiness evidence is current. This makes
-V4 recovery complete without waiting for V6.
+`running` fsync occurs only after all readiness evidence is current. This is the pending MVP recovery contract; Slice A does not claim it is operational.
 
 V2 creates a stopped copy-on-write Tart clone from the selected generic golden and returns only after the randomized-MAC clone is observed stopped. It does not boot the guest, initialize domain trust, obtain a host key, or converge the time zone.
 
@@ -72,8 +75,8 @@ For each domain, `boxwarden --domain <domain> domain init` creates only that
 domain's sole host-only SSH management user CA. Adding a domain does not repeat
 the host installation, and neither scope is created lazily from session start.
 
-V4 verifies the complete V3 prerequisite, establishes the supervisor-owned
-broker/Screen topology, and launches only the exact default qualified Tart +
+The pending MVP composition verifies the complete V3 prerequisite, establishes
+one supervisor-owned serial PTY, and launches only the exact default qualified Tart +
 Softnet policy with clipboard/audio disabled and every allow flag rejected.
 Future ADR 015 support requires explicit create/record/status/CLI semantics.
 Serial automation uses the exact static command `/usr/bin/sudo -n -- /usr/local/libexec/boxwarden-guest-bootstrap serial-bootstrap`, followed
@@ -86,7 +89,7 @@ certificate, proves strict SSH, applies and reads back the host zone, and only
 then persists running/ready. Partial bootstrap verifies exact existing state or
 fails closed; it never replaces mismatched trust material.
 
-Repeating time-zone convergence whenever a transition boots or resumes a guest matters because the laptop can move after a golden or stopped session was created. The initial guest definition carries the build host's validated zone only to make first boot correct before management is available. Time-zone convergence is a workstation correctness property, not a security boundary: an agent-owned guest root can later change it. `tart run` is a long-lived graphical process with durable logs; Task 0 established its foreground ownership/lifetime and Aqua-login constraints, and M1A supervision stays within that evidence. Do not retain project truth only in a session.
+Repeating time-zone convergence whenever a transition boots or resumes a guest matters because the laptop can move after a golden or stopped session was created. The initial guest definition carries the build host's validated zone only to make first boot correct before management is available. Time-zone convergence is a workstation correctness property, not a security boundary: an agent-owned guest root can later change it. `tart run` is a long-lived graphical process whose lifetime needs supervision; Task 0 established its foreground ownership/lifetime and Aqua-login constraints, and the new detached MVP path must earn its own evidence. Do not retain project truth only in a session.
 
 M1A session classes:
 

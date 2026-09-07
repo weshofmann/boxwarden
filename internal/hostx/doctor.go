@@ -9,40 +9,11 @@ import (
 	"strings"
 )
 
-const (
-	ScreenPath             = "/usr/bin/screen"
-	ScreenExecutableSHA256 = "07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add"
-	ScreenVersionOutput    = "Screen version 4.00.03 (FAU) 23-Oct-06"
-)
-
-// ScreenAdmission is an opaque capability minted only after observed metadata
-// and version output match the qualified system Screen identity.
-type ScreenAdmission struct{ fact screenAdmissionFact }
-type screenAdmissionFact struct {
-	path, digest, version string
-	mode                  uint32
-	uid, gid              int
-	links                 uint64
-}
-
-func (a ScreenAdmission) Path() string { return a.fact.path }
-func (a ScreenAdmission) ValidForRuntime() bool {
-	return a.fact == screenAdmissionFact{path: ScreenPath, digest: ScreenExecutableSHA256, version: ScreenVersionOutput, mode: 0o755, uid: 0, gid: 0, links: 1}
-}
-
-// RuntimeAdmission is the public projection of one complete healthy Doctor
-// inspection. Screen remains an opaque capability for the later owner.
+// RuntimeExpectation records one complete healthy Doctor inspection.
+// It contains public toolchain facts; child composition must inspect again.
 type RuntimeExpectation struct {
 	Manifest      Manifest
-	ScreenPath    string
-	ScreenSHA256  string
-	ScreenVersion string
 	SoftnetBinDir string
-}
-
-type RuntimeAdmission struct {
-	RuntimeExpectation
-	Screen ScreenAdmission
 }
 
 type Status string
@@ -149,85 +120,19 @@ func NewSystemDoctor() SystemDoctor {
 
 func (s SystemDoctor) CheckRuntime(ctx context.Context, request Request) (RuntimeExpectation, error) {
 	result := s.inspect(ctx, request)
-	if result.report.Status != Healthy || result.screen.err != nil {
+	if result.report.Status != Healthy {
 		return RuntimeExpectation{}, fmt.Errorf("host runtime is not healthy")
 	}
 	return result.expectation(), nil
 }
 
-func (s SystemDoctor) AdmitRuntime(ctx context.Context, request Request) (RuntimeAdmission, error) {
-	result := s.inspect(ctx, request)
-	if result.report.Status != Healthy || result.screen.err != nil {
-		return RuntimeAdmission{}, fmt.Errorf("host runtime is not healthy")
-	}
-	return RuntimeAdmission{RuntimeExpectation: result.expectation(), Screen: result.screen.admission}, nil
-}
-
-type screenInspectionResult struct {
-	admission ScreenAdmission
-	findings  []Finding
-	err       error
-}
-
-func inspectCurrentScreen(ctx context.Context, inspector DoctorInspector) screenInspectionResult {
-	report := Report{}
-	if err := ctx.Err(); err != nil {
-		report.Findings = append(report.Findings, Finding{
-			Code:     "screen.metadata",
-			Category: Drifted,
-			Observed: "path safety inspection unavailable",
-			Expected: "single-link regular file without ACL",
-			Remedy:   "inspect host tool state manually",
-		})
-		return screenInspectionResult{findings: report.Findings, err: fmt.Errorf("Screen admission canceled: %w", err)}
-	}
-
-	fact, inspectable := checkTool(inspector, &report, "screen", ScreenPath, ScreenExecutableSHA256, 0o755, 0, 0)
-	if !inspectable || !exactToolFact(fact, ScreenExecutableSHA256, 0o755, 0, 0) {
-		return screenInspectionResult{findings: report.Findings, err: errors.New("current Screen metadata is not qualified")}
-	}
-	if err := ctx.Err(); err != nil {
-		report.Findings = append(report.Findings, Finding{
-			Code:     "screen.version",
-			Category: Drifted,
-			Observed: "version did not match",
-			Expected: ScreenVersionOutput,
-			Remedy:   "use the exact qualified system Screen",
-		})
-		return screenInspectionResult{findings: report.Findings, err: fmt.Errorf("Screen admission canceled: %w", err)}
-	}
-	output, err := inspector.CommandOutput(ScreenPath, "--version")
-	if err != nil || strings.TrimSpace(output) != ScreenVersionOutput {
-		report.Findings = append(report.Findings, Finding{
-			Code:     "screen.version",
-			Category: Drifted,
-			Observed: "version did not match",
-			Expected: ScreenVersionOutput,
-			Remedy:   "use the exact qualified system Screen",
-		})
-		return screenInspectionResult{findings: report.Findings, err: errors.New("current Screen version is not qualified")}
-	}
-
-	admission := ScreenAdmission{fact: screenAdmissionFact{
-		path:    ScreenPath,
-		digest:  fact.SHA256,
-		version: strings.TrimSpace(output),
-		mode:    fact.Mode,
-		uid:     fact.UID,
-		gid:     fact.GID,
-		links:   fact.Links,
-	}}
-	return screenInspectionResult{admission: admission}
-}
-
 type doctorInspection struct {
 	report   Report
 	manifest Manifest
-	screen   screenInspectionResult
 }
 
 func (r doctorInspection) expectation() RuntimeExpectation {
-	return RuntimeExpectation{Manifest: r.manifest, ScreenPath: ScreenPath, ScreenSHA256: ScreenExecutableSHA256, ScreenVersion: ScreenVersionOutput, SoftnetBinDir: filepath.Dir(QualifiedSoftnetPath)}
+	return RuntimeExpectation{Manifest: r.manifest, SoftnetBinDir: filepath.Dir(QualifiedSoftnetPath)}
 }
 
 func (s SystemDoctor) Doctor(ctx context.Context, request Request) Report {
@@ -235,6 +140,13 @@ func (s SystemDoctor) Doctor(ctx context.Context, request Request) Report {
 }
 
 func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspection {
+	if ctx.Err() != nil {
+		return doctorInspection{report: Report{Status: Drifted, Findings: []Finding{{
+			Code: "inspection.canceled", Category: Drifted,
+			Observed: "host inspection canceled", Expected: "complete host inspection",
+			Remedy: "retry the read-only host inspection",
+		}}}}
+	}
 	inspector := s.inspector
 	if inspector == nil {
 		inspector = NewOSDoctorInspector()
@@ -345,8 +257,6 @@ func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspec
 	for _, tool := range []struct{ code, path string }{{"ssh", "/usr/bin/ssh"}, {"ssh-keygen", "/usr/bin/ssh-keygen"}} {
 		checkTool(inspector, &report, tool.code, tool.path, "", 0o755, 0, 0)
 	}
-	screen := inspectCurrentScreen(ctx, inspector)
-	report.Findings = append(report.Findings, screen.findings...)
 	homebrew, err := inspector.HomebrewSoftnet()
 	if err != nil {
 		add("homebrew.scan", Drifted, "scan unavailable", "complete read-only mutable Homebrew scan", "inspect mutable Homebrew privilege state manually")
@@ -359,7 +269,7 @@ func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspec
 		}
 	}
 	report.Normalize()
-	return doctorInspection{report: report, manifest: manifest, screen: screen}
+	return doctorInspection{report: report, manifest: manifest}
 }
 
 func checkTool(inspector DoctorInspector, report *Report, code, path, digest string, mode uint32, uid, gid int) (PathFact, bool) {

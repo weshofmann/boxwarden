@@ -92,7 +92,7 @@ func TestSerialRequestRejectsUnknownOrMismatchedFields(t *testing.T) {
 }
 
 // This fails if a response can be correlated to a different start attempt or
-// loses either framing token used by the host broker.
+// loses either framing token used by the host serial parser.
 func TestEncodeSerialFrameRoundTripsExactGenerationAndNonce(t *testing.T) {
 	r := testRequest()
 	result := SerialResult{Version: Version, StartGeneration: r.StartGeneration, Association: r.Association, CAFingerprint: r.CAFingerprint, Principal: r.Principal, HostPublicKey: testKey}

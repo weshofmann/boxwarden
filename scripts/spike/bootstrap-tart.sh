@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# Historical Task 0 / separately attended spike harness, not MVP lifecycle code.
+# Its socat/two-PTY/Screen console is superseded for MVP by amended ADR 017.
+# Retained to reproduce recorded evidence; production uses internal/serialx.
+
 set -euo pipefail
 
 readonly spike_prefix="boxwarden-m1a-spike-"

@@ -69,7 +69,7 @@ func TestStartPersistsGenerationBeforeSupervisorMutation(t *testing.T) {
 
 // Production break: accepting a stale, incomplete, or wrong-generation
 // supervisor snapshot would make durable READY a claim rather than fresh
-// authenticated runtime evidence.
+// live runtime evidence.
 func TestStartRequiresFreshExactReadySnapshotBeforeDurableReady(t *testing.T) {
 	domainConfig, backendFake, creator := createFixture(t)
 	if _, err := creator.Create(context.Background(), "dev", ModeClean); err != nil {
@@ -135,7 +135,7 @@ func TestStartRequiresConfiguredCACollectionToContainSelectedDomain(t *testing.T
 	}
 }
 
-// Production break: accepting a future-dated snapshot lets an untrusted
+// Production break: accepting a future-dated snapshot lets a mismatched
 // supervisor clock bypass the fresh-evidence window.
 func TestStartRejectsFutureReadySnapshotUsingTrustedClock(t *testing.T) {
 	domainConfig, backendFake, creator := createFixture(t)
@@ -182,5 +182,5 @@ func (f startCAFake) Check(context.Context, sshx.Domain, []sshx.Domain) (sshx.CA
 }
 
 func readySnapshot(binding supervisor.Binding) supervisor.Snapshot {
-	return supervisor.Snapshot{Binding: binding, BackendRunning: true, BrokerHealthy: true, ScreenHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true, ObservedAt: time.Now().UTC()}
+	return supervisor.Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true, ObservedAt: time.Now().UTC()}
 }
