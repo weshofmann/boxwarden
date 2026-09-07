@@ -64,3 +64,9 @@ The b3 classification and both startup waits are bounded by the private
 five-minute/one-second production policy, with short injected policies for
 deterministic tests. Runtime composition and authoritative lifecycle creation
 remain deliberately deferred to Task 5.3. No real host runtime was exercised.
+
+The focused b3 regressions cover the unheld request-plus-lock foundation and
+initial detached authentication polling. Follow-up coverage is still needed
+for every later-artifact class, claim-race reconciliation, and deterministic
+controller timeout/cancellation sequences before treating the complete b3 test
+matrix as independently demonstrated.
