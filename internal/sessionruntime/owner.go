@@ -221,6 +221,9 @@ func (o *Owner) failedStart(cause error) error {
 	if observeErr == nil && observation.State != backend.ObjectStopped {
 		observeErr = fmt.Errorf("exact backend stopped state was not proved after reap")
 	}
+	if observeErr != nil {
+		observeErr = fmt.Errorf("%w: %w", supervisor.ErrRuntimeCleanupUnproven, observeErr)
+	}
 	return errors.Join(cause, stopErr, waitErr, observeErr)
 }
 

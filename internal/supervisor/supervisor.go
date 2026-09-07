@@ -12,8 +12,15 @@ import (
 	"time"
 )
 
-// RuntimeOwner retains actual backend/serial handles. Start failure must undo
-// partial acquisition before returning. After success, Wait reaps exactly once,
+// ErrRuntimeCleanupUnproven marks a Start failure whose final runtime cleanup
+// proof is incomplete. Run must preserve the exact generation for reconciliation
+// instead of interpreting that error as authority to remove its outer namespace.
+var ErrRuntimeCleanupUnproven = errors.New("runtime cleanup is unproven; preserve exact generation")
+
+// RuntimeOwner retains actual backend/serial handles. Start failure must finish
+// its owned-handle stop/reap and serial cleanup path before returning. If final
+// runtime cleanup proof remains incomplete, it wraps ErrRuntimeCleanupUnproven.
+// After success, Wait reaps exactly once,
 // and Stop targets only those retained handles. Wait also releases serial and
 // other runtime resources before returning; the generation lock outlives it.
 type RuntimeOwner interface {
@@ -62,6 +69,9 @@ func Run(ctx context.Context, path string, owner RuntimeOwner) error {
 		return fmt.Errorf("stale live artifacts require reconciliation")
 	}
 	if err := owner.Start(ctx, request); err != nil {
+		if errors.Is(err, ErrRuntimeCleanupUnproven) {
+			return err
+		}
 		return errors.Join(err, removeExactGeneration(request))
 	}
 
