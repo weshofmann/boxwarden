@@ -77,6 +77,10 @@ type retainedPrivateFile struct {
 	file     *os.File
 }
 
+// privateRegularAdmissionHook is a deterministic test seam for the narrow
+// lstat/open/lstat admission boundary. Production leaves it nil.
+var privateRegularAdmissionHook func()
+
 type NamedProcessEvidence struct {
 	Role     string          `json:"role"`
 	Identity ProcessIdentity `json:"identity"`
@@ -189,7 +193,10 @@ func admitPrivateRegular(path string) (*retainedPrivateFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	file, err := os.Open(path)
+	if privateRegularAdmissionHook != nil {
+		privateRegularAdmissionHook()
+	}
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -200,6 +207,14 @@ func admitPrivateRegular(path string) (*retainedPrivateFile, error) {
 	}
 	actual, err := identityFor(path, info)
 	if err != nil || !expected.matches(actual) || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info) {
+		_ = file.Close()
+		return nil, fmt.Errorf("owner-private regular artifact changed during admission")
+	}
+	// This is the final pathname validation before decoding the held file. An
+	// active same-UID replacement after this check remains outside this local
+	// admission claim; retained cleanup will still preserve a changed path.
+	postOpen, postInfo, err := captureIdentity(path)
+	if err != nil || !actual.matches(postOpen) || postInfo.Mode()&os.ModeSymlink != 0 || !postInfo.Mode().IsRegular() || postInfo.Mode().Perm() != 0o600 || !ownedByCurrentUser(postInfo) {
 		_ = file.Close()
 		return nil, fmt.Errorf("owner-private regular artifact changed during admission")
 	}

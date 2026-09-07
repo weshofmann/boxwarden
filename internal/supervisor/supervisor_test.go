@@ -675,6 +675,61 @@ func TestAdmittedPrivateRegularRetainsOriginalInodeUntilClosed(t *testing.T) {
 	}
 }
 
+func TestAdmitLaunchRequestRejectsHardLinkSymlinkSubstitution(t *testing.T) {
+	dir := privateRuntime(t)
+	path := filepath.Join(dir, requestName)
+	if err := writeLaunchRequest(path, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}); err != nil {
+		t.Fatal(err)
+	}
+	privateRegularAdmissionHook = func() { replaceWithHardLinkedSymlink(t, path) }
+	t.Cleanup(func() { privateRegularAdmissionHook = nil })
+	if _, retained, err := admitLaunchRequest(path); err == nil {
+		_ = retained.close()
+		t.Fatal("hard-link-backed request symlink was admitted")
+	} else if retained != nil {
+		t.Fatal("rejected request retained a file descriptor")
+	}
+}
+
+func TestAdmitManifestRejectsHardLinkSymlinkSubstitution(t *testing.T) {
+	dir := privateRuntime(t)
+	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}
+	if err := writeLaunchRequest(filepath.Join(dir, requestName), request); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := capturePrivateDirectory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(607, 0).UTC(), Unique: 67}
+	if _, started, err := prepare(context.Background(), request, newTestOwner(identity), testInspector(identity), runtime); err != nil || !started {
+		t.Fatalf("prepare manifest err=%v started=%t", err, started)
+	}
+	path := filepath.Join(dir, manifestName)
+	privateRegularAdmissionHook = func() { replaceWithHardLinkedSymlink(t, path) }
+	t.Cleanup(func() { privateRegularAdmissionHook = nil })
+	if _, retained, err := admitManifest(path); err == nil {
+		_ = retained.close()
+		t.Fatal("hard-link-backed manifest symlink was admitted")
+	} else if retained != nil {
+		t.Fatal("rejected manifest retained a file descriptor")
+	}
+}
+
+func replaceWithHardLinkedSymlink(t *testing.T, path string) {
+	t.Helper()
+	hardLink := path + ".hard-link"
+	if err := os.Link(path, hardLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Base(hardLink), path); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDetachedLauncherRetainsRequestInodeThroughFailedLaunchCleanup(t *testing.T) {
 	dir := privateRuntime(t)
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(606, 0).UTC(), Unique: 66}

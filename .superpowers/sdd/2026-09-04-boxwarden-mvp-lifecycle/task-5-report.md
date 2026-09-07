@@ -241,3 +241,79 @@ The 20-iteration supervisor/CLI gate completed in 73.117 s. Native cgo and
 no-cgo outputs are Mach-O arm64; the Boxwarden cross-build is ELF arm64 and
 the compile-only supervisor test binary is ELF amd64. `gofmt -l` on changed Go
 files and `git diff --check` produced no output.
+
+## Task 5A CI correction round 3
+
+**Base:** `e284168b7d0feac6356a36bf80bb6ecc98fc6289`.
+
+Review found that retained-file admission still used an initial `lstat` followed
+by ordinary `os.Open`. A same-UID actor could hard-link the original inode,
+replace the fixed artifact name with a symlink to that hard link between those
+operations, and preserve `(device,inode)`. The descriptor then referred to the
+right inode but the fixed layout contained a symlink, which violates artifact
+admission rules.
+
+### Decision
+
+`admitPrivateRegular` now uses `os.OpenFile` with `O_NOFOLLOW`, available on
+the supported Darwin and Linux targets, after the initial lstat. It validates
+the held descriptor's regular type, `0600` mode, owner, and identity; then
+performs a second `Lstat` of the pathname and requires non-symlinked regular
+type, owner, mode, and exact identity equality with the held descriptor before
+any bounded bytes are decoded. Failure closes the descriptor. Existing retained
+request/manifest cleanup remains unchanged and continues to close descriptors
+on success and every error path.
+
+This is deliberately a bounded admission claim. An active same-UID replacement
+after that final pathname validation remains outside the claim; the held
+descriptor preserves the admitted bytes, and later cleanup continues to
+preserve a changed pathname rather than adopting or removing it.
+
+### TDD evidence
+
+Added deterministic hard-link-to-symlink substitutions before implementation
+for both `admitLaunchRequest` and `admitManifest`. The initial RED was the
+missing narrow admission seam:
+
+```text
+undefined: privateRegularAdmissionHook
+```
+
+The behavioral RED against the former ordinary-open path then proved the
+defect:
+
+```text
+TestAdmitLaunchRequestRejectsHardLinkSymlinkSubstitution
+hard-link-backed request symlink was admitted
+TestAdmitManifestRejectsHardLinkSymlinkSubstitution
+hard-link-backed manifest symlink was admitted
+```
+
+With no-follow open and final pathname validation, both regressions pass,
+alongside the round-2 request/manifest replacement-retention tests. A first
+race run exposed that the asynchronous `runningService` fixture was still
+admitting a manifest while the global test seam changed. The test now generates
+a valid manifest synchronously with `prepare`; the same focused set passes
+under `-race`, with no production synchronization or behavior added.
+
+### Verification
+
+All required native verification commands exited zero:
+
+```text
+go test ./internal/supervisor -count=1
+go test ./internal/supervisor ./cmd/boxwarden -count=20
+go test -race ./internal/supervisor -count=1
+go test ./...
+go test -race ./...
+go vet ./...
+go build -o /private/tmp/boxwarden-task5a-ci3-build.peDumT/boxwarden-cgo ./cmd/boxwarden
+CGO_ENABLED=0 go build -o /private/tmp/boxwarden-task5a-ci3-build.peDumT/boxwarden-nocgo ./cmd/boxwarden
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o /private/tmp/boxwarden-task5a-ci3-build.peDumT/boxwarden-linux-arm64 ./cmd/boxwarden
+GOOS=linux GOARCH=amd64 go test -c -o /private/tmp/boxwarden-task5a-ci3-build.peDumT/supervisor-linux-amd64.test ./internal/supervisor
+```
+
+The 20-iteration supervisor/CLI gate completed in 75.206 s. Native cgo and
+no-cgo outputs are Mach-O arm64; the Boxwarden cross-build is ELF arm64 and
+the compile-only supervisor test binary is ELF amd64. `gofmt -l` on changed Go
+files and `git diff --check` produced no output.
