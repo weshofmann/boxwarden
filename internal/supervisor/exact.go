@@ -138,6 +138,14 @@ func validateLiveOuterEntry(runtime string, entry os.DirEntry) error {
 		if !info.IsDir() || info.Mode().Perm() != 0o700 {
 			return fmt.Errorf("exact generation has malformed serial entry")
 		}
+	case "client", "known_hosts":
+		if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
+			return fmt.Errorf("exact generation has malformed credential %q", name)
+		}
+	case "client.pub", "client-cert.pub":
+		if !info.Mode().IsRegular() || info.Mode().Perm() != 0o644 {
+			return fmt.Errorf("exact generation has malformed credential %q", name)
+		}
 	default:
 		return fmt.Errorf("exact generation has unexpected live entry %q", name)
 	}

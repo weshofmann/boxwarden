@@ -547,3 +547,62 @@ would remove it based only on a nonblocking flock. It therefore remains drift
 without mutation in this correction rather than risking a concurrent-owner
 deletion. 5.3/5.4 must supply an owner-authenticated convergence protocol for
 that case. Production main wiring and owned failure convergence remain open.
+
+## Task 5.2 review-round correction (partial safety fixes)
+
+This corrective commit rejects duplicate JSON fields recursively before strict
+decode, binds `CA.Domain` to `Binding.Domain`, moves the runtime admission
+projection to `hostx`, and nests serial endpoint evidence below `serial/`.
+`hostx.SystemDoctor.CheckRuntime` refuses every non-Healthy Doctor result and
+returns the qualified manifest plus public Screen/Softnet projection and the
+opaque Screen admission. Session consumes the projection type only.
+
+RED/GREEN evidence:
+
+```text
+go test ./internal/supervisor -run TestDecodeExactRejectsDuplicateNestedFields -count=1
+RED: decodeExact() accepted duplicate nested binding field
+GREEN: PASS
+
+go test ./internal/supervisor -run TestPublishOrAdmitRequestRejectsCADomainDifferentFromBinding -count=1
+RED: publishOrAdmitRequest() accepted CA identity for another domain
+GREEN: PASS
+
+go test ./internal/hostx ./internal/session ./internal/supervisor -count=1
+PASS
+go test ./...
+PASS
+```
+
+The descriptor-transfer lock protocol and injected realistic startup policy
+remain unresolved in this commit. They cannot safely be simulated by deleting
+or briefly releasing the present lock; the current detached launcher API lacks
+an `ExtraFiles`/child-handoff capability. No completion claim is made for that
+Critical review finding.
+
+### Correction before commit
+
+The initial `CheckRuntime` draft called `Doctor` and then re-read manifest and
+Screen state. That is a TOCTOU and does not satisfy the same-inspection
+contract. It is intentionally left uncommitted pending a refactor that has
+Doctor return one unexported inspection result (report, parsed manifest, and
+screen inspection result) for both public projections. Likewise, the lock
+descriptor-transfer Critical finding remains open. No review-round commit was
+made from this incomplete state.
+
+## Task 5.2a — same-inspection admission correction
+
+`SystemDoctor` now has one unexported inspection result that carries the
+normalized Doctor report, the manifest parsed during that inspection, and the
+same `screenInspectionResult` added to the report. `Doctor` projects only the
+report; `CheckRuntime` returns only comparable public expectation facts;
+`AdmitRuntime` is the later child-facing capability that additionally returns
+the opaque Screen admission. Neither method re-reads manifest or re-probes
+Screen after Doctor.
+
+Outer live-state validation accepts serial only as one private directory and
+rejects root-level relay endpoints. Its finite credential allowlist is exactly
+`client`/`known_hosts` (0600) and `client.pub`/`client-cert.pub` (0644); no
+prefix or glob is admitted. Transient credential staging remains a 5.3 design
+item. The generation-lock handoff and injected startup reconciliation policy
+remain explicitly open for 5.2b.

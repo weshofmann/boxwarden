@@ -66,6 +66,22 @@ func TestExactControllerReconcilesAuthenticatedLiveGenerationWithoutLaunch(t *te
 	}
 }
 
+// Production break: serial endpoints at the generation root blur serialx's
+// nested ownership boundary and must not be authenticated as live state.
+func TestExactControllerRejectsSerialEndpointAtGenerationRoot(t *testing.T) {
+	runtime := privateRuntime(t)
+	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: runtime, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
+	if err := writeLaunchRequest(filepath.Join(runtime, requestName), request); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runtime, "tart-serial"), []byte("foreign"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewExactController(&exactLauncherFake{}, &exactControllerFake{}).StartExact(context.Background(), request); err == nil {
+		t.Fatal("StartExact() accepted a serial endpoint at generation root")
+	}
+}
+
 type exactLauncherFake struct {
 	request LaunchRequest
 	called  bool

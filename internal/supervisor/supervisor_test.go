@@ -1052,13 +1052,13 @@ func TestRuntimeEvidenceRejectsUnassociatedOrNonEndpointForms(t *testing.T) {
 		t.Fatal("endpoint outside runtime was admitted")
 	}
 	evidence = RuntimeStartEvidence{Children: []NamedProcessEvidence{{Role: "backend", Identity: identity}, {Role: "screen", Identity: identity}}, Endpoints: endpointEvidence(t, dir), Broker: BrokerEvidence{Healthy: true}}
-	if err := os.Remove(filepath.Join(dir, "operator-console")); err != nil {
+	if err := os.Remove(filepath.Join(dir, "serial", "operator-console")); err != nil {
 		t.Fatal(err)
 	}
-	if err := writePrivateFile(filepath.Join(dir, "operator-console"), []byte("not a pty endpoint")); err != nil {
+	if err := writePrivateFile(filepath.Join(dir, "serial", "operator-console"), []byte("not a pty endpoint")); err != nil {
 		t.Fatal(err)
 	}
-	operator, _, err := captureIdentity(filepath.Join(dir, "operator-console"))
+	operator, _, err := captureIdentity(filepath.Join(dir, "serial", "operator-console"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1260,6 +1260,16 @@ func TestClientRejectsFutureAuthenticatedSnapshot(t *testing.T) {
 	}
 }
 
+// Production break: accepting duplicate nested JSON lets an attacker smuggle
+// a second binding or CA field past the immutable request contract.
+func TestDecodeExactRejectsDuplicateNestedFields(t *testing.T) {
+	var request LaunchRequest
+	data := []byte(`{"binding":{"domain":"w","domain":"other"}}`)
+	if err := decodeExact(data, &request); err == nil {
+		t.Fatal("decodeExact() accepted duplicate nested binding field")
+	}
+}
+
 func runningService(t *testing.T, poisoned bool) (testService, *Client, context.CancelFunc) {
 	t.Helper()
 	dir := privateRuntime(t)
@@ -1386,9 +1396,13 @@ func setLifecycleDeadline(t *testing.T, value time.Duration) {
 
 func endpointEvidence(t *testing.T, dir string) []NamedFileEvidence {
 	t.Helper()
+	serial := filepath.Join(dir, "serial")
+	if err := os.MkdirAll(serial, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range []string{"tart-serial", "operator-console"} {
-		target := filepath.Join(dir, name+"-target")
-		endpoint := filepath.Join(dir, name)
+		target := filepath.Join(serial, name+"-target")
+		endpoint := filepath.Join(serial, name)
 		if _, err := os.Lstat(endpoint); errors.Is(err, os.ErrNotExist) {
 			if err := writePrivateFile(target, []byte(name)); err != nil {
 				t.Fatal(err)
@@ -1398,11 +1412,11 @@ func endpointEvidence(t *testing.T, dir string) []NamedFileEvidence {
 			}
 		}
 	}
-	tart, _, err := captureIdentity(filepath.Join(dir, "tart-serial"))
+	tart, _, err := captureIdentity(filepath.Join(serial, "tart-serial"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	operator, _, err := captureIdentity(filepath.Join(dir, "operator-console"))
+	operator, _, err := captureIdentity(filepath.Join(serial, "operator-console"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1486,9 +1500,13 @@ func (o *testOwner) Start(_ context.Context, request LaunchRequest) (RuntimeStar
 	defer o.mu.Unlock()
 	o.didStart = true
 	endpoints := make([]NamedFileEvidence, 0, 2)
+	serial := filepath.Join(request.RuntimeDirectory, "serial")
+	if err := os.Mkdir(serial, 0o700); err != nil {
+		return RuntimeStartResult{}, err
+	}
 	for _, name := range []string{"tart-serial", "operator-console"} {
-		target := filepath.Join(request.RuntimeDirectory, name+"-target")
-		endpoint := filepath.Join(request.RuntimeDirectory, name)
+		target := filepath.Join(serial, name+"-target")
+		endpoint := filepath.Join(serial, name)
 		if err := writePrivateFile(target, []byte(name)); err != nil {
 			return RuntimeStartResult{}, err
 		}

@@ -11,6 +11,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strings"
@@ -223,6 +224,28 @@ func TestCurrentScreenAdmissionAgreesWithDoctorScreenFindings(t *testing.T) {
 				t.Fatalf("CurrentScreen() admitted=%t error=%v, Doctor()=%#v", admitted, err, report)
 			}
 		})
+	}
+}
+
+// Production break: admitting Screen separately from Doctor could pair a
+// healthy capability with a drifted manifest/toolchain report.
+func TestCheckRuntimeRequiresCompleteHealthyDoctorReport(t *testing.T) {
+	inspector, request := healthyDoctorFixture(t)
+	doctor := SystemDoctor{inspector: inspector}
+	expectation, err := doctor.CheckRuntime(context.Background(), request)
+	if err != nil {
+		t.Fatalf("CheckRuntime() error = %v", err)
+	}
+	if expectation.Manifest.Version != ManifestVersion || expectation.ScreenPath != ScreenPath || expectation.SoftnetBinDir != filepath.Dir(QualifiedSoftnetPath) {
+		t.Fatalf("CheckRuntime() expectation = %#v, want public facts", expectation)
+	}
+	admission, err := doctor.AdmitRuntime(context.Background(), request)
+	if err != nil || !admission.Screen.ValidForRuntime() || !reflect.DeepEqual(admission.RuntimeExpectation, expectation) {
+		t.Fatalf("AdmitRuntime() admission/error = %#v/%v, want matching opaque admission", admission, err)
+	}
+	inspector.paths[ScreenPath] = PathFact{}
+	if _, err := doctor.CheckRuntime(context.Background(), request); err == nil {
+		t.Fatal("CheckRuntime() admitted a doctor report with a Screen finding")
 	}
 }
 

@@ -18,13 +18,9 @@ import (
 
 const maxReadySnapshotAge = 90 * time.Second
 
-// RuntimeAdmission is the non-secret result of the complete host-runtime
-// check. Session compares these facts; only the host subsystem mints any
-// opaque runtime capability used later by a concrete supervisor owner.
-type RuntimeAdmission struct {
-	Manifest                                               hostx.Manifest
-	ScreenPath, ScreenSHA256, ScreenVersion, SoftnetBinDir string
-}
+// RuntimeAdmission is hostx's public projection. Session cannot access its
+// opaque Screen capability; the future child composition owns that boundary.
+type RuntimeAdmission = hostx.RuntimeExpectation
 
 type RuntimeChecker interface {
 	CheckRuntime(context.Context, hostx.Request) (RuntimeAdmission, error)

@@ -189,6 +189,9 @@ func validLaunchRequest(request LaunchRequest) error {
 	if err := validCAExpectation(request.CA); err != nil {
 		return err
 	}
+	if request.CA.Domain != request.Binding.Domain {
+		return fmt.Errorf("CA expectation does not match supervisor domain")
+	}
 	return nil
 }
 
@@ -488,7 +491,7 @@ func validProcessRoles(values []NamedProcessEvidence) error {
 func validFileRoles(values []NamedFileEvidence, runtime string) error {
 	seen := map[string]bool{}
 	for _, value := range values {
-		if (value.Role != "tart-serial" && value.Role != "operator-console") || !value.Identity.valid() || seen[value.Role] || value.Identity.Path != filepath.Join(runtime, value.Role) {
+		if (value.Role != "tart-serial" && value.Role != "operator-console") || !value.Identity.valid() || seen[value.Role] || value.Identity.Path != filepath.Join(runtime, "serial", value.Role) {
 			return fmt.Errorf("invalid endpoint evidence")
 		}
 		if err := identityStillMatches(value.Identity, func(info os.FileInfo) bool {
@@ -527,6 +530,10 @@ func validManifest(manifest Manifest) error {
 	return validEvidence(manifest.Evidence, manifest.RuntimeDirectory)
 }
 func decodeExact(data []byte, value any) error {
+	duplicates := json.NewDecoder(strings.NewReader(string(data)))
+	if err := rejectDuplicateJSONFields(duplicates); err != nil {
+		return err
+	}
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(value); err != nil {
@@ -537,6 +544,57 @@ func decodeExact(data []byte, value any) error {
 		return fmt.Errorf("trailing JSON")
 	}
 	return nil
+}
+
+func rejectDuplicateJSONFields(decoder *json.Decoder) error {
+	if err := consumeJSONValue(decoder); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return fmt.Errorf("trailing JSON")
+	}
+	return nil
+}
+
+func consumeJSONValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		seen := map[string]bool{}
+		for decoder.More() {
+			name, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			field, ok := name.(string)
+			if !ok || seen[field] {
+				return fmt.Errorf("duplicate JSON field %q", field)
+			}
+			seen[field] = true
+			if err := consumeJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		_, err := decoder.Token()
+		return err
+	case '[':
+		for decoder.More() {
+			if err := consumeJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		_, err := decoder.Token()
+		return err
+	default:
+		return fmt.Errorf("unexpected JSON delimiter %q", delimiter)
+	}
 }
 func newControlKey() ([]byte, string, error) {
 	value := make([]byte, 32)

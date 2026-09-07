@@ -30,6 +30,21 @@ func (a ScreenAdmission) ValidForRuntime() bool {
 	return a.fact == screenAdmissionFact{path: ScreenPath, digest: ScreenExecutableSHA256, version: ScreenVersionOutput, mode: 0o755, uid: 0, gid: 0, links: 1}
 }
 
+// RuntimeAdmission is the public projection of one complete healthy Doctor
+// inspection. Screen remains an opaque capability for the later owner.
+type RuntimeExpectation struct {
+	Manifest      Manifest
+	ScreenPath    string
+	ScreenSHA256  string
+	ScreenVersion string
+	SoftnetBinDir string
+}
+
+type RuntimeAdmission struct {
+	RuntimeExpectation
+	Screen ScreenAdmission
+}
+
 type Status string
 
 const (
@@ -144,6 +159,22 @@ func (s SystemDoctor) CurrentScreen(ctx context.Context) (ScreenAdmission, error
 	return result.admission, result.err
 }
 
+func (s SystemDoctor) CheckRuntime(ctx context.Context, request Request) (RuntimeExpectation, error) {
+	result := s.inspect(ctx, request)
+	if result.report.Status != Healthy || result.screen.err != nil {
+		return RuntimeExpectation{}, fmt.Errorf("host runtime is not healthy")
+	}
+	return result.expectation(), nil
+}
+
+func (s SystemDoctor) AdmitRuntime(ctx context.Context, request Request) (RuntimeAdmission, error) {
+	result := s.inspect(ctx, request)
+	if result.report.Status != Healthy || result.screen.err != nil {
+		return RuntimeAdmission{}, fmt.Errorf("host runtime is not healthy")
+	}
+	return RuntimeAdmission{RuntimeExpectation: result.expectation(), Screen: result.screen.admission}, nil
+}
+
 type screenInspectionResult struct {
 	admission ScreenAdmission
 	findings  []Finding
@@ -201,7 +232,21 @@ func inspectCurrentScreen(ctx context.Context, inspector DoctorInspector) screen
 	return screenInspectionResult{admission: admission}
 }
 
+type doctorInspection struct {
+	report   Report
+	manifest Manifest
+	screen   screenInspectionResult
+}
+
+func (r doctorInspection) expectation() RuntimeExpectation {
+	return RuntimeExpectation{Manifest: r.manifest, ScreenPath: ScreenPath, ScreenSHA256: ScreenExecutableSHA256, ScreenVersion: ScreenVersionOutput, SoftnetBinDir: filepath.Dir(QualifiedSoftnetPath)}
+}
+
 func (s SystemDoctor) Doctor(ctx context.Context, request Request) Report {
+	return s.inspect(ctx, request).report
+}
+
+func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspection {
 	inspector := s.inspector
 	if inspector == nil {
 		inspector = NewOSDoctorInspector()
@@ -326,7 +371,7 @@ func (s SystemDoctor) Doctor(ctx context.Context, request Request) Report {
 		}
 	}
 	report.Normalize()
-	return report
+	return doctorInspection{report: report, manifest: manifest, screen: screen}
 }
 
 func checkTool(inspector DoctorInspector, report *Report, code, path, digest string, mode uint32, uid, gid int) (PathFact, bool) {

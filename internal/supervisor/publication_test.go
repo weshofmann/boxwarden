@@ -85,6 +85,22 @@ func TestPublishOrAdmitRequestRejectsPrecreatedEmptyGeneration(t *testing.T) {
 	}
 }
 
+// Production break: a CA admitted for another security domain must never be
+// attached to this generation's immutable request.
+func TestPublishOrAdmitRequestRejectsCADomainDifferentFromBinding(t *testing.T) {
+	base := t.TempDir()
+	if err := os.Chmod(base, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	request := publicationRequest(filepath.Join(base, "runtime"))
+	request.CA.Domain = "personal"
+	if _, _, err := publishOrAdmitRequest(request); err == nil {
+		t.Fatal("publishOrAdmitRequest() accepted CA identity for another domain")
+	}
+}
+
 func publicationRequest(root string) LaunchRequest {
-	return LaunchRequest{Binding: Binding{Domain: "work", SessionID: "00112233-4455-4677-8899-aabbccddeeff", BackendKind: "tart", BackendObject: "boxwarden-work-00112233445546778899aabbccddeeff", Generation: "11111111-2222-4333-8444-555555555555"}, RuntimeDirectory: filepath.Join(root, "work", "00112233-4455-4677-8899-aabbccddeeff", "11111111-2222-4333-8444-555555555555"), HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
+	request := LaunchRequest{Binding: Binding{Domain: "work", SessionID: "00112233-4455-4677-8899-aabbccddeeff", BackendKind: "tart", BackendObject: "boxwarden-work-00112233445546778899aabbccddeeff", Generation: "11111111-2222-4333-8444-555555555555"}, RuntimeDirectory: filepath.Join(root, "work", "00112233-4455-4677-8899-aabbccddeeff", "11111111-2222-4333-8444-555555555555"), HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
+	request.CA.Domain = request.Binding.Domain
+	return request
 }
