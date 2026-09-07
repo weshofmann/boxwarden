@@ -10,7 +10,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const controlIOTimeout = 2 * time.Second
@@ -80,18 +82,34 @@ func handleControl(connection net.Conn, binding Binding, owner RuntimeOwner, sto
 			return
 		}
 		if err := stop(); err != nil {
-			response.Error = boundedDiagnostic(err.Error())
+			response.Error = err.Error()
 		}
 	}
 	response.Snapshot = owner.Snapshot()
 	response.Snapshot.Binding = binding
 	response.Snapshot.ObservedAt = time.Now().UTC()
-	response.Snapshot.Diagnostic = boundedDiagnostic(response.Snapshot.Diagnostic)
-	data, err = json.Marshal(response)
+	data, err = encodeControlResponse(response)
 	if err != nil {
 		return
 	}
 	_ = writeFrame(connection, data)
+}
+
+// Measure the complete encoded response: JSON escaping can expand each
+// diagnostic byte sixfold. Reduce both diagnostic prefixes until the actual
+// frame fits, preserving the exact binding and a valid UTF-8 boundary.
+func encodeControlResponse(response controlResponse) ([]byte, error) {
+	for limit := maxDiagnosticBytes; ; limit /= 2 {
+		response.Error = truncateDiagnostic(response.Error, limit)
+		response.Snapshot.Diagnostic = truncateDiagnostic(response.Snapshot.Diagnostic, limit)
+		data, err := json.Marshal(response)
+		if err != nil || len(data) <= maxControlBytes {
+			return data, err
+		}
+		if limit == 0 {
+			return nil, fmt.Errorf("control response binding exceeds bound")
+		}
+	}
 }
 func readBounded(reader io.Reader) ([]byte, error) {
 	var size uint32
@@ -126,10 +144,17 @@ func writeFrame(writer io.Writer, data []byte) error {
 	return nil
 }
 func boundedDiagnostic(s string) string {
-	if len(s) > maxDiagnosticBytes {
-		return s[:maxDiagnosticBytes]
+	return truncateDiagnostic(s, maxDiagnosticBytes)
+}
+func truncateDiagnostic(s string, limit int) string {
+	var prefix strings.Builder
+	for _, r := range s {
+		if prefix.Len()+utf8.RuneLen(r) > limit {
+			break
+		}
+		prefix.WriteRune(r)
 	}
-	return s
+	return prefix.String()
 }
 
 // Client trusts cooperating host processes, but admits only the private socket

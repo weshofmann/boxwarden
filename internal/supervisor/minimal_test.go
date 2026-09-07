@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -14,16 +15,72 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func minimalRequest(t *testing.T) LaunchRequest {
 	t.Helper()
-	root, err := os.MkdirTemp("/private/tmp", "bw-supervisor-")
+	parent, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Darwin has the smaller sockaddr_un path capacity (104 bytes). Its OS
+	// temp directory can be too long even before adding the generation tree.
+	const socketSuffix = "/bw-4294967295/personal/session-1/generation-1/supervisor.sock"
+	if len(parent)+len(socketSuffix) >= 104 {
+		parent, err = filepath.EvalSymlinks("/tmp")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.MkdirTemp(parent, "bw-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(root) })
 	return LaunchRequest{Binding: Binding{Domain: "personal", SessionID: "session-1", BackendKind: "tart", BackendObject: "vm-1", Generation: "generation-1"}, RuntimeDirectory: filepath.Join(root, "personal", "session-1", "generation-1"), HostConfigPath: "/private/config.json", SessionRecordName: "dev"}
+}
+
+func TestRequestFixtureUsesCanonicalTemporaryRoot(t *testing.T) {
+	base, err := os.MkdirTemp("/tmp", "bw-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(base) })
+	canonical, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(base, "alias")
+	if err := os.Symlink(canonical, alias); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", alias)
+	request := minimalRequest(t)
+	if !strings.HasPrefix(request.RuntimeDirectory, canonical+string(os.PathSeparator)) {
+		t.Fatalf("fixture ignored OS temp root: %s", request.RuntimeDirectory)
+	}
+	if _, _, err := publishOrAdmitRequest(request); err != nil {
+		t.Fatalf("canonical fixture rejected: %v", err)
+	}
+}
+
+func TestRequestFixturePreservesSocketHeadroomWithLongTempRoot(t *testing.T) {
+	base := t.TempDir()
+	long := filepath.Join(base, strings.Repeat("x", 100))
+	if err := os.Mkdir(long, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", long)
+	request := minimalRequest(t)
+	if _, _, err := publishOrAdmitRequest(request); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := listenSocket(filepath.Join(request.RuntimeDirectory, socketName))
+	if err != nil {
+		t.Fatalf("fixture leaves no Unix socket headroom: %v", err)
+	}
+	listener.Close()
 }
 
 func TestSingleGenerationLockWinnerAndCrashRetry(t *testing.T) {
@@ -66,6 +123,55 @@ func TestTypedControlBounds(t *testing.T) {
 		if err := decodeExact([]byte(data), &request); err == nil {
 			t.Fatalf("accepted %s", data)
 		}
+	}
+}
+
+type diagnosticRuntime struct {
+	runtimeFixture
+	diagnostic string
+}
+
+func (o *diagnosticRuntime) Snapshot() Snapshot {
+	s := o.runtimeFixture.Snapshot()
+	s.Diagnostic = o.diagnostic
+	return s
+}
+
+func TestControlReturnsEncodedBoundedUTF8Diagnostics(t *testing.T) {
+	for _, text := range []string{strings.Repeat("\x01", maxDiagnosticBytes), strings.Repeat("界", maxDiagnosticBytes)} {
+		t.Run(fmt.Sprintf("rune-%U", []rune(text)[0]), func(t *testing.T) {
+			binding := minimalRequest(t).Binding
+			owner := &diagnosticRuntime{runtimeFixture: runtimeFixture{binding: binding, done: make(chan struct{})}, diagnostic: text}
+			server, client := net.Pipe()
+			defer client.Close()
+			served := make(chan struct{})
+			go func() {
+				handleControl(server, binding, owner, func() error { owner.stops.Add(1); return errors.New(text) })
+				close(served)
+			}()
+			client.SetDeadline(time.Now().Add(time.Second))
+			request, _ := json.Marshal(controlRequest{Version: 1, Action: "stop", Binding: binding})
+			if err := writeFrame(client, request); err != nil {
+				t.Fatal(err)
+			}
+			data, err := readBounded(client)
+			if err != nil {
+				t.Fatalf("stop executed but no bounded response returned: %v", err)
+			}
+			<-served
+			var response controlResponse
+			if err := decodeExact(data, &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Binding != binding || response.Snapshot.Binding != binding || owner.stops.Load() != 1 {
+				t.Fatal("response lost exact stop binding")
+			}
+			for _, diagnostic := range []string{response.Error, response.Snapshot.Diagnostic} {
+				if diagnostic == "" || len(diagnostic) > maxDiagnosticBytes || !utf8.ValidString(diagnostic) || !strings.HasPrefix(text, diagnostic) {
+					t.Fatalf("diagnostic was not a bounded valid UTF-8 prefix: %q", diagnostic)
+				}
+			}
+		})
 	}
 }
 
