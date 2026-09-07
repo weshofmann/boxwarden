@@ -1146,9 +1146,25 @@ func socketIsPrivate(path string) bool {
 func testBinding() Binding {
 	return Binding{Domain: "work", SessionID: "session-uuid", BackendKind: "fake", BackendObject: "object-1", Generation: "generation-1"}
 }
+
+func TestPrivateRuntimeUsesGoTemporaryDirectory(t *testing.T) {
+	dir := privateRuntime(t)
+	relative, err := filepath.Rel(os.TempDir(), dir)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
+		t.Fatalf("private runtime %q is not under Go temporary directory %q: relative=%q err=%v", dir, os.TempDir(), relative, err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.IsDir() || info.Mode().Perm() != 0o700 {
+		t.Fatalf("private runtime mode=%#o directory=%t, want owner-private directory", info.Mode(), info.IsDir())
+	}
+}
+
 func privateRuntime(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/private/tmp", "bw-sup-")
+	dir, err := os.MkdirTemp("", "bw-sup-")
 	if err != nil {
 		t.Fatal(err)
 	}

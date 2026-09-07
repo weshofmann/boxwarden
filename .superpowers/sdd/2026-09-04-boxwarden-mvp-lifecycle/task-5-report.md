@@ -103,3 +103,65 @@ and no-cgo artifacts are Mach-O arm64; the cross artifact is ELF arm64.
   primitive shared by owner and detached child paths.
 - `internal/supervisor/supervisor_test.go`: delayed-dial, completion-tie, and
   exact lifecycle/cleanup regressions.
+
+## Task 5A CI correction round 1
+
+**Base:** `6744cbfa7bf39cd87c51b21d396f7824dc649285`.
+
+GitHub Actions run `34071176020` failed before every supervisor test body
+because the test-only `privateRuntime` helper passed the macOS-specific
+`/private/tmp` path to `os.MkdirTemp`; that directory does not exist on Ubuntu.
+No supervisor production path ran or failed.
+
+### TDD evidence
+
+Added `TestPrivateRuntimeUsesGoTemporaryDirectory` before changing the helper.
+The focused RED failed on macOS because the hard-coded directory was outside
+Go's configured temporary directory:
+
+```text
+private runtime "/private/tmp/bw-sup-..." is not under Go temporary directory
+"/var/folders/.../T/": relative="../../../../../private/tmp/bw-sup-..."
+```
+
+The minimal test-helper-only correction changes `os.MkdirTemp("/private/tmp",
+"bw-sup-")` to `os.MkdirTemp("", "bw-sup-")`; Go therefore selects the
+platform's configured temporary directory. The same test verifies that the
+result remains a `0700` owner-private directory, preserving the existing
+owner-private Unix-socket admission gate.
+
+Focused GREEN:
+
+```text
+go test ./internal/supervisor -run '^TestPrivateRuntimeUsesGoTemporaryDirectory$' -count=1 -v
+PASS
+```
+
+An initial `GOOS=linux GOARCH=amd64 go test ...` attempt correctly produced
+`exec format error` because a macOS host cannot execute a Linux test binary.
+The portable equivalent compiled the Linux supervisor test binary only:
+
+```text
+GOOS=linux GOARCH=amd64 go test -c -o .../supervisor-linux-amd64.test ./internal/supervisor
+ELF 64-bit LSB executable, x86-64
+```
+
+### Verification
+
+All required native test and verification commands exited zero:
+
+```text
+go test ./internal/supervisor -count=1
+go test ./internal/supervisor ./cmd/boxwarden -count=20
+go test -race ./internal/supervisor -count=1
+go test ./...
+go test -race ./...
+go vet ./...
+go build -o /private/tmp/boxwarden-task5a-ci-build.odPoxV/boxwarden-cgo ./cmd/boxwarden
+CGO_ENABLED=0 go build -o /private/tmp/boxwarden-task5a-ci-build.odPoxV/boxwarden-nocgo ./cmd/boxwarden
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o /private/tmp/boxwarden-task5a-ci-build.odPoxV/boxwarden-linux-arm64 ./cmd/boxwarden
+```
+
+The 20-iteration supervisor/CLI gate completed in 71.608 s. Native cgo and
+no-cgo outputs are Mach-O arm64; the cross-build is ELF arm64. `gofmt -l` on
+the changed Go test and `git diff --check` produced no output.
