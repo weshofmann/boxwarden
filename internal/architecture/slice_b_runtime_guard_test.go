@@ -15,9 +15,11 @@ import (
 )
 
 var (
-	libprocSourcePattern = regexp.MustCompile(`(?i)(\blibproc\b|<libproc\.h>|-lproc\b)`)
-	ofdSourcePattern     = regexp.MustCompile(`(?i)(\bofd\b|f_ofd_[a-z0-9_]*|\bofd_[a-z0-9_]*)`)
-	hmacSourcePattern    = regexp.MustCompile(`(?i)\bhmac\b`)
+	libprocSourcePattern      = regexp.MustCompile(`(?i)(\blibproc\b|<libproc\.h>|-lproc\b)`)
+	ofdSourcePattern          = regexp.MustCompile(`(?i)(\bofd\b|f_ofd_[a-z0-9_]*|\bofd_[a-z0-9_]*)`)
+	hmacSourcePattern         = regexp.MustCompile(`(?i)\bhmac\b`)
+	openPTYPrimitivePattern   = regexp.MustCompile(`(?i)\bopenpty[[:space:]]*\(`)
+	alternatePTYSourcePattern = regexp.MustCompile(`(?i)(\b(posix_openpt|grantpt|unlockpt)[[:space:]]*\(|/dev/ptmx\b)`)
 )
 
 func TestSliceBPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
@@ -32,6 +34,12 @@ func TestSliceBPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
 		{"cgo libproc linker", "internal/backend/proc.go", "package backend\n/* #cgo LDFLAGS: -lproc */\nimport \"C\"", "discarded libproc"},
 		{"cgo OFD token", "internal/lifecycle/lock.go", "package lifecycle\n// F_OFD_SETLK would reconstruct authority.\n", "discarded OFD"},
 		{"direct second PTY", "internal/serialx/runtime.go", `package serialx; func second() { allocatePTY() }`, "direct PTY allocation"},
+		{"second C openpty primitive", "internal/serialx/pty_darwin.go", "package serialx\n/*\n#include <pty.h>\nstatic int duplicate(void) { openpty(0, 0, 0, 0, 0); return openpty(0, 0, 0, 0, 0); }\n*/\nimport \"C\"", "actual PTY primitive"},
+		{"alternate PTY provider", "internal/backend/terminal.go", `package backend; import terminal "github.com/creack/pty"; func f() { _, _, _ = terminal.Open() }`, "alternate PTY provider"},
+		{"renamed SSH wrapper", "internal/backend/start.go", `package backend; import trust "github.com/weshofmann/boxwarden/internal/sshx"; func f() { trust.EstablishManagement() }`, "unapproved foundation selector"},
+		{"renamed bootstrap wrapper", "internal/lifecycle/start.go", `package lifecycle; import serialtransport "github.com/weshofmann/boxwarden/internal/serialx"; func f() { serialtransport.RunBootstrap() }`, "unapproved foundation selector"},
+		{"blank foundation import", "internal/backend/start.go", `package backend; import _ "github.com/weshofmann/boxwarden/internal/sshx"`, "unsupported foundation import"},
+		{"dot foundation import", "internal/lifecycle/start.go", `package lifecycle; import . "github.com/weshofmann/boxwarden/internal/serialx"`, "unsupported foundation import"},
 		{"alternate process field", "internal/backend/state.go", `package backend; type State struct { ProcessID int }`, "persisted process authority"},
 		{"alternate process json", "internal/backend/state.go", "package backend; type State struct { Value int `json:\"process_id\"` }", "persisted process authority"},
 		{"pid map key", "internal/lifecycle/state.go", `package lifecycle; var state = map[string]any{"pid": 42}`, "persisted process authority"},
@@ -61,11 +69,14 @@ func TestSliceBPolicyAllowsCurrentAdmissionAndUncomposedFoundations(t *testing.T
 			`package sessionruntime
 import (
   "context"
+	"github.com/weshofmann/boxwarden/internal/serialx"
   "github.com/weshofmann/boxwarden/internal/sshx"
   "github.com/weshofmann/boxwarden/internal/supervisor"
 )
-func f(ctx context.Context, ca *sshx.CAStore, expectation struct{ Manifest struct{ Operator string } }) {
+func f(ctx context.Context, expectation struct{ Manifest struct{ Operator string } }) {
+	ca := sshx.NewCAStore(sshx.CAStoreOptions{Runner: sshx.NewExecRunner(), Identity: sshx.OSIdentity{}})
   _, _ = ca.Check(ctx, sshx.Domain{}, []sshx.Domain{{}})
+	_, _ = serialx.CreateRuntime(ctx, "/generation")
   _ = supervisor.LaunchRequest{Binding: supervisor.Binding{}}
   _ = supervisor.Snapshot{PinPresent: false, CertificateCurrent: false, ProbeOK: false, ZoneMatches: false}
   _ = expectation.Manifest.Operator
@@ -73,7 +84,14 @@ func f(ctx context.Context, ca *sshx.CAStore, expectation struct{ Manifest struc
 		},
 		{"host admission manifest", "internal/hostx/manifest.go", `package hostx; type Manifest struct{ Operator string }`},
 		{"guest trust foundation", "internal/guestproto/bootstrap.go", `package guestproto; type bindingManifest struct{ Domain string }`},
-		{"serial protocol foundation", "internal/serialx/runtime.go", `package serialx; import _ "github.com/weshofmann/boxwarden/internal/guestproto"`},
+		{"serial protocol foundation", "internal/serialx/runtime.go", `package serialx
+import protocol "github.com/weshofmann/boxwarden/internal/guestproto"
+var _ = protocol.MaxRequestBytes
+func f(request protocol.SerialRequest) protocol.SerialResult {
+	result, _ := protocol.DecodeSerialEndLine(request, "")
+	return result
+}`},
+		{"exact Darwin PTY primitive", "internal/serialx/pty_darwin.go", "package serialx\n/*\n#include <pty.h>\nstatic int boxwarden_openpty(void) { return openpty(0, 0, 0, 0, 0); }\n*/\nimport \"C\""},
 		{"SSH foundation", "internal/sshx/client.go", `package sshx; func NewClient() {}; func f(c interface{ Probe() }) { c.Probe() }`},
 		{"time-zone foundation", "internal/timezonex/guest.go", `package timezonex; func Converge() {}`},
 		{"qualification libproc", "internal/qualification/adr024/proc.go", "package adr024\n/* #cgo LDFLAGS: -lproc\n#include <libproc.h> */\nimport \"C\""},
@@ -127,6 +145,7 @@ func TestSliceBProductionTreeSatisfiesRuntimeBoundaryPolicy(t *testing.T) {
 
 type sliceBPolicy struct {
 	issues                     []string
+	actualPTYPrimitives        int
 	ptyRuntimeBindings         int
 	ptyParameterCalls          int
 	lowLevelPTYCalls           int
@@ -146,6 +165,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 	}
 	composition := isSliceBCompositionPath(path)
 	serialFoundation := strings.HasPrefix(path, "internal/serialx/")
+	foundationImports := make(map[string]string)
 
 	if libprocSourcePattern.Match(source) {
 		p.add(path, "discarded libproc", "libproc header, linker flag, or token")
@@ -156,6 +176,16 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 	if hmacSourcePattern.Match(source) {
 		p.add(path, "discarded HMAC", "HMAC token in production source")
 	}
+	primitiveCount := len(openPTYPrimitivePattern.FindAll(source, -1))
+	if primitiveCount > 0 {
+		p.actualPTYPrimitives += primitiveCount
+		if path != "internal/serialx/pty_darwin.go" || primitiveCount != 1 {
+			p.add(path, "actual PTY primitive", "openpty must appear exactly once in the Darwin serial allocator")
+		}
+	}
+	if alternatePTYSourcePattern.Match(source) {
+		p.add(path, "alternate PTY provider", "alternate PTY primitive or device route")
+	}
 
 	file, err := parser.ParseFile(token.NewFileSet(), path, source, parser.ParseComments)
 	if err != nil {
@@ -164,6 +194,21 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 	}
 	for _, imported := range file.Imports {
 		importPath := strings.ToLower(strings.Trim(imported.Path.Value, `"`))
+		if isAlternatePTYImport(importPath) {
+			p.add(path, "alternate PTY provider", importPath)
+		}
+		foundation, foundationImport := sliceBFoundation(importPath)
+		if composition && foundationImport {
+			localName := foundation
+			if imported.Name != nil {
+				localName = imported.Name.Name
+			}
+			if localName == "_" || localName == "." {
+				p.add(path, "unsupported foundation import", foundation+" imported as "+localName)
+			} else {
+				foundationImports[localName] = foundation
+			}
+		}
 		if composition && strings.HasSuffix(importPath, "/internal/timezonex") {
 			p.add(path, "deferred Slice C/D import", importPath)
 		}
@@ -258,6 +303,15 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 			if isOwnershipFile(lower) {
 				p.add(path, "ownership file", literal)
 			}
+		case *ast.SelectorExpr:
+			identifier, ok := value.X.(*ast.Ident)
+			if !ok {
+				break
+			}
+			foundation, ok := foundationImports[identifier.Name]
+			if ok && !allowedFoundationSelector(foundation, value.Sel.Name) {
+				p.add(path, "unapproved foundation selector", foundation+"."+value.Sel.Name)
+			}
 		}
 		return true
 	})
@@ -270,6 +324,7 @@ func (p *sliceBPolicy) finish() []string {
 		want int
 		name string
 	}{
+		{p.actualPTYPrimitives, 1, "actual openpty primitive in Darwin serial allocator"},
 		{p.ptyRuntimeBindings, 1, "allocatePTY binding into createRuntime"},
 		{p.ptyParameterCalls, 1, "single allocator invocation in serial runtime"},
 		{p.lowLevelPTYCalls, 1, "Darwin low-level PTY allocation"},
@@ -298,6 +353,63 @@ func isSliceBCompositionPath(path string) bool {
 		}
 	}
 	return strings.HasPrefix(path, "cmd/") || strings.HasPrefix(path, "internal/")
+}
+
+func sliceBFoundation(importPath string) (string, bool) {
+	const prefix = "github.com/weshofmann/boxwarden/internal/"
+	if !strings.HasPrefix(importPath, prefix) {
+		return "", false
+	}
+	name := strings.TrimPrefix(importPath, prefix)
+	switch name {
+	case "guestproto", "serialx", "sshx", "timezonex":
+		return name, true
+	default:
+		return "", false
+	}
+}
+
+func allowedFoundationSelector(foundation, selector string) bool {
+	allowed := map[string]map[string]bool{
+		"guestproto": {
+			"DecodeSerialEndLine": true,
+			"MaxRequestBytes":     true,
+			"SerialRequest":       true,
+			"SerialResult":        true,
+		},
+		"serialx": {
+			"CreateRuntime": true,
+		},
+		"sshx": {
+			"CAAlreadyInitialized": true,
+			"CAIdentity":           true,
+			"CAInitDisposition":    true,
+			"CAInitialized":        true,
+			"CAInitResult":         true,
+			"CAStoreOptions":       true,
+			"Domain":               true,
+			"NewCAStore":           true,
+			"NewExecRunner":        true,
+			"OSIdentity":           true,
+			"RandomUUID":           true,
+		},
+		"timezonex": {},
+	}
+	return allowed[foundation][selector]
+}
+
+func isAlternatePTYImport(importPath string) bool {
+	parts := strings.Split(importPath, "/")
+	if len(parts) == 0 {
+		return false
+	}
+	base := parts[len(parts)-1]
+	if len(base) > 1 && base[0] == 'v' {
+		if _, err := strconv.Atoi(base[1:]); err == nil && len(parts) > 1 {
+			base = parts[len(parts)-2]
+		}
+	}
+	return base == "pty" || base == "go-pty" || base == "conpty" || strings.HasSuffix(base, "-pty")
 }
 
 func manifestFoundationPath(path string) bool {
