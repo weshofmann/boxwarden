@@ -2,9 +2,6 @@ package supervisor
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -13,278 +10,138 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
-// These private seams make the narrow post-bind admission boundary
-// deterministic in tests. Production retains the exact os.Chmod behavior.
-var socketChmod = os.Chmod
-var socketAdmissionHook func()
-var controlDialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-	return (&net.Dialer{}).DialContext(ctx, network, address)
-}
-
 const controlIOTimeout = 2 * time.Second
-
-func boundedControlIOTimeout() time.Duration {
-	if lifecycle := lifecycleDeadline(); lifecycle < controlIOTimeout {
-		return lifecycle
-	}
-	return controlIOTimeout
-}
-
-func controlClientTimeout(action string) time.Duration {
-	overhead := 2 * boundedControlIOTimeout()
-	if action == "stop" {
-		return lifecycleDeadline() + overhead
-	}
-	return overhead
-}
-
-// Unix connection establishment is a separately bounded pre-accept phase.
-// A successful connection earns the complete bounded action window below.
-func controlDialTimeout() time.Duration { return controlIOTimeout }
+const lifecycleTimeout = 5 * time.Second
 
 type controlRequest struct {
-	Version   int     `json:"version"`
-	Action    string  `json:"action"`
-	Binding   Binding `json:"binding"`
-	Challenge string  `json:"challenge"`
-	MAC       string  `json:"mac"`
+	Version int     `json:"version"`
+	Action  string  `json:"action"`
+	Binding Binding `json:"binding"`
 }
 type controlResponse struct {
-	Version   int      `json:"version"`
-	Binding   Binding  `json:"binding"`
-	Challenge string   `json:"challenge"`
-	Snapshot  Snapshot `json:"snapshot"`
-	MAC       string   `json:"mac"`
-	Error     string   `json:"error"`
+	Version  int      `json:"version"`
+	Binding  Binding  `json:"binding"`
+	Snapshot Snapshot `json:"snapshot"`
+	Error    string   `json:"error"`
 }
 
-func requestMAC(key []byte, request controlRequest) (string, error) {
-	request.MAC = ""
-	data, err := json.Marshal(request)
-	if err != nil {
-		return "", err
-	}
-	return base64.RawStdEncoding.EncodeToString(mac(key, data)), nil
-}
-func responseMAC(key []byte, response controlResponse) (string, error) {
-	response.MAC = ""
-	data, err := json.Marshal(response)
-	if err != nil {
-		return "", err
-	}
-	return base64.RawStdEncoding.EncodeToString(mac(key, data)), nil
-}
-func mac(key, data []byte) []byte {
-	sum := hmac.New(sha256.New, key)
-	_, _ = sum.Write(data)
-	return sum.Sum(nil)
-}
-
-func listenSocket(path string) (*net.UnixListener, FileIdentity, error) {
+func listenSocket(path string) (*net.UnixListener, error) {
 	if filepath.Base(path) != socketName || !privateDirectory(filepath.Dir(path)) {
-		return nil, FileIdentity{}, fmt.Errorf("unsafe control socket path")
+		return nil, fmt.Errorf("unsafe control socket path")
 	}
-	if _, err := os.Lstat(path); err == nil {
-		return nil, FileIdentity{}, fmt.Errorf("control socket already exists")
-	} else if !os.IsNotExist(err) {
-		return nil, FileIdentity{}, err
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		return nil, fmt.Errorf("control socket already exists")
 	}
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
-		return nil, FileIdentity{}, err
+		return nil, err
 	}
-	// Listener close must not unlink a name that may have been replaced. The
-	// generation owner removes only its captured socket identity during cleanup.
-	listener.SetUnlinkOnClose(false)
-	identity, err := captureBoundSocket(path)
-	if err != nil {
-		return nil, FileIdentity{}, errors.Join(err, closeAndRemoveBoundSocket(listener, identity))
+	if err := os.Chmod(path, 0600); err != nil {
+		listener.Close()
+		return nil, err
 	}
-	if err := socketChmod(path, 0o600); err != nil {
-		return nil, FileIdentity{}, errors.Join(fmt.Errorf("chmod control socket: %w", err), closeAndRemoveBoundSocket(listener, identity))
-	}
-	if socketAdmissionHook != nil {
-		socketAdmissionHook()
-	}
-	current, err := captureSocket(path)
-	if err != nil || !identity.matches(current) {
-		if err == nil {
-			err = fmt.Errorf("control socket was replaced during post-bind admission")
-		}
-		return nil, FileIdentity{}, errors.Join(err, closeAndRemoveBoundSocket(listener, identity))
-	}
-	return listener, identity, nil
+	return listener, nil
 }
-
-func captureBoundSocket(path string) (FileIdentity, error) {
-	identity, info, err := captureIdentity(path)
-	if err != nil || info.Mode()&os.ModeSocket == 0 || !ownedByCurrentUser(info) {
-		return FileIdentity{}, fmt.Errorf("bound control socket identity unavailable")
-	}
-	return identity, nil
-}
-
-func closeAndRemoveBoundSocket(listener *net.UnixListener, identity FileIdentity) error {
-	var result error
-	if listener != nil {
-		result = errors.Join(result, listener.Close())
-	}
-	if identity.Path == "" {
-		return errors.Join(result, fmt.Errorf("bound control socket identity unavailable for cleanup"))
-	}
-	return errors.Join(result, removeExact(identity, false))
-}
-func serveControl(ctx context.Context, listener *net.UnixListener, manifest Manifest, key []byte, owner interface{ Snapshot() Snapshot }, stop func() error) error {
+func serveControl(ctx context.Context, listener *net.UnixListener, binding Binding, owner RuntimeOwner, stop func() error) error {
 	for {
-		listener.SetDeadline(time.Now().Add(100 * time.Millisecond))
 		connection, err := listener.AcceptUnix()
 		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				if ctx.Err() != nil {
-					return nil
-				}
-				continue
-			}
 			if ctx.Err() != nil {
 				return nil
 			}
 			return err
 		}
-		// A supervisor owns one generation, not an unbounded connection pool.
-		// Inline handling gives every connection the existing deadline and makes
-		// listener shutdown join the last handler before namespace cleanup.
-		handleControl(connection, manifest, key, owner, stop)
+		// One bounded connection at a time; no unbounded handler pool.
+		handleControl(connection, binding, owner, stop)
 	}
 }
-func handleControl(connection net.Conn, manifest Manifest, key []byte, owner interface{ Snapshot() Snapshot }, stop func() error) {
+func handleControl(connection net.Conn, binding Binding, owner RuntimeOwner, stop func() error) {
 	defer connection.Close()
-	if err := connection.SetDeadline(time.Now().Add(boundedControlIOTimeout())); err != nil {
+	if err := connection.SetDeadline(time.Now().Add(controlIOTimeout)); err != nil {
 		return
 	}
-	request, err := readControlRequest(connection)
+	data, err := readBounded(connection)
 	if err != nil {
 		return
 	}
-	if request.Version != 1 || (request.Action != "snapshot" && request.Action != "stop") || request.Challenge == "" || request.Binding != manifest.Binding {
+	var request controlRequest
+	if err := decodeExact(data, &request); err != nil {
 		return
 	}
-	want, err := requestMAC(key, request)
-	if err != nil || !hmac.Equal([]byte(want), []byte(request.MAC)) {
+	if request.Version != 1 || request.Binding != binding || (request.Action != "snapshot" && request.Action != "stop") {
 		return
 	}
-	snapshot := owner.Snapshot()
-	snapshot.Binding = manifest.Binding
-	snapshot.ObservedAt = time.Now().UTC()
-	snapshot.Diagnostic = boundedDiagnostic(snapshot.Diagnostic)
-	if !snapshot.BrokerHealthy {
-		snapshot.BackendRunning = false
-		snapshot.PinPresent = false
-		snapshot.CertificateCurrent = false
-		snapshot.ProbeOK = false
-		snapshot.ZoneMatches = false
-	}
-	response := controlResponse{Version: 1, Binding: manifest.Binding, Challenge: request.Challenge, Snapshot: snapshot}
+	response := controlResponse{Version: 1, Binding: binding}
 	if request.Action == "stop" {
-		// The stop callback has its own lifecycle bound. Keep the connection
-		// bounded as well, while leaving a complete I/O interval after that
-		// inner deadline in which to authenticate and return its result.
-		if err := connection.SetDeadline(time.Now().Add(lifecycleDeadline() + boundedControlIOTimeout())); err != nil {
+		if err := connection.SetDeadline(time.Now().Add(lifecycleTimeout + controlIOTimeout)); err != nil {
 			return
 		}
-		if stop == nil {
-			response.Error = "supervisor stop is unavailable"
-		} else if err := stop(); err != nil {
+		if err := stop(); err != nil {
 			response.Error = boundedDiagnostic(err.Error())
 		}
 	}
-	response.MAC, err = responseMAC(key, response)
+	response.Snapshot = owner.Snapshot()
+	response.Snapshot.Binding = binding
+	response.Snapshot.ObservedAt = time.Now().UTC()
+	response.Snapshot.Diagnostic = boundedDiagnostic(response.Snapshot.Diagnostic)
+	data, err = json.Marshal(response)
 	if err != nil {
 		return
 	}
-	if err := connection.SetDeadline(time.Now().Add(boundedControlIOTimeout())); err != nil {
-		return
-	}
-	_ = writeControl(connection, response)
+	_ = writeFrame(connection, data)
 }
-func readControlRequest(connection net.Conn) (controlRequest, error) {
-	var request controlRequest
-	data, err := readBounded(connection)
-	if err != nil {
-		return request, err
-	}
-	if err := decodeExact(data, &request); err != nil {
-		return request, err
-	}
-	return request, nil
-}
-func writeControl(connection net.Conn, value controlResponse) error {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	if len(data) > maxControlBytes {
-		return fmt.Errorf("control response exceeds bound")
-	}
-	return writeFrame(connection, data)
-}
-func readBounded(connection net.Conn) ([]byte, error) {
+func readBounded(reader io.Reader) ([]byte, error) {
 	var size uint32
-	if err := binary.Read(connection, binary.BigEndian, &size); err != nil {
+	if err := binary.Read(reader, binary.BigEndian, &size); err != nil {
 		return nil, err
 	}
 	if size == 0 || size > maxControlBytes {
 		return nil, fmt.Errorf("control message exceeds bound")
 	}
-	buffer := make([]byte, size)
-	_, err := io.ReadFull(connection, buffer)
-	return buffer, err
+	data := make([]byte, size)
+	_, err := io.ReadFull(reader, data)
+	return data, err
 }
 func writeFrame(writer io.Writer, data []byte) error {
 	if len(data) == 0 || len(data) > maxControlBytes {
 		return fmt.Errorf("control message exceeds bound")
 	}
-	header := make([]byte, 4)
-	binary.BigEndian.PutUint32(header, uint32(len(data)))
-	if err := writeAll(writer, header); err != nil {
-		return err
-	}
-	return writeAll(writer, data)
-}
-func writeAll(writer io.Writer, data []byte) error {
-	for len(data) > 0 {
-		count, err := writer.Write(data)
-		if err != nil {
-			return err
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], uint32(len(data)))
+	for _, part := range [][]byte{header[:], data} {
+		for len(part) > 0 {
+			n, err := writer.Write(part)
+			if err != nil {
+				return err
+			}
+			if n == 0 {
+				return io.ErrShortWrite
+			}
+			part = part[n:]
 		}
-		if count == 0 {
-			return io.ErrShortWrite
-		}
-		data = data[count:]
 	}
 	return nil
 }
-func boundedDiagnostic(value string) string {
-	if len(value) <= maxDiagnosticBytes {
-		return value
+func boundedDiagnostic(s string) string {
+	if len(s) > maxDiagnosticBytes {
+		return s[:maxDiagnosticBytes]
 	}
-	return value[:maxDiagnosticBytes]
+	return s
 }
 
-// Client reconnects only to a runtime it can reprove from its immutable
-// manifest, current kernel identity, private socket, and a fresh MAC challenge.
+// Client trusts cooperating host processes, but admits only the private socket
+// inside the exact structurally valid, currently owned generation namespace.
 type Client struct {
 	RuntimeDirectory string
-	Inspector        ProcessInspector
 	MaxSnapshotAge   time.Duration
 	Now              func() time.Time
 }
 
 func (c *Client) Snapshot(ctx context.Context, binding Binding) (Snapshot, error) {
-	response, err := c.authenticated(ctx, binding, "snapshot")
+	response, err := c.call(ctx, binding, "snapshot")
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -297,127 +154,82 @@ func (c *Client) Snapshot(ctx context.Context, binding Binding) (Snapshot, error
 	}
 	return response.Snapshot, nil
 }
-
-func validateSnapshotFreshness(snapshot Snapshot, now time.Time, maximumAge time.Duration) error {
-	if snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || maximumAge > 0 && now.Sub(snapshot.ObservedAt) > maximumAge {
+func validateSnapshotFreshness(s Snapshot, now time.Time, maxAge time.Duration) error {
+	if s.ObservedAt.IsZero() || s.ObservedAt.After(now) || maxAge > 0 && now.Sub(s.ObservedAt) > maxAge {
 		return fmt.Errorf("supervisor snapshot is stale")
 	}
 	return nil
 }
 func (c *Client) Stop(ctx context.Context, binding Binding) error {
-	_, err := c.authenticated(ctx, binding, "stop")
+	_, err := c.call(ctx, binding, "stop")
 	return err
 }
-func (c *Client) authenticated(ctx context.Context, binding Binding, action string) (controlResponse, error) {
+func (c *Client) call(ctx context.Context, binding Binding, action string) (controlResponse, error) {
+	var response controlResponse
 	if err := ctx.Err(); err != nil {
-		return controlResponse{}, err
+		return response, err
 	}
-	if c == nil || !binding.valid() || !privateDirectory(c.RuntimeDirectory) || c.Inspector == nil || !c.Inspector.Supported() {
-		return controlResponse{}, fmt.Errorf("supervisor ownership unavailable")
+	if c == nil || !binding.valid() {
+		return response, fmt.Errorf("invalid control binding")
 	}
-	manifest, err := readManifest(filepath.Join(c.RuntimeDirectory, manifestName))
+	request, err := readLaunchRequest(filepath.Join(c.RuntimeDirectory, requestName))
 	if err != nil {
-		return controlResponse{}, err
+		return response, err
 	}
-	if manifest.Binding != binding {
-		return controlResponse{}, fmt.Errorf("supervisor binding mismatch")
+	if request.Binding != binding {
+		return response, fmt.Errorf("supervisor binding mismatch")
 	}
-	current, err := c.Inspector.Observe(ctx, manifest.Evidence.Supervisor.PID)
-	if err != nil || !current.matches(manifest.Evidence.Supervisor) {
-		return controlResponse{}, fmt.Errorf("supervisor process identity no longer matches")
+	// Before the socket exists, a read-only poll must not briefly acquire the
+	// lock and make the starting child's nonblocking ownership claim lose.
+	if err := validateGenerationEntry(c.RuntimeDirectory, socketName); err != nil {
+		return response, err
 	}
-	for _, child := range manifest.Evidence.Children {
-		observed, err := c.Inspector.Observe(ctx, child.Identity.PID)
-		if err != nil || !observed.matches(child.Identity) {
-			return controlResponse{}, fmt.Errorf("supervisor direct child identity no longer matches")
-		}
-	}
-	key, err := decodeKey(manifest.ControlKey)
+	state, err := classifyExactGeneration(request)
 	if err != nil {
-		return controlResponse{}, err
+		return response, err
 	}
-	return c.call(ctx, binding, action, randomChallengeOrEmpty(), key)
-}
-func randomChallengeOrEmpty() string {
-	value, err := newChallenge()
+	if state != exactGenerationLive {
+		return response, fmt.Errorf("supervisor generation has no live owner")
+	}
+	timeout := controlIOTimeout
+	if action == "stop" {
+		timeout += lifecycleTimeout
+	}
+	operationCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	connection, err := (&net.Dialer{}).DialContext(operationCtx, "unix", filepath.Join(c.RuntimeDirectory, socketName))
 	if err != nil {
-		return ""
-	}
-	return value
-}
-func (c *Client) call(ctx context.Context, binding Binding, action, challenge string, key []byte) (controlResponse, error) {
-	if challenge == "" || len(key) != 32 {
-		return controlResponse{}, fmt.Errorf("invalid control challenge or key")
-	}
-	request := controlRequest{Version: 1, Action: action, Binding: binding, Challenge: challenge}
-	var err error
-	request.MAC, err = requestMAC(key, request)
-	if err != nil {
-		return controlResponse{}, err
-	}
-	socket := filepath.Join(c.RuntimeDirectory, socketName)
-	info, err := os.Lstat(socket)
-	if err != nil || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info) {
-		return controlResponse{}, fmt.Errorf("control socket is not owner-private: %v", err)
-	}
-	dialCtx, cancelDial := context.WithTimeout(ctx, controlDialTimeout())
-	connection, err := controlDialContext(dialCtx, "unix", socket)
-	cancelDial()
-	if err != nil {
-		return controlResponse{}, err
+		return response, err
 	}
 	defer connection.Close()
-	operationCtx, cancel := context.WithTimeout(ctx, controlClientTimeout(action))
-	defer cancel()
-	deadline, ok := operationCtx.Deadline()
-	if !ok {
-		return controlResponse{}, fmt.Errorf("control operation deadline is unavailable")
-	}
+	deadline, _ := operationCtx.Deadline()
 	if err := connection.SetDeadline(deadline); err != nil {
-		return controlResponse{}, err
+		return response, err
 	}
-	stopCancellation := context.AfterFunc(operationCtx, func() { _ = connection.SetDeadline(time.Now()) })
-	defer stopCancellation()
-	data, err := json.Marshal(request)
+	cancelIO := context.AfterFunc(operationCtx, func() { connection.SetDeadline(time.Now()) })
+	defer cancelIO()
+	data, err := json.Marshal(controlRequest{Version: 1, Action: action, Binding: binding})
 	if err != nil {
-		return controlResponse{}, err
-	}
-	if len(data) > maxControlBytes {
-		return controlResponse{}, fmt.Errorf("control request exceeds bound")
+		return response, err
 	}
 	if err := writeFrame(connection, data); err != nil {
-		return controlResponse{}, controlOperationError(operationCtx, err)
+		return response, errors.Join(operationCtx.Err(), err)
 	}
-	responseData, err := readBounded(connection)
+	data, err = readBounded(connection)
 	if err != nil {
-		return controlResponse{}, controlOperationError(operationCtx, err)
+		return response, errors.Join(operationCtx.Err(), err)
 	}
-	var response controlResponse
-	if err := decodeExact(responseData, &response); err != nil {
-		return controlResponse{}, err
+	if err := decodeExact(data, &response); err != nil {
+		return response, err
 	}
-	if response.Version != 1 || response.Binding != binding || response.Challenge != challenge {
-		return controlResponse{}, fmt.Errorf("control response binding or challenge mismatch")
+	if response.Version != 1 || response.Binding != binding || response.Snapshot.Binding != binding {
+		return response, fmt.Errorf("control response binding mismatch")
 	}
-	want, err := responseMAC(key, response)
-	if err != nil || !hmac.Equal([]byte(want), []byte(response.MAC)) {
-		return controlResponse{}, fmt.Errorf("control response MAC mismatch")
-	}
-	if len(response.Snapshot.Diagnostic) > maxDiagnosticBytes || response.Snapshot.Binding != binding {
-		return controlResponse{}, fmt.Errorf("invalid bounded snapshot")
+	if len(response.Snapshot.Diagnostic) > maxDiagnosticBytes || len(response.Error) > maxDiagnosticBytes {
+		return response, fmt.Errorf("control response diagnostic exceeds bound")
 	}
 	if response.Error != "" {
-		return controlResponse{}, fmt.Errorf("supervisor stop failed: %s", response.Error)
+		return response, fmt.Errorf("supervisor stop: %s", response.Error)
 	}
 	return response, nil
 }
-
-func controlOperationError(ctx context.Context, err error) error {
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return errors.Join(ctxErr, err)
-	}
-	return err
-}
-
-var _ Controller = (*Client)(nil)
-var _ = strings.Builder{}

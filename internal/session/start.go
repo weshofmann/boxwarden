@@ -85,7 +85,7 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 	if err != nil {
 		return Record{}, fmt.Errorf("load session record: %w", err)
 	}
-	admission, ca, err := s.admitStartPrerequisites(ctx)
+	_, _, err = s.admitStartPrerequisites(ctx)
 	if err != nil {
 		return Record{}, err
 	}
@@ -127,8 +127,6 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 		RuntimeDirectory:  filepath.Join(s.start.RuntimeRoot, string(record.Domain), record.ID, record.StartGeneration),
 		HostConfigPath:    s.start.ConfigPath,
 		SessionRecordName: string(record.Name),
-		Host:              supervisor.HostExpectation{Manifest: admission.Manifest, ScreenPath: admission.ScreenPath, ScreenSHA256: admission.ScreenSHA256, ScreenVersion: admission.ScreenVersion, SoftnetBinDir: admission.SoftnetBinDir},
-		CA:                caExpectation(ca),
 	}
 	snapshot, err := s.start.Supervisor.StartExact(ctx, request)
 	if err != nil {
@@ -192,7 +190,4 @@ func (s *Service) admitStartPrerequisites(ctx context.Context) (RuntimeAdmission
 		return RuntimeAdmission{}, sshx.CAIdentity{}, fmt.Errorf("admit selected domain management CA: %w", err)
 	}
 	return admission, ca, nil
-}
-func caExpectation(ca sshx.CAIdentity) supervisor.CAExpectation {
-	return supervisor.CAExpectation{Version: ca.Version, Domain: string(ca.Domain), Algorithm: ca.Algorithm, PublicKey: ca.PublicKey, PublicDigest: ca.PublicDigest, Fingerprint: ca.Fingerprint, CreationUUID: ca.CreationUUID, CreatorUID: ca.CreatorUID, CreatorName: ca.CreatorName}
 }
