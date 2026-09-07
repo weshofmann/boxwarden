@@ -116,12 +116,19 @@ func Run(ctx context.Context, path string, owner RuntimeOwner) error {
 		cause = ctx.Err()
 	}
 	cancelServe()
-	_ = listener.Close()
+	closeErr := listener.Close()
+	cause = errors.Join(cause, closeErr)
 	// Accepted calls have a fixed deadline; join them before releasing the lock.
 	if !serverExited {
 		cause = errors.Join(cause, <-serveDone)
 	}
-	return errors.Join(finish(cause), removeExactGeneration(request))
+	result := finish(cause)
+	if closeErr != nil {
+		// An exact socket cleanup refusal cannot become generic namespace
+		// cleanup authority. Preserve request/lock for reconciliation.
+		return result
+	}
+	return errors.Join(result, removeExactGeneration(request))
 }
 
 type detachedLauncher struct{}

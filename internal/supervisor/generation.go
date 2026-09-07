@@ -219,6 +219,8 @@ func classifyExactGeneration(r LaunchRequest) (exactGenerationState, error) {
 
 // removeExactGeneration removes only the supervisor-owned outer namespace.
 // RuntimeOwner must finish serial and other runtime cleanup before this runs.
+// The control listener must already have removed its exact socket; a residual
+// socket is never authority for this generic cleanup to unlink it.
 // Validate the complete directory before unlinking anything and never recurse.
 func removeExactGeneration(r LaunchRequest) error {
 	if _, err := admitGeneration(r); err != nil {
@@ -239,7 +241,6 @@ func removeExactGeneration(r LaunchRequest) error {
 			foundRequest = true
 		case lockName:
 			foundLock = true
-		case socketName:
 		default:
 			return fmt.Errorf("unexpected generation entry %q during cleanup", entry.Name())
 		}
@@ -247,7 +248,7 @@ func removeExactGeneration(r LaunchRequest) error {
 	if !foundRequest || !foundLock {
 		return fmt.Errorf("exact generation cleanup requires request and lock")
 	}
-	for _, name := range []string{socketName, requestName, lockName} {
+	for _, name := range []string{requestName, lockName} {
 		path := filepath.Join(r.RuntimeDirectory, name)
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return err

@@ -371,23 +371,100 @@ func (o *listenerFailureRuntime) Start(ctx context.Context, request LaunchReques
 	return listener.Close()
 }
 
-// Production break: the listener-failure return used to stop and reap the
-// owner but bypass exact outer-generation cleanup.
-func TestRunRemovesExactGenerationAfterListenerFailureAndActualReap(t *testing.T) {
+// A listener failure cannot transfer socket-unlink authority to generic
+// generation cleanup, even after the runtime has actually reaped.
+func TestRunPreservesResidualSocketAfterListenerFailureAndActualReap(t *testing.T) {
 	request := minimalRequest(t)
 	path, _, err := publishOrAdmitRequest(request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	owner := &listenerFailureRuntime{runtimeFixture: runtimeFixture{done: make(chan struct{})}}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := Run(context.Background(), path, owner); err == nil || !strings.Contains(err.Error(), "control socket already exists") {
 		t.Fatalf("Run() error = %v, want listener failure", err)
 	}
 	if owner.starts.Load() != 1 || owner.stops.Load() != 1 || owner.waits.Load() != 1 {
 		t.Fatalf("start/stop/wait = %d/%d/%d, want 1/1/1", owner.starts.Load(), owner.stops.Load(), owner.waits.Load())
 	}
-	if _, err := os.Lstat(request.RuntimeDirectory); !os.IsNotExist(err) {
-		t.Fatalf("listener-failed generation retained after reap: %v", err)
+	assertPreservedSocketGeneration(t, request, before, nil)
+}
+
+// Catch Run discarding exact listener cleanup refusal and then unlinking a
+// substituted 0600 socket through generic outer-generation cleanup.
+func TestRunPreservesReplacementSocketAndEntireGenerationAfterCloseRefusal(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &runtimeFixture{done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, path, owner) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory}
+	if _, err := awaitSnapshot(ctx, request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	socketPath := filepath.Join(request.RuntimeDirectory, socketName)
+	if err := os.Remove(socketPath); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketPath, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement.SetUnlinkOnClose(false)
+	defer replacement.Close()
+	if err := os.Chmod(socketPath, 0600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	err = <-done
+	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "control socket changed; refuse unlink") {
+		t.Errorf("Run did not retain listener cleanup refusal: %v", err)
+	}
+	if owner.stops.Load() != 1 || owner.waits.Load() != 1 {
+		t.Fatalf("stop/wait = %d/%d", owner.stops.Load(), owner.waits.Load())
+	}
+	assertPreservedSocketGeneration(t, request, before, info)
+}
+
+func assertPreservedSocketGeneration(t *testing.T, request LaunchRequest, requestBytes []byte, socketInfo os.FileInfo) {
+	t.Helper()
+	entries, err := os.ReadDir(request.RuntimeDirectory)
+	if err != nil {
+		t.Fatalf("unproven socket cleanup removed generation: %v", err)
+	}
+	if len(entries) != 3 || entries[0].Name() != lockName || entries[1].Name() != requestName || entries[2].Name() != socketName {
+		t.Fatalf("partial generation cleanup: %v", entries)
+	}
+	after, err := os.ReadFile(filepath.Join(request.RuntimeDirectory, requestName))
+	if err != nil || !bytes.Equal(after, requestBytes) {
+		t.Fatalf("exact request changed: %q %v", after, err)
+	}
+	lockBytes, err := os.ReadFile(filepath.Join(request.RuntimeDirectory, lockName))
+	if err != nil || len(lockBytes) != 0 {
+		t.Fatalf("lock changed: %q %v", lockBytes, err)
+	}
+	info, err := os.Lstat(filepath.Join(request.RuntimeDirectory, socketName))
+	if err != nil || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0600 {
+		t.Fatalf("residual socket changed: %v %v", info, err)
+	}
+	if socketInfo != nil && !os.SameFile(info, socketInfo) {
+		t.Fatal("replacement socket inode changed")
 	}
 }
 
