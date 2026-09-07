@@ -21,6 +21,9 @@ import (
 // deterministic in tests. Production retains the exact os.Chmod behavior.
 var socketChmod = os.Chmod
 var socketAdmissionHook func()
+var controlDialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+	return (&net.Dialer{}).DialContext(ctx, network, address)
+}
 
 const controlIOTimeout = 2 * time.Second
 
@@ -38,6 +41,10 @@ func controlClientTimeout(action string) time.Duration {
 	}
 	return overhead
 }
+
+// Unix connection establishment is a separately bounded pre-accept phase.
+// A successful connection earns the complete bounded action window below.
+func controlDialTimeout() time.Duration { return controlIOTimeout }
 
 type controlRequest struct {
 	Version   int     `json:"version"`
@@ -341,13 +348,15 @@ func (c *Client) call(ctx context.Context, binding Binding, action, challenge st
 	if err != nil || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info) {
 		return controlResponse{}, fmt.Errorf("control socket is not owner-private: %v", err)
 	}
-	operationCtx, cancel := context.WithTimeout(ctx, controlClientTimeout(action))
-	defer cancel()
-	connection, err := (&net.Dialer{}).DialContext(operationCtx, "unix", socket)
+	dialCtx, cancelDial := context.WithTimeout(ctx, controlDialTimeout())
+	connection, err := controlDialContext(dialCtx, "unix", socket)
+	cancelDial()
 	if err != nil {
 		return controlResponse{}, err
 	}
 	defer connection.Close()
+	operationCtx, cancel := context.WithTimeout(ctx, controlClientTimeout(action))
+	defer cancel()
 	deadline, ok := operationCtx.Deadline()
 	if !ok {
 		return controlResponse{}, fmt.Errorf("control operation deadline is unavailable")

@@ -478,6 +478,111 @@ func TestStopClientDeadlineCoversServerLifecycleWindow(t *testing.T) {
 	}
 }
 
+func TestStopClientStartsActionWindowAfterDelayedDial(t *testing.T) {
+	// This catches starting the complete stop window before Unix connect. A
+	// 300 ms pre-accept delay plus a valid 100 ms stop exceeds the former
+	// 360 ms single budget (120 ms lifecycle + two I/O intervals), while the
+	// post-connect operation remains inside its authorized window.
+	setLifecycleDeadline(t, 120*time.Millisecond)
+	service, controller, cancel := runningService(t, false)
+	defer cancel()
+	previousDial := controlDialContext
+	controlDialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		timer := time.NewTimer(300 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			return (&net.Dialer{}).DialContext(ctx, network, address)
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	t.Cleanup(func() { controlDialContext = previousDial })
+	go func() {
+		time.Sleep(400 * time.Millisecond)
+		service.owner.exit(nil)
+	}()
+	if err := controller.Stop(context.Background(), testBinding()); err != nil {
+		t.Fatalf("Stop() spent pre-accept time from its action window: %v", err)
+	}
+	select {
+	case <-service.done:
+	case <-time.After(time.Second):
+		t.Fatal("supervisor did not finish after a valid delayed-dial stop")
+	}
+}
+
+func TestOwnerReaperCompletionWinsReadyDeadline(t *testing.T) {
+	terminal := errors.New("owner terminal wait result")
+	owner := newTestOwner(ProcessIdentity{PID: 1, StartedAt: time.Unix(605, 0).UTC(), Unique: 65})
+	reaper := &ownerReaper{owner: owner, done: make(chan struct{})}
+	reaper.start()
+	owner.exit(terminal)
+	select {
+	case <-reaper.done:
+	case <-time.After(time.Second):
+		t.Fatal("owner reaper did not publish its terminal result")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for range 200 {
+		awaited := reaper.await(ctx)
+		if !awaited.completed || !errors.Is(awaited.err, terminal) {
+			t.Fatalf("ready owner completion lost to deadline: %#v", awaited)
+		}
+	}
+	dir := privateRuntime(t)
+	requestPath := filepath.Join(dir, requestName)
+	if err := writePrivateFile(requestPath, []byte("request")); err != nil {
+		t.Fatal(err)
+	}
+	request, err := capturePrivateRegular(requestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := capturePrivateDirectory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setLifecycleDeadline(t, 0)
+	err = terminateAndCleanup(owner, reaper, true, lifecycleResources{request: request, runtime: runtime})
+	if strings.Count(err.Error(), terminal.Error()) != 1 || strings.Contains(err.Error(), "did not reap before cleanup deadline") {
+		t.Fatalf("owner cleanup error=%v, want one terminal result and no synthetic timeout", err)
+	}
+	if owner.stopCalls() != 1 || owner.waitCalls() != 1 || owner.closeCalls() != 1 {
+		t.Fatalf("owner lifecycle Stop=%d Wait=%d Close=%d, want exactly one each", owner.stopCalls(), owner.waitCalls(), owner.closeCalls())
+	}
+	if _, err := os.Lstat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("owner cleanup retained namespace: %v", err)
+	}
+}
+
+func TestDetachedChildReaperCompletionWinsReadyDeadline(t *testing.T) {
+	terminal := errors.New("detached child terminal wait result")
+	child := &testLaunchChild{waitErr: terminal}
+	if err := child.stop(); err != nil {
+		t.Fatal(err)
+	}
+	reaper := &launchChildReaper{child: child, done: make(chan struct{})}
+	reaper.start()
+	select {
+	case <-reaper.done:
+	case <-time.After(time.Second):
+		t.Fatal("child reaper did not publish its terminal result")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for range 200 {
+		awaited := reaper.await(ctx)
+		if !awaited.completed || !errors.Is(awaited.err, terminal) {
+			t.Fatalf("ready child completion lost to deadline: %#v", awaited)
+		}
+	}
+	if child.stopCalls != 1 || child.waitCalls != 1 || child.released {
+		t.Fatalf("child lifecycle Stop=%d Wait=%d released=%t, want one retained stop/wait", child.stopCalls, child.waitCalls, child.released)
+	}
+}
+
 func TestCleanupPreservesSameModeManifestReplacement(t *testing.T) {
 	service, _, cancel := runningService(t, false)
 	manifestPath := filepath.Join(service.dir, manifestName)
@@ -1129,7 +1234,7 @@ type testOwner struct {
 	identity                    ProcessIdentity
 	poisoned, healthy, didStart bool
 	exitCh                      chan error
-	stopped, closed             int
+	stopped, waited, closed     int
 	stopFailure                 error
 	endpoints                   []string
 	exitOnce                    sync.Once
@@ -1185,7 +1290,12 @@ func (o *testOwner) Snapshot() Snapshot {
 	defer o.mu.Unlock()
 	return Snapshot{BackendRunning: o.healthy, BrokerHealthy: o.healthy && !o.poisoned, ScreenHealthy: o.healthy, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true, Diagnostic: string(make([]byte, maxDiagnosticBytes+10))}
 }
-func (o *testOwner) Wait(context.Context) error { return <-o.exitCh }
+func (o *testOwner) Wait(context.Context) error {
+	o.mu.Lock()
+	o.waited++
+	o.mu.Unlock()
+	return <-o.exitCh
+}
 func (o *testOwner) Stop(context.Context) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -1203,6 +1313,7 @@ func (o *testOwner) Close(context.Context) error {
 }
 func (o *testOwner) exit(err error)    { o.exitOnce.Do(func() { o.exitCh <- err }) }
 func (o *testOwner) stopCalls() int    { o.mu.Lock(); defer o.mu.Unlock(); return o.stopped }
+func (o *testOwner) waitCalls() int    { o.mu.Lock(); defer o.mu.Unlock(); return o.waited }
 func (o *testOwner) closeCalls() int   { o.mu.Lock(); defer o.mu.Unlock(); return o.closed }
 func (o *testOwner) setHealthy(v bool) { o.mu.Lock(); defer o.mu.Unlock(); o.healthy = v }
 func (o *testOwner) started() bool     { o.mu.Lock(); defer o.mu.Unlock(); return o.didStart }

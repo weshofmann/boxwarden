@@ -470,12 +470,9 @@ func (r *launchChildReaper) start() {
 }
 func (r *launchChildReaper) result() error { r.mu.Lock(); defer r.mu.Unlock(); return r.err }
 func (r *launchChildReaper) await(ctx context.Context) reapAwait {
-	select {
-	case <-r.done:
-		return reapAwait{completed: true, err: r.result()}
-	case <-ctx.Done():
-		return reapAwait{err: fmt.Errorf("supervisor child did not reap before cleanup deadline: %w", ctx.Err())}
-	}
+	return awaitCompletedReaper(ctx, r.done, r.result, func() error {
+		return fmt.Errorf("supervisor child did not reap before cleanup deadline: %w", ctx.Err())
+	})
 }
 
 func (r *ownerReaper) start() {
@@ -494,11 +491,30 @@ func (r *ownerReaper) await(ctx context.Context) reapAwait {
 	if r == nil {
 		return reapAwait{completed: true, err: fmt.Errorf("owner reaper is unavailable")}
 	}
+	return awaitCompletedReaper(ctx, r.done, r.result, func() error {
+		return fmt.Errorf("owner did not reap before cleanup deadline: %w", ctx.Err())
+	})
+}
+
+// awaitCompletedReaper treats an already observable terminal result as more
+// authoritative than a simultaneous cleanup deadline. The reaper owns the
+// only Wait; a timeout remains diagnostic only when no result is observable.
+func awaitCompletedReaper(ctx context.Context, done <-chan struct{}, result func() error, timeout func() error) reapAwait {
 	select {
-	case <-r.done:
-		return reapAwait{completed: true, err: r.result()}
+	case <-done:
+		return reapAwait{completed: true, err: result()}
+	default:
+	}
+	select {
+	case <-done:
+		return reapAwait{completed: true, err: result()}
 	case <-ctx.Done():
-		return reapAwait{err: fmt.Errorf("owner did not reap before cleanup deadline: %w", ctx.Err())}
+	}
+	select {
+	case <-done:
+		return reapAwait{completed: true, err: result()}
+	default:
+		return reapAwait{err: timeout()}
 	}
 }
 
