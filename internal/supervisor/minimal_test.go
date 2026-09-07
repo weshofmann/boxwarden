@@ -107,6 +107,25 @@ func TestSingleGenerationLockWinnerAndCrashRetry(t *testing.T) {
 	}
 }
 
+// Production break: requiring future READY predicates here would keep Slice B
+// start blocked after the exact backend and serial drain are already healthy.
+func TestAwaitSnapshotReturnsAtBackendPlusSerialStartedBoundary(t *testing.T) {
+	binding := minimalRequest(t).Binding
+	snapshot := Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, ObservedAt: time.Now().UTC()}
+	got, err := awaitSnapshot(context.Background(), binding, startupPolicy{timeout: 20 * time.Millisecond, interval: time.Millisecond}, func(context.Context, Binding) (Snapshot, error) {
+		return snapshot, nil
+	})
+	if err != nil {
+		t.Fatalf("awaitSnapshot() error = %v", err)
+	}
+	if got != snapshot {
+		t.Fatalf("awaitSnapshot() = %#v, want %#v", got, snapshot)
+	}
+	if snapshotReady(snapshot) {
+		t.Fatal("full snapshotReady accepted a Slice B-only started snapshot")
+	}
+}
+
 func TestTypedControlBounds(t *testing.T) {
 	for _, size := range []uint32{0, maxControlBytes + 1, ^uint32(0)} {
 		var wire bytes.Buffer
@@ -334,6 +353,64 @@ func TestRunCancellationStopsAndReapsOnce(t *testing.T) {
 	}
 }
 
+type startFailureRuntime struct {
+	err   error
+	start func(LaunchRequest) error
+}
+
+func (o *startFailureRuntime) Start(_ context.Context, request LaunchRequest) error {
+	if o.start != nil {
+		return o.start(request)
+	}
+	return o.err
+}
+func (*startFailureRuntime) Snapshot() Snapshot         { return Snapshot{} }
+func (*startFailureRuntime) Stop(context.Context) error { return errors.New("unexpected stop") }
+func (*startFailureRuntime) Wait(context.Context) error { return errors.New("unexpected wait") }
+
+// Production break: retaining a failed generation after RuntimeOwner.Start has
+// completed its partial cleanup would make the same durable retry ambiguous.
+func TestRunRemovesCleanExactGenerationAfterOwnerStartFailure(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := errors.New("owner start failed after cleanup")
+	if err := Run(context.Background(), path, &startFailureRuntime{err: want}); !errors.Is(err, want) {
+		t.Fatalf("Run() error = %v, want %v", err, want)
+	}
+	if _, err := os.Lstat(request.RuntimeDirectory); !os.IsNotExist(err) {
+		t.Fatalf("failed generation retained: %v", err)
+	}
+}
+
+// Production break: recursive cleanup could erase foreign or poisoned state
+// merely because it appeared beneath a generation that otherwise matched.
+func TestRunFailureCleanupRejectsUnexpectedContentsWithoutRecursing(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(request.RuntimeDirectory, "foreign", "sentinel")
+	owner := &startFailureRuntime{start: func(LaunchRequest) error {
+		if err := os.Mkdir(filepath.Dir(sentinel), 0700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(sentinel, []byte("retain"), 0600); err != nil {
+			return err
+		}
+		return errors.New("owner start failed")
+	}}
+	if err := Run(context.Background(), path, owner); err == nil || !strings.Contains(err.Error(), "unexpected generation entry") {
+		t.Fatalf("Run() error = %v, want cleanup rejection", err)
+	}
+	if got, err := os.ReadFile(sentinel); err != nil || string(got) != "retain" {
+		t.Fatalf("foreign sentinel = %q, %v, want retained", got, err)
+	}
+}
+
 type slowStopRuntime struct{ runtimeFixture }
 
 func (o *slowStopRuntime) Stop(ctx context.Context) error {
@@ -407,6 +484,29 @@ func (l *rejectLauncher) Launch(context.Context, LaunchRequest) error {
 	return errors.New("unexpected launch")
 }
 
+// Production break: trusting LaunchRequest.RuntimeDirectory independently of
+// the configured root would let one binding target a foreign runtime tree.
+func TestRootControllerRejectsRuntimeDirectoryOutsideItsRoot(t *testing.T) {
+	request := minimalRequest(t)
+	runtimeRoot := filepath.Dir(filepath.Dir(filepath.Dir(request.RuntimeDirectory)))
+	foreign := minimalRequest(t)
+	foreign.Binding = request.Binding
+	launcher := &rejectLauncher{}
+	control, err := NewExactController(runtimeRoot, launcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.StartExact(context.Background(), foreign); err == nil {
+		t.Fatal("StartExact() accepted a caller-selected foreign runtime directory")
+	}
+	if launcher.calls.Load() != 0 {
+		t.Fatal("foreign runtime directory reached launcher")
+	}
+	if _, err := os.Lstat(foreign.RuntimeDirectory); !os.IsNotExist(err) {
+		t.Fatal("foreign runtime directory was mutated")
+	}
+}
+
 func TestLiveReconnectStopAndSingleReap(t *testing.T) {
 	request := minimalRequest(t)
 	path, _, err := publishOrAdmitRequest(request)
@@ -436,7 +536,12 @@ func TestLiveReconnectStopAndSingleReap(t *testing.T) {
 		}
 	}
 	launcher := &rejectLauncher{}
-	if _, err := NewExactController(launcher, client).StartExact(ctx, request); err != nil {
+	runtimeRoot := filepath.Dir(filepath.Dir(filepath.Dir(request.RuntimeDirectory)))
+	control, err := NewExactController(runtimeRoot, launcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.StartExact(ctx, request); err != nil {
 		t.Fatal(err)
 	}
 	if launcher.calls.Load() != 0 {
@@ -444,10 +549,10 @@ func TestLiveReconnectStopAndSingleReap(t *testing.T) {
 	}
 	foreign := request.Binding
 	foreign.Generation = "foreign"
-	if _, err := client.Snapshot(ctx, foreign); err == nil {
+	if _, err := control.Snapshot(ctx, foreign); err == nil {
 		t.Fatal("foreign binding admitted")
 	}
-	if err := client.Stop(ctx, request.Binding); err != nil {
+	if err := control.Stop(ctx, request.Binding); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-runDone; err != nil {
@@ -456,11 +561,8 @@ func TestLiveReconnectStopAndSingleReap(t *testing.T) {
 	if owner.starts.Load() != 1 || owner.stops.Load() != 1 || owner.waits.Load() != 1 {
 		t.Fatalf("start/stop/wait = %d/%d/%d", owner.starts.Load(), owner.stops.Load(), owner.waits.Load())
 	}
-	if _, err := os.Lstat(filepath.Join(request.RuntimeDirectory, socketName)); !os.IsNotExist(err) {
-		t.Fatal("socket retained after reap")
-	}
-	if state, err := classifyExactGeneration(request); err != nil || state != exactGenerationResumable {
-		t.Fatalf("post-stop state %v: %v", state, err)
+	if _, err := os.Lstat(request.RuntimeDirectory); !os.IsNotExist(err) {
+		t.Fatalf("generation retained after actual reap: %v", err)
 	}
 }
 

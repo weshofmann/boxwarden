@@ -217,6 +217,48 @@ func classifyExactGeneration(r LaunchRequest) (exactGenerationState, error) {
 	return exactGenerationResumable, nil
 }
 
+// removeExactGeneration removes only the supervisor-owned outer namespace.
+// RuntimeOwner must finish serial and other runtime cleanup before this runs.
+// Validate the complete directory before unlinking anything and never recurse.
+func removeExactGeneration(r LaunchRequest) error {
+	if _, err := admitGeneration(r); err != nil {
+		return fmt.Errorf("admit exact generation for cleanup: %w", err)
+	}
+	entries, err := os.ReadDir(r.RuntimeDirectory)
+	if err != nil {
+		return err
+	}
+	foundRequest := false
+	foundLock := false
+	for _, entry := range entries {
+		if err := validateGenerationEntry(r.RuntimeDirectory, entry.Name()); err != nil {
+			return err
+		}
+		switch entry.Name() {
+		case requestName:
+			foundRequest = true
+		case lockName:
+			foundLock = true
+		case socketName:
+		default:
+			return fmt.Errorf("unexpected generation entry %q during cleanup", entry.Name())
+		}
+	}
+	if !foundRequest || !foundLock {
+		return fmt.Errorf("exact generation cleanup requires request and lock")
+	}
+	for _, name := range []string{socketName, requestName, lockName} {
+		path := filepath.Join(r.RuntimeDirectory, name)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if err := os.Remove(r.RuntimeDirectory); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Dir(r.RuntimeDirectory))
+}
+
 // The descriptor is the lifetime ownership lock, never persisted process evidence.
 func acquireGenerationLock(r LaunchRequest) (*os.File, error) {
 	path := filepath.Join(r.RuntimeDirectory, lockName)

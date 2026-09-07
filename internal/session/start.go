@@ -95,7 +95,7 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 
 	switch record.IntendedState {
 	case StateStopped:
-		observation, observeErr := s.observer.Observe(ctx, record.Backend.ObjectID)
+		observation, observeErr := s.observeExact(ctx, record.Backend.ObjectID)
 		if observeErr != nil {
 			return Record{}, fmt.Errorf("observe stopped session backend: %w", observeErr)
 		}
@@ -113,7 +113,25 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 			return Record{}, fmt.Errorf("persist starting session: %w", saveErr)
 		}
 	case StateStarting:
-		// The existing durable generation is the only retry target.
+		observation, observeErr := s.observeExact(ctx, record.Backend.ObjectID)
+		if observeErr != nil {
+			return Record{}, fmt.Errorf("observe starting session backend: %w", observeErr)
+		}
+		if !observation.Exists {
+			return Record{}, fmt.Errorf("starting session backend is missing")
+		}
+		switch observation.State {
+		case backend.ObjectRunning:
+			snapshot, snapshotErr := s.start.Supervisor.Snapshot(ctx, startBinding(record))
+			if snapshotErr != nil {
+				return Record{}, fmt.Errorf("inspect exact starting generation: %w", snapshotErr)
+			}
+			return s.acceptStarted(record, snapshot)
+		case backend.ObjectStopped:
+			// Relaunch below using only the durable generation.
+		default:
+			return Record{}, fmt.Errorf("starting session backend state is ambiguous")
+		}
 	case StateRunning:
 		return s.reconcileReady(ctx, record)
 	default:
@@ -123,7 +141,7 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 		return Record{}, fmt.Errorf("starting session has no valid generation")
 	}
 	request := supervisor.LaunchRequest{
-		Binding:           supervisor.Binding{Domain: string(record.Domain), SessionID: record.ID, BackendKind: record.Backend.Kind, BackendObject: record.Backend.ObjectID, Generation: record.StartGeneration},
+		Binding:           startBinding(record),
 		RuntimeDirectory:  filepath.Join(s.start.RuntimeRoot, string(record.Domain), record.ID, record.StartGeneration),
 		HostConfigPath:    s.start.ConfigPath,
 		SessionRecordName: string(record.Name),
@@ -132,11 +150,11 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 	if err != nil {
 		return Record{}, fmt.Errorf("start exact generation: %w", err)
 	}
-	return s.persistReady(record, snapshot)
+	return s.acceptStarted(record, snapshot)
 }
 
 func (s *Service) reconcileReady(ctx context.Context, record Record) (Record, error) {
-	binding := supervisor.Binding{Domain: string(record.Domain), SessionID: record.ID, BackendKind: record.Backend.Kind, BackendObject: record.Backend.ObjectID, Generation: record.StartGeneration}
+	binding := startBinding(record)
 	snapshot, err := s.start.Supervisor.Snapshot(ctx, binding)
 	if err != nil {
 		return Record{}, fmt.Errorf("inspect exact running generation: %w", err)
@@ -144,8 +162,21 @@ func (s *Service) reconcileReady(ctx context.Context, record Record) (Record, er
 	return s.persistReady(record, snapshot)
 }
 
+func startBinding(record Record) supervisor.Binding {
+	return supervisor.Binding{Domain: string(record.Domain), SessionID: record.ID, BackendKind: record.Backend.Kind, BackendObject: record.Backend.ObjectID, Generation: record.StartGeneration}
+}
+
+func (s *Service) acceptStarted(record Record, snapshot supervisor.Snapshot) (Record, error) {
+	want := startBinding(record)
+	now := s.start.Now()
+	if snapshot.Binding != want || !snapshot.BackendRunning || !snapshot.SerialHealthy || snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || now.Sub(snapshot.ObservedAt) > maxReadySnapshotAge {
+		return Record{}, fmt.Errorf("supervisor did not provide a fresh exact started snapshot")
+	}
+	return record, nil
+}
+
 func (s *Service) persistReady(record Record, snapshot supervisor.Snapshot) (Record, error) {
-	want := supervisor.Binding{Domain: string(record.Domain), SessionID: record.ID, BackendKind: record.Backend.Kind, BackendObject: record.Backend.ObjectID, Generation: record.StartGeneration}
+	want := startBinding(record)
 	now := s.start.Now()
 	if snapshot.Binding != want || !snapshot.BackendRunning || !snapshot.SerialHealthy || !snapshot.PinPresent || !snapshot.CertificateCurrent || !snapshot.ProbeOK || !snapshot.ZoneMatches || snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || now.Sub(snapshot.ObservedAt) > maxReadySnapshotAge {
 		return Record{}, fmt.Errorf("supervisor did not provide a fresh exact ready snapshot")

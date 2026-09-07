@@ -152,5 +152,9 @@ func decodeExact(data []byte, value any) error {
 	return nil
 }
 func snapshotReady(s Snapshot) bool {
-	return s.BackendRunning && s.SerialHealthy && s.PinPresent && s.CertificateCurrent && s.ProbeOK && s.ZoneMatches
+	return snapshotStarted(s) && s.PinPresent && s.CertificateCurrent && s.ProbeOK && s.ZoneMatches
+}
+
+func snapshotStarted(s Snapshot) bool {
+	return s.BackendRunning && s.SerialHealthy
 }

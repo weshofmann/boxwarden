@@ -35,8 +35,9 @@ func RunRequest(ctx context.Context, path string) error {
 	return fmt.Errorf("supervisor runtime composition is unavailable")
 }
 
-// Run owns one exact generation through a single stop/wait path. It retains
-// request+lock for exact retry; only its control socket is removed here.
+// Run owns one exact generation through a single stop/wait path. After owner
+// startup cleanup or actual reap, it removes only the admitted outer namespace;
+// the durable session record remains authoritative for same-generation retry.
 func Run(ctx context.Context, path string, owner RuntimeOwner) error {
 	if owner == nil {
 		return fmt.Errorf("runtime owner is unavailable")
@@ -61,7 +62,7 @@ func Run(ctx context.Context, path string, owner RuntimeOwner) error {
 		return fmt.Errorf("stale live artifacts require reconciliation")
 	}
 	if err := owner.Start(ctx, request); err != nil {
-		return err
+		return errors.Join(err, removeExactGeneration(request))
 	}
 
 	reaped := make(chan struct{})
@@ -110,7 +111,7 @@ func Run(ctx context.Context, path string, owner RuntimeOwner) error {
 	if !serverExited {
 		cause = errors.Join(cause, <-serveDone)
 	}
-	return finish(cause)
+	return errors.Join(finish(cause), removeExactGeneration(request))
 }
 
 type detachedLauncher struct{}
