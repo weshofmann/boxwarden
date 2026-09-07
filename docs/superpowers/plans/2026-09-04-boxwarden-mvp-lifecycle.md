@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go (standard library first), Tart/Softnet on macOS, system GNU Screen, strict OpenSSH, `os.Root` state handling, deterministic fake backend, and a committed static Linux/arm64 guest-helper artifact.
 
-**Spec:** `/Users/wes/.codex/attachments/520988fe-e463-46dd-91d8-432c60568f4f/pasted-text.txt`; `docs/architecture.md`, `docs/state-model.md`, `docs/lifecycle-and-recovery.md`, `docs/operations/ssh-management.md`, ADRs 012/017/019, and `AGENTS.md`.
+**Spec:** `/Users/wes/.codex/attachments/520988fe-e463-46dd-91d8-432c60568f4f/pasted-text.txt`; `docs/superpowers/specs/2026-09-06-boxwarden-supervisor-generation-ownership-design.md`; `docs/architecture.md`, `docs/state-model.md`, `docs/lifecycle-and-recovery.md`, `docs/operations/ssh-management.md`, ADRs 012/017/019, and `AGENTS.md`.
 
 ## Global Constraints
 
@@ -16,7 +16,7 @@
 - The preserved refs `0045e205`, `2e711d617`, `75763d58`, and `6ca97e782` are read-only source material. Manually port cohesive code only; do not cherry-pick their branch-wide diffs or restore qualification machinery.
 - Keep the backend seam small. Common code owns domains, locks, state, readiness, credentials/pins, project-loss gate, and destructive policy; Tart owns VM mechanics only.
 - Start uses the admitted absolute Tart path, canonical configured Tart home, generation-private `TMPDIR`, and a closed environment. Its complete environment is `PATH=<qualified-softnet-digest-dir>`, `HOME=<admitted-home>`, `USER=<admitted-user>`, `LOGNAME=<admitted-user>`, `TART_HOME=<configured-home>`, `TMPDIR=<generation-dir>`, `LANG=C`, and `LC_ALL=C`. No shell, sudo, ambient proxy/telemetry/loader variables, clipboard, audio, share, bridge, host networking, port publication, or Softnet allow flag.
-- Serial is host-local: a `0700` generation directory; two exact `0600` PTY slaves; Tart sees only its slave; `/usr/bin/screen -D -m -S <session>` is a direct owned child holding the operator slave. Never use a serial network service, socat, or Screen control/data paths for automation.
+- Serial is host-local inside the fixed supervisor-owned `<generation>/serial/` subtree: `serialx` creates that owner-private subtree itself, creates two exact `0600` PTY slaves, exposes only Tart's slave to Tart, and starts `/usr/bin/screen -D -m -S <session>` as a direct owned child holding the operator slave. Never pre-create or adopt `serial/`; never use a serial network service, socat, or Screen control/data paths for automation.
 - Bootstrap is serial-first and canonical. The generic golden receives only selected-domain public CA, durable binding, and derived principal. Generation/nonce are runtime correlation only. Pin fresh guest Ed25519 host key before issuing a certificate; no TOFU and no network bootstrap.
 - READY requires current authenticated supervisor ownership, exact running backend, healthy broker/Screen, exact pin, fresh literal address, current no-extension certificate, strict typed probe, and exact host/guest IANA-zone agreement. A record bit or Tart-running alone is non-ready.
 - Stop/destroy never trust a PID alone: each mutable action proves control challenge, manifest, process-start evidence, current generation, exact binding, and backend object. Unproven runtime is drift/no mutation.
@@ -130,7 +130,7 @@ func (b *Broker) Exchange(context.Context, ExchangeRequest) (json.RawMessage, er
 func (b *Broker) AcquireConsole(context.Context) (Lease, error)
 ```
 
-`hostx.SystemDoctor.CurrentScreen` is the sole public admission-minting path. Create one private generation directory, two Darwin PTY pairs, exact private endpoint links, and direct `/usr/bin/screen -D -m -S <derived-name>` with the already-open operator slave as stdin. `serialx` alone owns the direct `exec.Cmd`, captures its kernel PID/birth identity immediately after Start, and retains wait/reap state; no caller supplies a starter, child, PID, or birth evidence. Runtime exposes only read-only evidence/check/watch and owned shutdown for the next supervisor task. Root safety is bound to the exact pre-open identity cross-checked against its opened descriptor; generation creation does the same before any endpoint mutation. Supervisor-owned readers pass Tart-master output to broker and operator-master input only to `OperatorInput`. The broker has exactly idle/console/automation/failed states; fixed queue, line, frame, aggregate and deadline bounds; operator data outside console is counted/discarded; overflow, interleaving, timeout, child loss, observer error, or identity mismatch poisons the generation.
+`hostx.SystemDoctor.CurrentScreen` is the sole public admission-minting path. Create one private serial runtime directory, two Darwin PTY pairs, exact private endpoint links, and direct `/usr/bin/screen -D -m -S <derived-name>` with the already-open operator slave as stdin. `serialx` alone owns the direct `exec.Cmd`, captures its kernel PID/birth identity immediately after Start, and retains wait/reap state; no caller supplies a starter, child, PID, or birth evidence. Runtime exposes only read-only evidence/check/watch and owned shutdown for the next supervisor task. Root safety is bound to the exact pre-open identity cross-checked against its opened descriptor; serial-subtree creation does the same before any endpoint mutation. Supervisor-owned readers pass Tart-master output to broker and operator-master input only to `OperatorInput`. The broker has exactly idle/console/automation/failed states; fixed queue, line, frame, aggregate and deadline bounds; operator data outside console is counted/discarded; overflow, interleaving, timeout, child loss, observer error, or identity mismatch poisons the generation.
 
 The Task 3 cleanup contract relies on the trusted host, not the guest, for its
 namespace boundary: guest root has no path to the owner-private generation.
@@ -169,7 +169,13 @@ Start writes an owner-only immutable supervisor request in its fresh runtime dir
 
 Task 4 establishes the long-lived exclusive generation owner, and Tasks 5-8
 must serialize retries, readiness failures, stop, and destroy with that owner
-until its endpoint and generation/rollback cleanup completes. This is a
+until serial and outer-namespace rollback/cleanup completes. The detached child
+owns live runtime capabilities and may remove outer artifacts after its
+supervised runtime and serial subtree are conclusively terminated, immediately
+before the child exits; it never claims to reap itself. On failed launch before
+detachment, the controller/parent retains, stops, and reaps the exact child
+before removing the outer namespace. Both roles belong to the supervisor
+subsystem. This is a
 trusted-host cooperative-lifetime requirement, not a pathname-unlink primitive:
 the recorded identity checks detect pre-validation replacement but cannot close
 an active same-UID mutation between validation and unlink.
@@ -179,6 +185,28 @@ an active same-UID mutation between validation and unlink.
 - [ ] **GREEN:** Implement fixed internal parser plus injected process/clock/socket seams. On exit/poison, close socket/readers, stop/reap only exact handle, remove only proven runtime tree; never scan or signal by process name/PID.
 - [ ] **Verify:** `go test ./internal/supervisor -count=1 && go test -race ./internal/supervisor -count=1 && go test ./cmd/boxwarden -count=1`.
 - [ ] **Commit:** `git add internal/supervisor internal/backend/fake cmd/boxwarden && git commit -m "feat(supervisor): own lifecycle runtime through authenticated control" -m "Make mutable running-session actions prove recorded generation and direct-child ownership rather than trusting a bare PID."`
+
+### Task 5A: Close Task 4 control/reaper prerequisites
+
+Before composing a concrete runtime owner, close the two load-bearing findings
+carried by the Task 4 five-round review breaker. This is a supervisor-only TDD
+slice; the exact behavioral brief and evidence contract are in
+`.superpowers/sdd/2026-09-04-boxwarden-mvp-lifecycle/task-5a-supervisor-prerequisite.md`.
+
+- [ ] **RED:** Add a real delayed-dial regression proving pre-accept time does
+  not consume the valid post-connect stop window. Add deterministic repeated
+  owner and detached-child reaper tests with completion and cancellation both
+  ready, proving observable completion wins the tie and the terminal result is
+  returned once.
+- [ ] **GREEN:** Bound Unix dialing separately, then start a fresh action budget
+  after connection. Centralize a completion-preferred reaper await pattern with
+  a completion precheck and a final recheck after the deadline branch.
+- [ ] **Verify:** Run the focused tests in an environment that permits the
+  owner-private Unix socket, then supervisor/cmd repetition, race, repository
+  test/race/vet, and native cgo/native no-cgo/Linux arm64 builds. Do not begin
+  runtime composition until an independent scoped review is clean.
+- [ ] **Commit:** one focused supervisor correction; no Task 5 runtime/session
+  composition in this commit.
 
 ### Task 5: Start through serial trust, pin, strict SSH, and zone convergence
 
@@ -191,19 +219,31 @@ an active same-UID mutation between validation and unlink.
 ```go
 type RuntimeAdmission struct { Manifest hostx.Manifest; ScreenPath, ScreenSHA256, ScreenVersion, SoftnetBinDir string }
 type RuntimeChecker interface { CheckRuntime(context.Context, hostx.Request) (RuntimeAdmission, error) }
-type StartDependencies struct { Observer backend.Observer; Host RuntimeChecker; CA CAValidator; Supervisor supervisor.Launcher; RuntimeRoot string; NewGeneration func() (string, error) }
+type SupervisorControl interface {
+    StartExact(context.Context, supervisor.LaunchRequest) (supervisor.Snapshot, error)
+    Snapshot(context.Context, supervisor.Binding) (supervisor.Snapshot, error)
+    Stop(context.Context, supervisor.Binding) error
+}
+type ClientKeyCreator interface { Create(context.Context, sshx.ClientKeyRequest) (sshx.ClientKey, error) }
+type StartDependencies struct { Observer backend.Observer; Host RuntimeChecker; CA CAValidator; Supervisor SupervisorControl; RuntimeRoot string; NewGeneration func() (string, error) }
 func (s *Service) Start(context.Context, string) (Record, error)
 func DetectHost() (string, error)
 func Converge(context.Context, ZoneClient, sshx.Connection, string) error
 ```
 
-Start acquires the per-session lock, validates only selected-domain V3 host/CA prerequisites, loads exact record/object, persists `StateStarting` + fresh UUID generation + `ReadinessStarting` before launch. `CheckRuntime` reuses doctor-equivalent inspection and returns the exact validated manifest/Screen/Softnet facts rather than duplicating path trust in session code. Those facts are serialized into the owner-private supervisor request and revalidated by the child before Tart execution. Supervisor exchanges exact serial request/result, validates nonce/generation/association/CA/principal/sshd/host key, admits pin, resolves fresh literal address, issues runtime cert, probes strict SSH, applies and reads back `DetectHost()`. Only a fresh healthy snapshot fsyncs `StateRunning` / `ReadinessReady`; failures remain non-ready or settle stopped only after proven owned shutdown and observation.
+Start acquires the per-session lock, validates only selected-domain V3 host/CA prerequisites, loads exact record/object, persists `StateStarting` + fresh UUID generation + `ReadinessStarting` before launch. `CheckRuntime` reuses doctor-equivalent inspection and returns the exact validated manifest/Screen/Softnet facts rather than duplicating path trust in session code. Start supplies the focused supervisor control with the exact canonical outer path and an expected-contract request containing the binding, canonical session-record name, and non-secret host/CA admission facts. It supplies no private key, control key, open descriptor, process handle, or preconstructed runtime capability.
+
+The supervisor subsystem atomically publishes a first-launch outer namespace containing its exact immutable request. On retry it admits only a canonical, owner-private, non-symlinked generation whose request, fixed entry set, optional live manifest/control authentication, and durable `starting`/`running` record all prove the same domain/session UUID/backend/generation. Empty, request-less, foreign, malformed, unexpectedly populated, or unauthenticated-live state is drift and is never adopted. A retry retains the exact persisted generation rather than allocating another.
+
+After claiming the generation lock, the detached child reloads the configured domain and durable session record by canonical name; compares the exact UUID/backend/generation binding; reruns host admission; reruns configured-domain CA admission without weakening its duplicate/partial-state checks; and compares the resulting public facts with the request. Only after all authoritative checks pass does it construct its backend, serial, SSH, and health capabilities. It calls `serialx.CreateRuntime(ctx, outerGeneration, "serial", screenAdmission)`, so `serialx` exclusively creates/adopts nothing outside its fixed subtree and supervisor endpoint evidence is bound to `<generation>/serial/...`.
+
+Supervisor exchanges exact serial request/result, validates nonce/generation/association/CA/principal/sshd/host key, admits pin, asks the narrow `sshx` client-key creator for one fixed generation-private Ed25519 management key, resolves a fresh literal address, issues the runtime certificate, probes strict SSH, and applies and reads back `DetectHost()`. The key creator owns fixed `/usr/bin/ssh-keygen` argv/environment, exact path/type/mode validation, and atomic publication; the supervisor receives no generic command-execution capability. Only a fresh healthy snapshot fsyncs `StateRunning` / `ReadinessReady`; failures remain non-ready or settle stopped only after exact owned serial cleanup, backend termination, supervisor outer cleanup, and stopped observation. Failed pre-detach launch cleanup additionally reaps the exact retained child before parent/controller namespace removal.
 
 The supervisor revalidates immutable CA metadata, renews the 15-minute no-extension certificate when five minutes remain, and runs a typed read-only probe every 30 seconds. It publishes only a bounded authenticated health snapshot. Evidence older than 90 seconds, an expired certificate, failed probe/challenge, poisoned broker, missing child, or zone mismatch is non-ready. Status consumes this evidence but never renews, probes, or repairs.
 
-- [ ] **RED:** `TestStartPersistsGenerationBeforeBackendMutation`, `TestStartRejectsUnhealthyHostOrMissingSelectedDomainCA`, `TestStartDoesNotAdoptAlreadyRunningObject`, `TestStartPinsSerialHostKeyBeforeCertificateAndSSH`, `TestStartRequiresExactZoneReadbackBeforeReady`, `TestStartRetryResumesOnlyExactLiveGeneration`, `TestStartFailureCleansOnlyProvenOwnedRuntime`.
+- [ ] **RED:** `TestStartPersistsGenerationBeforeRuntimeMutation`, `TestSupervisorPublishesOnlyBoundGenerationNamespace`, `TestStartRejectsUnhealthyHostOrMissingSelectedDomainCA`, `TestStartDoesNotAdoptAlreadyRunningObject`, `TestStartRejectsEmptyForeignMalformedOrUnexpectedGenerationState`, `TestChildRevalidatesRequestAgainstConfigRecordHostAndCA`, `TestSerialRuntimeCreatesOnlyNestedSerialSubtree`, `TestStartPinsSerialHostKeyBeforeClientKeyCertificateAndSSH`, `TestClientKeyCreatorHasOnlyExactTypedSurface`, `TestStartRequiresExactZoneReadbackBeforeReady`, `TestStartRetryResumesOnlyExactLiveGeneration`, `TestStartFailureCleansOnlyProvenOwnedRuntimeAfterChildReap`.
 - [ ] **Run RED:** `go test ./internal/session ./internal/timezonex -run 'Test(Start|DetectHost|Converge)' -count=1`.
-- [ ] **GREEN:** Adapt preserved backend/timezone/guestproto code. Preserve record compatibility: starting/running require generation; stopped clears it. No IP in record/pin; no generic SSH command, lazy init, credential/profile injection, or repair.
+- [ ] **GREEN:** Adapt preserved backend/timezone/guestproto code and implement the approved ownership refinement in `docs/superpowers/specs/2026-09-06-boxwarden-supervisor-generation-ownership-design.md`. Preserve record compatibility: starting/running require generation; stopped clears it. No IP in record/pin; no generic SSH command, lazy init, credential/profile injection, or repair.
 - [ ] **Verify:** `go test ./internal/session ./internal/timezonex ./internal/sshx -count=1 && go test -race ./internal/session ./internal/timezonex -count=1`.
 - [ ] **Commit:** `git add internal/session internal/timezonex internal/sshx internal/hostx internal/app cmd/boxwarden && git commit -m "feat(session): start owned sessions through serial readiness" -m "Persist a start generation before launch and require admitted host facts, serial trust, exact host-key pinning, strict SSH, and time-zone convergence before READY."`
 
