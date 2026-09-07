@@ -629,3 +629,20 @@ PASS
 
 No generation-lock or startup-policy work was added; those remain the bounded
 5.2b follow-up.
+
+### 5.2a correction round 2
+
+The redundant `SystemDoctor.currentScreen` method was removed entirely. The
+shared inspection invokes only `inspectCurrentScreen`; no exported function or
+method returns `ScreenAdmission`, and the AST regression permits
+`RuntimeAdmission` only from `SystemDoctor.AdmitRuntime`.
+
+The outer-artifact adversarial table now covers every credential name with its
+exact accepted regular mode, wrong regular mode, directory, and symlink forms,
+both root serial endpoints, arbitrary names, and the sole valid `serial/`
+directory.
+
+```text
+go test ./internal/hostx ./internal/supervisor -run 'Test(ScreenAdmissionPublicSurface|ValidateLiveOuterEntry)' -count=1
+PASS
+```

@@ -147,17 +147,6 @@ func NewSystemDoctor() SystemDoctor {
 	return SystemDoctor{inspector: NewOSDoctorInspector()}
 }
 
-// currentScreen is an in-package test helper. Production callers must use
-// AdmitRuntime, which gates this capability on the complete Doctor result.
-func (s SystemDoctor) currentScreen(ctx context.Context) (ScreenAdmission, error) {
-	inspector := s.inspector
-	if inspector == nil {
-		inspector = NewOSDoctorInspector()
-	}
-	result := inspectCurrentScreen(ctx, inspector)
-	return result.admission, result.err
-}
-
 func (s SystemDoctor) CheckRuntime(ctx context.Context, request Request) (RuntimeExpectation, error) {
 	result := s.inspect(ctx, request)
 	if result.report.Status != Healthy || result.screen.err != nil {

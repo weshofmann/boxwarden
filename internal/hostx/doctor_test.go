@@ -125,9 +125,7 @@ func TestDoctorNeverExecutesConfiguredTartAndGatesScreenVersionOnExactIdentity(t
 
 func TestCurrentScreenInspectsAndExecutesOnlyTheFixedQualifiedPathInOrder(t *testing.T) {
 	inspector, _ := healthyDoctorFixture(t)
-	doctor := SystemDoctor{inspector: inspector}
-
-	admission, err := doctor.currentScreen(t.Context())
+	admission, err := currentScreenForTest(t.Context(), inspector)
 	if err != nil {
 		t.Fatalf("currentScreen() error = %v", err)
 	}
@@ -183,7 +181,7 @@ func TestCurrentScreenNeverExecutesScreenAfterMetadataFailure(t *testing.T) {
 			inspector, _ := healthyDoctorFixture(t)
 			mutate(inspector)
 
-			if admission, err := (SystemDoctor{inspector: inspector}).currentScreen(t.Context()); err == nil || admission.ValidForRuntime() {
+			if admission, err := currentScreenForTest(t.Context(), inspector); err == nil || admission.ValidForRuntime() {
 				t.Fatalf("currentScreen() = %#v, %v; want refusal", admission, err)
 			}
 			if len(inspector.commands) != 0 {
@@ -217,7 +215,7 @@ func TestCurrentScreenAdmissionAgreesWithDoctorScreenFindings(t *testing.T) {
 			mutate(admissionInspector)
 			mutate(doctorInspector)
 
-			admission, err := (SystemDoctor{inspector: admissionInspector}).currentScreen(t.Context())
+			admission, err := currentScreenForTest(t.Context(), admissionInspector)
 			report := (SystemDoctor{inspector: doctorInspector}).Doctor(t.Context(), request)
 			doctorAccepted := !hasFindingPrefix(report, "screen.")
 			if admitted := err == nil && admission.ValidForRuntime(); admitted != doctorAccepted {
@@ -250,11 +248,6 @@ func TestCheckRuntimeRequiresCompleteHealthyDoctorReport(t *testing.T) {
 }
 
 func TestScreenAdmissionPublicSurfaceHasNoCallerFactMintingAPI(t *testing.T) {
-	var currentScreen func(SystemDoctor, context.Context) (ScreenAdmission, error) = SystemDoctor.currentScreen
-	if currentScreen == nil {
-		t.Fatal("SystemDoctor.currentScreen is nil")
-	}
-
 	_, testFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller() failed")
@@ -274,14 +267,22 @@ func TestScreenAdmissionPublicSurfaceHasNoCallerFactMintingAPI(t *testing.T) {
 		}
 		for _, declaration := range file.Decls {
 			function, ok := declaration.(*ast.FuncDecl)
-			if !ok || !ast.IsExported(function.Name.Name) || !returnsNamedType(function.Type.Results, "ScreenAdmission") {
+			if !ok || !ast.IsExported(function.Name.Name) {
 				continue
 			}
-			if function.Recv == nil || function.Name.Name != "currentScreen" || !fieldListNamesType(function.Recv, "SystemDoctor") {
-				t.Fatalf("exported %s can mint ScreenAdmission outside SystemDoctor.currentScreen", function.Name.Name)
+			if returnsNamedType(function.Type.Results, "ScreenAdmission") {
+				t.Fatalf("exported %s can mint ScreenAdmission", function.Name.Name)
+			}
+			if returnsNamedType(function.Type.Results, "RuntimeAdmission") && (function.Recv == nil || function.Name.Name != "AdmitRuntime" || !fieldListNamesType(function.Recv, "SystemDoctor")) {
+				t.Fatalf("exported %s can mint RuntimeAdmission outside SystemDoctor.AdmitRuntime", function.Name.Name)
 			}
 		}
 	}
+}
+
+func currentScreenForTest(ctx context.Context, inspector DoctorInspector) (ScreenAdmission, error) {
+	result := inspectCurrentScreen(ctx, inspector)
+	return result.admission, result.err
 }
 
 func TestDoctorTartAdmissionRequiresExactSafeExecutableMetadata(t *testing.T) {

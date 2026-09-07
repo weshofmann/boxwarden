@@ -85,28 +85,70 @@ func TestExactControllerRejectsSerialEndpointAtGenerationRoot(t *testing.T) {
 // Production break: broad root artifact admission would let a hostile or
 // stale child hide arbitrary files behind an authenticated generation.
 func TestValidateLiveOuterEntryFiniteCredentialAllowlist(t *testing.T) {
-	for _, test := range []struct {
-		name  string
-		entry string
-		mode  os.FileMode
-		dir   bool
-		ok    bool
-	}{
-		{"client private", "client", 0o600, false, true},
-		{"client public wrong mode", "client", 0o644, false, false},
-		{"client pub", "client.pub", 0o644, false, true},
-		{"certificate public", "client-cert.pub", 0o644, false, true},
-		{"known hosts private", "known_hosts", 0o600, false, true},
-		{"known hosts wrong type", "known_hosts", 0o700, true, false},
-		{"serial directory", "serial", 0o700, true, true},
-		{"root serial endpoint", "tart-serial", 0o600, false, false},
-		{"arbitrary root artifact", "client.tmp", 0o600, false, false},
-	} {
+	credentials := []struct {
+		name string
+		mode os.FileMode
+	}{{"client", 0o600}, {"client.pub", 0o644}, {"client-cert.pub", 0o644}, {"known_hosts", 0o600}}
+	tests := []struct {
+		name    string
+		entry   string
+		mode    os.FileMode
+		dir     bool
+		symlink bool
+		ok      bool
+	}{}
+	for _, credential := range credentials {
+		tests = append(tests,
+			struct {
+				name, entry      string
+				mode             os.FileMode
+				dir, symlink, ok bool
+			}{"accept " + credential.name, credential.name, credential.mode, false, false, true},
+			struct {
+				name, entry      string
+				mode             os.FileMode
+				dir, symlink, ok bool
+			}{"wrong mode " + credential.name, credential.name, credential.mode ^ 0o044, false, false, false},
+			struct {
+				name, entry      string
+				mode             os.FileMode
+				dir, symlink, ok bool
+			}{"directory " + credential.name, credential.name, 0o700, true, false, false},
+			struct {
+				name, entry      string
+				mode             os.FileMode
+				dir, symlink, ok bool
+			}{"symlink " + credential.name, credential.name, credential.mode, false, true, false})
+	}
+	tests = append(tests,
+		struct {
+			name, entry      string
+			mode             os.FileMode
+			dir, symlink, ok bool
+		}{"serial directory", "serial", 0o700, true, false, true},
+		struct {
+			name, entry      string
+			mode             os.FileMode
+			dir, symlink, ok bool
+		}{"tart serial root", "tart-serial", 0o600, false, false, false},
+		struct {
+			name, entry      string
+			mode             os.FileMode
+			dir, symlink, ok bool
+		}{"operator console root", "operator-console", 0o600, false, false, false},
+		struct {
+			name, entry      string
+			mode             os.FileMode
+			dir, symlink, ok bool
+		}{"arbitrary root artifact", "client.tmp", 0o600, false, false, false})
+	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			runtime := privateRuntime(t)
 			path := filepath.Join(runtime, test.entry)
 			var err error
-			if test.dir {
+			if test.symlink {
+				err = os.Symlink("target", path)
+			} else if test.dir {
 				err = os.Mkdir(path, test.mode)
 			} else {
 				err = os.WriteFile(path, []byte("test"), test.mode)
