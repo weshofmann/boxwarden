@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -360,6 +361,17 @@ func TestDetachedLauncherUsesFixedInternalArgvAndClosedEnvironment(t *testing.T)
 	child := &testLaunchChild{}
 	launcher := newDetachedLauncher(launcherDeps{executable: func() (string, error) { return "/private/boxwarden", nil }, inspector: testInspector(identity), start: func(_ context.Context, command LaunchCommand) (launchChild, error) {
 		got = command
+		if command.GenerationLock == nil {
+			t.Fatal("detached launch did not receive the fixed inherited generation-lock capability")
+		}
+		contender, err := os.OpenFile(filepath.Join(dir, lockName), os.O_RDONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer contender.Close()
+		if err := syscall.Flock(int(contender.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+			t.Fatal("parent did not claim generation lock before fake child start")
+		}
 		return child, nil
 	}, await: func(context.Context, *Client, Binding) error { return nil }})
 	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
@@ -371,6 +383,44 @@ func TestDetachedLauncherUsesFixedInternalArgvAndClosedEnvironment(t *testing.T)
 	}
 	if len(got.Env) != 3 || got.Env[0] != "PATH=/usr/bin:/bin" || !child.released {
 		t.Fatalf("launch env=%#v", got.Env)
+	}
+}
+
+func TestDetachedLauncherReturnsOwnedGenerationWithoutSpawnOrCleanupOnLockContention(t *testing.T) {
+	dir := privateRuntime(t)
+	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
+	if err := writeLaunchRequest(filepath.Join(dir, requestName), request); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeBoundGenerationLock(filepath.Join(dir, lockName), request); err != nil {
+		t.Fatal(err)
+	}
+	held, err := os.OpenFile(filepath.Join(dir, lockName), os.O_RDONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(301, 0), Unique: 31}
+	launcher := newDetachedLauncher(launcherDeps{executable: func() (string, error) { return "/private/boxwarden", nil }, inspector: testInspector(identity), start: func(context.Context, LaunchCommand) (launchChild, error) {
+		called = true
+		return &testLaunchChild{}, nil
+	}, await: func(context.Context, *Client, Binding) error { return nil }})
+	err = launcher.Launch(context.Background(), request)
+	if !errors.Is(err, errGenerationAlreadyOwned) {
+		t.Fatalf("Launch() error=%v, want owned-generation sentinel", err)
+	}
+	if called {
+		t.Fatal("contended generation spawned a child")
+	}
+	if _, err := os.Lstat(filepath.Join(dir, requestName)); err != nil {
+		t.Fatalf("contended request was cleaned: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, lockName)); err != nil {
+		t.Fatalf("contended lock was cleaned: %v", err)
 	}
 }
 

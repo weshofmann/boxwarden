@@ -137,6 +137,36 @@ go test ./internal/supervisor -run '^TestPrivateRuntimeUsesGoTemporaryDirectory$
 PASS
 ```
 
+## Task 5.2b2 — gap-free inherited generation-lock handoff
+
+The detached parent now takes `LOCK_EX|LOCK_NB` on its retained exact bound
+lock before spawning. It passes only that file as the first fixed `ExtraFiles`
+entry (child fd 3), retains its copy until `exec.Cmd.Start` succeeds, then
+closes only the parent copy. The child production entrypoint accepts only fd 3
+and admits it against the rooted current `generation.lock` identity, mode,
+owner, strict bound bytes, and admitted request before any owner mutation.
+Production never reopens or creates a pathname lock; direct `Run` retains its
+test-only self-acquire seam.
+
+Lock contention returns the internal `errGenerationAlreadyOwned` sentinel
+without spawn or cleanup, leaving b3 to authenticate/reconcile it. Failed
+parent launches retain existing stop/reap-before-identity-cleanup ordering.
+
+One OS limitation is explicit: Darwin/POSIX `flock` has no operation that can
+distinguish an already-held inherited open-file description from an unheld
+valid descriptor owned by the same process. The gap-free security property is
+therefore established by parent claim-before-fork plus exact fd-3 inheritance;
+detecting a deliberately fabricated unheld but otherwise identical fd would
+require a separate authenticated handoff record and is outside this narrow
+transport slice.
+
+Focused verification:
+
+```text
+go test ./internal/supervisor -run 'Test(DetachedLauncherUsesFixedInternalArgvAndClosedEnvironment|DetachedLauncherReturnsOwnedGenerationWithoutSpawnOrCleanupOnLockContention)' -count=1
+PASS
+```
+
 An initial `GOOS=linux GOARCH=amd64 go test ...` attempt correctly produced
 `exec format error` because a macOS host cannot execute a Linux test binary.
 The portable equivalent compiled the Linux supervisor test binary only:

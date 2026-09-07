@@ -48,9 +48,10 @@ type ProcessInspector interface {
 }
 
 type LaunchCommand struct {
-	Path      string
-	Args, Env []string
-	Dir       string
+	Path           string
+	Args, Env      []string
+	Dir            string
+	GenerationLock *os.File // fixed fd 3 in the detached child; no generic fd surface
 }
 type launchChild interface {
 	release() error
@@ -109,6 +110,9 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 	if err != nil {
 		return errors.Join(fmt.Errorf("admit exact bound generation lock: %w", err), requestArtifact.close())
 	}
+	if err := claimPublishedGenerationLock(lockArtifact); err != nil {
+		return errors.Join(err, requestArtifact.close(), lockArtifact.close())
+	}
 	requestCleaned := false
 	cleanupRequest := func() error {
 		if requestCleaned {
@@ -131,7 +135,7 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 	if err := ctx.Err(); err != nil {
 		return errors.Join(err, cleanupRequest())
 	}
-	child, err := l.deps.start(ctx, LaunchCommand{Path: executable, Args: []string{"internal", "session-supervisor", requestPath}, Env: []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C"}, Dir: request.RuntimeDirectory})
+	child, err := l.deps.start(ctx, LaunchCommand{Path: executable, Args: []string{"internal", "session-supervisor", requestPath}, Env: []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C"}, Dir: request.RuntimeDirectory, GenerationLock: lockArtifact.file})
 	if err != nil {
 		return errors.Join(err, cleanupRequest())
 	}
@@ -177,9 +181,13 @@ func awaitAuthenticated(ctx context.Context, client *Client, binding Binding) er
 type exactChild struct{ cmd *exec.Cmd }
 
 func startExactChild(ctx context.Context, command LaunchCommand) (launchChild, error) {
+	if command.GenerationLock == nil {
+		return nil, fmt.Errorf("inherited generation lock is unavailable")
+	}
 	cmd := exec.Command(command.Path, command.Args...)
 	cmd.Env = append([]string(nil), command.Env...)
 	cmd.Dir = command.Dir
+	cmd.ExtraFiles = []*os.File{command.GenerationLock}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -188,6 +196,26 @@ func startExactChild(ctx context.Context, command LaunchCommand) (launchChild, e
 		return nil, err
 	}
 	return &exactChild{cmd: cmd}, nil
+}
+
+var errGenerationAlreadyOwned = errors.New("exact generation is already owned")
+
+type generationAlreadyOwnedError struct{ cause error }
+
+func (e generationAlreadyOwnedError) Error() string { return errGenerationAlreadyOwned.Error() }
+func (e generationAlreadyOwnedError) Unwrap() error { return errGenerationAlreadyOwned }
+
+func claimPublishedGenerationLock(lock *retainedPrivateFile) error {
+	if lock == nil || lock.file == nil {
+		return fmt.Errorf("published generation lock is unavailable")
+	}
+	if err := syscall.Flock(int(lock.file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return generationAlreadyOwnedError{cause: err}
+		}
+		return fmt.Errorf("claim published generation lock: %w", err)
+	}
+	return nil
 }
 func (c *exactChild) release() error {
 	if c == nil || c.cmd == nil || c.cmd.Process == nil {
@@ -212,7 +240,11 @@ func (c *exactChild) wait() error {
 // host/backend facts. The launcher only treats an authenticated ready response
 // as success; this refusal never fabricates an owner from request bytes.
 func RunRequest(ctx context.Context, requestPath string) error {
-	return Run(ctx, requestPath, unavailableOwner{}, systemInspector{})
+	lock := os.NewFile(uintptr(3), "boxwarden-generation-lock")
+	if lock == nil {
+		return fmt.Errorf("inherited generation lock fd 3 is unavailable")
+	}
+	return runWithInheritedLock(ctx, requestPath, unavailableOwner{}, systemInspector{}, lock)
 }
 
 type unavailableOwner struct{}
@@ -270,6 +302,13 @@ func prepare(ctx context.Context, request LaunchRequest, owner RuntimeOwner, ins
 // Run owns one generation. Every outcome converges through one bounded
 // stop/wait/close/identity-cleanup sequence; evidence is never used to signal.
 func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector ProcessInspector) error {
+	return runWithInheritedLock(ctx, requestPath, owner, inspector, nil)
+}
+
+// runWithInheritedLock preserves the direct Run seam for deterministic tests.
+// Production RunRequest always supplies fixed fd 3 and therefore cannot reopen
+// or create a pathname lock.
+func runWithInheritedLock(ctx context.Context, requestPath string, owner RuntimeOwner, inspector ProcessInspector, inheritedLock *os.File) error {
 	if inspector == nil || !inspector.Supported() {
 		return fmt.Errorf("supervisor process identity is unsupported on this platform")
 	}
@@ -303,7 +342,12 @@ func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector 
 		_ = resources.root.Close()
 		return fmt.Errorf("runtime directory path was replaced during rooted admission")
 	}
-	lock, err := acquirePublishedGenerationLockInRoot(resources.root, request.RuntimeDirectory, request)
+	var lock *retainedPrivateFile
+	if inheritedLock == nil {
+		lock, err = acquirePublishedGenerationLockInRoot(resources.root, request.RuntimeDirectory, request)
+	} else {
+		lock, err = admitInheritedGenerationLockInRoot(resources.root, request.RuntimeDirectory, request, inheritedLock)
+	}
 	if err != nil {
 		_ = resources.root.Close()
 		return err
@@ -459,6 +503,38 @@ func acquirePublishedGenerationLockInRoot(root *os.Root, runtime string, request
 		return nil, fmt.Errorf("acquire published generation lock: %w", err)
 	}
 	return lock, nil
+}
+
+// admitInheritedGenerationLockInRoot accepts only the parent's fixed fd-3
+// duplicate. It proves that descriptor and the rooted current pathname name
+// the same private immutable bound lock; it does not reopen, create, or flock
+// a path. The parent claim survives exec through the shared open description.
+func admitInheritedGenerationLockInRoot(root *os.Root, runtime string, request LaunchRequest, file *os.File) (*retainedPrivateFile, error) {
+	if root == nil || file == nil || request.RuntimeDirectory != runtime {
+		return nil, fmt.Errorf("inherited generation lock is unavailable")
+	}
+	path := filepath.Join(runtime, lockName)
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info) {
+		_ = file.Close()
+		return nil, fmt.Errorf("inherited generation lock is unsafe")
+	}
+	identity, err := identityFor(path, info)
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	current, err := root.Lstat(lockName)
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	currentIdentity, err := identityFor(path, current)
+	if err != nil || !identity.matches(currentIdentity) || current.Mode()&os.ModeSymlink != 0 || !current.Mode().IsRegular() || current.Mode().Perm() != 0o600 || !ownedByCurrentUser(current) {
+		_ = file.Close()
+		return nil, fmt.Errorf("inherited generation lock was replaced")
+	}
+	return validateBoundGenerationLock(&retainedPrivateFile{identity: identity, file: file}, request)
 }
 func captureSocket(path string) (FileIdentity, error) {
 	identity, info, err := captureIdentity(path)
