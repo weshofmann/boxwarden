@@ -290,7 +290,7 @@ properties (S10–S13) remain pending.
 | I2 | Guest-controlled input cannot automatically become trusted persistent host state | D | `docs/security-model.md`; `docs/state-model.md` | Profile persistence not yet implemented |
 | I3 | age private keys are host-only; never enter a guest | D | `docs/credentials.md`; `docs/decisions/005-age-and-explicit-profile-writeback.md` | — |
 | I4 | The installed manifest contains only non-secret metadata; CA material, credentials, and session data are prohibited | D, T, Q | ADR 024; `internal/hostx/manifest_test.go`; V3 evidence: manifest SHA-256 and content verified | — |
-| I5 | Runtime authority is only the live exact supervisor/listener and retained backend handle; no Screen, two-PTY relay, HMAC/control key, ownership manifest, libproc/OFD reconstruction, or persisted PID/start-time authority exists | D, T | `docs/architecture.md`; `internal/architecture/backend_seam_test.go`; retained-handle and exact-cleanup tests in `internal/sessionruntime` and `internal/supervisor` | Trusted cooperating host-process model; no attended Slice B runtime proof |
+| I5 | Runtime authority is only the live exact supervisor/listener and retained backend handle; no Screen, two-PTY relay, HMAC/control key, ownership manifest, libproc/OFD reconstruction, or persisted PID/start-time authority exists | D, T | `docs/architecture.md`; `internal/architecture/slice_b_runtime_guard_test.go`; retained-handle and exact-cleanup tests in `internal/sessionruntime` and `internal/supervisor` | Trusted cooperating host-process model; no attended Slice B runtime proof |
 
 ### Golden provenance
 
