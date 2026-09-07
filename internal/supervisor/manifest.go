@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -66,6 +67,14 @@ type FileIdentity struct {
 func (f FileIdentity) valid() bool { return canonicalAbsolute(f.Path) && f.Device != 0 && f.Inode != 0 }
 func (f FileIdentity) matches(other FileIdentity) bool {
 	return f.Path == other.Path && f.Device == other.Device && f.Inode == other.Inode
+}
+
+// retainedPrivateFile is a supervisor-owned capability for one admitted
+// immutable artifact. Its descriptor prevents a removed inode from being
+// reused under the same path before identity-checked cleanup completes.
+type retainedPrivateFile struct {
+	identity FileIdentity
+	file     *os.File
 }
 
 type NamedProcessEvidence struct {
@@ -148,10 +157,6 @@ func privateDirectory(path string) bool {
 	info, err := os.Lstat(path)
 	return err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 && info.Mode().Perm() == 0o700 && ownedByCurrentUser(info)
 }
-func privateRegular(path string) bool {
-	info, err := os.Lstat(path)
-	return err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 && info.Mode().Perm() == 0o600 && ownedByCurrentUser(info)
-}
 func ownedByCurrentUser(info os.FileInfo) bool {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	return ok && int(stat.Uid) == os.Getuid()
@@ -177,6 +182,54 @@ func capturePrivateRegular(path string) (FileIdentity, error) {
 		return FileIdentity{}, fmt.Errorf("owner-private regular identity unavailable")
 	}
 	return identity, nil
+}
+
+func admitPrivateRegular(path string) (*retainedPrivateFile, error) {
+	expected, err := capturePrivateRegular(path)
+	if err != nil {
+		return nil, err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	actual, err := identityFor(path, info)
+	if err != nil || !expected.matches(actual) || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info) {
+		_ = file.Close()
+		return nil, fmt.Errorf("owner-private regular artifact changed during admission")
+	}
+	return &retainedPrivateFile{identity: actual, file: file}, nil
+}
+
+func (r *retainedPrivateFile) read() ([]byte, error) {
+	if r == nil || r.file == nil {
+		return nil, fmt.Errorf("retained artifact is unavailable")
+	}
+	if _, err := r.file.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(io.LimitReader(r.file, maxControlBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 || len(data) > maxControlBytes {
+		return nil, fmt.Errorf("supervisor artifact exceeds bound")
+	}
+	return data, nil
+}
+
+func (r *retainedPrivateFile) close() error {
+	if r == nil || r.file == nil {
+		return nil
+	}
+	file := r.file
+	r.file = nil
+	return file.Close()
 }
 func capturePrivateDirectory(path string) (FileIdentity, error) {
 	identity, info, err := captureIdentity(path)
@@ -233,27 +286,40 @@ func writePrivateFile(path string, data []byte) error {
 	return dir.Sync()
 }
 func readLaunchRequest(path string) (LaunchRequest, error) {
-	if filepath.Base(path) != requestName || !privateRegular(path) {
-		return LaunchRequest{}, fmt.Errorf("supervisor request is not an owner-private immutable file")
+	request, retained, err := admitLaunchRequest(path)
+	if retained != nil {
+		err = errors.Join(err, retained.close())
 	}
-	data, err := os.ReadFile(path)
+	return request, err
+}
+
+func admitLaunchRequest(path string) (LaunchRequest, *retainedPrivateFile, error) {
+	if filepath.Base(path) != requestName {
+		return LaunchRequest{}, nil, fmt.Errorf("supervisor request is not an owner-private immutable file")
+	}
+	retained, err := admitPrivateRegular(path)
 	if err != nil {
-		return LaunchRequest{}, err
+		return LaunchRequest{}, nil, fmt.Errorf("supervisor request is not an owner-private immutable file: %w", err)
 	}
-	if len(data) == 0 || len(data) > maxControlBytes {
-		return LaunchRequest{}, fmt.Errorf("supervisor request exceeds bound")
+	data, err := retained.read()
+	if err != nil {
+		_ = retained.close()
+		return LaunchRequest{}, nil, err
 	}
 	var request LaunchRequest
 	if err := decodeExact(data, &request); err != nil {
-		return LaunchRequest{}, err
+		_ = retained.close()
+		return LaunchRequest{}, nil, err
 	}
 	if err := validLaunchRequest(request); err != nil {
-		return LaunchRequest{}, err
+		_ = retained.close()
+		return LaunchRequest{}, nil, err
 	}
 	if filepath.Dir(path) != request.RuntimeDirectory {
-		return LaunchRequest{}, fmt.Errorf("request is outside bound runtime directory")
+		_ = retained.close()
+		return LaunchRequest{}, nil, fmt.Errorf("request is outside bound runtime directory")
 	}
-	return request, nil
+	return request, retained, nil
 }
 func writeManifest(path string, manifest Manifest) error {
 	if filepath.Dir(path) != manifest.RuntimeDirectory || filepath.Base(path) != manifestName {
@@ -269,27 +335,40 @@ func writeManifest(path string, manifest Manifest) error {
 	return writePrivateFile(path, data)
 }
 func readManifest(path string) (Manifest, error) {
-	if filepath.Base(path) != manifestName || !privateRegular(path) {
-		return Manifest{}, fmt.Errorf("supervisor manifest is not an owner-private immutable file")
+	manifest, retained, err := admitManifest(path)
+	if retained != nil {
+		err = errors.Join(err, retained.close())
 	}
-	data, err := os.ReadFile(path)
+	return manifest, err
+}
+
+func admitManifest(path string) (Manifest, *retainedPrivateFile, error) {
+	if filepath.Base(path) != manifestName {
+		return Manifest{}, nil, fmt.Errorf("supervisor manifest is not an owner-private immutable file")
+	}
+	retained, err := admitPrivateRegular(path)
 	if err != nil {
-		return Manifest{}, err
+		return Manifest{}, nil, fmt.Errorf("supervisor manifest is not an owner-private immutable file: %w", err)
 	}
-	if len(data) == 0 || len(data) > maxControlBytes {
-		return Manifest{}, fmt.Errorf("supervisor manifest exceeds bound")
+	data, err := retained.read()
+	if err != nil {
+		_ = retained.close()
+		return Manifest{}, nil, err
 	}
 	var manifest Manifest
 	if err := decodeExact(data, &manifest); err != nil {
-		return Manifest{}, err
+		_ = retained.close()
+		return Manifest{}, nil, err
 	}
 	if err := validManifest(manifest); err != nil {
-		return Manifest{}, err
+		_ = retained.close()
+		return Manifest{}, nil, err
 	}
 	if filepath.Dir(path) != manifest.RuntimeDirectory {
-		return Manifest{}, fmt.Errorf("manifest is outside declared runtime directory")
+		_ = retained.close()
+		return Manifest{}, nil, fmt.Errorf("manifest is outside declared runtime directory")
 	}
-	return manifest, nil
+	return manifest, retained, nil
 }
 func validStartEvidence(evidence RuntimeStartEvidence, runtime string) error {
 	if len(evidence.Children) != 2 || len(evidence.Endpoints) != 2 || len(evidence.Children) > maxEvidenceItems || len(evidence.Endpoints) > maxEvidenceItems || evidence.Broker.Healthy == evidence.Broker.Poisoned {

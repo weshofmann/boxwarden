@@ -27,7 +27,7 @@ func TestSupervisorLaunchPersistsNoBarePIDOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, _, err := prepare(context.Background(), filepath.Join(dir, requestName), owner, testInspector(identity), runtimeIdentity)
+	manifest, _, err := prepare(context.Background(), request, owner, testInspector(identity), runtimeIdentity)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,11 @@ func TestManifestRejectsPathOutsideDeclaredRuntimeDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, _, err := prepare(context.Background(), requestPath, owner, testInspector(identity), runtimeIdentity)
+	request, err := readLaunchRequest(requestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, _, err := prepare(context.Background(), request, owner, testInspector(identity), runtimeIdentity)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +327,11 @@ func TestPrepareRejectsUnsupportedPlatformBeforeRuntimeStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := prepare(context.Background(), requestPath, owner, unsupportedInspector{}, runtimeIdentity); err == nil {
+	request, err := readLaunchRequest(requestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := prepare(context.Background(), request, owner, unsupportedInspector{}, runtimeIdentity); err == nil {
 		t.Fatal("unsupported platform prepared a runtime")
 	}
 	if owner.started() {
@@ -586,11 +594,40 @@ func TestDetachedChildReaperCompletionWinsReadyDeadline(t *testing.T) {
 func TestCleanupPreservesSameModeManifestReplacement(t *testing.T) {
 	service, _, cancel := runningService(t, false)
 	manifestPath := filepath.Join(service.dir, manifestName)
+	requestPath := filepath.Join(service.dir, requestName)
+	original, err := capturePrivateRegular(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestOriginal, err := capturePrivateRegular(requestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Remove(manifestPath); err != nil {
 		t.Fatal(err)
 	}
 	if err := writePrivateFile(manifestPath, []byte("replacement")); err != nil {
 		t.Fatal(err)
+	}
+	replacement, err := capturePrivateRegular(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if original.matches(replacement) {
+		t.Fatal("replacement reused the owned manifest inode")
+	}
+	if err := os.Remove(requestPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePrivateFile(requestPath, []byte("request replacement")); err != nil {
+		t.Fatal(err)
+	}
+	requestReplacement, err := capturePrivateRegular(requestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requestOriginal.matches(requestReplacement) {
+		t.Fatal("replacement reused the owned request inode")
 	}
 	cancel()
 	service.owner.exit(nil)
@@ -601,6 +638,77 @@ func TestCleanupPreservesSameModeManifestReplacement(t *testing.T) {
 	}
 	if _, err := os.Lstat(manifestPath); err != nil {
 		t.Fatalf("same-mode replacement was removed: %v", err)
+	}
+	if _, err := os.Lstat(requestPath); err != nil {
+		t.Fatalf("same-mode request replacement was removed: %v", err)
+	}
+}
+
+func TestAdmittedPrivateRegularRetainsOriginalInodeUntilClosed(t *testing.T) {
+	dir := privateRuntime(t)
+	path := filepath.Join(dir, requestName)
+	if err := writePrivateFile(path, []byte("original")); err != nil {
+		t.Fatal(err)
+	}
+	retained, err := admitPrivateRegular(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePrivateFile(path, []byte("replacement")); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := capturePrivateRegular(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retained.identity.matches(replacement) {
+		t.Fatal("replacement reused inode while original artifact remained retained")
+	}
+	if err := retained.close(); err != nil {
+		t.Fatal(err)
+	}
+	if retained.file != nil {
+		t.Fatal("retained original file descriptor remained open after close")
+	}
+}
+
+func TestDetachedLauncherRetainsRequestInodeThroughFailedLaunchCleanup(t *testing.T) {
+	dir := privateRuntime(t)
+	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(606, 0).UTC(), Unique: 66}
+	var original FileIdentity
+	launcher := newDetachedLauncher(launcherDeps{
+		executable: func() (string, error) { return "/private/boxwarden", nil },
+		inspector:  testInspector(identity),
+		start: func(context.Context, LaunchCommand) (launchChild, error) {
+			requestPath := filepath.Join(dir, requestName)
+			var err error
+			original, err = capturePrivateRegular(requestPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(requestPath); err != nil {
+				t.Fatal(err)
+			}
+			if err := writePrivateFile(requestPath, []byte("replacement")); err != nil {
+				t.Fatal(err)
+			}
+			return nil, errors.New("start failed after request replacement")
+		},
+		await: func(context.Context, *Client, Binding) error { return nil },
+	})
+	err := launcher.Launch(context.Background(), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"})
+	if err == nil {
+		t.Fatal("replacement launch failure was accepted")
+	}
+	replacement, captureErr := capturePrivateRegular(filepath.Join(dir, requestName))
+	if captureErr != nil {
+		t.Fatalf("parent cleanup removed request replacement: %v", captureErr)
+	}
+	if original.matches(replacement) {
+		t.Fatal("parent request replacement reused the retained inode")
 	}
 }
 

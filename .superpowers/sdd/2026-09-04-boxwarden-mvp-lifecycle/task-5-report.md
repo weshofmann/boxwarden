@@ -165,3 +165,79 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o /private/tmp/boxwarden-task5a-
 The 20-iteration supervisor/CLI gate completed in 71.608 s. Native cgo and
 no-cgo outputs are Mach-O arm64; the cross-build is ELF arm64. `gofmt -l` on
 the changed Go test and `git diff --check` produced no output.
+
+## Task 5A CI correction round 2
+
+**Base:** `9e4c81ea5d0769d108dfe5b6a5707665366345e7`.
+
+GitHub Actions run `34072078362` exposed a real exact-artifact ownership flaw:
+the old cleanup remembered only `(path, device, inode)`. On ext4/overlayfs, a
+same-UID replacement could immediately reuse an inode after the original
+manifest had been removed, allowing cleanup to misclassify and unlink that
+replacement. This is not the accepted active same-UID postvalidation race; it
+was an avoidable artifact-lifetime gap in supervisor-owned cleanup.
+
+### Decision
+
+Supervisor lifecycle ownership now retains an owner-private regular-file
+descriptor for each admitted immutable request and manifest. Admission verifies
+the lstat/open/fstat identity before decoding bounded bytes from that retained
+descriptor. `Run` supplies the admitted request to `prepare`, rather than
+rereading the replaceable request pathname. It admits the generated manifest
+again and requires it to equal the generated expected manifest before using it.
+
+The parent detached launcher retains its request descriptor through start,
+authenticated handoff, and any failed-launch cleanup. `Run` retains both its
+request and manifest descriptors through identity-checked cleanup. The cleanup
+first compares/removes only the original path identity while the descriptor is
+still open, then closes the descriptor. Descriptors close on every early error,
+normal handoff, and final cleanup path. `FileIdentity` remains comparison
+evidence only; no PID/path adoption, new signal path, or runtime authority was
+introduced.
+
+### TDD evidence
+
+Added the retained-artifact regressions before implementation. Initial focused
+RED was the expected absent-admission capability:
+
+```text
+internal/supervisor/supervisor_test.go:624:19: undefined: admitPrivateRegular
+```
+
+GREEN coverage includes:
+
+- `TestAdmittedPrivateRegularRetainsOriginalInodeUntilClosed`, which removes
+  an admitted original, creates a replacement, proves the replacement cannot
+  inherit the retained inode, then proves the original descriptor closes.
+- `TestCleanupPreservesSameModeManifestReplacement`, strengthened to cover
+  both the child `Run` manifest and request cleanup paths; each replacement
+  must have a distinct inode and survive cleanup.
+- `TestDetachedLauncherRetainsRequestInodeThroughFailedLaunchCleanup`, which
+  replaces the parent-owned request during failed child start and proves the
+  replacement survives exact cleanup with a different inode.
+
+The focused regressions and their race-enabled form passed. Existing late
+reaper and one Stop/Wait/Close/cleanup tests remain green, so the correction
+does not add a second lifecycle cleanup sequence.
+
+### Verification
+
+All required native verification commands exited zero:
+
+```text
+go test ./internal/supervisor -count=1
+go test ./internal/supervisor ./cmd/boxwarden -count=20
+go test -race ./internal/supervisor -count=1
+go test ./...
+go test -race ./...
+go vet ./...
+go build -o /private/tmp/boxwarden-task5a-ci2-build.Rjvxpx/boxwarden-cgo ./cmd/boxwarden
+CGO_ENABLED=0 go build -o /private/tmp/boxwarden-task5a-ci2-build.Rjvxpx/boxwarden-nocgo ./cmd/boxwarden
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o /private/tmp/boxwarden-task5a-ci2-build.Rjvxpx/boxwarden-linux-arm64 ./cmd/boxwarden
+GOOS=linux GOARCH=amd64 go test -c -o /private/tmp/boxwarden-task5a-ci2-build.Rjvxpx/supervisor-linux-amd64.test ./internal/supervisor
+```
+
+The 20-iteration supervisor/CLI gate completed in 73.117 s. Native cgo and
+no-cgo outputs are Mach-O arm64; the Boxwarden cross-build is ELF arm64 and
+the compile-only supervisor test binary is ELF amd64. `gofmt -l` on changed Go
+files and `git diff --check` produced no output.

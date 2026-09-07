@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -92,11 +93,26 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 	if err := writeLaunchRequest(requestPath, request); err != nil {
 		return err
 	}
-	requestIdentity, err := capturePrivateRegular(requestPath)
+	admittedRequest, requestArtifact, err := admitLaunchRequest(requestPath)
 	if err != nil {
 		return err
 	}
-	cleanupRequest := func() error { return removeExact(requestIdentity, false) }
+	if admittedRequest != request {
+		return errors.Join(fmt.Errorf("supervisor request changed during parent admission"), requestArtifact.close())
+	}
+	requestCleaned := false
+	cleanupRequest := func() error {
+		if requestCleaned {
+			return nil
+		}
+		requestCleaned = true
+		return errors.Join(removeExact(requestArtifact.identity, false), requestArtifact.close())
+	}
+	defer func() {
+		if !requestCleaned {
+			_ = requestArtifact.close()
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return errors.Join(err, cleanupRequest())
 	}
@@ -130,7 +146,7 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 	if err := child.release(); err != nil {
 		return cleanupChild(err)
 	}
-	return nil
+	return requestArtifact.close()
 }
 func awaitAuthenticated(ctx context.Context, client *Client, binding Binding) error {
 	snapshot, err := client.Snapshot(ctx, binding)
@@ -198,17 +214,14 @@ func (unavailableOwner) Close(context.Context) error { return nil }
 
 type lifecycleResources struct {
 	runtime, request, manifest, socket, lock FileIdentity
+	requestArtifact, manifestArtifact        *retainedPrivateFile
 	lockHandle                               *os.File
 	root                                     *os.Root
 }
 
-func prepare(ctx context.Context, requestPath string, owner RuntimeOwner, inspector ProcessInspector, runtimeIdentity FileIdentity) (Manifest, bool, error) {
+func prepare(ctx context.Context, request LaunchRequest, owner RuntimeOwner, inspector ProcessInspector, runtimeIdentity FileIdentity) (Manifest, bool, error) {
 	if inspector == nil || !inspector.Supported() {
 		return Manifest{}, false, fmt.Errorf("supervisor process identity is unsupported on this platform")
-	}
-	request, err := readLaunchRequest(requestPath)
-	if err != nil {
-		return Manifest{}, false, err
 	}
 	if owner == nil {
 		return Manifest{}, false, fmt.Errorf("runtime owner is unavailable")
@@ -245,11 +258,12 @@ func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector 
 	if inspector == nil || !inspector.Supported() {
 		return fmt.Errorf("supervisor process identity is unsupported on this platform")
 	}
-	request, err := readLaunchRequest(requestPath)
+	request, requestArtifact, err := admitLaunchRequest(requestPath)
 	if err != nil {
 		return err
 	}
-	resources := lifecycleResources{}
+	resources := lifecycleResources{request: requestArtifact.identity, requestArtifact: requestArtifact}
+	defer func() { _ = resources.closeArtifacts() }()
 	if resources.runtime, err = capturePrivateDirectory(request.RuntimeDirectory); err != nil {
 		return err
 	}
@@ -274,10 +288,6 @@ func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector 
 		_ = resources.root.Close()
 		return fmt.Errorf("runtime directory path was replaced during rooted admission")
 	}
-	if resources.request, err = capturePrivateRegular(requestPath); err != nil {
-		_ = resources.root.Close()
-		return err
-	}
 	lock, lockIdentity, err := acquireGenerationLockInRoot(resources.root, request.RuntimeDirectory)
 	if err != nil {
 		_ = resources.root.Close()
@@ -286,17 +296,23 @@ func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector 
 	resources.lock, resources.lockHandle = lockIdentity, lock
 	owned := &onceOwner{owner: owner}
 	reaper := &ownerReaper{owner: owned, done: make(chan struct{})}
-	manifest, started, err := prepare(ctx, requestPath, owned, inspector, resources.runtime)
+	manifest, started, err := prepare(ctx, request, owned, inspector, resources.runtime)
 	if started {
 		reaper.start()
 	}
 	if err != nil {
 		return finishStarted(err, owned, reaper, started, resources)
 	}
-	resources.manifest, err = capturePrivateRegular(filepath.Join(request.RuntimeDirectory, manifestName))
+	admittedManifest, manifestArtifact, err := admitManifest(filepath.Join(request.RuntimeDirectory, manifestName))
 	if err != nil {
 		return finishStarted(err, owned, reaper, true, resources)
 	}
+	if !reflect.DeepEqual(admittedManifest, manifest) {
+		_ = manifestArtifact.close()
+		return finishStarted(fmt.Errorf("supervisor manifest changed during admission"), owned, reaper, true, resources)
+	}
+	manifest = admittedManifest
+	resources.manifest, resources.manifestArtifact = manifestArtifact.identity, manifestArtifact
 	key, err := decodeKey(manifest.ControlKey)
 	if err != nil {
 		return finishStarted(err, owned, reaper, true, resources)
@@ -545,9 +561,20 @@ func terminateAndCleanup(owner RuntimeOwner, reaper *ownerReaper, started bool, 
 }
 func cleanupNamespace(resources lifecycleResources) error {
 	var result error
-	for _, identity := range []FileIdentity{resources.socket, resources.manifest, resources.request} {
-		if identity.Path != "" {
-			result = errors.Join(result, removeExact(identity, identity.Path == resources.socket.Path))
+	for _, artifact := range []struct {
+		identity FileIdentity
+		retained *retainedPrivateFile
+		allowNil bool
+	}{
+		{identity: resources.socket, allowNil: true},
+		{identity: resources.manifest, retained: resources.manifestArtifact},
+		{identity: resources.request, retained: resources.requestArtifact},
+	} {
+		if artifact.identity.Path != "" {
+			result = errors.Join(result, removeExact(artifact.identity, artifact.allowNil))
+		}
+		if artifact.retained != nil {
+			result = errors.Join(result, artifact.retained.close())
 		}
 	}
 	if resources.lock.Path != "" {
@@ -574,6 +601,13 @@ func cleanupNamespace(resources lifecycleResources) error {
 		result = errors.Join(result, removeExactDirectory(resources.runtime))
 	}
 	return result
+}
+
+func (resources *lifecycleResources) closeArtifacts() error {
+	if resources == nil {
+		return nil
+	}
+	return errors.Join(resources.requestArtifact.close(), resources.manifestArtifact.close())
 }
 func removeExact(identity FileIdentity, allowMissing bool) error {
 	err := identityStillMatches(identity, func(info os.FileInfo) bool { return ownedByCurrentUser(info) })
