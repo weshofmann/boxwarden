@@ -386,6 +386,49 @@ func TestDetachedLauncherUsesFixedInternalArgvAndClosedEnvironment(t *testing.T)
 	}
 }
 
+func TestDetachedLauncherClosesParentLockAfterStartWhileInheritedCopyRetainsClaim(t *testing.T) {
+	dir := privateLaunchRuntime(t)
+	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(302, 0), Unique: 32}
+	var parentLock, childCopy *os.File
+	child := &testLaunchChild{}
+	launcher := newDetachedLauncher(launcherDeps{
+		executable: func() (string, error) { return "/private/boxwarden", nil }, inspector: testInspector(identity),
+		start: func(_ context.Context, command LaunchCommand) (launchChild, error) {
+			parentLock = command.GenerationLock
+			dup, err := syscall.Dup(int(command.GenerationLock.Fd()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			childCopy = os.NewFile(uintptr(dup), "inherited-generation-lock")
+			return child, nil
+		},
+		await: func(context.Context, *Client, Binding) error {
+			if _, err := parentLock.Stat(); err == nil {
+				t.Fatal("parent lock descriptor remained open after successful child Start")
+			}
+			contender, err := os.OpenFile(filepath.Join(dir, lockName), os.O_RDONLY, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer contender.Close()
+			if err := syscall.Flock(int(contender.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+				t.Fatal("child inherited lock copy did not retain continuous claim")
+			}
+			return nil
+		},
+	})
+	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
+	if err := launcher.Launch(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if childCopy == nil {
+		t.Fatal("fake child did not inherit lock copy")
+	}
+	if err := childCopy.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDetachedLauncherReturnsOwnedGenerationWithoutSpawnOrCleanupOnLockContention(t *testing.T) {
 	dir := privateRuntime(t)
 	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
@@ -422,6 +465,93 @@ func TestDetachedLauncherReturnsOwnedGenerationWithoutSpawnOrCleanupOnLockConten
 	if _, err := os.Lstat(filepath.Join(dir, lockName)); err != nil {
 		t.Fatalf("contended lock was cleaned: %v", err)
 	}
+}
+
+func TestAdmitInheritedGenerationLockRequiresExactAlreadyHeldDescriptor(t *testing.T) {
+	newFixture := func(t *testing.T) (string, LaunchRequest, *os.Root) {
+		t.Helper()
+		dir := privateRuntime(t)
+		request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
+		if err := writeBoundGenerationLock(filepath.Join(dir, lockName), request); err != nil {
+			t.Fatal(err)
+		}
+		root, err := os.OpenRoot(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dir, request, root
+	}
+	t.Run("exact held duplicate", func(t *testing.T) {
+		dir, request, root := newFixture(t)
+		defer root.Close()
+		parent, err := os.OpenFile(filepath.Join(dir, lockName), os.O_RDONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer parent.Close()
+		if err := syscall.Flock(int(parent.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+			t.Fatal(err)
+		}
+		dup, err := syscall.Dup(int(parent.Fd()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		lock, err := admitInheritedGenerationLockInRoot(root, dir, request, os.NewFile(uintptr(dup), "fd3"))
+		if err != nil {
+			t.Fatalf("exact held inherited descriptor rejected: %v", err)
+		}
+		defer lock.close()
+	})
+	t.Run("unheld exact descriptor", func(t *testing.T) {
+		dir, request, root := newFixture(t)
+		defer root.Close()
+		file, err := os.OpenFile(filepath.Join(dir, lockName), os.O_RDONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if lock, err := admitInheritedGenerationLockInRoot(root, dir, request, file); err == nil {
+			_ = lock.close()
+			t.Fatal("unheld exact descriptor was admitted")
+		}
+	})
+	t.Run("different inode", func(t *testing.T) {
+		dir, request, root := newFixture(t)
+		defer root.Close()
+		other := filepath.Join(dir, "other-lock")
+		if err := writeBoundGenerationLockAt(other, request); err == nil {
+			t.Fatal("non-fixed writer accepted fabricated descriptor path")
+		}
+		if err := writePrivateFile(other, []byte("fabricated")); err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.OpenFile(other, os.O_RDONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if lock, err := admitInheritedGenerationLockInRoot(root, dir, request, file); err == nil {
+			_ = lock.close()
+			t.Fatal("different-inode descriptor was admitted")
+		}
+	})
+	t.Run("pathname replacement", func(t *testing.T) {
+		dir, request, root := newFixture(t)
+		defer root.Close()
+		path := filepath.Join(dir, lockName)
+		file, err := os.OpenFile(path, os.O_RDONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := writeBoundGenerationLock(path, request); err != nil {
+			t.Fatal(err)
+		}
+		if lock, err := admitInheritedGenerationLockInRoot(root, dir, request, file); err == nil {
+			_ = lock.close()
+			t.Fatal("replaced lock pathname was admitted")
+		}
+	})
 }
 
 type testLaunchChild struct {

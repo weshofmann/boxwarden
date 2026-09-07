@@ -142,6 +142,13 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 	if child == nil {
 		return errors.Join(fmt.Errorf("supervisor child is unavailable"), cleanupRequest())
 	}
+	// exec.Cmd.Start has duplicated the fixed ExtraFiles entry into the child.
+	// Close only the parent's copy now: the inherited open-file description
+	// keeps the flock continuous across a parent crash while avoiding a second
+	// long-lived parent owner.
+	if err := lockArtifact.close(); err != nil {
+		return errors.Join(err, cleanupRequest())
+	}
 	cleanupChild := func(cause error) error {
 		reaper := &launchChildReaper{child: child, done: make(chan struct{})}
 		stopErr := child.stop()
@@ -200,7 +207,7 @@ func startExactChild(ctx context.Context, command LaunchCommand) (launchChild, e
 
 var errGenerationAlreadyOwned = errors.New("exact generation is already owned")
 
-type generationAlreadyOwnedError struct{ cause error }
+type generationAlreadyOwnedError struct{}
 
 func (e generationAlreadyOwnedError) Error() string { return errGenerationAlreadyOwned.Error() }
 func (e generationAlreadyOwnedError) Unwrap() error { return errGenerationAlreadyOwned }
@@ -211,7 +218,7 @@ func claimPublishedGenerationLock(lock *retainedPrivateFile) error {
 	}
 	if err := syscall.Flock(int(lock.file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
-			return generationAlreadyOwnedError{cause: err}
+			return generationAlreadyOwnedError{}
 		}
 		return fmt.Errorf("claim published generation lock: %w", err)
 	}
@@ -534,7 +541,36 @@ func admitInheritedGenerationLockInRoot(root *os.Root, runtime string, request L
 		_ = file.Close()
 		return nil, fmt.Errorf("inherited generation lock was replaced")
 	}
-	return validateBoundGenerationLock(&retainedPrivateFile{identity: identity, file: file}, request)
+	lock, err := validateBoundGenerationLock(&retainedPrivateFile{identity: identity, file: file}, request)
+	if err != nil {
+		return nil, err
+	}
+	if err := proveInheritedGenerationLockHeld(root, lock); err != nil {
+		_ = lock.close()
+		return nil, err
+	}
+	return lock, nil
+}
+
+// proveInheritedGenerationLockHeld uses a separate validation-only open. A
+// successful nonblocking claim proves fd 3 was not carrying continuous
+// ownership; release that probe immediately and reject. The probe descriptor
+// is never returned or used as lock authority.
+func proveInheritedGenerationLockHeld(root *os.Root, lock *retainedPrivateFile) error {
+	probe, err := root.OpenFile(lockName, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return err
+	}
+	defer probe.Close()
+	err = syscall.Flock(int(probe.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	if err == nil {
+		_ = syscall.Flock(int(probe.Fd()), syscall.LOCK_UN)
+		return fmt.Errorf("inherited generation lock is not held")
+	}
+	if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+		return nil
+	}
+	return fmt.Errorf("probe inherited generation lock: %w", err)
 }
 func captureSocket(path string) (FileIdentity, error) {
 	identity, info, err := captureIdentity(path)

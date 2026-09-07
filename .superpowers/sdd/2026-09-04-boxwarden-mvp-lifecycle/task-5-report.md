@@ -137,6 +137,32 @@ go test ./internal/supervisor -run '^TestPrivateRuntimeUsesGoTemporaryDirectory$
 PASS
 ```
 
+### Task 5.2b2 corrective handoff admission
+
+The parent now closes its own retained lock descriptor immediately after a
+successful child `Start`; the child’s fd-3 duplicate retains the same open-file
+description and flock continuously. A deterministic fake duplicates the lock
+during `start`, then proves during `await` that the parent descriptor is closed
+while a separate contender remains blocked.
+
+Child inherited-descriptor admission now validates strict bound contents and
+rooted identity, then opens a separate validation-only probe. Probe success
+means fd 3 was not held, so it unlocks/closes that probe and rejects; only
+would-block permits the exact supplied descriptor to continue. The probe is
+never used as authority. Tests cover held duplicate admission plus rejection
+of unheld, different-inode, and pathname-replaced descriptors.
+
+RED/GREEN:
+
+```text
+go test ./internal/supervisor -run TestDetachedLauncherClosesParentLockAfterStartWhileInheritedCopyRetainsClaim -count=1
+RED: parent lock descriptor remained open after successful child Start
+GREEN: PASS
+go test ./internal/supervisor -run TestAdmitInheritedGenerationLockRequiresExactAlreadyHeldDescriptor -count=1
+RED: unheld exact descriptor was admitted
+GREEN: PASS
+```
+
 ## Task 5.2b2 — gap-free inherited generation-lock handoff
 
 The detached parent now takes `LOCK_EX|LOCK_NB` on its retained exact bound
