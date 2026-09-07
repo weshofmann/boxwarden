@@ -3,11 +3,52 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/weshofmann/boxwarden/internal/config"
+	"github.com/weshofmann/boxwarden/internal/supervisor"
 )
+
+func TestProductionPublicOptionsWireAdmittedStarterFactory(t *testing.T) {
+	options := publicOptions(&bytes.Buffer{})
+	if options.SessionStarter != nil || options.SessionStarterFactory == nil {
+		t.Fatal("production public start is not factory-composed")
+	}
+	if _, err := options.SessionStarterFactory(config.Config{}, config.Domain{}, "/private/config.json"); err == nil {
+		t.Fatal("production factory accepted unadmitted configuration")
+	}
+}
+
+func TestDefaultInternalSupervisorUsesAuthoritativeOwner(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := supervisor.LaunchRequest{Binding: supervisor.Binding{Domain: "work", SessionID: "session", BackendKind: "tart", BackendObject: "exact-vm", Generation: "generation"}, RuntimeDirectory: filepath.Join(root, "work", "session", "generation"), HostConfigPath: filepath.Join(root, "missing-config.json"), SessionRecordName: "dev"}
+	if err := os.MkdirAll(request.RuntimeDirectory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(request.RuntimeDirectory, "supervisor-request.json")
+	for name, contents := range map[string][]byte{path: data, filepath.Join(request.RuntimeDirectory, "generation.lock"): nil} {
+		if err := os.WriteFile(name, contents, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	handled, err := runInternal(context.Background(), []string{"internal", "session-supervisor", path}, nil, nil, nil)
+	if !handled || err == nil || !strings.Contains(err.Error(), "reload host configuration") {
+		t.Fatalf("production internal dispatch = %t, %v", handled, err)
+	}
+}
 
 func TestRunInternalDispatchesOnlyExactHostInstallBeforePublicCLI(t *testing.T) {
 	var output bytes.Buffer

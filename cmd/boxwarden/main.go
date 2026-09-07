@@ -8,22 +8,28 @@ import (
 
 	"github.com/weshofmann/boxwarden/internal/app"
 	"github.com/weshofmann/boxwarden/internal/backend/tart"
+	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/execx"
 	"github.com/weshofmann/boxwarden/internal/hostx"
+	"github.com/weshofmann/boxwarden/internal/sessionruntime"
 	"github.com/weshofmann/boxwarden/internal/sshx"
-	"github.com/weshofmann/boxwarden/internal/supervisor"
 )
 
 type rootInstaller func(context.Context, []byte) ([]byte, error)
 
 func main() {
 	ctx := context.Background()
-	handled, err := runInternal(ctx, os.Args[1:], os.Stdin, os.Stdout, hostx.RunRootHostInstall, supervisor.RunRequest)
+	handled, err := runInternal(ctx, os.Args[1:], os.Stdin, os.Stdout, hostx.RunRootHostInstall, sessionruntime.RunRequest)
 	if handled {
 		finish(err)
 		return
 	}
 
+	err = app.Run(ctx, os.Args[1:], publicOptions(os.Stdout))
+	finish(err)
+}
+
+func publicOptions(output io.Writer) app.Options {
 	backendAdapter := tart.New(execx.OSRunner{MaxOutputBytes: 1 << 20}, "tart")
 	sshRunner := sshx.NewExecRunner()
 	caStore := sshx.NewCAStore(sshx.CAStoreOptions{
@@ -34,15 +40,17 @@ func main() {
 	})
 	hostInitializer := hostx.NewSystemInitializer()
 	hostDoctor := hostx.NewSystemDoctor()
-	err = app.Run(ctx, os.Args[1:], app.Options{
+	return app.Options{
 		Observer:   backendAdapter,
 		Creator:    backendAdapter,
 		HostInit:   hostInitializer,
 		HostDoctor: hostDoctor,
 		CAInit:     caStore,
-		Output:     os.Stdout,
-	})
-	finish(err)
+		SessionStarterFactory: func(loaded config.Config, selected config.Domain, path string) (app.SessionStarter, error) {
+			return sessionruntime.NewStarter(loaded, selected, path)
+		},
+		Output: output,
+	}
 }
 
 func runInternal(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, install rootInstaller, supervisorRun ...func(context.Context, string) error) (bool, error) {
@@ -53,7 +61,7 @@ func runInternal(ctx context.Context, args []string, stdin io.Reader, stdout io.
 		if len(supervisorRun) > 1 || (len(supervisorRun) == 1 && supervisorRun[0] == nil) {
 			return true, fmt.Errorf("supervisor dependencies are required")
 		}
-		run := supervisor.RunRequest
+		run := sessionruntime.RunRequest
 		if len(supervisorRun) == 1 {
 			run = supervisorRun[0]
 		}

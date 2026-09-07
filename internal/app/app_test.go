@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -33,6 +34,68 @@ func TestSessionStartDispatchesOnlySelectedDomainStarter(t *testing.T) {
 	}
 	if got, want := output.String(), "domain: work\nsession: dev\nstate: running\nreadiness: ready\n"; got != want {
 		t.Fatalf("Run(session start) output = %q, want %q", got, want)
+	}
+}
+
+func TestSessionStarterFactoryReceivesAdmittedConfigDomainAndExactPath(t *testing.T) {
+	path := writeV2DomainSetFixture(t)
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, _ := loaded.Domain("work")
+	starter := &sessionStarterFake{record: session.Record{Domain: "work", Name: "dev", IntendedState: session.StateStarting, Readiness: session.ReadinessRecord{Status: session.ReadinessStarting}}}
+	var output bytes.Buffer
+	calls := 0
+	err = Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "start", "dev"}, Options{
+		ConfigPath: "/unused/config.json", Output: &output,
+		SessionStarterFactory: func(got config.Config, domain config.Domain, exactPath string) (SessionStarter, error) {
+			calls++
+			if !reflect.DeepEqual(got, loaded) || domain != selected || exactPath != path {
+				t.Fatalf("factory inputs = %#v %#v %q", got, domain, exactPath)
+			}
+			return starter, nil
+		},
+	})
+	if err != nil || calls != 1 || starter.name != "dev" {
+		t.Fatalf("Run = %v, factory calls %d, name %q", err, calls, starter.name)
+	}
+	if got, want := output.String(), "domain: work\nsession: dev\nstate: starting\nreadiness: starting\n"; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
+
+func TestSessionStarterFactoryIsUnreachableBeforeAdmissionAndForOtherCommands(t *testing.T) {
+	path, _ := writeV2DomainFixture(t, "work")
+	for _, args := range [][]string{
+		{"--config", path + ".missing", "--domain", "work", "session", "start", "dev"},
+		{"--config", path, "--domain", "unknown", "session", "start", "dev"},
+		{"--config", path, "session", "start", "dev"},
+		{"--config", path, "--domain", "work", "session", "start", "../bad"},
+		{"--config", path, "--domain", "work", "session", "start", "dev", "extra"},
+		{"--config", path, "--domain", "work", "session", "stop", "dev"},
+		{"--config", path, "--domain", "work", "session", "status", "dev"},
+	} {
+		t.Run(strings.Join(args[2:], "_"), func(t *testing.T) {
+			err := Run(context.Background(), args, Options{Output: &bytes.Buffer{}, SessionStarterFactory: func(config.Config, config.Domain, string) (SessionStarter, error) {
+				t.Fatal("unadmitted/non-start command reached factory")
+				return nil, nil
+			}})
+			if err == nil {
+				t.Fatal("invalid or unavailable command succeeded")
+			}
+		})
+	}
+}
+
+func TestSessionStarterFactoryFailureAndNilStarterAreErrors(t *testing.T) {
+	path, _ := writeDomainFixture(t, "work")
+	want := errors.New("construction denied")
+	for _, factoryErr := range []error{want, nil} {
+		err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "start", "dev"}, Options{Output: &bytes.Buffer{}, SessionStarterFactory: func(config.Config, config.Domain, string) (SessionStarter, error) { return nil, factoryErr }})
+		if err == nil || (factoryErr != nil && !errors.Is(err, want)) {
+			t.Fatalf("factory failure = %v", err)
+		}
 	}
 }
 

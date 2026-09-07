@@ -39,18 +39,23 @@ type SessionStarter interface {
 	Start(context.Context, string) (session.Record, error)
 }
 
+// SessionStarterFactory receives only the admitted configuration, selected
+// domain, and exact configuration locator for the detached child's reload.
+type SessionStarterFactory func(config.Config, config.Domain, string) (SessionStarter, error)
+
 // Options supplies trusted-host dependencies to Run. App depends only on the
 // narrow backend seams and never on Tart directly.
 type Options struct {
-	ConfigPath     string
-	Env            []string
-	Observer       backend.Observer
-	Creator        backend.Creator
-	HostInit       HostInitializer
-	HostDoctor     HostDoctor
-	CAInit         CAInitializer
-	SessionStarter SessionStarter
-	Output         io.Writer
+	ConfigPath            string
+	Env                   []string
+	Observer              backend.Observer
+	Creator               backend.Creator
+	HostInit              HostInitializer
+	HostDoctor            HostDoctor
+	CAInit                CAInitializer
+	SessionStarter        SessionStarter
+	SessionStarterFactory SessionStarterFactory
+	Output                io.Writer
 }
 
 // DefaultConfigPath returns the conventional trusted-host configuration path.
@@ -167,10 +172,20 @@ func Run(ctx context.Context, args []string, options Options) error {
 		}
 		return writeCreatedSession(options.Output, record)
 	case commandSessionStart:
-		if options.SessionStarter == nil {
+		if _, err := session.ParseName(command.name); err != nil {
+			return err
+		}
+		starter := options.SessionStarter
+		if options.SessionStarterFactory != nil {
+			starter, err = options.SessionStarterFactory(loaded, selectedDomain, command.configPath)
+			if err != nil {
+				return fmt.Errorf("construct session starter: %w", err)
+			}
+		}
+		if starter == nil {
 			return errors.New("session starter is required")
 		}
-		record, err := options.SessionStarter.Start(ctx, command.name)
+		record, err := starter.Start(ctx, command.name)
 		if err != nil {
 			return fmt.Errorf("start session: %w", err)
 		}

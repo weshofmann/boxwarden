@@ -30,24 +30,33 @@ type controlResponse struct {
 	Error    string   `json:"error"`
 }
 
-func listenSocket(path string) (*net.UnixListener, error) {
+func listenSocket(path string) (*controlListener, error) {
 	if filepath.Base(path) != socketName || !privateDirectory(filepath.Dir(path)) {
 		return nil, fmt.Errorf("unsafe control socket path")
 	}
 	if _, err := os.Lstat(path); !os.IsNotExist(err) {
 		return nil, fmt.Errorf("control socket already exists")
 	}
-	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	address, cleanup, err := socketAddress(path)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(path, 0600); err != nil {
-		listener.Close()
-		return nil, err
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: address, Net: "unix"})
+	if err != nil {
+		return nil, errors.Join(err, cleanup())
 	}
-	return listener, nil
+	listener.SetUnlinkOnClose(false)
+	info, statErr := os.Lstat(path)
+	if statErr != nil {
+		return nil, errors.Join(statErr, listener.Close(), cleanup())
+	}
+	owned := &controlListener{UnixListener: listener, path: path, info: info}
+	if err := errors.Join(os.Chmod(path, 0600), cleanup()); err != nil {
+		return nil, errors.Join(err, owned.Close())
+	}
+	return owned, nil
 }
-func serveControl(ctx context.Context, listener *net.UnixListener, binding Binding, owner RuntimeOwner, stop func() error) error {
+func serveControl(ctx context.Context, listener *controlListener, binding Binding, owner RuntimeOwner, stop func() error) error {
 	for {
 		connection, err := listener.AcceptUnix()
 		if err != nil {
@@ -222,7 +231,7 @@ func (c *Client) call(ctx context.Context, binding Binding, action string) (cont
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	connection, err := (&net.Dialer{}).DialContext(operationCtx, "unix", filepath.Join(c.RuntimeDirectory, socketName))
+	connection, err := dialControl(operationCtx, filepath.Join(c.RuntimeDirectory, socketName))
 	if err != nil {
 		return response, err
 	}
