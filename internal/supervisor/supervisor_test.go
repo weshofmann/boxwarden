@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/weshofmann/boxwarden/internal/hostx"
 )
 
 func TestSupervisorLaunchPersistsNoBarePIDOwnership(t *testing.T) {
@@ -19,7 +21,7 @@ func TestSupervisorLaunchPersistsNoBarePIDOwnership(t *testing.T) {
 	binding := testBinding()
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(100, 0).UTC(), Unique: 7}
 	owner := newTestOwner(identity)
-	request := LaunchRequest{Binding: binding, RuntimeDirectory: dir, HostConfigPath: "/private/config"}
+	request := LaunchRequest{Binding: binding, RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
 	if err := writeLaunchRequest(filepath.Join(dir, requestName), request); err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +56,7 @@ func TestManifestRejectsPathOutsideDeclaredRuntimeDirectory(t *testing.T) {
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(101, 0).UTC(), Unique: 8}
 	owner := newTestOwner(identity)
 	requestPath := filepath.Join(dir, requestName)
-	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}); err != nil {
+	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
 		t.Fatal(err)
 	}
 	runtimeIdentity, err := capturePrivateDirectory(dir)
@@ -216,7 +218,7 @@ func TestSetupFailureAfterStartRetainsOwnershipUntilReaped(t *testing.T) {
 	setLifecycleDeadline(t, 25*time.Millisecond)
 	dir := privateRuntime(t)
 	requestPath := filepath.Join(dir, requestName)
-	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}); err != nil {
+	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
 		t.Fatal(err)
 	}
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(600, 0).UTC(), Unique: 60}
@@ -249,7 +251,7 @@ func TestSetupFailureAfterStartRetainsOwnershipUntilReaped(t *testing.T) {
 func TestRunCleansUpUnownedStartFailureWithoutStoppingOwner(t *testing.T) {
 	dir := privateRuntime(t)
 	requestPath := filepath.Join(dir, requestName)
-	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}); err != nil {
+	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
 		t.Fatal(err)
 	}
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(601, 0).UTC(), Unique: 61}
@@ -270,7 +272,7 @@ func TestRunReapsPartialStartFailureBeforeClosingNamespace(t *testing.T) {
 	setLifecycleDeadline(t, 25*time.Millisecond)
 	dir := privateRuntime(t)
 	requestPath := filepath.Join(dir, requestName)
-	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}); err != nil {
+	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
 		t.Fatal(err)
 	}
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(602, 0).UTC(), Unique: 62}
@@ -319,7 +321,7 @@ func TestSnapshotIsBoundedAndCannotReportReadyAfterBrokerPoison(t *testing.T) {
 func TestPrepareRejectsUnsupportedPlatformBeforeRuntimeStart(t *testing.T) {
 	dir := privateRuntime(t)
 	requestPath := filepath.Join(dir, requestName)
-	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}); err != nil {
+	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
 		t.Fatal(err)
 	}
 	owner := newTestOwner(ProcessIdentity{PID: 1, StartedAt: time.Unix(1, 0), Unique: 1})
@@ -343,7 +345,7 @@ func TestPrepareRejectsUnsupportedPlatformBeforeRuntimeStart(t *testing.T) {
 }
 
 func TestDetachedLauncherUsesFixedInternalArgvAndClosedEnvironment(t *testing.T) {
-	dir := privateRuntime(t)
+	dir := privateLaunchRuntime(t)
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(300, 0), Unique: 30}
 	var got LaunchCommand
 	child := &testLaunchChild{}
@@ -351,7 +353,7 @@ func TestDetachedLauncherUsesFixedInternalArgvAndClosedEnvironment(t *testing.T)
 		got = command
 		return child, nil
 	}, await: func(context.Context, *Client, Binding) error { return nil }})
-	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}
+	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
 	if err := launcher.Launch(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
@@ -678,7 +680,7 @@ func TestAdmittedPrivateRegularRetainsOriginalInodeUntilClosed(t *testing.T) {
 func TestAdmitLaunchRequestRejectsHardLinkSymlinkSubstitution(t *testing.T) {
 	dir := privateRuntime(t)
 	path := filepath.Join(dir, requestName)
-	if err := writeLaunchRequest(path, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}); err != nil {
+	if err := writeLaunchRequest(path, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
 		t.Fatal(err)
 	}
 	privateRegularAdmissionHook = func() { replaceWithHardLinkedSymlink(t, path) }
@@ -693,7 +695,7 @@ func TestAdmitLaunchRequestRejectsHardLinkSymlinkSubstitution(t *testing.T) {
 
 func TestAdmitManifestRejectsHardLinkSymlinkSubstitution(t *testing.T) {
 	dir := privateRuntime(t)
-	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}
+	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
 	if err := writeLaunchRequest(filepath.Join(dir, requestName), request); err != nil {
 		t.Fatal(err)
 	}
@@ -731,7 +733,7 @@ func replaceWithHardLinkedSymlink(t *testing.T, path string) {
 }
 
 func TestDetachedLauncherRetainsRequestInodeThroughFailedLaunchCleanup(t *testing.T) {
-	dir := privateRuntime(t)
+	dir := privateLaunchRuntime(t)
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(606, 0).UTC(), Unique: 66}
 	var original FileIdentity
 	launcher := newDetachedLauncher(launcherDeps{
@@ -754,7 +756,7 @@ func TestDetachedLauncherRetainsRequestInodeThroughFailedLaunchCleanup(t *testin
 		},
 		await: func(context.Context, *Client, Binding) error { return nil },
 	})
-	err := launcher.Launch(context.Background(), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"})
+	err := launcher.Launch(context.Background(), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()})
 	if err == nil {
 		t.Fatal("replacement launch failure was accepted")
 	}
@@ -827,7 +829,7 @@ func TestFinishStartedClosesExactlyOnceAfterStopFailureAndReap(t *testing.T) {
 }
 
 func TestDetachedLauncherReapsOnlyUnauthenticatedChildAndOwnRequest(t *testing.T) {
-	dir := privateRuntime(t)
+	dir := privateLaunchRuntime(t)
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(400, 0).UTC(), Unique: 40}
 	child := &testLaunchChild{}
 	launcher := newDetachedLauncher(launcherDeps{
@@ -836,7 +838,7 @@ func TestDetachedLauncherReapsOnlyUnauthenticatedChildAndOwnRequest(t *testing.T
 		start:      func(context.Context, LaunchCommand) (launchChild, error) { return child, nil },
 		await:      func(context.Context, *Client, Binding) error { return errors.New("no authenticated evidence") },
 	})
-	err := launcher.Launch(context.Background(), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"})
+	err := launcher.Launch(context.Background(), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()})
 	if err == nil || !child.stopped || child.released {
 		t.Fatalf("failed launch = %v, stopped=%t released=%t; want reaped but not released", err, child.stopped, child.released)
 	}
@@ -860,7 +862,7 @@ func TestDetachedLauncherRefusesCancelledContextBeforeRequestOrSpawn(t *testing.
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := launcher.Launch(ctx, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}); !errors.Is(err, context.Canceled) {
+	if err := launcher.Launch(ctx, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Launch() error = %v, want context cancellation", err)
 	}
 	if called {
@@ -872,7 +874,7 @@ func TestDetachedLauncherRefusesCancelledContextBeforeRequestOrSpawn(t *testing.
 }
 
 func TestDetachedLauncherJoinsReleaseAndCleanupFailures(t *testing.T) {
-	dir := privateRuntime(t)
+	dir := privateLaunchRuntime(t)
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(402, 0).UTC(), Unique: 42}
 	child := &testLaunchChild{releaseErr: errors.New("release failed"), waitErr: errors.New("reap failed")}
 	launcher := newDetachedLauncher(launcherDeps{
@@ -881,7 +883,7 @@ func TestDetachedLauncherJoinsReleaseAndCleanupFailures(t *testing.T) {
 		start:      func(context.Context, LaunchCommand) (launchChild, error) { return child, nil },
 		await:      func(context.Context, *Client, Binding) error { return nil },
 	})
-	err := launcher.Launch(context.Background(), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"})
+	err := launcher.Launch(context.Background(), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()})
 	if err == nil || !strings.Contains(err.Error(), "release failed") || !strings.Contains(err.Error(), "reap failed") || !child.stopped {
 		t.Fatalf("Launch() error = %v, child=%#v; want joined release/reap failure", err, child)
 	}
@@ -891,7 +893,7 @@ func TestDetachedLauncherJoinsReleaseAndCleanupFailures(t *testing.T) {
 }
 
 func TestDetachedLauncherReturnsTerminalWaitErrorOnce(t *testing.T) {
-	dir := privateRuntime(t)
+	dir := privateLaunchRuntime(t)
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(404, 0).UTC(), Unique: 44}
 	waitErr := errors.New("detached child terminal wait failure")
 	child := &testLaunchChild{waitErr: waitErr}
@@ -901,7 +903,7 @@ func TestDetachedLauncherReturnsTerminalWaitErrorOnce(t *testing.T) {
 		start:      func(context.Context, LaunchCommand) (launchChild, error) { return child, nil },
 		await:      func(context.Context, *Client, Binding) error { return errors.New("authentication failed") },
 	})
-	err := launcher.Launch(context.Background(), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"})
+	err := launcher.Launch(context.Background(), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()})
 	if err == nil || strings.Count(err.Error(), waitErr.Error()) != 1 {
 		t.Fatalf("Launch() error = %v, want one terminal Wait result", err)
 	}
@@ -915,7 +917,7 @@ func TestDetachedLauncherReturnsTerminalWaitErrorOnce(t *testing.T) {
 
 func TestDetachedLauncherRetainsRequestUntilBlockedReaperCompletes(t *testing.T) {
 	setLifecycleDeadline(t, 25*time.Millisecond)
-	dir := privateRuntime(t)
+	dir := privateLaunchRuntime(t)
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(403, 0).UTC(), Unique: 43}
 	child := &testLaunchChild{waitRelease: make(chan struct{})}
 	launcher := newDetachedLauncher(launcherDeps{
@@ -926,7 +928,7 @@ func TestDetachedLauncherRetainsRequestUntilBlockedReaperCompletes(t *testing.T)
 	})
 	done := make(chan error, 1)
 	go func() {
-		done <- launcher.Launch(context.Background(), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"})
+		done <- launcher.Launch(context.Background(), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()})
 	}()
 	select {
 	case err := <-done:
@@ -953,7 +955,7 @@ func TestDetachedLauncherRetainsRequestUntilBlockedReaperCompletes(t *testing.T)
 func TestDetachedLauncherRefusesUnsupportedPlatformBeforeRequestMutation(t *testing.T) {
 	dir := privateRuntime(t)
 	launcher := newDetachedLauncher(launcherDeps{inspector: unsupportedInspector{}})
-	err := launcher.Launch(context.Background(), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"})
+	err := launcher.Launch(context.Background(), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()})
 	if err == nil {
 		t.Fatal("unsupported platform launched")
 	}
@@ -1009,7 +1011,7 @@ func TestRootedLockAdmissionPreservesReplacement(t *testing.T) {
 func TestRootedRuntimeAdmissionRejectsDirectoryReplacement(t *testing.T) {
 	dir := privateRuntime(t)
 	requestPath := filepath.Join(dir, requestName)
-	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}); err != nil {
+	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
 		t.Fatal(err)
 	}
 	backup := dir + "-original"
@@ -1246,6 +1248,18 @@ type testService struct {
 	result    <-chan error
 }
 
+// Production break: a future authenticated observation cannot be fresh
+// evidence because an untrusted child clock could otherwise extend its life.
+func TestClientRejectsFutureAuthenticatedSnapshot(t *testing.T) {
+	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	if err := validateSnapshotFreshness(Snapshot{ObservedAt: now.Add(time.Second)}, now, time.Minute); err == nil {
+		t.Fatal("validateSnapshotFreshness() accepted a future observation")
+	}
+	if err := validateSnapshotFreshness(Snapshot{ObservedAt: now}, now, time.Minute); err != nil {
+		t.Fatalf("validateSnapshotFreshness() exact trusted-time boundary error = %v", err)
+	}
+}
+
 func runningService(t *testing.T, poisoned bool) (testService, *Client, context.CancelFunc) {
 	t.Helper()
 	dir := privateRuntime(t)
@@ -1253,7 +1267,7 @@ func runningService(t *testing.T, poisoned bool) (testService, *Client, context.
 	owner := newTestOwner(identity)
 	owner.poisoned = poisoned
 	requestPath := filepath.Join(dir, requestName)
-	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config"}); err != nil {
+	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
 		t.Fatal(err)
 	}
 	inspector := testInspector(identity)
@@ -1307,7 +1321,20 @@ func socketIsPrivate(path string) bool {
 	return err == nil && info.Mode()&os.ModeSocket != 0 && info.Mode().Perm() == 0o600
 }
 func testBinding() Binding {
-	return Binding{Domain: "work", SessionID: "session-uuid", BackendKind: "fake", BackendObject: "object-1", Generation: "generation-1"}
+	return Binding{Domain: "w", SessionID: "s", BackendKind: "fake", BackendObject: "object-1", Generation: "g"}
+}
+
+func testHostExpectation() HostExpectation {
+	return HostExpectation{Manifest: hostx.Manifest{
+		Version: hostx.ManifestVersion, Platform: hostx.QualifiedPlatform, MacOS: hostx.QualifiedMacOS, MacOSBuild: hostx.QualifiedMacOSBuild,
+		Tart:    hostx.ToolIdentity{Path: "/opt/qualified/tart", Version: hostx.TartVersion, ExecutableSHA256: hostx.TartExecutableSHA256, ArchiveSHA256: hostx.TartArchiveSHA256},
+		Softnet: hostx.ToolIdentity{Path: hostx.QualifiedSoftnetPath, Version: hostx.SoftnetVersion, ExecutableSHA256: hostx.SoftnetExecutableSHA256, ArchiveSHA256: hostx.SoftnetArchiveSHA256},
+		RootUID: 0, Group: hostx.Group{ID: 20, Name: hostx.OperatorGroupName, Members: []int{501}}, Operator: hostx.Operator{UID: 501, Name: "operator", Home: "/Users/operator"}, TartHome: "/Users/operator/tart", SoftnetMode: hostx.SoftnetMode, InstalledAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+	}, ScreenPath: hostx.ScreenPath, ScreenSHA256: hostx.ScreenExecutableSHA256, ScreenVersion: hostx.ScreenVersionOutput, SoftnetBinDir: filepath.Dir(hostx.QualifiedSoftnetPath)}
+}
+
+func testCAExpectation() CAExpectation {
+	return CAExpectation{Version: 1, Domain: "w", Algorithm: "ssh-ed25519", PublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGxvY2FsLWNhLXRlc3Q= boxwarden", PublicDigest: "digest", Fingerprint: "SHA256:fingerprint", CreationUUID: "11111111-2222-4333-8444-555555555555", CreatorUID: 501, CreatorName: "operator"}
 }
 
 func TestPrivateRuntimeUsesGoTemporaryDirectory(t *testing.T) {
@@ -1335,7 +1362,20 @@ func privateRuntime(t *testing.T) string {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	return dir
+	path := filepath.Join(dir, "w", "s", "g")
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func privateLaunchRuntime(t *testing.T) string {
+	t.Helper()
+	path := privateRuntime(t)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func setLifecycleDeadline(t *testing.T, value time.Duration) {

@@ -54,6 +54,7 @@ type StartDependencies struct {
 	RuntimeRoot       string
 	ConfigPath        string
 	NewGeneration     func() (string, error)
+	Now               func() time.Time
 }
 
 // NewStartService composes the narrow dependencies needed for start without
@@ -88,7 +89,8 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 	if err != nil {
 		return Record{}, fmt.Errorf("load session record: %w", err)
 	}
-	if err := s.admitStartPrerequisites(ctx); err != nil {
+	admission, ca, err := s.admitStartPrerequisites(ctx)
+	if err != nil {
 		return Record{}, err
 	}
 	if record.Backend.Kind != "tart" || record.Backend.ObjectID == "" {
@@ -129,6 +131,8 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 		RuntimeDirectory:  filepath.Join(s.start.RuntimeRoot, string(record.Domain), record.ID, record.StartGeneration),
 		HostConfigPath:    s.start.ConfigPath,
 		SessionRecordName: string(record.Name),
+		Host:              supervisor.HostExpectation{Manifest: admission.Manifest, ScreenPath: admission.ScreenPath, ScreenSHA256: admission.ScreenSHA256, ScreenVersion: admission.ScreenVersion, SoftnetBinDir: admission.SoftnetBinDir},
+		CA:                caExpectation(ca),
 	}
 	snapshot, err := s.start.Supervisor.StartExact(ctx, request)
 	if err != nil {
@@ -148,7 +152,8 @@ func (s *Service) reconcileReady(ctx context.Context, record Record) (Record, er
 
 func (s *Service) persistReady(record Record, snapshot supervisor.Snapshot) (Record, error) {
 	want := supervisor.Binding{Domain: string(record.Domain), SessionID: record.ID, BackendKind: record.Backend.Kind, BackendObject: record.Backend.ObjectID, Generation: record.StartGeneration}
-	if snapshot.Binding != want || !snapshot.BackendRunning || !snapshot.BrokerHealthy || !snapshot.ScreenHealthy || !snapshot.PinPresent || !snapshot.CertificateCurrent || !snapshot.ProbeOK || !snapshot.ZoneMatches || snapshot.ObservedAt.IsZero() || time.Since(snapshot.ObservedAt) > maxReadySnapshotAge {
+	now := s.start.Now()
+	if snapshot.Binding != want || !snapshot.BackendRunning || !snapshot.BrokerHealthy || !snapshot.ScreenHealthy || !snapshot.PinPresent || !snapshot.CertificateCurrent || !snapshot.ProbeOK || !snapshot.ZoneMatches || snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || now.Sub(snapshot.ObservedAt) > maxReadySnapshotAge {
 		return Record{}, fmt.Errorf("supervisor did not provide a fresh exact ready snapshot")
 	}
 	record.IntendedState = StateRunning
@@ -163,21 +168,19 @@ func (s *Service) validStartDependencies() error {
 	if _, err := domain.Parse(string(s.domain.ID)); err != nil || strings.TrimSpace(s.domain.StateRoot) == "" {
 		return fmt.Errorf("invalid configured domain")
 	}
-	if s.observer == nil || s.start.Host == nil || s.start.CA == nil || s.start.Supervisor == nil || s.start.NewGeneration == nil || !filepath.IsAbs(s.start.RuntimeRoot) || filepath.Clean(s.start.RuntimeRoot) != s.start.RuntimeRoot || !filepath.IsAbs(s.start.ConfigPath) || filepath.Clean(s.start.ConfigPath) != s.start.ConfigPath {
+	if s.observer == nil || s.start.Host == nil || s.start.CA == nil || s.start.Supervisor == nil || s.start.NewGeneration == nil || s.start.Now == nil || len(s.start.ConfiguredDomains) == 0 || !filepath.IsAbs(s.start.RuntimeRoot) || filepath.Clean(s.start.RuntimeRoot) != s.start.RuntimeRoot || !filepath.IsAbs(s.start.ConfigPath) || filepath.Clean(s.start.ConfigPath) != s.start.ConfigPath {
 		return fmt.Errorf("session start dependencies are required")
 	}
 	return nil
 }
 
-func (s *Service) admitStartPrerequisites(ctx context.Context) error {
-	if _, err := s.start.Host.CheckRuntime(ctx, s.start.HostRequest); err != nil {
-		return fmt.Errorf("admit host runtime: %w", err)
+func (s *Service) admitStartPrerequisites(ctx context.Context) (RuntimeAdmission, sshx.CAIdentity, error) {
+	admission, err := s.start.Host.CheckRuntime(ctx, s.start.HostRequest)
+	if err != nil {
+		return RuntimeAdmission{}, sshx.CAIdentity{}, fmt.Errorf("admit host runtime: %w", err)
 	}
 	selected := sshx.Domain{ID: s.domain.ID, StateRoot: s.domain.StateRoot}
 	configured := append([]sshx.Domain(nil), s.start.ConfiguredDomains...)
-	if len(configured) == 0 {
-		configured = []sshx.Domain{selected}
-	}
 	selectedConfigured := false
 	for _, configuredDomain := range configured {
 		if configuredDomain == selected {
@@ -186,10 +189,14 @@ func (s *Service) admitStartPrerequisites(ctx context.Context) error {
 		}
 	}
 	if !selectedConfigured {
-		return fmt.Errorf("configured domain CA collection omits selected domain")
+		return RuntimeAdmission{}, sshx.CAIdentity{}, fmt.Errorf("configured domain CA collection omits selected domain")
 	}
-	if _, err := s.start.CA.Check(ctx, selected, configured); err != nil {
-		return fmt.Errorf("admit selected domain management CA: %w", err)
+	ca, err := s.start.CA.Check(ctx, selected, configured)
+	if err != nil {
+		return RuntimeAdmission{}, sshx.CAIdentity{}, fmt.Errorf("admit selected domain management CA: %w", err)
 	}
-	return nil
+	return admission, ca, nil
+}
+func caExpectation(ca sshx.CAIdentity) supervisor.CAExpectation {
+	return supervisor.CAExpectation{Version: ca.Version, Domain: string(ca.Domain), Algorithm: ca.Algorithm, PublicKey: ca.PublicKey, PublicDigest: ca.PublicDigest, Fingerprint: ca.Fingerprint, CreationUUID: ca.CreationUUID, CreatorUID: ca.CreatorUID, CreatorName: ca.CreatorName}
 }

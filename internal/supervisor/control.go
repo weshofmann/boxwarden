@@ -280,6 +280,7 @@ type Client struct {
 	RuntimeDirectory string
 	Inspector        ProcessInspector
 	MaxSnapshotAge   time.Duration
+	Now              func() time.Time
 }
 
 func (c *Client) Snapshot(ctx context.Context, binding Binding) (Snapshot, error) {
@@ -287,10 +288,21 @@ func (c *Client) Snapshot(ctx context.Context, binding Binding) (Snapshot, error
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if c.MaxSnapshotAge > 0 && time.Since(response.Snapshot.ObservedAt) > c.MaxSnapshotAge {
-		return Snapshot{}, fmt.Errorf("supervisor snapshot is stale")
+	now := time.Now
+	if c.Now != nil {
+		now = c.Now
+	}
+	if err := validateSnapshotFreshness(response.Snapshot, now(), c.MaxSnapshotAge); err != nil {
+		return Snapshot{}, err
 	}
 	return response.Snapshot, nil
+}
+
+func validateSnapshotFreshness(snapshot Snapshot, now time.Time, maximumAge time.Duration) error {
+	if snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || maximumAge > 0 && now.Sub(snapshot.ObservedAt) > maximumAge {
+		return fmt.Errorf("supervisor snapshot is stale")
+	}
+	return nil
 }
 func (c *Client) Stop(ctx context.Context, binding Binding) error {
 	_, err := c.authenticated(ctx, binding, "stop")

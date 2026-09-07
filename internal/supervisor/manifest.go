@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/weshofmann/boxwarden/internal/hostx"
 )
 
 const (
@@ -37,10 +39,35 @@ type Controller interface {
 	Stop(context.Context, Binding) error
 }
 type LaunchRequest struct {
-	Binding           Binding `json:"binding"`
-	RuntimeDirectory  string  `json:"runtime_directory"`
-	HostConfigPath    string  `json:"host_config_path"`
-	SessionRecordName string  `json:"session_record_name,omitempty"`
+	Binding           Binding         `json:"binding"`
+	RuntimeDirectory  string          `json:"runtime_directory"`
+	HostConfigPath    string          `json:"host_config_path"`
+	SessionRecordName string          `json:"session_record_name"`
+	Host              HostExpectation `json:"host"`
+	CA                CAExpectation   `json:"ca"`
+}
+
+// HostExpectation contains only comparable, non-secret runtime facts. It has
+// no opaque Screen capability, descriptor, process, or executable authority.
+type HostExpectation struct {
+	Manifest      hostx.Manifest `json:"manifest"`
+	ScreenPath    string         `json:"screen_path"`
+	ScreenSHA256  string         `json:"screen_sha256"`
+	ScreenVersion string         `json:"screen_version"`
+	SoftnetBinDir string         `json:"softnet_bin_dir"`
+}
+
+// CAExpectation is the serializable public projection of one admitted CA.
+type CAExpectation struct {
+	Version      int    `json:"version"`
+	Domain       string `json:"domain"`
+	Algorithm    string `json:"algorithm"`
+	PublicKey    string `json:"public_key"`
+	PublicDigest string `json:"public_digest"`
+	Fingerprint  string `json:"fingerprint"`
+	CreationUUID string `json:"creation_uuid"`
+	CreatorUID   int    `json:"creator_uid"`
+	CreatorName  string `json:"creator_name"`
 }
 type Launcher interface {
 	Launch(context.Context, LaunchRequest) error
@@ -147,13 +174,57 @@ func validLaunchRequest(request LaunchRequest) error {
 	if !request.Binding.valid() {
 		return fmt.Errorf("invalid supervisor binding")
 	}
-	if !privateDirectory(request.RuntimeDirectory) {
-		return fmt.Errorf("runtime directory must be canonical owner-private directory")
+	if !canonicalAbsolute(request.RuntimeDirectory) {
+		return fmt.Errorf("runtime directory must be canonical and absolute")
 	}
 	if !canonicalAbsolute(request.HostConfigPath) {
 		return fmt.Errorf("host config path must be canonical and absolute")
 	}
+	if !validPart(request.SessionRecordName) {
+		return fmt.Errorf("canonical session record name is required")
+	}
+	if err := validHostExpectation(request.Host); err != nil {
+		return err
+	}
+	if err := validCAExpectation(request.CA); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validHostExpectation(expectation HostExpectation) error {
+	if err := expectation.Manifest.Validate(); err != nil {
+		return fmt.Errorf("host manifest expectation is invalid: %w", err)
+	}
+	if !canonicalAbsolute(expectation.ScreenPath) || len(expectation.ScreenSHA256) != 64 || expectation.ScreenVersion == "" || !canonicalAbsolute(expectation.SoftnetBinDir) {
+		return fmt.Errorf("host runtime expectation is invalid")
+	}
+	return nil
+}
+
+func validCAExpectation(expectation CAExpectation) error {
+	if expectation.Version <= 0 || !validPart(expectation.Domain) || expectation.Algorithm != "ssh-ed25519" || expectation.PublicKey == "" || expectation.PublicDigest == "" || expectation.Fingerprint == "" || !validUUIDText(expectation.CreationUUID) || expectation.CreatorUID < 0 || expectation.CreatorName == "" {
+		return fmt.Errorf("CA expectation is invalid")
+	}
+	return nil
+}
+
+func validUUIDText(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	for index, r := range value {
+		if index == 8 || index == 13 || index == 18 || index == 23 {
+			if r != '-' {
+				return false
+			}
+			continue
+		}
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 func canonicalAbsolute(path string) bool {
 	return path != "/" && filepath.IsAbs(path) && filepath.Clean(path) == path && !strings.ContainsAny(path, "\x00\r\n")
@@ -271,6 +342,12 @@ func writeLaunchRequest(path string, request LaunchRequest) error {
 	}
 	if filepath.Dir(path) != request.RuntimeDirectory || filepath.Base(path) != requestName {
 		return fmt.Errorf("request path is not the fixed runtime request path")
+	}
+	return writeLaunchRequestAt(path, request)
+}
+func writeLaunchRequestAt(path string, request LaunchRequest) error {
+	if filepath.Base(path) != requestName || !privateDirectory(filepath.Dir(path)) {
+		return fmt.Errorf("request path is not an owner-private staging path")
 	}
 	data, err := json.Marshal(request)
 	if err != nil {

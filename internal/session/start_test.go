@@ -39,13 +39,15 @@ func TestStartPersistsGenerationBeforeSupervisorMutation(t *testing.T) {
 		return readySnapshot(request.Binding), nil
 	}}
 	service = NewStartService(domainConfig, StartDependencies{
-		Observer:      backendFake,
-		Host:          startHostFake{},
-		CA:            startCAFake{identity: admittedCA},
-		Supervisor:    supervisorFake,
-		RuntimeRoot:   filepath.Join(domainConfig.StateRoot, "runtime"),
-		ConfigPath:    "/private/boxwarden-config.json",
-		NewGeneration: func() (string, error) { return "11111111-2222-4333-8444-555555555555", nil },
+		Observer:          backendFake,
+		Host:              startHostFake{},
+		CA:                startCAFake{identity: admittedCA},
+		Supervisor:        supervisorFake,
+		RuntimeRoot:       filepath.Join(domainConfig.StateRoot, "runtime"),
+		ConfigPath:        "/private/boxwarden-config.json",
+		ConfiguredDomains: []sshx.Domain{{ID: domainConfig.ID, StateRoot: domainConfig.StateRoot}},
+		NewGeneration:     func() (string, error) { return "11111111-2222-4333-8444-555555555555", nil },
+		Now:               time.Now,
 	})
 
 	got, err := service.Start(context.Background(), "dev")
@@ -75,9 +77,11 @@ func TestStartRequiresFreshExactReadySnapshotBeforeDurableReady(t *testing.T) {
 	}
 	service := NewStartService(domainConfig, StartDependencies{
 		Observer: backendFake, Host: startHostFake{}, CA: startCAFake{},
-		RuntimeRoot:   filepath.Join(domainConfig.StateRoot, "runtime"),
-		ConfigPath:    "/private/boxwarden-config.json",
-		NewGeneration: func() (string, error) { return "11111111-2222-4333-8444-555555555555", nil },
+		RuntimeRoot:       filepath.Join(domainConfig.StateRoot, "runtime"),
+		ConfigPath:        "/private/boxwarden-config.json",
+		ConfiguredDomains: []sshx.Domain{{ID: domainConfig.ID, StateRoot: domainConfig.StateRoot}},
+		NewGeneration:     func() (string, error) { return "11111111-2222-4333-8444-555555555555", nil },
+		Now:               time.Now,
 		Supervisor: startSupervisorFake{start: func(binding supervisor.LaunchRequest) (supervisor.Snapshot, error) {
 			snapshot := readySnapshot(binding.Binding)
 			snapshot.ObservedAt = time.Now().Add(-2 * time.Minute)
@@ -117,6 +121,7 @@ func TestStartRequiresConfiguredCACollectionToContainSelectedDomain(t *testing.T
 		RuntimeRoot:   filepath.Join(domainConfig.StateRoot, "runtime"),
 		ConfigPath:    "/private/boxwarden-config.json",
 		NewGeneration: func() (string, error) { return "11111111-2222-4333-8444-555555555555", nil },
+		Now:           time.Now,
 	})
 	if _, err := service.Start(context.Background(), "dev"); err == nil {
 		t.Fatal("Start() error = nil, want selected-domain collection rejection")
@@ -127,6 +132,28 @@ func TestStartRequiresConfiguredCACollectionToContainSelectedDomain(t *testing.T
 	}
 	if loaded.IntendedState != StateStopped {
 		t.Fatalf("record after rejected admission = %#v, want unchanged stopped intent", loaded)
+	}
+}
+
+// Production break: accepting a future-dated snapshot lets an untrusted
+// supervisor clock bypass the fresh-evidence window.
+func TestStartRejectsFutureReadySnapshotUsingTrustedClock(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	if _, err := creator.Create(context.Background(), "dev", ModeClean); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+	service := NewStartService(domainConfig, StartDependencies{
+		Observer: backendFake, Host: startHostFake{}, CA: startCAFake{}, ConfiguredDomains: []sshx.Domain{{ID: domainConfig.ID, StateRoot: domainConfig.StateRoot}},
+		RuntimeRoot: filepath.Join(domainConfig.StateRoot, "runtime"), ConfigPath: "/private/boxwarden-config.json", NewGeneration: func() (string, error) { return "11111111-2222-4333-8444-555555555555", nil }, Now: func() time.Time { return now },
+		Supervisor: startSupervisorFake{start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+			snapshot := readySnapshot(request.Binding)
+			snapshot.ObservedAt = now.Add(time.Second)
+			return snapshot, nil
+		}},
+	})
+	if _, err := service.Start(context.Background(), "dev"); err == nil {
+		t.Fatal("Start() accepted future snapshot")
 	}
 }
 

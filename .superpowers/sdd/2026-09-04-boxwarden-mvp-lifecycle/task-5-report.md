@@ -439,3 +439,111 @@ gofmt -l [changed Go files]
 git diff --check
 (no output)
 ```
+
+## Task 5.2 — supervisor publication/admission correction
+
+**Base:** `a6811888a776faf842229f0a86f91be936b1663a`.
+
+This bounded slice replaces direct request creation in an existing generation
+directory with supervisor-owned staged publication. It creates/adopts only
+owner-private parent directories, writes and syncs a `0600` immutable request
+in a sibling staging directory, uses Darwin `renameatx_np(..., RENAME_EXCL)`
+for no-replace publication (and fails closed in Darwin no-cgo builds), then
+syncs the parent. Existing retry state must contain precisely the exact
+immutable request; empty, foreign, and extra-entry state is rejected without
+mutation. The launcher removes a first-publication namespace only after its
+existing exact child cleanup path completes.
+
+The request now carries the complete public host manifest plus comparable
+Screen/Softnet facts, and a public-only CA projection. Session has no fallback
+for an absent configured-domain collection, passes those expectations to the
+supervisor, and uses its injected trusted clock to reject both stale and
+future READY evidence.
+
+### TDD evidence
+
+New publication tests were RED before `publishOrAdmitRequest` existed:
+
+```text
+undefined: publishOrAdmitRequest
+```
+
+They then proved staged first publication has only `supervisor-request.json`,
+request-only exact retry is admitted, and a pre-created empty generation is
+rejected. The future-snapshot session regression was RED before the injected
+clock field existed (`unknown field Now`), and is green once the trusted clock
+is used for both lower and upper freshness bounds.
+
+Focused GREEN:
+
+```text
+go test ./internal/session ./internal/supervisor -run 'Test(Start|Publish)' -count=1
+go test ./internal/supervisor -count=1
+```
+
+Both passed. No real host runtime was launched.
+
+### Explicitly still open
+
+5.3 still must implement authoritative detached-child reload and comparison of
+these request expectations, authenticated live-artifact reconciliation before
+any spawn decision, and serial/bootstrap/SSH composition. 5.4 still owns
+failure convergence and production main wiring. `RunRequest` remains the
+intentional unavailable owner; this slice does not claim a working VM start.
+
+### 5.2 corrective review follow-up
+
+The final 5.2 correction changes the publication primitive to the repository's
+pure-Go Darwin `renameatx_np(RENAME_EXCL)` syscall pattern, so `CGO_ENABLED=0`
+Darwin builds retain no-replace publication. Linux has only the same
+conservative, explicitly unqualified CI fallback used by `hostx`: it rejects
+an already visible destination and must not be read as a production atomicity
+claim. The regression test creates a competing empty generation and proves
+the staged directory remains and the competitor is not replaced.
+
+`ExactController` now classifies an existing exact generation before calling
+the launcher. A request-only matching directory can launch; empty, missing,
+foreign, symlinked, malformed, or unexpected outer state fails closed. The
+only accepted live outer names are the request, lock, manifest, socket, and
+owner-private `serial/` directory (whose nested contents remain serialx-owned
+and opaque here). Live state is returned only from the authenticated exact
+controller; it gets a bounded reconciliation interval rather than spawning a
+second child. This does not make `RunRequest` available—the runtime owner and
+its authoritative revalidation remain 5.3 work.
+
+Request JSON field names are now stable and explicit. Request validation
+requires canonical record identity, a complete qualified public host manifest
+with Screen and Softnet expectations, and all public CA identity fields; no
+private CA paths, state roots, process handles, or opaque Screen capability is
+serializable. The controller now applies both stale and future bounds against
+an injectable trusted clock.
+
+The staged-directory cleanup no longer uses `RemoveAll`: it captures the
+private staging identity, removes only the retained request identity, then
+removes the captured directory. Parent admission explicitly verifies the
+runtime/domain/session components as private non-symlink directories.
+
+Additional RED/GREEN evidence:
+
+```text
+go test ./internal/supervisor -run 'Test(RenameWithoutReplacePreservesConcurrentGenerationNamespace|ExactControllerReconcilesAuthenticatedLiveGenerationWithoutLaunch)' -count=1
+RED: StartExact() launched a second child for authenticated live generation
+GREEN: PASS
+
+go test ./internal/supervisor -run TestClientRejectsFutureAuthenticatedSnapshot -count=1
+RED: undefined: validateSnapshotFreshness
+GREEN: PASS
+
+go test ./internal/supervisor ./internal/session -count=1
+PASS
+go test ./...
+PASS
+```
+
+The stale, unheld `generation.lock` normalization requested in review remains
+open: the available identity/advisory-lock evidence is not safe deletion
+authority, and the safety guard correctly rejected an implementation that
+would remove it based only on a nonblocking flock. It therefore remains drift
+without mutation in this correction rather than risking a concurrent-owner
+deletion. 5.3/5.4 must supply an owner-authenticated convergence protocol for
+that case. Production main wiring and owned failure convergence remain open.

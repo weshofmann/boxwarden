@@ -89,15 +89,19 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 	if err != nil || !canonicalAbsolute(executable) {
 		return fmt.Errorf("resolve exact boxwarden executable: %w", err)
 	}
-	requestPath := filepath.Join(request.RuntimeDirectory, requestName)
-	if err := writeLaunchRequest(requestPath, request); err != nil {
+	requestPath, firstPublication, err := publishOrAdmitRequest(request)
+	if err != nil {
+		return err
+	}
+	runtimeIdentity, err := capturePrivateDirectory(request.RuntimeDirectory)
+	if err != nil {
 		return err
 	}
 	admittedRequest, requestArtifact, err := admitLaunchRequest(requestPath)
 	if err != nil {
 		return err
 	}
-	if admittedRequest != request {
+	if !reflect.DeepEqual(admittedRequest, request) {
 		return errors.Join(fmt.Errorf("supervisor request changed during parent admission"), requestArtifact.close())
 	}
 	requestCleaned := false
@@ -106,7 +110,11 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 			return nil
 		}
 		requestCleaned = true
-		return errors.Join(removeExact(requestArtifact.identity, false), requestArtifact.close())
+		result := errors.Join(removeExact(requestArtifact.identity, false), requestArtifact.close())
+		if firstPublication {
+			result = errors.Join(result, removeExactDirectory(runtimeIdentity))
+		}
+		return result
 	}
 	defer func() {
 		if !requestCleaned {
