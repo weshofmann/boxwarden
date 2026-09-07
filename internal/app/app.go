@@ -43,6 +43,17 @@ type SessionStarter interface {
 // domain, and exact configuration locator for the detached child's reload.
 type SessionStarterFactory func(config.Config, config.Domain, string) (SessionStarter, error)
 
+// BackendDependencies keeps observation and creation in one backend namespace.
+type BackendDependencies struct {
+	Observer backend.Observer
+	Creator  backend.Creator
+}
+
+// BackendFactory receives the admitted configuration and exact selected domain.
+// When provided, its result replaces both directly injected backend dependencies;
+// missing factory dependencies never fall back to direct injection.
+type BackendFactory func(config.Config, config.Domain) (BackendDependencies, error)
+
 // Options supplies trusted-host dependencies to Run. App depends only on the
 // narrow backend seams and never on Tart directly.
 type Options struct {
@@ -50,6 +61,7 @@ type Options struct {
 	Env                   []string
 	Observer              backend.Observer
 	Creator               backend.Creator
+	BackendFactory        BackendFactory
 	HostInit              HostInitializer
 	HostDoctor            HostDoctor
 	CAInit                CAInitializer
@@ -91,6 +103,23 @@ func Run(ctx context.Context, args []string, options Options) error {
 		selectedDomain, err = loaded.Domain(command.domain)
 		if err != nil {
 			return err
+		}
+	}
+	if command.requiresBackend() {
+		if command.kind == commandGoldenRegister {
+			err = backend.ValidateObjectID(command.name)
+		} else {
+			_, err = session.ParseName(command.name)
+		}
+		if err != nil {
+			return err
+		}
+		if options.BackendFactory != nil {
+			dependencies, err := options.BackendFactory(loaded, selectedDomain)
+			if err != nil {
+				return fmt.Errorf("construct backend: %w", err)
+			}
+			options.Observer, options.Creator = dependencies.Observer, dependencies.Creator
 		}
 	}
 
@@ -217,6 +246,10 @@ type parsedCommand struct {
 
 func (c parsedCommand) requiresDomain() bool {
 	return c.kind != commandInit && c.kind != commandDoctor
+}
+
+func (c parsedCommand) requiresBackend() bool {
+	return c.kind == commandGoldenRegister || c.kind == commandSessionCreate || c.kind == commandSessionStatus
 }
 
 func parseCommand(args []string, options Options) (parsedCommand, error) {

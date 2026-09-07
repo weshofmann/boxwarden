@@ -20,6 +20,131 @@ import (
 	"github.com/weshofmann/boxwarden/internal/sshx"
 )
 
+func TestBackendFactoryBindsRegisterCreateAndStatusToAdmittedConfigAndDomain(t *testing.T) {
+	path := writeV2DomainSetFixture(t)
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, _ := loaded.Domain("work")
+	admitted := fake.New(backend.Observation{ObjectID: "golden-work-r1", Exists: true, State: backend.ObjectStopped})
+	directObserver, directCreator := &countingObserver{}, fake.New()
+	for _, suffix := range [][]string{{"golden", "register", "golden-work-r1"}, {"session", "create", "dev"}, {"session", "status", "dev"}} {
+		t.Run(strings.Join(suffix, "_"), func(t *testing.T) {
+			calls := 0
+			var output bytes.Buffer
+			err := Run(context.Background(), append([]string{"--config", path, "--domain", "work"}, suffix...), Options{
+				ConfigPath: "/unused/config.json", Output: &output,
+				Observer: directObserver, Creator: directCreator,
+				BackendFactory: func(got config.Config, domain config.Domain) (BackendDependencies, error) {
+					calls++
+					if !reflect.DeepEqual(got, loaded) || domain != selected {
+						t.Fatalf("factory inputs = %#v, %#v; want exact loaded config and work domain", got, domain)
+					}
+					deps := BackendDependencies{Observer: admitted}
+					if suffix[1] == "create" {
+						deps.Creator = admitted
+					}
+					return deps, nil
+				},
+			})
+			if err != nil || calls != 1 || output.Len() == 0 {
+				t.Fatalf("Run = %v, factory calls %d, output %q", err, calls, output.String())
+			}
+			if directObserver.calls != 0 || len(directCreator.CloneCalls()) != 0 || len(directCreator.RandomizeMACCalls()) != 0 {
+				t.Fatal("factory composition used directly injected backend")
+			}
+		})
+	}
+	record, err := session.LoadRecord(selected.StateRoot, "work", "dev")
+	if err != nil || record.IntendedState != session.StateStopped || record.GoldenRevision != "golden-work-r1" {
+		t.Fatalf("record = %#v, %v", record, err)
+	}
+	if calls := admitted.CloneCalls(); len(calls) != 1 || calls[0].SourceID != "golden-work-r1" || calls[0].TargetID != record.Backend.ObjectID {
+		t.Fatalf("clones = %#v, want single exact recorded identity", calls)
+	}
+	if calls := admitted.RandomizeMACCalls(); !reflect.DeepEqual(calls, []string{record.Backend.ObjectID}) {
+		t.Fatalf("MAC calls = %#v", calls)
+	}
+}
+
+func TestBackendFactoryIsUnreachableForInvalidInputAndOtherCommands(t *testing.T) {
+	path, _ := writeV2DomainFixture(t, "work")
+	for _, args := range [][]string{
+		{"--config", path + ".missing", "--domain", "work", "golden", "register", "golden-work-r1"},
+		{"--config", path, "--domain", "unknown", "session", "create", "dev"},
+		{"--config", path, "session", "status", "dev"},
+		{"--config", path, "--domain", "work", "session", "status", "../bad"},
+		{"--config", path, "--domain", "work", "session", "create", "../bad"},
+		{"--config", path, "--domain", "work", "golden", "register", "../bad"},
+		{"--config", path, "--domain", "work", "session", "create", "--mode", "bad", "dev"},
+		{"--config", path, "--domain", "work", "session", "status", "dev", "extra"},
+		{"--config", path, "--domain", "work", "session", "stop", "dev"},
+		{"--config", path, "--domain", "work", "session", "start", "dev"},
+		{"--config", path, "--domain", "work", "domain", "init"},
+		{"--config", path, "init"},
+		{"--config", path, "doctor"},
+	} {
+		t.Run(strings.Join(args[2:], "_"), func(t *testing.T) {
+			err := Run(context.Background(), args, Options{Output: &bytes.Buffer{}, BackendFactory: func(config.Config, config.Domain) (BackendDependencies, error) {
+				t.Fatal("unadmitted/non-backend command reached factory")
+				return BackendDependencies{}, nil
+			}})
+			if err == nil {
+				t.Fatal("invalid or unavailable command succeeded")
+			}
+		})
+	}
+}
+
+func TestBackendFactoryFailureDoesNotUseReturnedOrDirectDependencies(t *testing.T) {
+	for _, suffix := range [][]string{{"golden", "register", "golden-work-r1"}, {"session", "create", "dev"}, {"session", "status", "dev"}} {
+		t.Run(strings.Join(suffix, "_"), func(t *testing.T) {
+			path, selected := writeV2DomainFixture(t, "work")
+			before, err := os.ReadDir(selected.StateRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			observer, creator := &countingObserver{}, fake.New()
+			want := errors.New("backend construction denied")
+			var output bytes.Buffer
+			err = Run(context.Background(), append([]string{"--config", path, "--domain", "work"}, suffix...), Options{
+				Output: &output, Observer: observer, Creator: creator,
+				BackendFactory: func(config.Config, config.Domain) (BackendDependencies, error) {
+					return BackendDependencies{Observer: observer, Creator: creator}, want
+				},
+			})
+			if !errors.Is(err, want) || output.Len() != 0 {
+				t.Fatalf("factory failure = %v, output %q", err, output.String())
+			}
+			if observer.calls != 0 || len(creator.CloneCalls()) != 0 || len(creator.RandomizeMACCalls()) != 0 {
+				t.Fatal("factory failure accessed backend")
+			}
+			after, err := os.ReadDir(selected.StateRoot)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("factory failure changed state directory: %v, %v", after, err)
+			}
+		})
+	}
+}
+
+func TestBackendFactoryMissingDependenciesNeverFallBackToDirectInjection(t *testing.T) {
+	path, _ := writeV2DomainFixture(t, "work")
+	observer, creator := &countingObserver{}, fake.New()
+	for _, deps := range []BackendDependencies{{}, {Observer: observer}, {Creator: creator}} {
+		err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "create", "dev"}, Options{
+			Output: &bytes.Buffer{}, Observer: observer, Creator: creator,
+			BackendFactory: func(config.Config, config.Domain) (BackendDependencies, error) { return deps, nil },
+		})
+		if err == nil || (!strings.Contains(err.Error(), "observer is required") && !strings.Contains(err.Error(), "creator is required")) {
+			t.Fatalf("missing dependency refusal = %v", err)
+		}
+		if observer.calls != 0 || len(creator.CloneCalls()) != 0 || len(creator.RandomizeMACCalls()) != 0 {
+			t.Fatal("missing factory dependency accessed backend")
+		}
+	}
+}
+
 // Production break: omitting the public start dispatch would leave the
 // generation-safe session service unreachable from the supported CLI surface.
 func TestSessionStartDispatchesOnlySelectedDomainStarter(t *testing.T) {
@@ -418,7 +543,10 @@ func TestLegacyDomainCommandsRequireFullV2HostAdmissionBeforeAccess(t *testing.T
 				configPath := write(t)
 				observer := &countingObserver{}
 				args := append([]string{"--config", configPath, "--domain", "work"}, suffix...)
-				err := Run(context.Background(), args, Options{Observer: observer, Output: &bytes.Buffer{}})
+				err := Run(context.Background(), args, Options{Observer: observer, Output: &bytes.Buffer{}, BackendFactory: func(config.Config, config.Domain) (BackendDependencies, error) {
+					t.Fatal("invalid host configuration reached backend factory")
+					return BackendDependencies{}, nil
+				}})
 				if err == nil || !strings.Contains(err.Error(), "load configuration") {
 					t.Fatalf("Run(%s) error = %v, want full host-admission failure", command, err)
 				}

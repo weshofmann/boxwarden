@@ -36,13 +36,17 @@ func (o Observer) runCreateCommand(ctx context.Context, operation string, args [
 	if strings.TrimSpace(o.executable) == "" {
 		return fmt.Errorf("%s: executable is required", operation)
 	}
+	env, err := o.commandEnvironment()
+	if err != nil {
+		return fmt.Errorf("%s: %w", operation, err)
+	}
 	timeout := mutationCommandTimeout
 	if len(args) > 0 && args[0] == "clone" {
 		timeout = cloneCommandTimeout
 	}
 	commandContext, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	result, err := o.runner.Run(commandContext, execx.Command{Path: o.executable, Args: args})
+	result, err := o.runner.Run(commandContext, execx.Command{Path: o.executable, Args: args, Env: env})
 	if err != nil {
 		return fmt.Errorf("%s: %w", operation, err)
 	}

@@ -29,13 +29,13 @@ type Observer struct {
 	qualified  bool
 }
 
-// New constructs an observer using executable. A caller may pass an absolute
-// executable path after resolving it on the trusted host.
+// New constructs a legacy observer/creator using executable and the inherited
+// host environment. Configured production commands use NewQualifiedObserver.
 func New(runner execx.Runner, executable string) Observer {
 	return Observer{runner: runner, executable: executable}
 }
 
-// NewQualifiedObserver confines read-only observations to the admitted Tart
+// NewQualifiedObserver confines observation and creation to the admitted Tart
 // executable and storage namespace without inheriting the host environment.
 func NewQualifiedObserver(runner execx.Runner, executable, tartHome string) Observer {
 	return Observer{runner: runner, executable: executable, tartHome: tartHome, qualified: true}
@@ -49,12 +49,9 @@ func (o Observer) Observe(ctx context.Context, objectID string) (backend.Observa
 	if strings.TrimSpace(o.executable) == "" {
 		return backend.Observation{}, fmt.Errorf("observe Tart object: executable is required")
 	}
-	var env []string
-	if o.qualified {
-		if !canonicalAbsolutePath(o.executable) || !canonicalAbsolutePath(o.tartHome) {
-			return backend.Observation{}, fmt.Errorf("qualified Tart observation paths must be canonical and absolute")
-		}
-		env = []string{"PATH=/usr/bin:/bin", "TART_HOME=" + o.tartHome, "LANG=C", "LC_ALL=C"}
+	env, err := o.commandEnvironment()
+	if err != nil {
+		return backend.Observation{}, err
 	}
 
 	commandContext, cancel := context.WithTimeout(ctx, observationCommandTimeout)
@@ -76,6 +73,16 @@ func (o Observer) Observe(ctx context.Context, objectID string) (backend.Observa
 		return backend.Observation{}, fmt.Errorf("observe Tart object: invalid tart list --format json output: %w", err)
 	}
 	return observation, nil
+}
+
+func (o Observer) commandEnvironment() ([]string, error) {
+	if !o.qualified {
+		return nil, nil
+	}
+	if !canonicalAbsolutePath(o.executable) || !canonicalAbsolutePath(o.tartHome) {
+		return nil, fmt.Errorf("qualified Tart paths must be canonical and absolute")
+	}
+	return []string{"PATH=/usr/bin:/bin", "TART_HOME=" + o.tartHome, "LANG=C", "LC_ALL=C"}, nil
 }
 
 type listEntry struct {

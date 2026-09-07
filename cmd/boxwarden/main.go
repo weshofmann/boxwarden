@@ -30,7 +30,6 @@ func main() {
 }
 
 func publicOptions(output io.Writer) app.Options {
-	backendAdapter := tart.New(execx.OSRunner{MaxOutputBytes: 1 << 20}, "tart")
 	sshRunner := sshx.NewExecRunner()
 	caStore := sshx.NewCAStore(sshx.CAStoreOptions{
 		Runner:        sshRunner,
@@ -41,8 +40,18 @@ func publicOptions(output io.Writer) app.Options {
 	hostInitializer := hostx.NewSystemInitializer()
 	hostDoctor := hostx.NewSystemDoctor()
 	return app.Options{
-		Observer:   backendAdapter,
-		Creator:    backendAdapter,
+		BackendFactory: func(loaded config.Config, selected config.Domain) (app.BackendDependencies, error) {
+			configured, err := loaded.Domain(string(selected.ID))
+			if err != nil || configured != selected {
+				return app.BackendDependencies{}, fmt.Errorf("backend requires exact configured domain")
+			}
+			host, err := loaded.Host()
+			if err != nil {
+				return app.BackendDependencies{}, err
+			}
+			adapter := tart.NewQualifiedObserver(execx.OSRunner{MaxOutputBytes: 1 << 20}, host.TartExecutable, host.TartHome)
+			return app.BackendDependencies{Observer: adapter, Creator: adapter}, nil
+		},
 		HostInit:   hostInitializer,
 		HostDoctor: hostDoctor,
 		CAInit:     caStore,
