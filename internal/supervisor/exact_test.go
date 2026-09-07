@@ -66,6 +66,23 @@ func TestExactControllerReconcilesAuthenticatedLiveGenerationWithoutLaunch(t *te
 	}
 }
 
+func TestExactControllerLaunchesSameGenerationFromUnheldBoundFoundation(t *testing.T) {
+	runtime := privateRuntime(t)
+	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: runtime, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
+	if err := writeLaunchRequest(filepath.Join(runtime, requestName), request); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeBoundGenerationLock(filepath.Join(runtime, lockName), request); err != nil {
+		t.Fatal(err)
+	}
+	launcher := &exactLauncherFake{}
+	ready := Snapshot{Binding: request.Binding, BackendRunning: true, BrokerHealthy: true, ScreenHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true, ObservedAt: time.Now().UTC()}
+	got, err := newExactController(launcher, &exactControllerFake{snapshot: ready}, startupPolicy{timeout: time.Second, interval: time.Millisecond}).StartExact(context.Background(), request)
+	if err != nil || !launcher.called || launcher.request.Binding != request.Binding || got != ready {
+		t.Fatalf("unheld foundation start=%#v launch=%#v err=%v", got, launcher.request, err)
+	}
+}
+
 // Production break: an authenticated snapshot cannot make an arbitrary
 // generation.lock safe. Exact controller admission must verify its binding to
 // the immutable request before classifying a namespace as live.
