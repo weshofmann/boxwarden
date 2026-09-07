@@ -20,11 +20,15 @@ Tart handle and one serial PTY, with one stop/wait/reap path. The host and
 cooperating host processes are trusted; runtime authority is not reconstructed
 from persisted process metadata.
 
-Slice A provides these foundations only. The production entry point fails
-explicitly until later slices compose an authoritative configured-domain and
-durable-record reload with a real runtime owner. Controlled product checks begin
-with Slice B's exact launch and continue at the serial and SSH boundaries.
-They are not formal qualification.
+Slice B composes the production public start entry point. `internal/app` invokes
+the start factory only after loading the exact configuration, selecting the
+explicit domain, and validating the session name. The parent persists intent and
+launches the detached supervisor; the child reloads the exact configuration,
+domain, and durable session record, requires the identical `starting + G`
+binding, and repeats current host and complete configured-domain CA admission
+before serial or Tart mutation. Controlled product checks begin at this exact
+launch boundary and continue at the later serial-bootstrap and SSH boundaries.
+They have not yet run for Slice B and are not formal qualification.
 
 The eventual supervisor owns generation SSH credentials, CA-validated renewal,
 and periodic strict read-only probes. READY requires a fresh exact-generation
@@ -36,9 +40,14 @@ The supervisor owns the outer generation namespace; `serialx` exclusively
 creates, validates, and cleans its new `serial/` subtree. Ownership stays held
 through actual runtime termination and cleanup. Ordinary safe path/type/no-follow
 hygiene rejects invalid state. Same-UID pathname-race fortification is outside
-the approved trusted-host model.
+the approved trusted-host model. The real mode-`0600` control socket and its
+inode authority remain in the canonical exact generation. When that path exceeds
+Darwin's AF_UNIX address capacity, bind/connect uses a transient owner-private
+short directory containing one link to the already admitted generation; ordinary
+success and error paths remove the alias immediately. The alias is transport
+only, never persisted runtime authority.
 
-Pending Slice B start/retry reconciliation must remain conservative:
+Implemented Slice B start/retry reconciliation is conservative:
 
 - `stopped` + backend stopped + no owned runtime creates and persists a fresh
   generation before launch.
@@ -47,26 +56,30 @@ Pending Slice B start/retry reconciliation must remain conservative:
 - `starting` + backend stopped + no live owner may retry the same structurally
   valid namespace only if its minimal request and durable binding match exactly.
   Stale serial/live artifacts require explicit reconciliation; they are not adopted.
-- `running` + backend running + exact live supervisor idempotently ensures the
-  same generation; it may renew/reprobe through the supervisor and reconverge a
-  changed host zone.
 - Any running observation with unproven ownership is drift/non-ready with no
   mutation or adoption.
-- Owned failure cleanup may persist `stopped` and clear generation only after
-  exact supervisor/backend stop and exact runtime cleanup are all observed.
-- An ambiguous or poisoned serial transport with still-proven ownership must
-  perform exact owned shutdown, observe backend stopped and runtime cleanup, and
-  only then create a fresh generation. Without proof it is drift/no mutation.
+- After Tart-handle acquisition, failed start stops and reaps only that retained
+  handle, closes only its serial runtime, and requires fresh exact stopped proof
+  before validated outer cleanup. Failed stopped proof preserves the generation.
+- Socket cleanup authority belongs only to the exact retained listener. A changed
+  or residual socket preserves the complete request/lock/generation for explicit
+  reconciliation; generic cleanup cannot unlink it.
+- Outer cleanup validates the complete exact generation before unlinking only the
+  request, empty lock, and then empty generation. It never recursively removes
+  unexpected state. Durable `starting + G` remains unchanged on start failure.
+- Durable `running` and READY publication remain Slice D behavior. The existing
+  future-ready reconciliation seam is not reached by a successful stopped or
+  starting Slice B transition.
 
 Cancellation before intent fsync leaves the prior durable record. Cancellation
 after `starting` fsync leaves that exact generation for retry. Cancellation
-during proven owned cleanup leaves `starting` until stop and cleanup are
-observed; only the final stopped-record fsync clears the generation. A final
-`running` fsync occurs only after all readiness evidence is current. This is the pending MVP recovery contract; Slice A does not claim it is operational.
+during exact owned cleanup leaves durable `starting + G`; actual retained-handle
+reap and serial cleanup still precede any outer-generation removal. A future
+`running` fsync may occur only after all Slice D readiness evidence is current.
 
 V2 creates a stopped copy-on-write Tart clone from the selected generic golden and returns only after the randomized-MAC clone is observed stopped. It does not boot the guest, initialize domain trust, obtain a host key, or converge the time zone.
 
-Before V4 start is available, the operator explicitly initializes two separate
+Before using session start, the operator explicitly initializes two separate
 scopes. Host-global `boxwarden init` runs once per trusted Mac and installs the
 exact qualified Softnet privilege binding; host-global `boxwarden doctor`
 diagnoses missing, unsupported, and drifted host prerequisites and gives an
@@ -75,18 +88,25 @@ For each domain, `boxwarden --domain <domain> domain init` creates only that
 domain's sole host-only SSH management user CA. Adding a domain does not repeat
 the host installation, and neither scope is created lazily from session start.
 
-The pending MVP composition verifies the complete V3 prerequisite, establishes
-one supervisor-owned serial PTY, and launches only the exact default qualified Tart +
-Softnet policy with clipboard/audio disabled and every allow flag rejected.
-Future ADR 015 support requires explicit create/record/status/CLI semantics.
-Serial automation uses the exact static command `/usr/bin/sudo -n -- /usr/local/libexec/boxwarden-guest-bootstrap serial-bootstrap`, followed
-separately by canonical bounded JSON. It atomically publishes
+Slice B verifies the complete V3 prerequisite, establishes one
+supervisor-owned serial PTY in continuous discard/drain mode, and launches only
+the exact configured Tart object with `run --net-softnet --no-audio
+--no-clipboard --serial-path <owned-endpoint> <exact-object>`. Registration,
+creation, status, parent start observation, and child observation/launch all use
+the admitted absolute Tart executable and exact configured `TART_HOME` rather
+than PATH selection or ambient/default Tart state. Launch PATH is only the
+qualified Softnet directory; the rest of the launch environment is the admitted
+closed set. Future ADR 015 support requires explicit create/record/status/CLI
+semantics.
+
+Slice C will invoke serial automation with the exact static command `/usr/bin/sudo -n -- /usr/local/libexec/boxwarden-guest-bootstrap serial-bootstrap`, followed
+separately by canonical bounded JSON. It will atomically publish
 `/etc/ssh/boxwarden/active` containing only the durable domain/session/backend,
 CA-fingerprint, and derived-principal binding; nonce and generation are echoed
-exchange correlation and never installed. Later generations verify that binding
-and the current host key. Start then resolves the address, issues a no-extension
+as exchange correlation and never installed. Later generations verify that binding
+and the current host key. Slice D then resolves the address, issues a no-extension
 certificate, proves strict SSH, applies and reads back the host zone, and only
-then persists running/ready. Partial bootstrap verifies exact existing state or
+then persists running/ready. Partial bootstrap will verify exact existing state or
 fails closed; it never replaces mismatched trust material.
 
 Repeating time-zone convergence whenever a transition boots or resumes a guest matters because the laptop can move after a golden or stopped session was created. The initial guest definition carries the build host's validated zone only to make first boot correct before management is available. Time-zone convergence is a workstation correctness property, not a security boundary: an agent-owned guest root can later change it. `tart run` is a long-lived graphical process whose lifetime needs supervision; Task 0 established its foreground ownership/lifetime and Aqua-login constraints, and the new detached MVP path must earn its own evidence. Do not retain project truth only in a session.

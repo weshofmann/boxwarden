@@ -1,6 +1,6 @@
 # Boxwarden MVP Lifecycle Implementation Plan
 
-Status: Slice A complete; Slices B–H pending. Stop after A for human inspection.
+Status: Slices A–B complete; Slices C–H pending. Stop after B for human inspection and the bounded controlled-host check.
 
 ## Goal and authority
 
@@ -72,12 +72,16 @@ trust, credentials, and destructive policy; the Tart adapter owns VM mechanics.
 
 ## Existing foundations
 
-V2 stopped-clone creation and V3 explicit host/domain admission remain.
-The branch adds narrow backend launch/address/delete and owned-handle seams,
-guest bootstrap protocol/helper and atomic trust publication, strict SSH
-primitives, minimal supervisor, and single-PTY serial foundations.
-These independently tested pieces are not a composed operational lifecycle:
-`supervisor.RunRequest` explicitly fails until a concrete owner is supplied.
+V2 stopped-clone creation and V3 explicit host/domain admission remain. Slice B
+now composes the public create/start path through the admitted configuration,
+durable session state, detached exact supervisor, one-PTY drain, and retained
+Tart handle. Public golden registration, session creation, and status observation
+all use the exact configured Tart executable and `TART_HOME`; they do not select
+an ambient executable or default Tart namespace. A successful start returns the
+durable `starting + generation G` record after proving the exact backend running
+and the serial drain healthy. Guest bootstrap, trust publication, host-key pin,
+management address, certificate SSH, time-zone convergence, and READY remain
+uncomposed foundations for Slices C and D.
 
 The old source refs `0045e205`, `2e711d617`, `75763d58`, and
 `6ca97e782` remain historical source material only. The former generation
@@ -95,7 +99,7 @@ defer testing from earlier slices.
 | Slice | Status | Production estimate | Focused effort |
 | --- | --- | --- | --- |
 | A — Simplified trusted-host foundation | Complete | Net reduction measured at checkpoint | 3 focused implementation/review units |
-| B — Durable create/start/retry and exact VM launch | Pending | 300–550 lines | 1–2 days |
+| B — Durable create/start/retry and exact VM launch | Complete | 300–550 lines | 1–2 days |
 | C — Boot and serial bootstrap composition | Pending | 180–350 lines | 1–2 days |
 | D — Strict SSH management and READY | Pending | 350–650 lines | 2–3 days |
 | E — Exact stop and explicit-loss destroy | Pending | 250–450 lines | 1–2 days |
@@ -122,22 +126,29 @@ before B; a green foundation alone does not authorize beginning B.
 
 ### B — Durable create/start/retry and exact VM launch
 
-Compose `internal/session → internal/supervisor → internal/backend/tart`.
-Retain V2's intent-first stopped creation. Implement child authoritative reload,
-exact record/config/backend comparison, current host/CA admission, and actual
-retained Tart handle ownership. Split successful process launch from READY:
-`session start <name>` must launch the exact disposable VM and report starting
-while management evidence is incomplete.
+- [x] Compose `internal/session → internal/supervisor → internal/sessionruntime
+  → internal/backend/tart`, retaining V2's intent-first stopped creation.
+- [x] Reload authoritative configuration and durable state in the child, recheck
+  current host and complete configured-domain CA admission, and retain the exact
+  returned Tart handle rather than persisting or reconstructing process authority.
+- [x] Persist `starting + generation G` before runtime mutation and return that
+  unchanged non-ready record only after fresh exact backend-running and healthy
+  serial-drain proof.
+- [x] Reconnect only to the matching live generation or relaunch the same G from
+  an exact structurally resumable stopped namespace. Reject missing, ambiguous,
+  foreign, symlinked, or unexpectedly populated state without adoption.
+- [x] Bind production registration, creation, status, parent start observation,
+  and child launch/observation to the admitted absolute Tart executable and exact
+  configured Tart home with closed environments.
+- [x] Support realistic Darwin runtime paths through a transient owner-private
+  short bind/connect alias while keeping the real socket and its inode authority
+  in the canonical exact generation.
 
-Retry reconnects to a matching live generation or relaunches only a valid
-exact stopped generation. Reject foreign/malformed/symlinked/unexpected runtime
-state and preserve durable intent on partial failure. Never adopt an unowned
-running object or infer ownership from a PID.
-
-Acceptance: deterministic persistence/retry/failure tests and a bounded
-controlled real-host exact-start check. Verify actual launch as soon as this
-boundary exists; do not wait for READY. The check must use the one-PTY ownership
-foundation needed by the backend, without adding C's bootstrap composition.
+Deterministic persistence, retry, process-boundary retention, exact cleanup,
+long-path transport, and configured-namespace tests are complete. The bounded
+controlled real-host exact-start check is the next controller-owned gate and has
+not yet run; it is product evidence, not formal qualification. Do not begin C or
+infer READY from this completed Slice B implementation boundary.
 
 ### C — Boot and serial bootstrap composition
 
