@@ -387,6 +387,35 @@ func TestDetachedLauncherUsesFixedInternalArgvAndClosedEnvironment(t *testing.T)
 	}
 }
 
+// Production break: a retry can inherit an exact request-plus-lock foundation
+// after a prior parent failed. Once this launcher re-admits and claims it, a
+// pre-detachment failure must remove the proven empty generation rather than
+// strand a namespace that future retries classify as drift.
+func TestDetachedLauncherCleansExactUnheldFoundationAfterStartFailure(t *testing.T) {
+	dir := privateRuntime(t)
+	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
+	if err := writeLaunchRequest(filepath.Join(dir, requestName), request); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeBoundGenerationLock(filepath.Join(dir, lockName), request); err != nil {
+		t.Fatal(err)
+	}
+	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(304, 0), Unique: 34}
+	launcher := newDetachedLauncher(launcherDeps{
+		executable: func() (string, error) { return "/private/boxwarden", nil }, inspector: testInspector(identity),
+		start: func(context.Context, LaunchCommand) (launchChild, error) {
+			return nil, errors.New("start failed before detachment")
+		},
+		await: func(context.Context, *Client, Binding) error { return nil },
+	})
+	if err := launcher.Launch(context.Background(), request); err == nil {
+		t.Fatal("Launch() error = nil")
+	}
+	if _, err := os.Lstat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("exact failed foundation directory=%v, want removed", err)
+	}
+}
+
 func TestDetachedLauncherClosesParentLockAfterStartWhileInheritedCopyRetainsClaim(t *testing.T) {
 	dir := privateLaunchRuntime(t)
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(302, 0), Unique: 32}

@@ -63,6 +63,9 @@ func (c *ExactController) reconcileLive(ctx context.Context, request LaunchReque
 	defer ticker.Stop()
 	var last error
 	for {
+		if err := ctx.Err(); err != nil {
+			return Snapshot{}, fmt.Errorf("reconcile authenticated exact live generation: %w", err)
+		}
 		snapshot, err := c.controller.Snapshot(ctx, request.Binding)
 		if err == nil {
 			if snapshot.Binding != request.Binding {
@@ -71,7 +74,7 @@ func (c *ExactController) reconcileLive(ctx context.Context, request LaunchReque
 			if snapshotReady(snapshot) {
 				return snapshot, nil
 			}
-			last = fmt.Errorf("authenticated supervisor snapshot is not ready")
+			last = snapshotPendingDiagnostic(snapshot)
 		} else {
 			last = err
 		}
@@ -83,6 +86,13 @@ func (c *ExactController) reconcileLive(ctx context.Context, request LaunchReque
 		case <-ticker.C:
 		}
 	}
+}
+
+func snapshotPendingDiagnostic(snapshot Snapshot) error {
+	if snapshot.Diagnostic != "" {
+		return fmt.Errorf("authenticated supervisor snapshot is not ready: %s", snapshot.Diagnostic)
+	}
+	return fmt.Errorf("authenticated supervisor snapshot is not ready")
 }
 
 type exactGenerationState uint8

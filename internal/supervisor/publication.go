@@ -154,6 +154,17 @@ func generationIsRequestOnly(runtime string) bool {
 	return err == nil && len(entries) == 1 && entries[0].Name() == requestName && !entries[0].IsDir()
 }
 
+// generationIsExactBoundFoundation reports only the narrow, already-admitted
+// retry foundation. Callers must still retain the admitted request and lock
+// identities; this shape check grants no pathname cleanup authority itself.
+func generationIsExactBoundFoundation(runtime string) bool {
+	if !privateDirectory(runtime) {
+		return false
+	}
+	entries, err := os.ReadDir(runtime)
+	return err == nil && exactBoundGenerationEntries(entries)
+}
+
 // publishBoundGenerationLock performs the only retry mutation: an O_EXCL
 // publication of the exact request-bound lock. A concurrent pre-existing lock
 // is accepted only by the same strict admission used for steady state.

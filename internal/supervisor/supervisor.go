@@ -110,6 +110,11 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 	if err != nil {
 		return errors.Join(fmt.Errorf("admit exact bound generation lock: %w", err), requestArtifact.close())
 	}
+	// A pre-existing, exact request-plus-lock-only namespace is a failed retry
+	// foundation. Once this parent has re-admitted both identities and won the
+	// flock below, it owns the same narrow cleanup obligation as request-only
+	// recovery; later artifacts deliberately make this false and are preserved.
+	resumableFoundation := generationIsExactBoundFoundation(request.RuntimeDirectory)
 	if err := claimPublishedGenerationLock(lockArtifact); err != nil {
 		return errors.Join(err, requestArtifact.close(), lockArtifact.close())
 	}
@@ -121,7 +126,7 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 		requestCleaned = true
 		result := errors.Join(removeExact(lockArtifact.identity, false), lockArtifact.close())
 		result = errors.Join(result, removeExact(requestArtifact.identity, false), requestArtifact.close())
-		if firstPublication || requestOnlyRecovery {
+		if firstPublication || requestOnlyRecovery || resumableFoundation {
 			result = errors.Join(result, removeExactDirectory(runtimeIdentity))
 		}
 		return result
@@ -199,6 +204,9 @@ func awaitAuthenticatedWithPolicy(ctx context.Context, binding Binding, policy s
 	defer ticker.Stop()
 	var last error
 	for {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("await authenticated supervisor: %w", err)
+		}
 		got, err := snapshot(ctx)
 		if err == nil {
 			if got.Binding != binding {
@@ -207,7 +215,7 @@ func awaitAuthenticatedWithPolicy(ctx context.Context, binding Binding, policy s
 			if snapshotReady(got) {
 				return nil
 			}
-			last = fmt.Errorf("supervisor authenticated snapshot is not ready")
+			last = snapshotPendingDiagnostic(got)
 		} else {
 			last = err
 		}

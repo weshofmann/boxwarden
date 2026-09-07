@@ -56,7 +56,33 @@ PASS
 gofmt -w internal/supervisor/exact.go internal/supervisor/supervisor.go internal/supervisor/exact_test.go
 git diff --check
 PASS
+
+RED: go test ./internal/supervisor -run 'TestExactController(PollsHeldCrashWindowUntilReady|CancellationAndTimeoutArePromptAndDiagnostic|WrongAuthenticatedBindingFailsWithoutExtraPoll|RejectsUnheldLaterArtifactsWithoutMutation|ReconcilesClaimContentionWithoutCleanup)' -count=1
+FAIL: pre-cancelled reconciliation sampled before context cancellation; timeout discarded Snapshot.Diagnostic
+
+RED: go test ./internal/supervisor -run 'Test(ExactController|DetachedLauncherCleansExactUnheldFoundationAfterStartFailure)' -count=1
+FAIL: claimed exact request-plus-lock foundation remained as an empty directory after pre-detachment start failure
+
+GREEN: go test ./internal/supervisor -run 'Test(ExactController|AwaitAuthenticated|DetachedLauncherCleansExactUnheldFoundationAfterStartFailure)' -count=1
+PASS
+
+FINAL CLOSEOUT: go test ./internal/supervisor -count=1; go test ./internal/supervisor ./internal/session ./cmd/boxwarden -count=20; go test -race ./internal/supervisor ./internal/session ./cmd/boxwarden -count=1; go test ./...; go vet ./...; CGO_ENABLED=1 go build ./cmd/boxwarden; CGO_ENABLED=0 go build ./cmd/boxwarden; GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build ./cmd/boxwarden; GOOS=linux GOARCH=amd64 go test -c ./internal/supervisor; git diff --check
+PASS
 ```
+
+## Closeout behavior
+
+The held crash-window test has no manifest or socket and sequences controller
+unavailable, authenticated non-READY, then exact READY; it makes zero launch
+calls. Timeout reports a non-READY snapshot diagnostic, pre-cancel avoids the
+first snapshot in both wait paths, and mid-loop cancellation returns promptly.
+Wrong authenticated bindings fail on their first sample. The later-artifact
+table covers `supervisor-manifest.json`, a real Unix socket, `serial/`, and all
+four credential shapes; it proves no launch and preservation of every entry.
+An `errors.Join(errGenerationAlreadyOwned, ...)` launch result reconciles the
+same namespace to READY without cleanup. A failed real detached launch from a
+claimed request-plus-lock-only foundation removes its retained request, lock,
+and proven empty directory.
 
 ## Remaining concerns
 
@@ -65,8 +91,6 @@ five-minute/one-second production policy, with short injected policies for
 deterministic tests. Runtime composition and authoritative lifecycle creation
 remain deliberately deferred to Task 5.3. No real host runtime was exercised.
 
-The focused b3 regressions cover the unheld request-plus-lock foundation and
-initial detached authentication polling. Follow-up coverage is still needed
-for every later-artifact class, claim-race reconciliation, and deterministic
-controller timeout/cancellation sequences before treating the complete b3 test
-matrix as independently demonstrated.
+The deterministic b3 matrix is complete for exact-generation retries. Runtime
+composition and any real Tart/serial/SSH qualification remain deliberately
+outside this slice.

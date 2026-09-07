@@ -2,9 +2,12 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -103,6 +106,162 @@ func TestAwaitAuthenticatedPollsUntilExactReady(t *testing.T) {
 	})
 	if err != nil || calls != 3 {
 		t.Fatalf("awaitAuthenticatedWithPolicy() calls=%d err=%v, want three polls and success", calls, err)
+	}
+}
+
+func TestAwaitAuthenticatedPreCancelledDoesNotSnapshot(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls := 0
+	err := awaitAuthenticatedWithPolicy(ctx, testBinding(), startupPolicy{timeout: time.Second, interval: time.Millisecond}, func(context.Context) (Snapshot, error) {
+		calls++
+		return exactReadySnapshot(testBinding()), nil
+	})
+	if !errors.Is(err, context.Canceled) || calls != 0 {
+		t.Fatalf("err=%v calls=%d, want cancellation before snapshot", err, calls)
+	}
+}
+
+func TestExactControllerPollsHeldCrashWindowUntilReady(t *testing.T) {
+	runtime := privateRuntime(t)
+	request := exactTestRequest(runtime)
+	writeExactFoundation(t, request)
+	lock, err := os.OpenFile(filepath.Join(runtime, lockName), os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	ready := exactReadySnapshot(request.Binding)
+	controller := &scriptedExactController{outcomes: []exactSnapshotOutcome{{err: errors.New("socket unavailable")}, {snapshot: Snapshot{Binding: request.Binding, Diagnostic: "booting", ObservedAt: time.Now().UTC()}}, {snapshot: ready}}}
+	launcher := &exactLauncherFake{}
+	got, err := newExactController(launcher, controller, startupPolicy{timeout: time.Second, interval: time.Millisecond}).StartExact(context.Background(), request)
+	if err != nil || got != ready || launcher.called || controller.calls != 3 {
+		t.Fatalf("StartExact() snapshot=%#v launch=%t calls=%d err=%v", got, launcher.called, controller.calls, err)
+	}
+}
+
+func TestExactControllerCancellationAndTimeoutArePromptAndDiagnostic(t *testing.T) {
+	t.Run("pre-cancelled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		controller := &scriptedExactController{outcomes: []exactSnapshotOutcome{{snapshot: exactReadySnapshot(testBinding())}}}
+		_, err := newExactController(&exactLauncherFake{}, controller, startupPolicy{timeout: time.Second, interval: time.Millisecond}).reconcileLive(ctx, exactTestRequest(privateLaunchRuntime(t)))
+		if !errors.Is(err, context.Canceled) || controller.calls != 0 {
+			t.Fatalf("err=%v calls=%d, want cancellation before snapshot", err, controller.calls)
+		}
+	})
+	t.Run("timeout retains diagnostic", func(t *testing.T) {
+		request := exactTestRequest(privateLaunchRuntime(t))
+		controller := &scriptedExactController{outcomes: []exactSnapshotOutcome{{snapshot: Snapshot{Binding: request.Binding, Diagnostic: "serial still booting", ObservedAt: time.Now().UTC()}}}}
+		_, err := newExactController(&exactLauncherFake{}, controller, startupPolicy{timeout: 8 * time.Millisecond, interval: time.Millisecond}).reconcileLive(context.Background(), request)
+		if err == nil || !strings.Contains(err.Error(), "serial still booting") {
+			t.Fatalf("timeout=%v, want snapshot diagnostic", err)
+		}
+	})
+	t.Run("mid-loop cancel", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		controller := &scriptedExactController{onSnapshot: cancel, outcomes: []exactSnapshotOutcome{{err: errors.New("not yet")}}}
+		_, err := newExactController(&exactLauncherFake{}, controller, startupPolicy{timeout: time.Second, interval: time.Millisecond}).reconcileLive(ctx, exactTestRequest(privateLaunchRuntime(t)))
+		if !errors.Is(err, context.Canceled) || controller.calls != 1 {
+			t.Fatalf("err=%v calls=%d, want prompt cancellation", err, controller.calls)
+		}
+	})
+}
+
+func TestExactControllerWrongAuthenticatedBindingFailsWithoutExtraPoll(t *testing.T) {
+	request := exactTestRequest(privateLaunchRuntime(t))
+	wrong := request.Binding
+	wrong.BackendObject = "foreign"
+	controller := &scriptedExactController{outcomes: []exactSnapshotOutcome{{snapshot: exactReadySnapshot(wrong)}, {snapshot: exactReadySnapshot(request.Binding)}}}
+	_, err := newExactController(&exactLauncherFake{}, controller, startupPolicy{timeout: time.Second, interval: time.Millisecond}).reconcileLive(context.Background(), request)
+	if err == nil || controller.calls != 1 {
+		t.Fatalf("err=%v calls=%d, want immediate wrong-binding rejection", err, controller.calls)
+	}
+}
+
+func TestExactControllerRejectsUnheldLaterArtifactsWithoutMutation(t *testing.T) {
+	tests := []struct {
+		name, path string
+		create     func(*testing.T, string)
+	}{
+		{"manifest", manifestName, func(t *testing.T, dir string) {
+			if err := os.WriteFile(filepath.Join(dir, manifestName), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"socket", socketName, func(t *testing.T, dir string) {
+			l, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(dir, socketName), Net: "unix"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = l.Close() })
+		}},
+		{"serial", "serial", func(t *testing.T, dir string) {
+			if err := os.Mkdir(filepath.Join(dir, "serial"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"client", "client", func(t *testing.T, dir string) {
+			if err := os.WriteFile(filepath.Join(dir, "client"), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"client.pub", "client.pub", func(t *testing.T, dir string) {
+			if err := os.WriteFile(filepath.Join(dir, "client.pub"), []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"client-cert.pub", "client-cert.pub", func(t *testing.T, dir string) {
+			if err := os.WriteFile(filepath.Join(dir, "client-cert.pub"), []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"known_hosts", "known_hosts", func(t *testing.T, dir string) {
+			if err := os.WriteFile(filepath.Join(dir, "known_hosts"), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := privateRuntime(t)
+			request := exactTestRequest(runtime)
+			writeExactFoundation(t, request)
+			test.create(t, runtime)
+			launcher := &exactLauncherFake{}
+			if _, err := newExactController(launcher, &exactControllerFake{}, startupPolicy{timeout: time.Second, interval: time.Millisecond}).StartExact(context.Background(), request); err == nil {
+				t.Fatal("StartExact accepted unheld later artifact")
+			}
+			if launcher.called {
+				t.Fatal("StartExact launched stale generation")
+			}
+			for _, name := range []string{requestName, lockName, test.path} {
+				if _, err := os.Lstat(filepath.Join(runtime, name)); err != nil {
+					t.Fatalf("%s was mutated: %v", name, err)
+				}
+			}
+		})
+	}
+}
+
+func TestExactControllerReconcilesClaimContentionWithoutCleanup(t *testing.T) {
+	runtime := privateRuntime(t)
+	request := exactTestRequest(runtime)
+	writeExactFoundation(t, request)
+	ready := exactReadySnapshot(request.Binding)
+	launcher := &exactLauncherFake{err: errors.Join(errGenerationAlreadyOwned, errors.New("claim race"))}
+	got, err := newExactController(launcher, &scriptedExactController{outcomes: []exactSnapshotOutcome{{snapshot: ready}}}, startupPolicy{timeout: time.Second, interval: time.Millisecond}).StartExact(context.Background(), request)
+	if err != nil || got != ready || !launcher.called {
+		t.Fatalf("contention result=%#v called=%t err=%v", got, launcher.called, err)
+	}
+	for _, name := range []string{requestName, lockName} {
+		if _, err := os.Lstat(filepath.Join(runtime, name)); err != nil {
+			t.Fatalf("contention removed %s: %v", name, err)
+		}
 	}
 }
 
@@ -231,12 +390,13 @@ func TestValidateLiveOuterEntryFiniteCredentialAllowlist(t *testing.T) {
 type exactLauncherFake struct {
 	request LaunchRequest
 	called  bool
+	err     error
 }
 
 func (f *exactLauncherFake) Launch(_ context.Context, request LaunchRequest) error {
 	f.called = true
 	f.request = request
-	return nil
+	return f.err
 }
 
 type exactControllerFake struct {
@@ -252,3 +412,46 @@ func (f *exactControllerFake) Snapshot(_ context.Context, binding Binding) (Snap
 	return f.snapshot, nil
 }
 func (*exactControllerFake) Stop(context.Context, Binding) error { return nil }
+
+type exactSnapshotOutcome struct {
+	snapshot Snapshot
+	err      error
+}
+type scriptedExactController struct {
+	outcomes   []exactSnapshotOutcome
+	calls      int
+	onSnapshot func()
+}
+
+func (f *scriptedExactController) Snapshot(_ context.Context, binding Binding) (Snapshot, error) {
+	f.calls++
+	if f.onSnapshot != nil {
+		f.onSnapshot()
+		f.onSnapshot = nil
+	}
+	if len(f.outcomes) == 0 {
+		return Snapshot{}, fmt.Errorf("missing scripted snapshot")
+	}
+	n := f.calls - 1
+	if n >= len(f.outcomes) {
+		n = len(f.outcomes) - 1
+	}
+	return f.outcomes[n].snapshot, f.outcomes[n].err
+}
+func (*scriptedExactController) Stop(context.Context, Binding) error { return nil }
+
+func exactReadySnapshot(binding Binding) Snapshot {
+	return Snapshot{Binding: binding, BackendRunning: true, BrokerHealthy: true, ScreenHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true, ObservedAt: time.Now().UTC()}
+}
+func exactTestRequest(runtime string) LaunchRequest {
+	return LaunchRequest{Binding: testBinding(), RuntimeDirectory: runtime, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
+}
+func writeExactFoundation(t *testing.T, request LaunchRequest) {
+	t.Helper()
+	if err := writeLaunchRequest(filepath.Join(request.RuntimeDirectory, requestName), request); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeBoundGenerationLock(filepath.Join(request.RuntimeDirectory, lockName), request); err != nil {
+		t.Fatal(err)
+	}
+}
