@@ -268,6 +268,9 @@ func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspec
 			}
 		}
 	}
+	if ctx.Err() != nil {
+		add("inspection.canceled", Drifted, "host inspection canceled", "complete host inspection", "retry the read-only host inspection")
+	}
 	report.Normalize()
 	return doctorInspection{report: report, manifest: manifest}
 }

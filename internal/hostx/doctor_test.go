@@ -54,6 +54,41 @@ func TestRuntimeAdmissionHonorsCancellation(t *testing.T) {
 	}
 }
 
+// A successful final inspector operation must not hide cancellation that
+// arrived while the host facts were being collected.
+func TestHostAdmissionRejectsCancellationDuringInspection(t *testing.T) {
+	for _, entry := range []string{"doctor", "runtime"} {
+		t.Run(entry, func(t *testing.T) {
+			inspector, request := healthyDoctorFixture(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			doctor := SystemDoctor{inspector: cancelDuringInspection{DoctorInspector: inspector, cancel: cancel}}
+			if entry == "doctor" {
+				report := doctor.Doctor(ctx, request)
+				if report.Status == Healthy || !hasFinding(report, "inspection.canceled") {
+					t.Fatalf("Doctor() accepted inspection canceled in flight: %#v", report)
+				}
+			} else if _, err := doctor.CheckRuntime(ctx, request); err == nil {
+				t.Fatal("CheckRuntime() accepted inspection canceled in flight")
+			}
+			if ctx.Err() != context.Canceled {
+				t.Fatal("inspection did not reach the cancellation operation")
+			}
+		})
+	}
+}
+
+type cancelDuringInspection struct {
+	DoctorInspector
+	cancel context.CancelFunc
+}
+
+func (i cancelDuringInspection) HomebrewSoftnet() ([]HomebrewSoftnet, error) {
+	facts, err := i.DoctorInspector.HomebrewSoftnet()
+	i.cancel()
+	return facts, err
+}
+
 func TestDoctorReportsHealthyOnlyWhenEveryHostPrerequisiteMatches(t *testing.T) {
 	inspector, request := healthyDoctorFixture(t)
 	service := SystemService{inspector: inspector}
