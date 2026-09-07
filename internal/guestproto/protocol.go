@@ -76,7 +76,7 @@ type SerialResult struct {
 }
 
 func DecodeSerialRequest(reader io.Reader) (SerialRequest, error) {
-	contents, err := readBounded(reader, MaxRequestBytes)
+	contents, err := readCanonicalLine(reader, MaxRequestBytes)
 	if err != nil {
 		return SerialRequest{}, err
 	}
@@ -91,7 +91,28 @@ func DecodeSerialRequest(reader io.Reader) (SerialRequest, error) {
 	if err := value.Validate(); err != nil {
 		return SerialRequest{}, err
 	}
+	canonical, err := json.Marshal(value)
+	if err != nil || !bytes.Equal(contents, canonical) {
+		return SerialRequest{}, fmt.Errorf("serial request must be one canonical JSON line")
+	}
 	return value, nil
+}
+
+// Read only through LF: the serial terminal stays open after the request. A
+// byte-sized read avoids consuming subsequent shell input into a hidden buffer.
+func readCanonicalLine(reader io.Reader, limit int) ([]byte, error) {
+	line := make([]byte, 0, 1024)
+	var one [1]byte
+	for len(line) <= limit {
+		if _, err := io.ReadFull(reader, one[:]); err != nil {
+			return nil, fmt.Errorf("incomplete serial request line: %w", err)
+		}
+		if one[0] == '\n' {
+			return line, nil
+		}
+		line = append(line, one[0])
+	}
+	return nil, fmt.Errorf("serial request exceeds %d bytes", limit)
 }
 func DecodeManagementRequest(reader io.Reader) (ManagementRequest, error) {
 	contents, err := readBounded(reader, MaxRequestBytes)

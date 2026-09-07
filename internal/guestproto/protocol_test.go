@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,45 @@ import (
 const testKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 const testSession = "123e4567-e89b-42d3-a456-426614174000"
 const testGeneration = "9b2d12d8-7014-4c5e-9d5c-627c2fcc1575"
+
+// The serial helper must finish at LF even while its terminal stays open,
+// and must leave following input untouched for its caller.
+func TestSerialRequestConsumesOneCanonicalLineWithoutEOF(t *testing.T) {
+	want := testRequest()
+	encoded, _ := json.Marshal(want)
+	r := &lineOnlyReader{data: append(encoded, '\n')}
+	got, err := DecodeSerialRequest(r)
+	if err != nil || got != want {
+		t.Fatalf("decode before EOF = %#v, %v", got, err)
+	}
+	input := bytes.NewBuffer(append(append(encoded, '\n'), []byte("next line\n")...))
+	if _, err := DecodeSerialRequest(input); err != nil || input.String() != "next line\n" {
+		t.Fatalf("line boundary: remaining %q, error %v", input.String(), err)
+	}
+}
+
+type lineOnlyReader struct{ data []byte }
+
+func (r *lineOnlyReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, fmt.Errorf("read past canonical line without EOF")
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
+}
+
+func TestSerialRequestRejectsNoncanonicalOrUnboundedLine(t *testing.T) {
+	encoded, _ := json.Marshal(testRequest())
+	for _, input := range []string{string(encoded), string(encoded) + "\r\n", " " + string(encoded) + "\n", string(encoded) + " {}\n", strings.Repeat("x", MaxRequestBytes+1) + "\n", strings.Replace(string(encoded), `"version":1`, `"version": 1`, 1) + "\n"} {
+		if _, err := DecodeSerialRequest(strings.NewReader(input)); err == nil {
+			t.Fatal("accepted noncanonical request line")
+		}
+	}
+	if _, err := DecodeManagementRequest(io.MultiReader(strings.NewReader(`{"version":1,"kind":"probe","domain":"work","session_id":"`+testSession+`","backend_kind":"tart","backend_object":"workstation"}`+"\n"), strings.NewReader("{}"))); err == nil {
+		t.Fatal("management decoder lost EOF/trailing-data validation")
+	}
+}
 
 func testRequest() SerialRequest {
 	return SerialRequest{Version: Version, Nonce: "nonce-1", StartGeneration: testGeneration, Association: Association{Domain: "work", SessionID: testSession, BackendKind: "tart", BackendObject: "workstation"}, CAPublicKey: testKey, CAFingerprint: testFingerprint(testKey), Principal: "boxwarden-session-" + testSession}
@@ -44,7 +84,7 @@ func TestSerialRequestRejectsUnknownOrMismatchedFields(t *testing.T) {
 		"wrong fingerprint":  strings.Replace(valid, r.CAFingerprint, "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", 1),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := DecodeSerialRequest(strings.NewReader(input)); err == nil {
+			if _, err := DecodeSerialRequest(strings.NewReader(input + "\n")); err == nil {
 				t.Fatal("invalid request accepted")
 			}
 		})

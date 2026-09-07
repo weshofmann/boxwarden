@@ -124,5 +124,6 @@ func serialFixture(t *testing.T) (*guestproto.Bootstrapper, *bytes.Buffer) {
 	fingerprint := "SHA256:" + base64.RawStdEncoding.EncodeToString(sum[:])
 	var input bytes.Buffer
 	input.WriteString(`{"version":1,"nonce":"nonce-1","start_generation":"9b2d12d8-7014-4c5e-9d5c-627c2fcc1575","domain":"work","session_id":"123e4567-e89b-42d3-a456-426614174000","backend_kind":"tart","backend_object":"workstation","ca_public_key":"` + key + `","ca_fingerprint":"` + fingerprint + `","principal":"boxwarden-session-123e4567-e89b-42d3-a456-426614174000"}`)
+	input.WriteByte('\n')
 	return bootstrapper, &input
 }
