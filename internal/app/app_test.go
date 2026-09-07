@@ -19,6 +19,33 @@ import (
 	"github.com/weshofmann/boxwarden/internal/sshx"
 )
 
+// Production break: omitting the public start dispatch would leave the
+// generation-safe session service unreachable from the supported CLI surface.
+func TestSessionStartDispatchesOnlySelectedDomainStarter(t *testing.T) {
+	configPath, _ := writeDomainFixture(t, "work")
+	starter := &sessionStarterFake{record: session.Record{Domain: "work", Name: "dev", IntendedState: session.StateRunning, Readiness: session.ReadinessRecord{Status: session.ReadinessReady}}}
+	var output bytes.Buffer
+	if err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "session", "start", "dev"}, Options{SessionStarter: starter, Output: &output}); err != nil {
+		t.Fatalf("Run(session start) error = %v", err)
+	}
+	if starter.name != "dev" {
+		t.Fatalf("Start() name = %q, want dev", starter.name)
+	}
+	if got, want := output.String(), "domain: work\nsession: dev\nstate: running\nreadiness: ready\n"; got != want {
+		t.Fatalf("Run(session start) output = %q, want %q", got, want)
+	}
+}
+
+type sessionStarterFake struct {
+	name   string
+	record session.Record
+}
+
+func (s *sessionStarterFake) Start(_ context.Context, name string) (session.Record, error) {
+	s.name = name
+	return s.record, nil
+}
+
 func TestSessionStatusRendersPersistedAndObservedState(t *testing.T) {
 	configPath := writeStatusFixture(t, "work", "dev")
 	recordPath := filepath.Join(filepath.Dir(configPath), "sessions", "dev.json")

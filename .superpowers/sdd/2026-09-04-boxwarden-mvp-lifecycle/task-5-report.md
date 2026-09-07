@@ -317,3 +317,125 @@ The 20-iteration supervisor/CLI gate completed in 75.206 s. Native cgo and
 no-cgo outputs are Mach-O arm64; the Boxwarden cross-build is ELF arm64 and
 the compile-only supervisor test binary is ELF amd64. `gofmt -l` on changed Go
 files and `git diff --check` produced no output.
+
+## Task 5 — resumed start-boundary implementation (partial; not a completed READY path)
+
+**Base:** `a8462c564a6d0fcd06a3156daaba089e19247d30`.
+
+### Implemented foundation
+
+- Added a narrow `session.StartDependencies` / `SupervisorControl` boundary.
+  `Start` holds the session lock, requires host and complete configured-domain
+  CA admission, verifies the exact stopped backend object, persists `starting`
+  plus a UUID generation and `readiness=starting`, and only then asks
+  `StartExact` to act. A fresh exact all-healthy supervisor snapshot is
+  required before it atomically persists `running` / `ready`; a stale or
+  incomplete snapshot leaves the exact `starting` generation durable for
+  recovery.
+- Added `SessionRecordName` to the comparable `supervisor.LaunchRequest`, and
+  an `ExactController` which launches only the supplied request and then
+  requires an authenticated snapshot with the exact same binding.
+- Added a public `session start <name>` command dispatch through one narrow
+  application `SessionStarter` interface, plus deterministic output.
+- Ported the narrowly typed time-zone detector/convergence helpers from the
+  preserved source material. The detector accepts only an IANA path resolved
+  under the fixed trusted zoneinfo root; convergence requires apply and exact
+  typed readback.
+
+### Honest RED / GREEN evidence
+
+Tests were written before the corresponding production code.
+
+Initial session RED, before the start composition types existed:
+
+```text
+undefined: NewStartService
+undefined: StartDependencies
+service.Start undefined
+undefined: RuntimeAdmission
+supervisor.LaunchRequest.SessionRecordName undefined
+```
+
+The test names the production break: moving persistence below `StartExact`
+would expose runtime mutation without durable generation ownership. Its fake
+does not assert mock calls: at the runtime boundary it independently reloads
+the real stored record and rejects anything other than the hand-specified
+`starting` state, generation, and request binding. After the minimal service
+implementation:
+
+```text
+go test ./internal/session -run 'TestStart' -count=1 -v
+PASS
+```
+
+Initial time-zone RED, before the package existed:
+
+```text
+undefined: Converge
+undefined: HostDetector
+```
+
+The green detector test resolves literal `/etc/localtime` to a literal
+`America/Denver` file under the trusted zoneinfo root; the convergence test
+proves an exact guest readback is required after typed application:
+
+```text
+go test ./internal/timezonex -run 'Test(DetectHost|HostDetector|Converge)' -count=1 -v
+PASS
+```
+
+Initial exact-controller RED:
+
+```text
+undefined: NewExactController
+```
+
+The green behavior rejects a snapshot with a different binding instead of
+turning a merely launched child into a ready generation:
+
+```text
+go test ./internal/supervisor -run '^TestExactControllerReturnsOnlyAuthenticatedExactSnapshot$' -count=1 -v
+PASS
+```
+
+The public-command test was likewise RED before `Options.SessionStarter` and
+the parser branch existed (`unknown field SessionStarter`), then green with a
+selected-domain starter and fixed output.
+
+### Mandatory incompleteness / blocker
+
+This is not the requested complete Task 5 implementation. The inherited Task
+4 `supervisor.RunRequest` still deliberately constructs `unavailableOwner`;
+there is no Task-5 composition runner to reload authoritative config/record,
+revalidate complete host/CA admission, publish the outer generation atomically,
+invoke `serialx`, perform serial bootstrap/pin/client-key/certificate/address/
+strict-SSH/zone work, or clean proven owned runtime on failure. Consequently
+`cmd/boxwarden/main.go` cannot honestly compose a functioning public start and
+does not provide `Options.SessionStarter`; invoking the new public command in
+the production binary returns `session starter is required` rather than
+launching a VM. No real Tart, Softnet, Screen, SSH, or VM was launched.
+
+### Verification actually run
+
+```text
+go test ./internal/app ./internal/session ./internal/timezonex ./internal/supervisor -run 'Test(SessionStart|Start|HostDetector|Converge|ExactController)' -count=1 -v
+PASS
+go test ./...
+PASS
+go test -race ./...
+PASS
+go vet ./...
+PASS
+go build ./cmd/boxwarden (native cgo)
+PASS (Mach-O arm64)
+CGO_ENABLED=0 go build ./cmd/boxwarden
+PASS (Mach-O arm64)
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build ./cmd/boxwarden
+PASS (ELF arm64)
+GOOS=linux GOARCH=amd64 go test -c ./internal/session
+PASS (ELF amd64 compile-only test binary)
+gofmt -l [changed Go files]
+(no output)
+git diff --check
+(no output)
+```

@@ -37,9 +37,10 @@ type Controller interface {
 	Stop(context.Context, Binding) error
 }
 type LaunchRequest struct {
-	Binding          Binding `json:"binding"`
-	RuntimeDirectory string  `json:"runtime_directory"`
-	HostConfigPath   string  `json:"host_config_path"`
+	Binding           Binding `json:"binding"`
+	RuntimeDirectory  string  `json:"runtime_directory"`
+	HostConfigPath    string  `json:"host_config_path"`
+	SessionRecordName string  `json:"session_record_name,omitempty"`
 }
 type Launcher interface {
 	Launch(context.Context, LaunchRequest) error

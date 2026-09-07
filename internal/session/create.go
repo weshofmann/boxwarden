@@ -32,6 +32,7 @@ type Service struct {
 	creator  backend.Creator
 	newID    func() (string, error)
 	hook     createHook
+	start    *StartDependencies
 }
 
 // NewService composes a domain-scoped session service. Dependencies are

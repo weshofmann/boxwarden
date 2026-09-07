@@ -33,17 +33,24 @@ type CAInitializer interface {
 	Init(context.Context, sshx.Domain, []sshx.Domain) (sshx.CAInitResult, error)
 }
 
+// SessionStarter is the only public-command authority required for start.
+// App does not learn its runtime, supervisor, or credential internals.
+type SessionStarter interface {
+	Start(context.Context, string) (session.Record, error)
+}
+
 // Options supplies trusted-host dependencies to Run. App depends only on the
 // narrow backend seams and never on Tart directly.
 type Options struct {
-	ConfigPath string
-	Env        []string
-	Observer   backend.Observer
-	Creator    backend.Creator
-	HostInit   HostInitializer
-	HostDoctor HostDoctor
-	CAInit     CAInitializer
-	Output     io.Writer
+	ConfigPath     string
+	Env            []string
+	Observer       backend.Observer
+	Creator        backend.Creator
+	HostInit       HostInitializer
+	HostDoctor     HostDoctor
+	CAInit         CAInitializer
+	SessionStarter SessionStarter
+	Output         io.Writer
 }
 
 // DefaultConfigPath returns the conventional trusted-host configuration path.
@@ -159,6 +166,15 @@ func Run(ctx context.Context, args []string, options Options) error {
 			return fmt.Errorf("create session: %w", err)
 		}
 		return writeCreatedSession(options.Output, record)
+	case commandSessionStart:
+		if options.SessionStarter == nil {
+			return errors.New("session starter is required")
+		}
+		record, err := options.SessionStarter.Start(ctx, command.name)
+		if err != nil {
+			return fmt.Errorf("start session: %w", err)
+		}
+		return writeStartedSession(options.Output, record)
 	default:
 		return errors.New("unsupported command")
 	}
@@ -170,6 +186,7 @@ const (
 	commandSessionStatus commandKind = iota + 1
 	commandGoldenRegister
 	commandSessionCreate
+	commandSessionStart
 	commandInit
 	commandDoctor
 	commandDomainInit
@@ -263,7 +280,12 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.name = createSet.Args()[0]
 		return base, nil
 	}
-	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] <session>, session status <session>")
+	if len(remaining) == 3 && remaining[0] == "session" && remaining[1] == "start" {
+		base.kind = commandSessionStart
+		base.name = remaining[2]
+		return base, nil
+	}
+	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] <session>, session start <session>, session status <session>")
 }
 
 func writeInit(output io.Writer, result hostx.InitResult) error {
@@ -367,6 +389,13 @@ func writeGoldenRegistration(output io.Writer, record golden.Record) error {
 func writeCreatedSession(output io.Writer, record session.Record) error {
 	if _, err := fmt.Fprintf(output, "domain: %s\nsession: %s\nmode: %s\nstate: %s\n", record.Domain, record.Name, record.Mode, record.IntendedState); err != nil {
 		return fmt.Errorf("write created session: %w", err)
+	}
+	return nil
+}
+
+func writeStartedSession(output io.Writer, record session.Record) error {
+	if _, err := fmt.Fprintf(output, "domain: %s\nsession: %s\nstate: %s\nreadiness: %s\n", record.Domain, record.Name, record.IntendedState, record.Readiness.Status); err != nil {
+		return fmt.Errorf("write started session: %w", err)
 	}
 	return nil
 }
