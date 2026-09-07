@@ -108,6 +108,13 @@ func classifyExactGeneration(request LaunchRequest) (exactGenerationState, error
 	if len(entries) == 1 && entries[0].Name() == requestName && !entries[0].IsDir() {
 		return exactGenerationRequestOnly, nil
 	}
+	lock, err := admitBoundGenerationLock(filepath.Join(request.RuntimeDirectory, lockName), request)
+	if lock != nil {
+		defer lock.close()
+	}
+	if err != nil {
+		return 0, fmt.Errorf("exact generation lock is missing or foreign: %w", err)
+	}
 	for _, entry := range entries {
 		if err := validateLiveOuterEntry(request.RuntimeDirectory, entry); err != nil {
 			return 0, err

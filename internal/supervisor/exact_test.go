@@ -40,7 +40,7 @@ func TestExactControllerReconcilesAuthenticatedLiveGenerationWithoutLaunch(t *te
 	if err := writeLaunchRequest(filepath.Join(runtime, requestName), request); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(runtime, lockName), []byte("child still starting"), 0o600); err != nil {
+	if err := writeBoundGenerationLock(filepath.Join(runtime, lockName), request); err != nil {
 		t.Fatal(err)
 	}
 	lock, err := os.OpenFile(filepath.Join(runtime, lockName), os.O_RDWR, 0)
@@ -63,6 +63,26 @@ func TestExactControllerReconcilesAuthenticatedLiveGenerationWithoutLaunch(t *te
 	}
 	if got != controller.snapshot || controller.binding != binding {
 		t.Fatalf("StartExact() snapshot/binding = %#v/%#v, want authenticated exact live owner", got, controller.binding)
+	}
+}
+
+// Production break: an authenticated snapshot cannot make an arbitrary
+// generation.lock safe. Exact controller admission must verify its binding to
+// the immutable request before classifying a namespace as live.
+func TestExactControllerRejectsForeignGenerationLock(t *testing.T) {
+	runtime := privateRuntime(t)
+	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: runtime, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
+	if err := writeLaunchRequest(filepath.Join(runtime, requestName), request); err != nil {
+		t.Fatal(err)
+	}
+	foreign := request
+	foreign.Binding.BackendObject = "object-other"
+	if err := writeBoundGenerationLock(filepath.Join(runtime, lockName), foreign); err != nil {
+		t.Fatal(err)
+	}
+	controller := &exactControllerFake{snapshot: Snapshot{Binding: request.Binding, BackendRunning: true, BrokerHealthy: true, ScreenHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true, ObservedAt: time.Now().UTC()}}
+	if _, err := NewExactController(&exactLauncherFake{}, controller).StartExact(context.Background(), request); err == nil {
+		t.Fatal("StartExact() accepted a generation lock bound to another request")
 	}
 }
 

@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,7 +32,7 @@ func publishOrAdmitRequest(request LaunchRequest) (string, bool, error) {
 	}
 	path := filepath.Join(request.RuntimeDirectory, requestName)
 	if _, err := os.Lstat(request.RuntimeDirectory); err == nil {
-		if err := admitRequestOnly(path, request); err != nil {
+		if err := admitOrCompleteBoundGeneration(path, request); err != nil {
 			return "", false, err
 		}
 		return path, false, nil
@@ -49,6 +50,9 @@ func publishOrAdmitRequest(request LaunchRequest) (string, bool, error) {
 	failed := true
 	defer func() {
 		if failed {
+			if lockIdentity, err := capturePrivateRegular(filepath.Join(stage, lockName)); err == nil {
+				_ = removeExact(lockIdentity, false)
+			}
 			if requestIdentity, err := capturePrivateRegular(filepath.Join(stage, requestName)); err == nil {
 				_ = removeExact(requestIdentity, false)
 			}
@@ -59,6 +63,9 @@ func publishOrAdmitRequest(request LaunchRequest) (string, bool, error) {
 		return "", false, err
 	}
 	if err := writeLaunchRequestAt(filepath.Join(stage, requestName), request); err != nil {
+		return "", false, err
+	}
+	if err := writeBoundGenerationLockAt(filepath.Join(stage, lockName), request); err != nil {
 		return "", false, err
 	}
 	if err := syncDirectory(stage); err != nil {
@@ -82,16 +89,19 @@ func publishOrAdmitRequest(request LaunchRequest) (string, bool, error) {
 	return path, true, nil
 }
 
-func admitRequestOnly(path string, want LaunchRequest) error {
-	if !privateDirectory(filepath.Dir(path)) {
+func admitOrCompleteBoundGeneration(path string, want LaunchRequest) error {
+	runtime := filepath.Dir(path)
+	runtimeIdentity, err := capturePrivateDirectory(runtime)
+	if err != nil {
 		return fmt.Errorf("generation directory is not owner-private")
 	}
-	entries, err := os.ReadDir(filepath.Dir(path))
+	entries, err := os.ReadDir(runtime)
 	if err != nil {
 		return err
 	}
-	if len(entries) != 1 || entries[0].Name() != requestName || entries[0].IsDir() {
-		return fmt.Errorf("generation is not request-only exact state")
+	requestOnly := len(entries) == 1 && entries[0].Name() == requestName && !entries[0].IsDir()
+	if !requestOnly && !exactBoundGenerationEntries(entries) {
+		return fmt.Errorf("generation is not exact bound request state")
 	}
 	got, artifact, err := admitLaunchRequest(path)
 	if artifact != nil {
@@ -100,7 +110,66 @@ func admitRequestOnly(path string, want LaunchRequest) error {
 	if err != nil || !launchRequestsEqual(got, want) {
 		return fmt.Errorf("generation request does not match exact binding: %w", err)
 	}
+	if requestOnly {
+		if err := publishBoundGenerationLock(filepath.Join(runtime, lockName), want); err != nil {
+			return err
+		}
+	}
+	if err := identityStillMatches(runtimeIdentity, func(info os.FileInfo) bool {
+		return info.IsDir() && info.Mode().Perm() == 0o700 && ownedByCurrentUser(info)
+	}); err != nil {
+		return fmt.Errorf("generation directory changed during bound admission: %w", err)
+	}
+	if err := identityStillMatches(artifact.identity, func(info os.FileInfo) bool {
+		return info.Mode().IsRegular() && info.Mode().Perm() == 0o600 && ownedByCurrentUser(info)
+	}); err != nil {
+		return fmt.Errorf("generation request changed during bound admission: %w", err)
+	}
+	entries, err = os.ReadDir(runtime)
+	if err != nil {
+		return err
+	}
+	if !exactBoundGenerationEntries(entries) {
+		return fmt.Errorf("generation changed during bound admission")
+	}
+	lock, err := admitBoundGenerationLock(filepath.Join(runtime, lockName), want)
+	if lock != nil {
+		defer lock.close()
+	}
+	if err != nil {
+		return fmt.Errorf("generation lock does not match exact request: %w", err)
+	}
 	return nil
+}
+
+func exactBoundGenerationEntries(entries []os.DirEntry) bool {
+	return len(entries) == 2 && entries[0].Name() == lockName && !entries[0].IsDir() && entries[1].Name() == requestName && !entries[1].IsDir()
+}
+
+func generationIsRequestOnly(runtime string) bool {
+	if !privateDirectory(runtime) {
+		return false
+	}
+	entries, err := os.ReadDir(runtime)
+	return err == nil && len(entries) == 1 && entries[0].Name() == requestName && !entries[0].IsDir()
+}
+
+// publishBoundGenerationLock performs the only retry mutation: an O_EXCL
+// publication of the exact request-bound lock. A concurrent pre-existing lock
+// is accepted only by the same strict admission used for steady state.
+func publishBoundGenerationLock(path string, request LaunchRequest) error {
+	err := writeBoundGenerationLock(path, request)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	lock, admitErr := admitBoundGenerationLock(path, request)
+	if lock != nil {
+		admitErr = errors.Join(admitErr, lock.close())
+	}
+	return admitErr
 }
 
 func launchRequestsEqual(got, want LaunchRequest) bool { return reflect.DeepEqual(got, want) }

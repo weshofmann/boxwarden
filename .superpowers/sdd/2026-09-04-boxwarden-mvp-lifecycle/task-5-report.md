@@ -646,3 +646,80 @@ directory.
 go test ./internal/hostx ./internal/supervisor -run 'Test(ScreenAdmissionPublicSurface|ValidateLiveOuterEntry)' -count=1
 PASS
 ```
+
+## Task 5.2b1 — immutable request-bound generation lock
+
+**Base:** `4cddbfa`.
+
+This bounded b1 slice makes `generation.lock` a fixed, non-secret immutable
+record: version 1, the full exact `Binding`, and SHA-256 of the canonical
+serialized validated `LaunchRequest`. Its encoding is bounded; strict decode
+rejects duplicate, unknown, and trailing fields. The narrow writer accepts
+only `<RuntimeDirectory>/generation.lock`, and admission retains an exact
+0600 regular-file descriptor after owner, no-symlink, record, binding, and
+digest checks.
+
+First publication stages and syncs both immutable request and bound lock before
+Darwin no-replace directory publication. Exact legacy request-only retry first
+retains and compares the request and runtime identities, then O_EXCL-publishes
+the bound lock; an EEXIST collision is accepted only by exact lock admission.
+Foreign, malformed, symlinked, empty, or extra retry state is drift without
+mutation. In particular, a foreign request-only directory cannot gain a lock.
+
+The parent retains both admitted request and lock identities. On failed
+pre-detach first publication or request-only recovery it stops/reaps its exact
+child before removing only those matching artifacts and the proven empty
+directory. Replacement paths are preserved. The child now has no lock-create
+surface: it opens the rooted already-published lock, validates it against the
+admitted request, then flocks that retained descriptor. `ExactController` also
+requires the bound lock before treating a namespace as live.
+
+**Remaining b2/b3 gap:** this still reopens the lock in the child. b2 must
+transfer the parent-held descriptor across the detached exec boundary; b3 owns
+retry reconciliation/polling and authoritative host/record/CA revalidation.
+No Tart, Softnet, Screen, VM, or SSH process was launched.
+
+### TDD evidence
+
+The new tests were written against the incomplete draft first. Initial RED
+showed that request-only retry did not publish a lock, the writer accepted a
+wrong parent, foreign request-only state was mutated before admission, missing
+child lock admission had no implementation seam, foreign live locks were
+accepted, and failed recovery left an empty directory:
+
+```text
+TestPublishOrAdmitRequestCompletesExactRequestOnlyNamespaceWithBoundLock
+generation lock is not an owner-private immutable file
+TestWriteBoundGenerationLockRejectsWrongParent
+writeBoundGenerationLock accepted a lock path outside the exact runtime directory
+TestPublishOrAdmitRequestDoesNotMutateForeignRequestOnlyNamespace
+foreign request-only namespace gained a lock
+TestAcquirePublishedGenerationLockRefusesMissingLockWithoutCreation
+undefined: acquirePublishedGenerationLockInRoot
+TestExactControllerRejectsForeignGenerationLock
+StartExact() accepted a generation lock bound to another request
+TestDetachedLauncherCleansCompletedRequestOnlyRecoveryNamespace
+failed request-only recovery left generation namespace
+TestAdmitBoundGenerationLockRejectsNonPrivateRuntimeParent
+generation lock under a non-private runtime parent was admitted
+```
+
+Focused GREEN and final verification:
+
+```text
+go test ./internal/supervisor -count=1
+PASS
+go test ./...
+PASS
+go test -race ./internal/supervisor ./cmd/boxwarden -count=1
+PASS
+go vet ./...
+PASS
+CGO_ENABLED=1 go build ./cmd/boxwarden
+CGO_ENABLED=0 go build ./cmd/boxwarden
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build ./cmd/boxwarden
+GOOS=linux GOARCH=amd64 go test -c ./internal/supervisor
+PASS (native and no-cgo Mach-O arm64; Linux ELF arm64/amd64 compile outputs)
+git diff --check
+PASS
+```

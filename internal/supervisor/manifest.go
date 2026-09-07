@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"time"
@@ -18,16 +20,117 @@ import (
 )
 
 const (
-	requestName        = "supervisor-request.json"
-	manifestName       = "supervisor-manifest.json"
-	socketName         = "supervisor.sock"
-	lockName           = "generation.lock"
-	maxDiagnosticBytes = 2048
-	maxControlBytes    = 16 << 10
-	maxEvidenceItems   = 8
+	requestName            = "supervisor-request.json"
+	manifestName           = "supervisor-manifest.json"
+	socketName             = "supervisor.sock"
+	lockName               = "generation.lock"
+	maxDiagnosticBytes     = 2048
+	maxControlBytes        = 16 << 10
+	maxEvidenceItems       = 8
+	maxGenerationLockBytes = 512
 )
 
 type Binding struct{ Domain, SessionID, BackendKind, BackendObject, Generation string }
+
+// generationLockRecord is a fixed, non-secret proof that generation.lock was
+// published for this exact canonical immutable request. Its descriptor is held
+// by each admitting owner; the record is never an authority by itself.
+type generationLockRecord struct {
+	Version       int     `json:"version"`
+	Binding       Binding `json:"binding"`
+	RequestSHA256 string  `json:"request_sha256"`
+}
+
+func canonicalLaunchRequestBytes(request LaunchRequest) ([]byte, error) {
+	if err := validLaunchRequest(request); err != nil {
+		return nil, err
+	}
+	return json.Marshal(request)
+}
+
+func boundLockRecord(request LaunchRequest) (generationLockRecord, error) {
+	data, err := canonicalLaunchRequestBytes(request)
+	if err != nil {
+		return generationLockRecord{}, err
+	}
+	sum := sha256.Sum256(data)
+	return generationLockRecord{Version: 1, Binding: request.Binding, RequestSHA256: fmt.Sprintf("%x", sum)}, nil
+}
+
+// writeBoundGenerationLock is deliberately narrow: callers cannot select an
+// arbitrary payload or destination, only the fixed lock in this request's
+// exact runtime root. First publication uses the staging-only helper below.
+func writeBoundGenerationLock(path string, request LaunchRequest) error {
+	if filepath.Base(path) != lockName || filepath.Dir(path) != request.RuntimeDirectory {
+		return fmt.Errorf("generation lock path is not the fixed runtime lock path")
+	}
+	return writeBoundGenerationLockAt(path, request)
+}
+
+func writeBoundGenerationLockAt(path string, request LaunchRequest) error {
+	if filepath.Base(path) != lockName || !privateDirectory(filepath.Dir(path)) {
+		return fmt.Errorf("generation lock path is not an owner-private fixed path")
+	}
+	record, err := boundLockRecord(request)
+	if err != nil {
+		return err
+	}
+	data, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	if len(data) == 0 || len(data) > maxGenerationLockBytes {
+		return fmt.Errorf("generation lock encoding exceeds bound")
+	}
+	return writePrivateFile(path, data)
+}
+
+// admitBoundGenerationLock returns a retained descriptor only after proving
+// the exact fixed path, private regular-file identity, strict record encoding,
+// binding, and canonical-request digest.
+func admitBoundGenerationLock(path string, request LaunchRequest) (*retainedPrivateFile, error) {
+	if filepath.Base(path) != lockName || filepath.Dir(path) != request.RuntimeDirectory {
+		return nil, fmt.Errorf("generation lock path is not the fixed runtime lock path")
+	}
+	if !privateDirectory(request.RuntimeDirectory) {
+		return nil, fmt.Errorf("generation lock runtime parent is not owner-private")
+	}
+	return admitBoundGenerationLockAt(path, request)
+}
+
+func admitBoundGenerationLockAt(path string, request LaunchRequest) (*retainedPrivateFile, error) {
+	if filepath.Base(path) != lockName {
+		return nil, fmt.Errorf("generation lock is not fixed")
+	}
+	retained, err := admitPrivateRegular(path)
+	if err != nil {
+		return nil, fmt.Errorf("generation lock is not an owner-private immutable file: %w", err)
+	}
+	return validateBoundGenerationLock(retained, request)
+}
+
+func validateBoundGenerationLock(retained *retainedPrivateFile, request LaunchRequest) (*retainedPrivateFile, error) {
+	data, err := retained.read()
+	if err != nil || len(data) > maxGenerationLockBytes {
+		_ = retained.close()
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("generation lock encoding exceeds bound")
+	}
+	var record generationLockRecord
+	if err := decodeExact(data, &record); err != nil {
+		_ = retained.close()
+		return nil, err
+	}
+	want, err := boundLockRecord(request)
+	if err != nil || !reflect.DeepEqual(record, want) {
+		_ = retained.close()
+		return nil, fmt.Errorf("generation lock does not bind exact request")
+	}
+	return retained, nil
+}
+
 type Snapshot struct {
 	Binding                                                                                            Binding `json:"binding"`
 	BackendRunning, BrokerHealthy, ScreenHealthy, PinPresent, CertificateCurrent, ProbeOK, ZoneMatches bool

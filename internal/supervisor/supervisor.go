@@ -89,6 +89,7 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 	if err != nil || !canonicalAbsolute(executable) {
 		return fmt.Errorf("resolve exact boxwarden executable: %w", err)
 	}
+	requestOnlyRecovery := generationIsRequestOnly(request.RuntimeDirectory)
 	requestPath, firstPublication, err := publishOrAdmitRequest(request)
 	if err != nil {
 		return err
@@ -104,14 +105,19 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 	if !reflect.DeepEqual(admittedRequest, request) {
 		return errors.Join(fmt.Errorf("supervisor request changed during parent admission"), requestArtifact.close())
 	}
+	lockArtifact, err := admitBoundGenerationLock(filepath.Join(request.RuntimeDirectory, lockName), request)
+	if err != nil {
+		return errors.Join(fmt.Errorf("admit exact bound generation lock: %w", err), requestArtifact.close())
+	}
 	requestCleaned := false
 	cleanupRequest := func() error {
 		if requestCleaned {
 			return nil
 		}
 		requestCleaned = true
-		result := errors.Join(removeExact(requestArtifact.identity, false), requestArtifact.close())
-		if firstPublication {
+		result := errors.Join(removeExact(lockArtifact.identity, false), lockArtifact.close())
+		result = errors.Join(result, removeExact(requestArtifact.identity, false), requestArtifact.close())
+		if firstPublication || requestOnlyRecovery {
 			result = errors.Join(result, removeExactDirectory(runtimeIdentity))
 		}
 		return result
@@ -119,6 +125,7 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 	defer func() {
 		if !requestCleaned {
 			_ = requestArtifact.close()
+			_ = lockArtifact.close()
 		}
 	}()
 	if err := ctx.Err(); err != nil {
@@ -154,7 +161,7 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 	if err := child.release(); err != nil {
 		return cleanupChild(err)
 	}
-	return requestArtifact.close()
+	return errors.Join(requestArtifact.close(), lockArtifact.close())
 }
 func awaitAuthenticated(ctx context.Context, client *Client, binding Binding) error {
 	snapshot, err := client.Snapshot(ctx, binding)
@@ -223,7 +230,7 @@ func (unavailableOwner) Close(context.Context) error { return nil }
 type lifecycleResources struct {
 	runtime, request, manifest, socket, lock FileIdentity
 	requestArtifact, manifestArtifact        *retainedPrivateFile
-	lockHandle                               *os.File
+	lockArtifact                             *retainedPrivateFile
 	root                                     *os.Root
 }
 
@@ -296,12 +303,12 @@ func Run(ctx context.Context, requestPath string, owner RuntimeOwner, inspector 
 		_ = resources.root.Close()
 		return fmt.Errorf("runtime directory path was replaced during rooted admission")
 	}
-	lock, lockIdentity, err := acquireGenerationLockInRoot(resources.root, request.RuntimeDirectory)
+	lock, err := acquirePublishedGenerationLockInRoot(resources.root, request.RuntimeDirectory, request)
 	if err != nil {
 		_ = resources.root.Close()
 		return err
 	}
-	resources.lock, resources.lockHandle = lockIdentity, lock
+	resources.lock, resources.lockArtifact = lock.identity, lock
 	owned := &onceOwner{owner: owner}
 	reaper := &ownerReaper{owner: owned, done: make(chan struct{})}
 	manifest, started, err := prepare(ctx, request, owned, inspector, resources.runtime)
@@ -399,56 +406,59 @@ func (o *onceOwner) Close(ctx context.Context) error {
 	return o.closeErr
 }
 
-func acquireGenerationLock(runtime string) (*os.File, FileIdentity, error) {
-	root, err := os.OpenRoot(runtime)
-	if err != nil {
-		return nil, FileIdentity{}, err
-	}
-	defer root.Close()
-	return acquireGenerationLockInRoot(root, runtime)
-}
-func acquireGenerationLockInRoot(root *os.Root, runtime string) (*os.File, FileIdentity, error) {
-	if root == nil {
-		return nil, FileIdentity{}, fmt.Errorf("runtime root is unavailable")
+// acquirePublishedGenerationLockInRoot is the detached child's exact lock
+// claim. Unlike the legacy low-level flock helper, it never creates a file:
+// admission proves the retained descriptor contains the lock bound to the
+// already-admitted request before exclusive ownership is claimed. b2 must
+// replace this reopen-and-flock step with parent descriptor handoff.
+func acquirePublishedGenerationLockInRoot(root *os.Root, runtime string, request LaunchRequest) (*retainedPrivateFile, error) {
+	if root == nil || request.RuntimeDirectory != runtime {
+		return nil, fmt.Errorf("runtime root is unavailable")
 	}
 	path := filepath.Join(runtime, lockName)
-	if info, err := root.Lstat(lockName); err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info)) {
-		return nil, FileIdentity{}, fmt.Errorf("generation lock is unsafe")
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, FileIdentity{}, err
-	}
-	file, err := root.OpenFile(lockName, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+	before, err := root.Lstat(lockName)
 	if err != nil {
-		return nil, FileIdentity{}, fmt.Errorf("open generation lock: %w", err)
+		return nil, fmt.Errorf("admit published generation lock: %w", err)
+	}
+	if before.Mode()&os.ModeSymlink != 0 || !before.Mode().IsRegular() || before.Mode().Perm() != 0o600 || !ownedByCurrentUser(before) {
+		return nil, fmt.Errorf("published generation lock is unsafe")
+	}
+	file, err := root.OpenFile(lockName, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open published generation lock: %w", err)
 	}
 	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info) {
-		_ = file.Close()
-		return nil, FileIdentity{}, fmt.Errorf("generation lock is unsafe")
-	}
-	identity, err := identityFor(path, info)
 	if err != nil {
 		_ = file.Close()
-		return nil, FileIdentity{}, err
+		return nil, err
+	}
+	identity, err := identityFor(path, info)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info) {
+		_ = file.Close()
+		return nil, fmt.Errorf("published generation lock is unsafe")
 	}
 	if lockAdmissionHook != nil {
 		lockAdmissionHook()
 	}
-	current, err := root.Lstat(lockName)
+	after, err := root.Lstat(lockName)
 	if err != nil {
 		_ = file.Close()
-		return nil, FileIdentity{}, err
+		return nil, err
 	}
-	currentIdentity, err := identityFor(path, current)
-	if err != nil || !identity.matches(currentIdentity) || current.Mode()&os.ModeSymlink != 0 || !current.Mode().IsRegular() || current.Mode().Perm() != 0o600 || !ownedByCurrentUser(current) {
+	afterIdentity, err := identityFor(path, after)
+	if err != nil || !identity.matches(afterIdentity) || after.Mode()&os.ModeSymlink != 0 || !after.Mode().IsRegular() || after.Mode().Perm() != 0o600 || !ownedByCurrentUser(after) {
 		_ = file.Close()
-		return nil, FileIdentity{}, fmt.Errorf("generation lock was replaced during rooted admission")
+		return nil, fmt.Errorf("published generation lock was replaced during rooted admission")
 	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		_ = file.Close()
-		return nil, FileIdentity{}, fmt.Errorf("acquire generation lock: %w", err)
+	lock, err := validateBoundGenerationLock(&retainedPrivateFile{identity: identity, file: file}, request)
+	if err != nil {
+		return nil, err
 	}
-	return file, identity, nil
+	if err := syscall.Flock(int(lock.file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = lock.close()
+		return nil, fmt.Errorf("acquire published generation lock: %w", err)
+	}
+	return lock, nil
 }
 func captureSocket(path string) (FileIdentity, error) {
 	identity, info, err := captureIdentity(path)
@@ -599,8 +609,8 @@ func cleanupNamespace(resources lifecycleResources) error {
 			result = errors.Join(result, removeExact(resources.lock, false))
 		}
 	}
-	if resources.lockHandle != nil {
-		result = errors.Join(result, resources.lockHandle.Close())
+	if resources.lockArtifact != nil {
+		result = errors.Join(result, resources.lockArtifact.close())
 	}
 	if resources.root != nil {
 		result = errors.Join(result, resources.root.Close())

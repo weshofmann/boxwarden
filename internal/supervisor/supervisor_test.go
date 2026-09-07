@@ -221,6 +221,9 @@ func TestSetupFailureAfterStartRetainsOwnershipUntilReaped(t *testing.T) {
 	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
 		t.Fatal(err)
 	}
+	if err := writeBoundGenerationLock(filepath.Join(dir, lockName), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
+		t.Fatal(err)
+	}
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(600, 0).UTC(), Unique: 60}
 	base := newTestOwner(identity)
 	owner := invalidEvidenceOwner{testOwner: base}
@@ -254,6 +257,9 @@ func TestRunCleansUpUnownedStartFailureWithoutStoppingOwner(t *testing.T) {
 	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
 		t.Fatal(err)
 	}
+	if err := writeBoundGenerationLock(filepath.Join(dir, lockName), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
+		t.Fatal(err)
+	}
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(601, 0).UTC(), Unique: 61}
 	owner := startResultOwner{testOwner: newTestOwner(identity), result: RuntimeStartResult{}, err: errors.New("start performed no mutation")}
 	err := Run(context.Background(), requestPath, owner, testInspector(identity))
@@ -273,6 +279,9 @@ func TestRunReapsPartialStartFailureBeforeClosingNamespace(t *testing.T) {
 	dir := privateRuntime(t)
 	requestPath := filepath.Join(dir, requestName)
 	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeBoundGenerationLock(filepath.Join(dir, lockName), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
 		t.Fatal(err)
 	}
 	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(602, 0).UTC(), Unique: 62}
@@ -845,6 +854,36 @@ func TestDetachedLauncherReapsOnlyUnauthenticatedChildAndOwnRequest(t *testing.T
 	if _, err := os.Lstat(filepath.Join(dir, requestName)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("failed launch request remains: %v", err)
 	}
+	if _, err := os.Lstat(filepath.Join(dir, lockName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed launch bound lock remains: %v", err)
+	}
+}
+
+// Production break: completing an exact request-only recovery turns the
+// namespace into this launch attempt's proven supervisor state. A pre-detach
+// failure must remove the retained request and lock and then the proven empty
+// directory, not strand an empty generation for a later ambiguous retry.
+func TestDetachedLauncherCleansCompletedRequestOnlyRecoveryNamespace(t *testing.T) {
+	dir := privateRuntime(t)
+	identity := ProcessIdentity{PID: os.Getpid(), StartedAt: time.Unix(405, 0).UTC(), Unique: 45}
+	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
+	if err := writeLaunchRequest(filepath.Join(dir, requestName), request); err != nil {
+		t.Fatal(err)
+	}
+	launcher := newDetachedLauncher(launcherDeps{
+		executable: func() (string, error) { return "/private/boxwarden", nil },
+		inspector:  testInspector(identity),
+		start: func(context.Context, LaunchCommand) (launchChild, error) {
+			return nil, errors.New("recovered child did not start")
+		},
+		await: func(context.Context, *Client, Binding) error { return nil },
+	})
+	if err := launcher.Launch(context.Background(), request); err == nil {
+		t.Fatal("request-only recovery launch failure was accepted")
+	}
+	if _, err := os.Lstat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed request-only recovery left generation namespace: %v", err)
+	}
 }
 
 func TestDetachedLauncherRefusesCancelledContextBeforeRequestOrSpawn(t *testing.T) {
@@ -966,6 +1005,7 @@ func TestDetachedLauncherRefusesUnsupportedPlatformBeforeRequestMutation(t *test
 
 func TestGenerationLockRejectsSameUIDSymlinkAndContention(t *testing.T) {
 	dir := privateRuntime(t)
+	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
 	target := filepath.Join(dir, "same-uid-target")
 	if err := writePrivateFile(target, []byte("target")); err != nil {
 		t.Fatal(err)
@@ -973,24 +1013,36 @@ func TestGenerationLockRejectsSameUIDSymlinkAndContention(t *testing.T) {
 	if err := os.Symlink(target, filepath.Join(dir, lockName)); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := acquireGenerationLock(dir); err == nil {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if _, err := acquirePublishedGenerationLockInRoot(root, dir, request); err == nil {
 		t.Fatal("same-UID 0600 lock symlink was admitted")
 	}
 	if err := os.Remove(filepath.Join(dir, lockName)); err != nil {
 		t.Fatal(err)
 	}
-	first, _, err := acquireGenerationLock(dir)
+	if err := writeBoundGenerationLock(filepath.Join(dir, lockName), request); err != nil {
+		t.Fatal(err)
+	}
+	first, err := acquirePublishedGenerationLockInRoot(root, dir, request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer first.Close()
-	if _, _, err := acquireGenerationLock(dir); err == nil {
+	defer first.close()
+	if _, err := acquirePublishedGenerationLockInRoot(root, dir, request); err == nil {
 		t.Fatal("second lock owner was admitted")
 	}
 }
 
 func TestRootedLockAdmissionPreservesReplacement(t *testing.T) {
 	dir := privateRuntime(t)
+	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
+	if err := writeBoundGenerationLock(filepath.Join(dir, lockName), request); err != nil {
+		t.Fatal(err)
+	}
 	lockAdmissionHook = func() {
 		if err := os.Remove(filepath.Join(dir, lockName)); err != nil {
 			t.Fatalf("replace admitted lock: %v", err)
@@ -1000,7 +1052,12 @@ func TestRootedLockAdmissionPreservesReplacement(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() { lockAdmissionHook = nil })
-	if _, _, err := acquireGenerationLock(dir); err == nil {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if _, err := acquirePublishedGenerationLockInRoot(root, dir, request); err == nil {
 		t.Fatal("rooted admission accepted a replaced lock")
 	}
 	if _, err := os.Lstat(filepath.Join(dir, lockName)); err != nil {
@@ -1008,10 +1065,73 @@ func TestRootedLockAdmissionPreservesReplacement(t *testing.T) {
 	}
 }
 
+// Production break: the detached child must claim only the already-published
+// request-bound lock. It may not turn a missing lock into an unbound file, and
+// no runtime owner may start before that admission succeeds.
+func TestRunRequiresExactPublishedBoundLockBeforeRuntimeStart(t *testing.T) {
+	for _, scenario := range []struct {
+		name string
+		lock func(t *testing.T, request LaunchRequest)
+	}{
+		{name: "missing"},
+		{
+			name: "foreign",
+			lock: func(t *testing.T, request LaunchRequest) {
+				t.Helper()
+				foreign := request
+				foreign.Binding.BackendObject = "object-other"
+				if err := writeBoundGenerationLock(filepath.Join(request.RuntimeDirectory, lockName), foreign); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			dir := privateRuntime(t)
+			request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
+			if err := writeLaunchRequest(filepath.Join(dir, requestName), request); err != nil {
+				t.Fatal(err)
+			}
+			if scenario.lock != nil {
+				scenario.lock(t, request)
+			}
+			identity := ProcessIdentity{PID: 1, StartedAt: time.Unix(1, 0).UTC(), Unique: 1}
+			owner := startResultOwner{testOwner: newTestOwner(identity), err: errors.New("runtime owner must not start")}
+			if err := Run(context.Background(), filepath.Join(dir, requestName), owner, testInspector(identity)); err == nil {
+				t.Fatal("Run() accepted missing or foreign generation lock")
+			}
+			if owner.started() {
+				t.Fatal("Run() reached runtime start before exact bound lock admission")
+			}
+		})
+	}
+}
+
+// Production break: the child admission helper must have no create surface.
+// A missing generation.lock is drift, and must remain absent after refusal.
+func TestAcquirePublishedGenerationLockRefusesMissingLockWithoutCreation(t *testing.T) {
+	dir := privateRuntime(t)
+	request := LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if _, err := acquirePublishedGenerationLockInRoot(root, dir, request); err == nil {
+		t.Fatal("missing generation.lock was acquired")
+	}
+	if _, err := os.Lstat(filepath.Join(dir, lockName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing generation lock was created during child admission: %v", err)
+	}
+}
+
 func TestRootedRuntimeAdmissionRejectsDirectoryReplacement(t *testing.T) {
 	dir := privateRuntime(t)
 	requestPath := filepath.Join(dir, requestName)
 	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeBoundGenerationLock(filepath.Join(dir, lockName), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
 		t.Fatal(err)
 	}
 	backup := dir + "-original"
@@ -1286,6 +1406,9 @@ func runningService(t *testing.T, poisoned bool) (testService, *Client, context.
 	owner.poisoned = poisoned
 	requestPath := filepath.Join(dir, requestName)
 	if err := writeLaunchRequest(requestPath, LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeBoundGenerationLock(filepath.Join(dir, lockName), LaunchRequest{Binding: testBinding(), RuntimeDirectory: dir, HostConfigPath: "/private/config", SessionRecordName: "dev", Host: testHostExpectation(), CA: testCAExpectation()}); err != nil {
 		t.Fatal(err)
 	}
 	inspector := testInspector(identity)
