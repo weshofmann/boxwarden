@@ -82,6 +82,50 @@ func TestExactControllerRejectsSerialEndpointAtGenerationRoot(t *testing.T) {
 	}
 }
 
+// Production break: broad root artifact admission would let a hostile or
+// stale child hide arbitrary files behind an authenticated generation.
+func TestValidateLiveOuterEntryFiniteCredentialAllowlist(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		entry string
+		mode  os.FileMode
+		dir   bool
+		ok    bool
+	}{
+		{"client private", "client", 0o600, false, true},
+		{"client public wrong mode", "client", 0o644, false, false},
+		{"client pub", "client.pub", 0o644, false, true},
+		{"certificate public", "client-cert.pub", 0o644, false, true},
+		{"known hosts private", "known_hosts", 0o600, false, true},
+		{"known hosts wrong type", "known_hosts", 0o700, true, false},
+		{"serial directory", "serial", 0o700, true, true},
+		{"root serial endpoint", "tart-serial", 0o600, false, false},
+		{"arbitrary root artifact", "client.tmp", 0o600, false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := privateRuntime(t)
+			path := filepath.Join(runtime, test.entry)
+			var err error
+			if test.dir {
+				err = os.Mkdir(path, test.mode)
+			} else {
+				err = os.WriteFile(path, []byte("test"), test.mode)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries, err := os.ReadDir(runtime)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("ReadDir() = %#v, %v", entries, err)
+			}
+			err = validateLiveOuterEntry(runtime, entries[0])
+			if (err == nil) != test.ok {
+				t.Fatalf("validateLiveOuterEntry(%q, %#o, dir=%t) error = %v, want accepted=%t", test.entry, test.mode, test.dir, err, test.ok)
+			}
+		})
+	}
+}
+
 type exactLauncherFake struct {
 	request LaunchRequest
 	called  bool

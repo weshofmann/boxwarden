@@ -147,10 +147,9 @@ func NewSystemDoctor() SystemDoctor {
 	return SystemDoctor{inspector: NewOSDoctorInspector()}
 }
 
-// CurrentScreen returns an opaque read-only capability only after inspecting
-// and probing the fixed qualified system Screen installation in the current
-// host state. Callers cannot provide or mint the facts represented by it.
-func (s SystemDoctor) CurrentScreen(ctx context.Context) (ScreenAdmission, error) {
+// currentScreen is an in-package test helper. Production callers must use
+// AdmitRuntime, which gates this capability on the complete Doctor result.
+func (s SystemDoctor) currentScreen(ctx context.Context) (ScreenAdmission, error) {
 	inspector := s.inspector
 	if inspector == nil {
 		inspector = NewOSDoctorInspector()

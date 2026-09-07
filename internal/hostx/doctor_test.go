@@ -127,16 +127,16 @@ func TestCurrentScreenInspectsAndExecutesOnlyTheFixedQualifiedPathInOrder(t *tes
 	inspector, _ := healthyDoctorFixture(t)
 	doctor := SystemDoctor{inspector: inspector}
 
-	admission, err := doctor.CurrentScreen(t.Context())
+	admission, err := doctor.currentScreen(t.Context())
 	if err != nil {
-		t.Fatalf("CurrentScreen() error = %v", err)
+		t.Fatalf("currentScreen() error = %v", err)
 	}
 	if admission.Path() != ScreenPath || !admission.ValidForRuntime() {
-		t.Fatalf("CurrentScreen() = %#v, want opaque exact admission", admission)
+		t.Fatalf("currentScreen() = %#v, want opaque exact admission", admission)
 	}
 	want := []string{"inspect:" + ScreenPath, "command:" + commandKey(ScreenPath, "--version")}
 	if fmt.Sprint(inspector.operations) != fmt.Sprint(want) {
-		t.Fatalf("CurrentScreen() operations = %v, want %v", inspector.operations, want)
+		t.Fatalf("currentScreen() operations = %v, want %v", inspector.operations, want)
 	}
 }
 
@@ -183,14 +183,14 @@ func TestCurrentScreenNeverExecutesScreenAfterMetadataFailure(t *testing.T) {
 			inspector, _ := healthyDoctorFixture(t)
 			mutate(inspector)
 
-			if admission, err := (SystemDoctor{inspector: inspector}).CurrentScreen(t.Context()); err == nil || admission.ValidForRuntime() {
-				t.Fatalf("CurrentScreen() = %#v, %v; want refusal", admission, err)
+			if admission, err := (SystemDoctor{inspector: inspector}).currentScreen(t.Context()); err == nil || admission.ValidForRuntime() {
+				t.Fatalf("currentScreen() = %#v, %v; want refusal", admission, err)
 			}
 			if len(inspector.commands) != 0 {
-				t.Fatalf("CurrentScreen() executed unsafe Screen: %v", inspector.commands)
+				t.Fatalf("currentScreen() executed unsafe Screen: %v", inspector.commands)
 			}
 			if len(inspector.operations) != 1 || inspector.operations[0] != "inspect:"+ScreenPath {
-				t.Fatalf("CurrentScreen() operations = %v, want only fixed-path inspection", inspector.operations)
+				t.Fatalf("currentScreen() operations = %v, want only fixed-path inspection", inspector.operations)
 			}
 		})
 	}
@@ -217,11 +217,11 @@ func TestCurrentScreenAdmissionAgreesWithDoctorScreenFindings(t *testing.T) {
 			mutate(admissionInspector)
 			mutate(doctorInspector)
 
-			admission, err := (SystemDoctor{inspector: admissionInspector}).CurrentScreen(t.Context())
+			admission, err := (SystemDoctor{inspector: admissionInspector}).currentScreen(t.Context())
 			report := (SystemDoctor{inspector: doctorInspector}).Doctor(t.Context(), request)
 			doctorAccepted := !hasFindingPrefix(report, "screen.")
 			if admitted := err == nil && admission.ValidForRuntime(); admitted != doctorAccepted {
-				t.Fatalf("CurrentScreen() admitted=%t error=%v, Doctor()=%#v", admitted, err, report)
+				t.Fatalf("currentScreen() admitted=%t error=%v, Doctor()=%#v", admitted, err, report)
 			}
 		})
 	}
@@ -250,9 +250,9 @@ func TestCheckRuntimeRequiresCompleteHealthyDoctorReport(t *testing.T) {
 }
 
 func TestScreenAdmissionPublicSurfaceHasNoCallerFactMintingAPI(t *testing.T) {
-	var currentScreen func(SystemDoctor, context.Context) (ScreenAdmission, error) = SystemDoctor.CurrentScreen
+	var currentScreen func(SystemDoctor, context.Context) (ScreenAdmission, error) = SystemDoctor.currentScreen
 	if currentScreen == nil {
-		t.Fatal("SystemDoctor.CurrentScreen is nil")
+		t.Fatal("SystemDoctor.currentScreen is nil")
 	}
 
 	_, testFile, _, ok := runtime.Caller(0)
@@ -277,8 +277,8 @@ func TestScreenAdmissionPublicSurfaceHasNoCallerFactMintingAPI(t *testing.T) {
 			if !ok || !ast.IsExported(function.Name.Name) || !returnsNamedType(function.Type.Results, "ScreenAdmission") {
 				continue
 			}
-			if function.Recv == nil || function.Name.Name != "CurrentScreen" || !fieldListNamesType(function.Recv, "SystemDoctor") {
-				t.Fatalf("exported %s can mint ScreenAdmission outside SystemDoctor.CurrentScreen", function.Name.Name)
+			if function.Recv == nil || function.Name.Name != "currentScreen" || !fieldListNamesType(function.Recv, "SystemDoctor") {
+				t.Fatalf("exported %s can mint ScreenAdmission outside SystemDoctor.currentScreen", function.Name.Name)
 			}
 		}
 	}

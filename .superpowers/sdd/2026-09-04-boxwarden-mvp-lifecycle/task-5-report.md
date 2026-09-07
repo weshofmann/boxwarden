@@ -606,3 +606,26 @@ rejects root-level relay endpoints. Its finite credential allowlist is exactly
 prefix or glob is admitted. Transient credential staging remains a 5.3 design
 item. The generation-lock handoff and injected startup reconciliation policy
 remain explicitly open for 5.2b.
+
+## Task 5.2a follow-up — Screen minting surface and finite outer artifacts
+
+`SystemDoctor.CurrentScreen` was removed from the exported API: a screen-only
+inspection cannot mint the opaque capability for production callers. The sole
+child-facing production mint is `AdmitRuntime`, after its complete shared
+Doctor inspection; parent `CheckRuntime` remains expectation-only. In-package
+tests retain the unexported helper for narrow Screen inspection coverage.
+
+The supervisor outer artifact tests now independently enumerate every accepted
+credential name/mode/type and rejected near-miss, arbitrary, and root serial
+endpoint. Recursive duplicate rejection is tested through request binding,
+host manifest, CA, and manifest evidence nesting.
+
+Focused GREEN:
+
+```text
+go test ./internal/hostx ./internal/supervisor -run 'Test(ScreenAdmissionPublicSurface|ValidateLiveOuterEntry|DecodeExact)' -count=1
+PASS
+```
+
+No generation-lock or startup-policy work was added; those remain the bounded
+5.2b follow-up.

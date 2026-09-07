@@ -1263,10 +1263,18 @@ func TestClientRejectsFutureAuthenticatedSnapshot(t *testing.T) {
 // Production break: accepting duplicate nested JSON lets an attacker smuggle
 // a second binding or CA field past the immutable request contract.
 func TestDecodeExactRejectsDuplicateNestedFields(t *testing.T) {
-	var request LaunchRequest
-	data := []byte(`{"binding":{"domain":"w","domain":"other"}}`)
-	if err := decodeExact(data, &request); err == nil {
-		t.Fatal("decodeExact() accepted duplicate nested binding field")
+	for name, data := range map[string][]byte{
+		"request binding":       []byte(`{"binding":{"domain":"w","domain":"other"}}`),
+		"request host manifest": []byte(`{"host":{"manifest":{"version":2,"version":3}}}`),
+		"request CA":            []byte(`{"ca":{"domain":"w","domain":"other"}}`),
+		"manifest evidence":     []byte(`{"evidence":{"broker":{"healthy":true,"healthy":false}}}`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var value any
+			if err := decodeExact(data, &value); err == nil {
+				t.Fatal("decodeExact() accepted duplicate nested field")
+			}
+		})
 	}
 }
 
