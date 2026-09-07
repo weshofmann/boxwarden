@@ -434,7 +434,7 @@ func admitExactCleanupResidue(r LaunchRequest) (exactCleanupResidue, error) {
 			return state, fmt.Errorf("unexpected exact cleanup entry %q", entry.Name())
 		}
 	}
-	if state.request && !state.lock {
+	if state.request && !state.lock && !state.marker {
 		return state, fmt.Errorf("exact cleanup request exists without its lock")
 	}
 	if state.lock && state.marker {
@@ -534,6 +534,9 @@ func finishExactGenerationCleanupWithOperations(r LaunchRequest, ownedLock os.Fi
 			return err
 		}
 		state.request = false
+		if err := operations.SyncDirectory(directory); err != nil {
+			return err
+		}
 	}
 	if state.lock {
 		if state.marker {

@@ -145,8 +145,9 @@ before B; a green foundation alone does not authorize beginning B.
   in the canonical exact generation.
 - [x] Make post-reap outer cleanup crash-recoverable: atomically rename exact G
   to a deterministic same-parent residue while retaining its lock, fsync the
-  durable namespace phases, recover only exact admitted interruption stages,
-  and fail closed on active, coexisting, foreign, malformed, or unexpected state.
+  request removal before publishing the lock marker, fsync the remaining durable
+  namespace phases, recover exact admitted stages including request+marker, and
+  fail closed on active, coexisting, foreign, malformed, or unexpected state.
 
 Deterministic persistence, retry, process-boundary retention, exact cleanup with
 rename/unlink/fsync interruption injection, long-path transport, and

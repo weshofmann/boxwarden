@@ -68,9 +68,11 @@ Implemented Slice B start/retry reconciliation is conservative:
   to the same-parent `.<G>.cleanup` residue, and fsyncs the parent before
   unlinking contents. The held generation-lock inode moves with cleanup and is
   retained through an exact sibling marker until the cleanup directory is gone.
-  A same-G retry contends with a still-finishing owner, or identity-validates and
-  completes request+lock, lock-only, marker, or empty interrupted stages before
-  republishing G. Canonical/residue coexistence and foreign, malformed,
+  Request removal is fsynced in the cleanup directory before that lock-to-marker
+  rename. A same-G retry contends with a still-finishing owner, or
+  identity-validates and completes request+lock, lock-only, request+marker,
+  empty+marker, marker-only, or empty interrupted stages before republishing G.
+  Canonical/residue coexistence and foreign, malformed,
   symlinked, unsafe-mode, or unexpectedly populated residue fail closed without
   mutation. Cleanup never recurses. Durable `starting + G` remains unchanged on
   start failure.

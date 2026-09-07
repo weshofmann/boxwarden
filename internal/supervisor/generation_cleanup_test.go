@@ -139,6 +139,110 @@ func TestPublishWaitsForExactCleanupOwnerBeforeRecoveringSameGeneration(t *testi
 	}
 }
 
+// Production break: an unsynced request unlink followed by lock-to-marker
+// rename can recover as request+marker after a crash. The marker is still the
+// exact ownership lock, so this state must contend while live and replay once
+// released instead of becoming permanent drift.
+func TestPublishRecoversExactRequestAndMarkerCleanupStage(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, residue, marker := makeRequestAndMarkerCleanupStage(t, request)
+	activeState := exactCleanupStateForTest(t, request, residue)
+
+	if _, _, err := publishOrAdmitRequest(request); !errors.Is(err, errGenerationAlreadyOwned) {
+		t.Errorf("retry during active request+marker cleanup = %v; want exact ownership contention", err)
+	}
+	if after := exactCleanupStateForTest(t, request, residue); after != activeState {
+		t.Fatalf("active request+marker cleanup mutated\nbefore: %s\nafter:  %s", activeState, after)
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	gotPath, first, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatalf("same-G request+marker retry: %v", err)
+	}
+	if !first || gotPath != path {
+		t.Fatalf("same-G request+marker publication = %q, %v; want %q, true", gotPath, first, path)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("republished request = %q, %v; want exact original", after, err)
+	}
+	for _, cleanupPath := range []string{residue, marker} {
+		if _, err := os.Lstat(cleanupPath); !os.IsNotExist(err) {
+			t.Fatalf("request+marker cleanup residue retained at %s: %v", cleanupPath, err)
+		}
+	}
+}
+
+func TestPublishRejectsForeignOrMalformedRequestAndMarkerWithoutMutation(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		data func(LaunchRequest) []byte
+	}{
+		{name: "foreign", data: func(request LaunchRequest) []byte {
+			request.Binding.BackendObject = "foreign"
+			data, _ := json.Marshal(request)
+			return data
+		}},
+		{name: "malformed", data: func(LaunchRequest) []byte { return []byte("{") }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := minimalRequest(t)
+			if _, _, err := publishOrAdmitRequest(request); err != nil {
+				t.Fatal(err)
+			}
+			lock, residue, _ := makeRequestAndMarkerCleanupStage(t, request)
+			if err := lock.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(residue, requestName), test.data(request), 0600); err != nil {
+				t.Fatal(err)
+			}
+			before := exactCleanupStateForTest(t, request, residue)
+
+			if _, _, err := publishOrAdmitRequest(request); err == nil {
+				t.Fatal("foreign or malformed request+marker cleanup was admitted")
+			}
+			if after := exactCleanupStateForTest(t, request, residue); after != before {
+				t.Fatalf("foreign or malformed request+marker mutated\nbefore: %s\nafter:  %s", before, after)
+			}
+		})
+	}
+}
+
+func makeRequestAndMarkerCleanupStage(t *testing.T, request LaunchRequest) (*os.File, string, string) {
+	t.Helper()
+	lock, err := acquireGenerationLock(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	residue := exactCleanupResiduePath(request)
+	marker := residue + ".lock"
+	if err := os.Rename(request.RuntimeDirectory, residue); err != nil {
+		lock.Close()
+		t.Fatal(err)
+	}
+	if err := syncDirectory(filepath.Dir(request.RuntimeDirectory)); err != nil {
+		lock.Close()
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(residue, lockName), marker); err != nil {
+		lock.Close()
+		t.Fatal(err)
+	}
+	return lock, residue, marker
+}
+
 type cleanupRetryLauncher struct {
 	lock  *os.File
 	calls atomic.Int32
@@ -256,15 +360,17 @@ func (o *interruptingCleanupOperations) after(kind, path string) error {
 // require the actual cleanup transaction to leave the same G recoverable.
 func TestCleanupTransactionRecoversAfterEveryInjectedBoundary(t *testing.T) {
 	for _, test := range []struct {
-		name, kind string
-		path       func(LaunchRequest) string
-		wantCall   int
+		name, kind    string
+		path          func(LaunchRequest) string
+		wantCall      int
+		wantPreMarker bool
 	}{
 		{name: "after-generation-rename", kind: "rename", path: exactCleanupResiduePath, wantCall: 1},
 		{name: "after-generation-rename-parent-fsync", kind: "sync", path: func(r LaunchRequest) string { return filepath.Dir(r.RuntimeDirectory) }, wantCall: 1},
 		{name: "after-request-unlink", kind: "remove", path: func(r LaunchRequest) string { return filepath.Join(exactCleanupResiduePath(r), requestName) }, wantCall: 1},
+		{name: "after-request-removal-directory-fsync", kind: "sync", path: exactCleanupResiduePath, wantCall: 1, wantPreMarker: true},
 		{name: "after-lock-unlink-to-marker", kind: "rename", path: func(r LaunchRequest) string { return exactCleanupResiduePath(r) + ".lock" }, wantCall: 1},
-		{name: "after-empty-residue-fsync", kind: "sync", path: exactCleanupResiduePath, wantCall: 1},
+		{name: "after-empty-residue-fsync", kind: "sync", path: exactCleanupResiduePath, wantCall: 2},
 		{name: "after-marker-publication-parent-fsync", kind: "sync", path: func(r LaunchRequest) string { return filepath.Dir(r.RuntimeDirectory) }, wantCall: 2},
 		{name: "after-cleanup-directory-unlink", kind: "remove", path: exactCleanupResiduePath, wantCall: 1},
 		{name: "after-cleanup-directory-parent-fsync", kind: "sync", path: func(r LaunchRequest) string { return filepath.Dir(r.RuntimeDirectory) }, wantCall: 3},
@@ -298,6 +404,16 @@ func TestCleanupTransactionRecoversAfterEveryInjectedBoundary(t *testing.T) {
 			if _, err := os.Lstat(request.RuntimeDirectory); !os.IsNotExist(err) {
 				lock.Close()
 				t.Fatalf("interrupted cleanup left partially unlinked canonical G: %v", err)
+			}
+			if test.wantPreMarker {
+				if _, err := os.Lstat(filepath.Join(exactCleanupResiduePath(request), lockName)); err != nil {
+					lock.Close()
+					t.Fatalf("pre-marker sync did not retain the in-directory lock: %v", err)
+				}
+				if _, err := os.Lstat(exactCleanupLockMarker(request)); !os.IsNotExist(err) {
+					lock.Close()
+					t.Fatalf("pre-marker sync published the marker early: %v", err)
+				}
 			}
 			if err := lock.Close(); err != nil {
 				t.Fatal(err)
@@ -353,6 +469,12 @@ func TestPublishRejectsInvalidExactCleanupResidueWithoutMutation(t *testing.T) {
 		{name: "request-only-invalid-stage", mutate: func(t *testing.T, _ LaunchRequest, residue string) {
 			t.Helper()
 			if err := os.Remove(filepath.Join(residue, lockName)); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "duplicate-lock-paths", mutate: func(t *testing.T, _ LaunchRequest, residue string) {
+			t.Helper()
+			if err := os.WriteFile(residue+".lock", nil, 0600); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -442,7 +564,7 @@ func copyExactGenerationForCleanupTest(t *testing.T, request LaunchRequest, resi
 func exactCleanupStateForTest(t *testing.T, request LaunchRequest, residue string) string {
 	t.Helper()
 	var state strings.Builder
-	for _, path := range []string{request.RuntimeDirectory, residue, residue + ".real"} {
+	for _, path := range []string{request.RuntimeDirectory, residue, residue + ".lock", residue + ".real"} {
 		info, err := os.Lstat(path)
 		if os.IsNotExist(err) {
 			state.WriteString(path + "=absent\n")
