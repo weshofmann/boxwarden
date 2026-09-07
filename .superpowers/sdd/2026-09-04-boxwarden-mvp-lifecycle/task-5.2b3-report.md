@@ -26,9 +26,41 @@ session settlement, or CLI work was added. No real host/VM tools ran.
 ## Verification
 
 ```text
+RED: go test ./internal/supervisor -run TestAwaitAuthenticatedPollsUntilExactReady -count=1
+FAIL: undefined: awaitAuthenticatedWithPolicy
+
+GREEN: go test ./internal/supervisor -run 'TestAwaitAuthenticatedPollsUntilExactReady|TestExactController' -count=1
+PASS
+
 go test ./internal/supervisor -count=1
+PASS
+
+go test ./internal/supervisor ./internal/session ./cmd/boxwarden -count=20
+PASS
+
+go test -race ./internal/supervisor ./internal/session ./cmd/boxwarden -count=1
+PASS
+
+go test ./...
+PASS
+
+go vet ./...
+PASS
+
+CGO_ENABLED=1 go build ./cmd/boxwarden
+CGO_ENABLED=0 go build ./cmd/boxwarden
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build ./cmd/boxwarden
+GOOS=linux GOARCH=amd64 go test -c ./internal/supervisor
+PASS
+
+gofmt -w internal/supervisor/exact.go internal/supervisor/supervisor.go internal/supervisor/exact_test.go
+git diff --check
 PASS
 ```
 
-Full repository/race/vet/native/no-cgo/Linux verification is recorded with the
-commit once completed.
+## Remaining concerns
+
+The b3 classification and both startup waits are bounded by the private
+five-minute/one-second production policy, with short injected policies for
+deterministic tests. Runtime composition and authoritative lifecycle creation
+remain deliberately deferred to Task 5.3. No real host runtime was exercised.

@@ -175,14 +175,50 @@ func (l detachedLauncher) Launch(ctx context.Context, request LaunchRequest) err
 	return errors.Join(requestArtifact.close(), lockArtifact.close())
 }
 func awaitAuthenticated(ctx context.Context, client *Client, binding Binding) error {
-	snapshot, err := client.Snapshot(ctx, binding)
-	if err != nil {
-		return err
+	if client == nil {
+		return fmt.Errorf("supervisor client is unavailable")
 	}
-	if !snapshotReady(snapshot) {
-		return fmt.Errorf("supervisor authenticated snapshot is not ready")
+	return awaitAuthenticatedWithPolicy(ctx, binding, productionStartupPolicy, func(ctx context.Context) (Snapshot, error) {
+		return client.Snapshot(ctx, binding)
+	})
+}
+
+// awaitAuthenticatedWithPolicy is the detached launcher's private startup
+// wait. It intentionally receives only the fixed binding and a snapshot
+// function: it cannot acquire a lock, launch a process, or widen authority.
+func awaitAuthenticatedWithPolicy(ctx context.Context, binding Binding, policy startupPolicy, snapshot func(context.Context) (Snapshot, error)) error {
+	if snapshot == nil {
+		return fmt.Errorf("supervisor snapshot function is unavailable")
 	}
-	return nil
+	if policy.timeout <= 0 || policy.interval <= 0 {
+		policy = productionStartupPolicy
+	}
+	deadline := time.NewTimer(policy.timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(policy.interval)
+	defer ticker.Stop()
+	var last error
+	for {
+		got, err := snapshot(ctx)
+		if err == nil {
+			if got.Binding != binding {
+				return fmt.Errorf("authenticated supervisor binding mismatch")
+			}
+			if snapshotReady(got) {
+				return nil
+			}
+			last = fmt.Errorf("supervisor authenticated snapshot is not ready")
+		} else {
+			last = err
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("await authenticated supervisor: %w", ctx.Err())
+		case <-deadline.C:
+			return fmt.Errorf("await authenticated supervisor: %w", last)
+		case <-ticker.C:
+		}
+	}
 }
 
 type exactChild struct{ cmd *exec.Cmd }

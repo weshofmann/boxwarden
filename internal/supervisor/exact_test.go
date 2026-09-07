@@ -83,6 +83,29 @@ func TestExactControllerLaunchesSameGenerationFromUnheldBoundFoundation(t *testi
 	}
 }
 
+// Production break: a detached child commonly needs several authenticated
+// snapshots to construct its runtime. Treating the first unavailable or
+// non-ready snapshot as terminal tears down a valid claimed generation.
+func TestAwaitAuthenticatedPollsUntilExactReady(t *testing.T) {
+	binding := testBinding()
+	ready := Snapshot{Binding: binding, BackendRunning: true, BrokerHealthy: true, ScreenHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true, ObservedAt: time.Now().UTC()}
+	calls := 0
+	err := awaitAuthenticatedWithPolicy(context.Background(), binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, func(context.Context) (Snapshot, error) {
+		calls++
+		switch calls {
+		case 1:
+			return Snapshot{}, fmt.Errorf("socket not ready")
+		case 2:
+			return Snapshot{Binding: binding, ObservedAt: time.Now().UTC()}, nil
+		default:
+			return ready, nil
+		}
+	})
+	if err != nil || calls != 3 {
+		t.Fatalf("awaitAuthenticatedWithPolicy() calls=%d err=%v, want three polls and success", calls, err)
+	}
+}
+
 // Production break: an authenticated snapshot cannot make an arbitrary
 // generation.lock safe. Exact controller admission must verify its binding to
 // the immutable request before classifying a namespace as live.
