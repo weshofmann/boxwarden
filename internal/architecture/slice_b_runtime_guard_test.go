@@ -22,12 +22,12 @@ var (
 	alternatePTYSourcePattern = regexp.MustCompile(`(?i)(\b(posix_openpt|grantpt|unlockpt)[[:space:]]*\(|/dev/ptmx\b)`)
 )
 
-func TestSliceBPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
+func TestSliceCPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
 	tests := []struct {
 		name, path, source, want string
 	}{
-		{"moved deferred import", "internal/lifecycle/start.go", `package lifecycle; import _ "github.com/weshofmann/boxwarden/internal/timezonex"`, "deferred Slice C/D import"},
-		{"moved deferred call", "internal/backend/start.go", `package backend; func f(r interface{ Bootstrap() }) { r.Bootstrap() }`, "deferred Slice C/D call"},
+		{"moved deferred import", "internal/lifecycle/start.go", `package lifecycle; import _ "github.com/weshofmann/boxwarden/internal/timezonex"`, "deferred Slice D import"},
+		{"moved bootstrap call", "internal/backend/start.go", `package backend; func f(r interface{ Bootstrap() }) { r.Bootstrap() }`, "unauthorized Slice C call"},
 		{"composite readiness publication", "internal/app/start.go", `package app; type Snapshot struct{ PinPresent bool }; var _ = Snapshot{PinPresent: true}`, "deferred readiness publication"},
 		{"assigned readiness publication", "internal/lifecycle/start.go", `package lifecycle; type Snapshot struct{ ZoneMatches bool }; func f(s *Snapshot) { s.ZoneMatches = true }`, "deferred readiness publication"},
 		{"cgo libproc header", "internal/backend/proc.go", "package backend\n/* #include <libproc.h> */\nimport \"C\"", "discarded libproc"},
@@ -59,7 +59,7 @@ func TestSliceBPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
 	}
 }
 
-func TestSliceBPolicyAllowsCurrentAdmissionAndUncomposedFoundations(t *testing.T) {
+func TestSliceCPolicyAllowsBoundedBootstrapAndUncomposedSliceDFoundations(t *testing.T) {
 	tests := []struct {
 		name, path, source string
 	}{
@@ -69,6 +69,7 @@ func TestSliceBPolicyAllowsCurrentAdmissionAndUncomposedFoundations(t *testing.T
 			`package sessionruntime
 import (
   "context"
+	"github.com/weshofmann/boxwarden/internal/guestproto"
 	"github.com/weshofmann/boxwarden/internal/serialx"
   "github.com/weshofmann/boxwarden/internal/sshx"
   "github.com/weshofmann/boxwarden/internal/supervisor"
@@ -77,8 +78,16 @@ func f(ctx context.Context, expectation struct{ Manifest struct{ Operator string
 	ca := sshx.NewCAStore(sshx.CAStoreOptions{Runner: sshx.NewExecRunner(), Identity: sshx.OSIdentity{}})
   _, _ = ca.Check(ctx, sshx.Domain{}, []sshx.Domain{{}})
 	_, _ = serialx.CreateRuntime(ctx, "/generation")
+	request := guestproto.SerialRequest{Version: guestproto.Version, Association: guestproto.Association{}}
+	result, _ := serial.Bootstrap(ctx, request)
+	_, _, _ = guestproto.EncodeSerialFrame(request, result)
+	pins := sshx.NewPinStore(sshx.Domain{})
+	binding := sshx.Binding{}
+	pin, _ := pins.Admit(ctx, binding, sshx.ObservedHostKey{})
+	_, _ = pins.Load(ctx, binding)
+	_ = pin
   _ = supervisor.LaunchRequest{Binding: supervisor.Binding{}}
-  _ = supervisor.Snapshot{PinPresent: false, CertificateCurrent: false, ProbeOK: false, ZoneMatches: false}
+	_ = supervisor.Snapshot{PinPresent: true, CertificateCurrent: false, ProbeOK: false, ZoneMatches: false}
   _ = expectation.Manifest.Operator
 }`,
 		},
@@ -105,7 +114,7 @@ func f(request protocol.SerialRequest) protocol.SerialResult {
 	}
 }
 
-func TestSliceBProductionTreeSatisfiesRuntimeBoundaryPolicy(t *testing.T) {
+func TestSliceCProductionTreeSatisfiesRuntimeBoundaryPolicy(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
 	policy := &sliceBPolicy{}
 	for _, sourceRoot := range []string{filepath.Join(root, "cmd"), filepath.Join(root, "internal")} {
@@ -139,7 +148,7 @@ func TestSliceBProductionTreeSatisfiesRuntimeBoundaryPolicy(t *testing.T) {
 	}
 	issues := append(policy.issues, policy.finish()...)
 	if len(issues) != 0 {
-		t.Fatalf("Slice B production runtime boundary violations:\n%s", strings.Join(issues, "\n"))
+		t.Fatalf("Slice C production runtime boundary violations:\n%s", strings.Join(issues, "\n"))
 	}
 }
 
@@ -150,6 +159,9 @@ type sliceBPolicy struct {
 	ptyParameterCalls          int
 	lowLevelPTYCalls           int
 	serialRuntimeConstructions int
+	serialBootstrapCalls       int
+	pinAdmissionCalls          int
+	pinLoadCalls               int
 }
 
 func inspectSliceBSource(path string, source []byte) []string {
@@ -210,10 +222,10 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 			}
 		}
 		if composition && strings.HasSuffix(importPath, "/internal/timezonex") {
-			p.add(path, "deferred Slice C/D import", importPath)
+			p.add(path, "deferred Slice D import", importPath)
 		}
-		if composition && !serialFoundation && strings.HasSuffix(importPath, "/internal/guestproto") {
-			p.add(path, "deferred Slice C/D import", importPath)
+		if composition && !serialFoundation && strings.HasSuffix(importPath, "/internal/guestproto") && path != "internal/sessionruntime/owner.go" {
+			p.add(path, "unauthorized Slice C import", importPath)
 		}
 	}
 
@@ -238,11 +250,20 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 			if composition && name == "CreateRuntime" {
 				p.serialRuntimeConstructions++
 			}
+			if path == "internal/sessionruntime/owner.go" && name == "Bootstrap" {
+				p.serialBootstrapCalls++
+			}
+			if path == "internal/sessionruntime/owner.go" && name == "Admit" && calledReceiver(value.Fun) == "pins" {
+				p.pinAdmissionCalls++
+			}
+			if path == "internal/sessionruntime/owner.go" && name == "Load" && calledReceiver(value.Fun) == "pins" {
+				p.pinLoadCalls++
+			}
 			if name == "FindProcess" {
 				p.add(path, "process reconstruction", "os.FindProcess or equivalent name")
 			}
-			if composition && isDeferredCall(name) {
-				p.add(path, "deferred Slice C/D call", name)
+			if composition && isDeferredCall(name) && !allowedSliceCCall(path, name) {
+				p.add(path, "unauthorized Slice C call", name)
 			}
 		case *ast.AssignStmt:
 			if !composition {
@@ -254,12 +275,15 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 					continue
 				}
 				if index >= len(value.Rhs) || !isFalseLiteral(value.Rhs[index]) {
+					if selector.Sel.Name == "PinPresent" && path == "internal/sessionruntime/owner.go" {
+						continue
+					}
 					p.add(path, "deferred readiness publication", selector.Sel.Name)
 				}
 			}
 		case *ast.KeyValueExpr:
 			name := expressionName(value.Key)
-			if composition && isFutureReadinessField(name) && !isFalseLiteral(value.Value) {
+			if composition && isFutureReadinessField(name) && !isFalseLiteral(value.Value) && !(name == "PinPresent" && path == "internal/sessionruntime/owner.go") {
 				p.add(path, "deferred readiness publication", name)
 			}
 			if isPersistedProcessName(name) || isOwnershipMetadataName(name) {
@@ -309,7 +333,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 				break
 			}
 			foundation, ok := foundationImports[identifier.Name]
-			if ok && !allowedFoundationSelector(foundation, value.Sel.Name) {
+			if ok && !allowedFoundationSelector(path, foundation, value.Sel.Name) {
 				p.add(path, "unapproved foundation selector", foundation+"."+value.Sel.Name)
 			}
 		}
@@ -329,6 +353,9 @@ func (p *sliceBPolicy) finish() []string {
 		{p.ptyParameterCalls, 1, "single allocator invocation in serial runtime"},
 		{p.lowLevelPTYCalls, 1, "Darwin low-level PTY allocation"},
 		{p.serialRuntimeConstructions, 1, "Slice B serial runtime construction"},
+		{p.serialBootstrapCalls, 1, "Slice C serial bootstrap composition"},
+		{p.pinAdmissionCalls, 1, "Slice C host-key pin admission"},
+		{p.pinLoadCalls, 1, "Slice C host-key pin verification"},
 	} {
 		if check.got != check.want {
 			issues = append(issues, check.name+" count = "+strconv.Itoa(check.got)+", want "+strconv.Itoa(check.want))
@@ -369,13 +396,16 @@ func sliceBFoundation(importPath string) (string, bool) {
 	}
 }
 
-func allowedFoundationSelector(foundation, selector string) bool {
+func allowedFoundationSelector(path, foundation, selector string) bool {
 	allowed := map[string]map[string]bool{
 		"guestproto": {
+			"Association":         true,
 			"DecodeSerialEndLine": true,
 			"MaxRequestBytes":     true,
 			"SerialRequest":       true,
 			"SerialResult":        true,
+			"EncodeSerialFrame":   true,
+			"Version":             true,
 		},
 		"serialx": {
 			"CreateRuntime": true,
@@ -387,15 +417,38 @@ func allowedFoundationSelector(foundation, selector string) bool {
 			"CAInitialized":        true,
 			"CAInitResult":         true,
 			"CAStoreOptions":       true,
+			"Binding":              true,
 			"Domain":               true,
+			"HostKeyPin":           true,
 			"NewCAStore":           true,
 			"NewExecRunner":        true,
+			"NewPinStore":          true,
+			"ObservedHostKey":      true,
 			"OSIdentity":           true,
 			"RandomUUID":           true,
 		},
 		"timezonex": {},
 	}
+	if path != "internal/sessionruntime/owner.go" {
+		if foundation == "guestproto" && (selector == "Association" || selector == "EncodeSerialFrame" || selector == "Version") {
+			return false
+		}
+		if foundation == "sshx" && (selector == "Binding" || selector == "HostKeyPin" || selector == "NewPinStore" || selector == "ObservedHostKey") {
+			return false
+		}
+	}
 	return allowed[foundation][selector]
+}
+
+func allowedSliceCCall(path, name string) bool {
+	switch name {
+	case "Bootstrap":
+		return path == "internal/sessionruntime/owner.go" || path == "internal/supervisor/control.go" || path == "internal/supervisor/exact.go"
+	case "Admit", "Load", "NewPinStore":
+		return path == "internal/sessionruntime/owner.go"
+	default:
+		return false
+	}
 }
 
 func isAlternatePTYImport(importPath string) bool {
@@ -425,6 +478,18 @@ func calledName(expression ast.Expr) string {
 	default:
 		return ""
 	}
+}
+
+func calledReceiver(expression ast.Expr) string {
+	selector, ok := expression.(*ast.SelectorExpr)
+	if !ok {
+		return ""
+	}
+	receiver, ok := selector.X.(*ast.Ident)
+	if !ok {
+		return ""
+	}
+	return receiver.Name
 }
 
 func expressionName(expression ast.Expr) string {

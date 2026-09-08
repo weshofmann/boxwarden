@@ -25,6 +25,10 @@ var ErrRuntimeCleanupUnproven = errors.New("runtime cleanup is unproven; preserv
 // other runtime resources before returning; the generation lock outlives it.
 type RuntimeOwner interface {
 	Start(context.Context, LaunchRequest) error
+	// Bootstrap performs only the fixed guest-trust and host-key-pin exchange.
+	// It is idempotent after an exact validated result and has no generic guest
+	// command authority.
+	Bootstrap(context.Context) error
 	// Snapshot must observe within the bounded context supplied by control.
 	Snapshot(context.Context) Snapshot
 	Stop(context.Context) error

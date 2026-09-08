@@ -19,6 +19,7 @@ import (
 // I/O; the client sends its possibly earlier operation deadline on the wire.
 const controlIOTimeout = 2 * time.Second
 const lifecycleTimeout = 5 * time.Second
+const bootstrapTimeout = 32 * time.Second
 
 type controlRequest struct {
 	Version   int       `json:"version"`
@@ -87,10 +88,12 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 	if err := decodeExact(data, &request); err != nil {
 		return
 	}
-	if request.Version != 1 || request.Binding != binding || (request.Action != "snapshot" && request.Action != "stop") {
+	if request.Version != 1 || request.Binding != binding || (request.Action != "snapshot" && request.Action != "bootstrap" && request.Action != "stop") {
 		return
 	}
-	if request.Action == "stop" {
+	if request.Action == "bootstrap" {
+		serverDeadline = acceptedAt.Add(bootstrapTimeout)
+	} else if request.Action == "stop" {
 		serverDeadline = acceptedAt.Add(lifecycleTimeout + controlIOTimeout)
 	}
 	now := time.Now()
@@ -108,14 +111,18 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 		return
 	}
 	response := controlResponse{Version: 1, Binding: binding}
-	if request.Action == "stop" {
+	operationCtx, cancelOperation := context.WithDeadline(ctx, effectiveDeadline)
+	defer cancelOperation()
+	if request.Action == "bootstrap" {
+		if err := owner.Bootstrap(operationCtx); err != nil {
+			response.Error = err.Error()
+		}
+	} else if request.Action == "stop" {
 		if err := stop(); err != nil {
 			response.Error = err.Error()
 		}
 	}
-	snapshotCtx, cancelSnapshot := context.WithDeadline(ctx, effectiveDeadline)
-	response.Snapshot = owner.Snapshot(snapshotCtx)
-	cancelSnapshot()
+	response.Snapshot = owner.Snapshot(operationCtx)
 	response.Snapshot.Binding = binding
 	response.Snapshot.ObservedAt = time.Now().UTC()
 	data, err = encodeControlResponse(response)
@@ -200,11 +207,24 @@ func (c *Client) Snapshot(ctx context.Context, binding Binding) (Snapshot, error
 	if err != nil {
 		return Snapshot{}, err
 	}
+	if err := c.validateSnapshot(response.Snapshot); err != nil {
+		return Snapshot{}, err
+	}
+	return response.Snapshot, nil
+}
+func (c *Client) validateSnapshot(snapshot Snapshot) error {
 	now := time.Now
 	if c.Now != nil {
 		now = c.Now
 	}
-	if err := validateSnapshotFreshness(response.Snapshot, now(), c.MaxSnapshotAge); err != nil {
+	return validateSnapshotFreshness(snapshot, now(), c.MaxSnapshotAge)
+}
+func (c *Client) Bootstrap(ctx context.Context, binding Binding) (Snapshot, error) {
+	response, err := c.call(ctx, binding, "bootstrap")
+	if err != nil {
+		return response.Snapshot, err
+	}
+	if err := c.validateSnapshot(response.Snapshot); err != nil {
 		return Snapshot{}, err
 	}
 	return response.Snapshot, nil
@@ -247,7 +267,9 @@ func (c *Client) call(ctx context.Context, binding Binding, action string) (cont
 		return response, fmt.Errorf("supervisor generation has no live owner")
 	}
 	timeout := controlIOTimeout
-	if action == "stop" {
+	if action == "bootstrap" {
+		timeout = bootstrapTimeout
+	} else if action == "stop" {
 		timeout += lifecycleTimeout
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -287,7 +309,7 @@ func (c *Client) call(ctx context.Context, binding Binding, action string) (cont
 		return response, fmt.Errorf("control response diagnostic exceeds bound")
 	}
 	if response.Error != "" {
-		return response, fmt.Errorf("supervisor stop: %s", response.Error)
+		return response, fmt.Errorf("supervisor %s: %s", action, response.Error)
 	}
 	return response, nil
 }

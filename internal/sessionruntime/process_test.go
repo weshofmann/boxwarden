@@ -66,7 +66,7 @@ func processHost() session.RuntimeChecker {
 
 func processCA() session.CAValidator {
 	return caFunc(func(context.Context, sshx.Domain, []sshx.Domain) (sshx.CAIdentity, error) {
-		return sshx.CAIdentity{}, nil
+		return sshx.CAIdentity{Domain: "work", Algorithm: "ssh-ed25519", PublicKey: ownerTestPublicKey, Fingerprint: ownerTestFingerprint()}, nil
 	})
 }
 
@@ -161,7 +161,7 @@ func TestInitiatingProcessReturnsWhileDetachedSupervisorRetainsRuntime(t *testin
 		_ = client.Stop(ctx, binding)
 	})
 	snapshot, err := client.Snapshot(ctx, binding)
-	if err != nil || snapshot.Binding != binding || !snapshot.BackendRunning || !snapshot.SerialHealthy || snapshot.PinPresent || snapshot.CertificateCurrent || snapshot.ProbeOK || snapshot.ZoneMatches {
+	if err != nil || snapshot.Binding != binding || !snapshot.BackendRunning || !snapshot.SerialHealthy || !snapshot.PinPresent || snapshot.CertificateCurrent || snapshot.ProbeOK || snapshot.ZoneMatches {
 		t.Fatalf("post-initiator snapshot = %#v %v", snapshot, err)
 	}
 	assertGenerationLock(t, filepath.Join(directory, "generation.lock"), true)
