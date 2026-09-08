@@ -75,8 +75,8 @@ Implemented Slice B start/retry reconciliation is conservative:
   Request removal is fsynced in the cleanup directory before that lock-to-marker
   rename. A same-G retry contends with a still-finishing owner, or
   identity-validates and completes request+lock, lock-only, request+marker,
-  empty+marker, marker-only, or empty interrupted stages before republishing G.
-  Canonical/residue coexistence and foreign, malformed,
+  empty+marker, or marker-only interrupted stages before republishing G.
+  Canonical/residue coexistence and foreign, malformed, ownerless-empty,
   symlinked, unsafe-mode, or unexpectedly populated residue fail closed without
   mutation. Cleanup never recurses. Durable `starting + G` remains unchanged on
   start failure.

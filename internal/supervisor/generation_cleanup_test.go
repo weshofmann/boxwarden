@@ -31,8 +31,7 @@ func TestPublishRecoversEveryInterruptedExactGenerationCleanupStage(t *testing.T
 		{name: "after-rename-before-parent-fsync"},
 		{name: "after-rename-publication-is-durable", durable: true},
 		{name: "after-request-unlink", durable: true, removeName: requestName},
-		{name: "after-lock-unlink", durable: true, removeName: lockName},
-		{name: "after-directory-unlink-before-parent-fsync", durable: true, removeName: lockName, removeDir: true},
+		{name: "after-cleanup-completion-before-parent-fsync", durable: true, removeName: lockName, removeDir: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -472,6 +471,14 @@ func TestPublishRejectsInvalidExactCleanupResidueWithoutMutation(t *testing.T) {
 				t.Fatal(err)
 			}
 		}},
+		{name: "ownerless-empty-directory", mutate: func(t *testing.T, _ LaunchRequest, residue string) {
+			t.Helper()
+			for _, name := range []string{requestName, lockName} {
+				if err := os.Remove(filepath.Join(residue, name)); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}},
 		{name: "duplicate-lock-paths", mutate: func(t *testing.T, _ LaunchRequest, residue string) {
 			t.Helper()
 			if err := os.WriteFile(residue+".lock", nil, 0600); err != nil {
@@ -533,12 +540,13 @@ func TestPublishRejectsInvalidExactCleanupResidueWithoutMutation(t *testing.T) {
 			}
 			before := exactCleanupStateForTest(t, request, residue)
 
-			if _, _, err := publishOrAdmitRequest(request); err == nil {
-				t.Fatal("invalid cleanup residue was admitted or removed")
-			}
+			_, _, publishErr := publishOrAdmitRequest(request)
 			after := exactCleanupStateForTest(t, request, residue)
 			if before != after {
 				t.Fatalf("invalid cleanup residue mutated\nbefore: %s\nafter:  %s", before, after)
+			}
+			if publishErr == nil {
+				t.Fatal("invalid cleanup residue was admitted")
 			}
 		})
 	}

@@ -434,6 +434,9 @@ func admitExactCleanupResidue(r LaunchRequest) (exactCleanupResidue, error) {
 			return state, fmt.Errorf("unexpected exact cleanup entry %q", entry.Name())
 		}
 	}
+	if !state.request && !state.lock && !state.marker {
+		return state, fmt.Errorf("exact cleanup directory has no ownership lock")
+	}
 	if state.request && !state.lock && !state.marker {
 		return state, fmt.Errorf("exact cleanup request exists without its lock")
 	}
