@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -310,6 +311,257 @@ func TestExactStartRetriesSameGenerationAfterCleanupOwnerFinishes(t *testing.T) 
 	}
 	if _, err := os.Lstat(residue); !os.IsNotExist(err) {
 		t.Fatalf("cleanup residue retained after exact start retry: %v", err)
+	}
+}
+
+type liveCleanupTransitionLauncher struct {
+	want     LaunchRequest
+	lock     *os.File
+	lockInfo os.FileInfo
+	calls    atomic.Int32
+	seen     []LaunchRequest
+}
+
+func (l *liveCleanupTransitionLauncher) Launch(_ context.Context, request LaunchRequest) error {
+	l.seen = append(l.seen, request)
+	if request != l.want {
+		return fmt.Errorf("launch request changed across exact-generation retry")
+	}
+	call := l.calls.Add(1)
+	_, _, err := publishOrAdmitRequest(request)
+	if call != 1 {
+		return err
+	}
+	if !errors.Is(err, errGenerationAlreadyOwned) {
+		return fmt.Errorf("first retry did not contend with cleanup owner: %w", err)
+	}
+	cleanupErr := finishExactGenerationCleanup(request, l.lockInfo)
+	closeErr := l.lock.Close()
+	l.lock = nil
+	if cleanupErr != nil || closeErr != nil {
+		return errors.Join(cleanupErr, closeErr)
+	}
+	return err
+}
+
+type liveCleanupTransitionController struct {
+	request  LaunchRequest
+	launcher *liveCleanupTransitionLauncher
+	calls    atomic.Int32
+}
+
+func (c *liveCleanupTransitionController) Snapshot(_ context.Context, binding Binding) (Snapshot, error) {
+	if binding != c.request.Binding {
+		return Snapshot{}, fmt.Errorf("snapshot binding changed across exact-generation retry")
+	}
+	if c.calls.Add(1) == 1 {
+		if err := os.Rename(c.request.RuntimeDirectory, exactCleanupResiduePath(c.request)); err != nil {
+			return Snapshot{}, err
+		}
+		if err := syncDirectory(filepath.Dir(c.request.RuntimeDirectory)); err != nil {
+			return Snapshot{}, err
+		}
+		return Snapshot{}, fmt.Errorf("old exact supervisor entered cleanup")
+	}
+	if c.launcher.calls.Load() < 2 {
+		return Snapshot{}, fmt.Errorf("same generation has not been republished")
+	}
+	state, err := classifyExactGeneration(c.request)
+	if err != nil || state != exactGenerationResumable {
+		return Snapshot{}, errors.Join(fmt.Errorf("republished generation is not resumable"), err)
+	}
+	return Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true}, nil
+}
+
+func (*liveCleanupTransitionController) Stop(context.Context, Binding) error { return nil }
+
+// Production break: an exact retry that first finds the old supervisor live
+// must not spend its entire startup budget polling a socket after that owner
+// enters cleanup. It must re-enter exact admission and republish only the same G.
+func TestExactStartReentersSameGenerationAfterLiveOwnerCleansUp(t *testing.T) {
+	request := minimalRequest(t)
+	if _, _, err := publishOrAdmitRequest(request); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := acquireGenerationLock(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockInfo, err := lock.Stat()
+	if err != nil {
+		lock.Close()
+		t.Fatal(err)
+	}
+	launcher := &liveCleanupTransitionLauncher{want: request, lock: lock, lockInfo: lockInfo}
+	defer func() {
+		if launcher.lock != nil {
+			launcher.lock.Close()
+		}
+	}()
+	controller := &liveCleanupTransitionController{request: request, launcher: launcher}
+	exact := &exactStartController{
+		launcher:   launcher,
+		controller: controller,
+		policy:     startupPolicy{timeout: time.Second, interval: time.Millisecond},
+	}
+
+	got, err := exact.startExact(context.Background(), request)
+	if err != nil {
+		t.Fatalf("live-to-cleanup exact retry: %v", err)
+	}
+	if got.Binding != request.Binding || !got.BackendRunning || !got.SerialHealthy {
+		t.Fatalf("fresh same-G snapshot = %#v", got)
+	}
+	if launcher.calls.Load() != 2 {
+		t.Fatalf("launch calls = %d, want cleanup contention plus exact republish", launcher.calls.Load())
+	}
+	for i, seen := range launcher.seen {
+		if seen != request {
+			t.Fatalf("launch request %d = %#v, want exact %#v", i, seen, request)
+		}
+	}
+	if controller.calls.Load() != 2 {
+		t.Fatalf("snapshot calls = %d, want old transition plus fresh same-G snapshot", controller.calls.Load())
+	}
+	if _, err := os.Lstat(exactCleanupResiduePath(request)); !os.IsNotExist(err) {
+		t.Fatalf("cleanup residue retained after exact relaunch: %v", err)
+	}
+}
+
+type coexistingCleanupController struct {
+	request LaunchRequest
+	calls   atomic.Int32
+}
+
+func (c *coexistingCleanupController) Snapshot(_ context.Context, binding Binding) (Snapshot, error) {
+	if binding != c.request.Binding {
+		return Snapshot{}, fmt.Errorf("snapshot binding changed during ambiguous transition")
+	}
+	if c.calls.Add(1) == 1 {
+		residue := exactCleanupResiduePath(c.request)
+		if err := os.Mkdir(residue, 0700); err != nil {
+			return Snapshot{}, err
+		}
+		data, err := os.ReadFile(filepath.Join(c.request.RuntimeDirectory, requestName))
+		if err != nil {
+			return Snapshot{}, err
+		}
+		if err := os.WriteFile(filepath.Join(residue, requestName), data, 0600); err != nil {
+			return Snapshot{}, err
+		}
+		if err := os.WriteFile(filepath.Join(residue, lockName), nil, 0600); err != nil {
+			return Snapshot{}, err
+		}
+	}
+	return Snapshot{}, fmt.Errorf("old exact supervisor entered ambiguous state")
+}
+
+func (*coexistingCleanupController) Stop(context.Context, Binding) error { return nil }
+
+func TestExactStartFailsClosedWhenLiveGenerationBecomesAmbiguous(t *testing.T) {
+	request := minimalRequest(t)
+	if _, _, err := publishOrAdmitRequest(request); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := acquireGenerationLock(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	launcher := &rejectLauncher{}
+	controller := &coexistingCleanupController{request: request}
+	exact := &exactStartController{
+		launcher:   launcher,
+		controller: controller,
+		policy:     startupPolicy{timeout: 200 * time.Millisecond, interval: time.Millisecond},
+	}
+
+	_, err = exact.startExact(context.Background(), request)
+	if err == nil || !strings.Contains(err.Error(), "canonical generation and exact cleanup residue coexist") {
+		t.Fatalf("ambiguous live transition error = %v, want exact fail-closed classification", err)
+	}
+	if launcher.calls.Load() != 0 {
+		t.Fatal("ambiguous live transition reached launcher")
+	}
+	for _, path := range []string{request.RuntimeDirectory, exactCleanupResiduePath(request)} {
+		if _, err := os.Lstat(path); err != nil {
+			t.Fatalf("ambiguous live transition mutated %s: %v", path, err)
+		}
+	}
+}
+
+func TestDetachedLauncherReportsLiveGenerationTransitionForExactRetry(t *testing.T) {
+	request := minimalRequest(t)
+	if _, _, err := publishOrAdmitRequest(request); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := acquireGenerationLock(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	socketPath := filepath.Join(request.RuntimeDirectory, socketName)
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketPath, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.SetUnlinkOnClose(true)
+	defer listener.Close()
+	if err := os.Chmod(socketPath, 0600); err != nil {
+		t.Fatal(err)
+	}
+	accepted := make(chan *net.UnixConn, 1)
+	acceptErr := make(chan error, 1)
+	go func() {
+		connection, err := listener.AcceptUnix()
+		if err != nil {
+			acceptErr <- err
+			return
+		}
+		if _, err := readBounded(connection); err != nil {
+			connection.Close()
+			acceptErr <- err
+			return
+		}
+		accepted <- connection
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	launchDone := make(chan error, 1)
+	go func() { launchDone <- (detachedLauncher{}).Launch(ctx, request) }()
+	var connection *net.UnixConn
+	select {
+	case connection = <-accepted:
+	case err := <-acceptErr:
+		t.Fatalf("accept live snapshot request: %v", err)
+	case <-ctx.Done():
+		t.Fatal("detached launcher did not contact the live generation")
+	}
+	if err := listener.Close(); err != nil {
+		connection.Close()
+		t.Fatal(err)
+	}
+	if err := os.Rename(request.RuntimeDirectory, exactCleanupResiduePath(request)); err != nil {
+		connection.Close()
+		t.Fatal(err)
+	}
+	if err := syncDirectory(filepath.Dir(request.RuntimeDirectory)); err != nil {
+		connection.Close()
+		t.Fatal(err)
+	}
+	if err := connection.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if state, err := classifyExactGeneration(request); err != nil || state != exactGenerationAbsent {
+		t.Fatalf("detached winner cleanup state = %v, %v; want exact transition", state, err)
+	}
+	select {
+	case err := <-launchDone:
+		if !errors.Is(err, errExactGenerationTransition) {
+			t.Fatalf("detached live transition = %v, want exact retry signal", err)
+		}
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatal("detached launcher hid the live-generation transition until timeout")
 	}
 }
 

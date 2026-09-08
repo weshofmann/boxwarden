@@ -153,7 +153,7 @@ func (detachedLauncher) Launch(ctx context.Context, request LaunchRequest) error
 	}
 	client := &Client{RuntimeDirectory: request.RuntimeDirectory, MaxSnapshotAge: time.Minute}
 	if state == exactGenerationLive {
-		_, err := awaitSnapshot(ctx, request.Binding, productionStartupPolicy, client.Snapshot)
+		_, err := awaitLiveSnapshot(ctx, request, productionStartupPolicy, client.Snapshot)
 		return err
 	}
 	executable, err := os.Executable()
@@ -190,7 +190,7 @@ func (detachedLauncher) Launch(ctx context.Context, request LaunchRequest) error
 	case <-childDone:
 		// A competing exact child may have won the generation lock.
 		if state, stateErr := classifyExactGeneration(request); stateErr == nil && state == exactGenerationLive {
-			_, err = awaitSnapshot(ctx, request.Binding, productionStartupPolicy, client.Snapshot)
+			_, err = awaitLiveSnapshot(ctx, request, productionStartupPolicy, client.Snapshot)
 			return err
 		}
 		return errors.Join(err, childErr)

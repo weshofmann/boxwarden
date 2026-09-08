@@ -12,6 +12,8 @@ type startupPolicy struct{ timeout, interval time.Duration }
 
 var productionStartupPolicy = startupPolicy{timeout: 5 * time.Minute, interval: time.Second}
 
+var errExactGenerationTransition = errors.New("exact live generation transitioned")
+
 type exactStartController struct {
 	launcher   Launcher
 	controller Controller
@@ -86,29 +88,61 @@ func (c *exactStartController) startExact(ctx context.Context, request LaunchReq
 	}
 	ctx, cancel := context.WithTimeout(ctx, policy.timeout)
 	defer cancel()
-	state, err := classifyExactGeneration(request)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if state != exactGenerationLive {
-		for {
-			if err := c.launcher.Launch(ctx, request); err == nil {
-				break
-			} else if !errors.Is(err, errGenerationAlreadyOwned) {
-				return Snapshot{}, err
+	for {
+		state, err := classifyExactGeneration(request)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		if state == exactGenerationLive {
+			got, err := awaitLiveSnapshot(ctx, request, policy, c.controller.Snapshot)
+			if errors.Is(err, errExactGenerationTransition) {
+				continue
 			}
-			timer := time.NewTimer(policy.interval)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return Snapshot{}, ctx.Err()
-			case <-timer.C:
-			}
+			return got, err
+		}
+		if err := c.launcher.Launch(ctx, request); err == nil {
+			return awaitSnapshot(ctx, request.Binding, policy, c.controller.Snapshot)
+		} else if errors.Is(err, errExactGenerationTransition) {
+			continue
+		} else if !errors.Is(err, errGenerationAlreadyOwned) {
+			return Snapshot{}, err
+		}
+		if err := ctx.Err(); err != nil {
+			return Snapshot{}, err
+		}
+		timer := time.NewTimer(policy.interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return Snapshot{}, ctx.Err()
+		case <-timer.C:
 		}
 	}
-	return awaitSnapshot(ctx, request.Binding, policy, c.controller.Snapshot)
 }
+
+// awaitLiveSnapshot watches only an already-owned exact generation. A valid
+// transition out of live ownership is a private instruction to re-enter exact
+// admission; malformed or ambiguous state remains an ordinary fail-closed
+// error and cannot become retry authority.
+func awaitLiveSnapshot(ctx context.Context, request LaunchRequest, policy startupPolicy, snapshot func(context.Context, Binding) (Snapshot, error)) (Snapshot, error) {
+	checkLive := func() error {
+		state, err := classifyExactGeneration(request)
+		if err != nil {
+			return err
+		}
+		if state != exactGenerationLive {
+			return errExactGenerationTransition
+		}
+		return nil
+	}
+	return awaitSnapshotChecked(ctx, request.Binding, policy, checkLive, snapshot)
+}
+
 func awaitSnapshot(ctx context.Context, binding Binding, policy startupPolicy, snapshot func(context.Context, Binding) (Snapshot, error)) (Snapshot, error) {
+	return awaitSnapshotChecked(ctx, binding, policy, nil, snapshot)
+}
+
+func awaitSnapshotChecked(ctx context.Context, binding Binding, policy startupPolicy, check func() error, snapshot func(context.Context, Binding) (Snapshot, error)) (Snapshot, error) {
 	if policy.timeout <= 0 || policy.interval <= 0 {
 		policy = productionStartupPolicy
 	}
@@ -120,6 +154,11 @@ func awaitSnapshot(ctx context.Context, binding Binding, policy startupPolicy, s
 	for {
 		if err := ctx.Err(); err != nil {
 			return Snapshot{}, errors.Join(err, last)
+		}
+		if check != nil {
+			if err := check(); err != nil {
+				return Snapshot{}, err
+			}
 		}
 		got, err := snapshot(ctx, binding)
 		if err == nil {

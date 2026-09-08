@@ -57,6 +57,10 @@ Implemented Slice B start/retry reconciliation is conservative:
   generation before launch.
 - `starting` + backend running + exact live supervisor generation reconnects and
   resumes that same generation.
+- `starting` + backend stopped + a matching live supervisor waits only while
+  exact ownership remains live. If that owner validly transitions through
+  cleanup, resumable publication, or absence, the same Start invocation
+  re-enters exact admission and may relaunch only the persisted G.
 - `starting` + backend stopped + no live owner may retry the same structurally
   valid namespace only if its minimal request and durable binding match exactly.
   Stale serial/live artifacts require explicit reconciliation; they are not adopted.

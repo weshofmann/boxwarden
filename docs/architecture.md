@@ -118,6 +118,13 @@ entries, and lock contention all fail closed.
 Cleanup remains nonrecursive and the deterministic names are correlation, not
 generic deletion authority.
 
+When a stopped-backend retry initially finds the matching generation live, it
+reclassifies that exact namespace between bounded snapshot attempts. A valid
+transition from live ownership to cleanup, resumable publication, or absence
+returns to the existing exact admission/launch path with the same request and
+G; classification errors remain terminal. Detached-launch contention uses the
+same live wait, so a finishing concurrent winner cannot hide that transition.
+
 The mode-`0600` control socket and its inode authority remain in the canonical
 exact generation. Realistic macOS state-root hierarchies can exceed Darwin's
 AF_UNIX address capacity, so bind/connect may use a transient owner-private short
