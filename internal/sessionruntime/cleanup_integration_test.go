@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -76,14 +77,14 @@ func TestAbandonedSnapshotObservationDoesNotStarveExactStop(t *testing.T) {
 	for range staleSnapshots {
 		select {
 		case err := <-staleDone:
-			requireReadTimeout(t, err)
+			requirePostWriteReadCompletion(t, err)
 		case <-time.After(2 * time.Second):
 			t.Fatal("queued snapshot did not expire behind the active request")
 		}
 	}
 	select {
 	case err := <-snapshotDone:
-		requireReadTimeout(t, err)
+		requirePostWriteReadCompletion(t, err)
 	case <-time.After(3 * time.Second):
 		t.Fatal("snapshot client did not enforce its RPC budget")
 	}
@@ -122,11 +123,17 @@ func TestAbandonedSnapshotObservationDoesNotStarveExactStop(t *testing.T) {
 	}
 }
 
-func requireReadTimeout(t *testing.T, err error) {
+// The request frame was written before Client entered its response read. At
+// the shared absolute expiry, client cancellation can win as a read timeout or
+// the server can close first and produce EOF; no other read outcome is valid.
+func requirePostWriteReadCompletion(t *testing.T, err error) {
 	t.Helper()
+	if errors.Is(err, io.EOF) {
+		return
+	}
 	var networkError *net.OpError
 	if !errors.As(err, &networkError) || networkError.Op != "read" || !networkError.Timeout() {
-		t.Fatalf("snapshot RPC error = %v, want read timeout after a fully written request", err)
+		t.Fatalf("snapshot RPC error = %v, want EOF or read timeout after a fully written request", err)
 	}
 }
 
