@@ -63,6 +63,8 @@ Implemented Slice B start/retry reconciliation is conservative:
   re-enters exact admission and may relaunch only the persisted G.
 - `starting` + backend stopped + no live owner may retry the same structurally
   valid namespace only if its minimal request and durable binding match exactly.
+  A successful launcher result enters the same transition-aware live wait, so
+  cleanup before the outer snapshot re-enters exact admission for that G.
   Stale serial/live artifacts require explicit reconciliation; they are not adopted.
 - Any running observation with unproven ownership is drift/non-ready with no
   mutation or adoption.

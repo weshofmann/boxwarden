@@ -101,7 +101,11 @@ func (c *exactStartController) startExact(ctx context.Context, request LaunchReq
 			return got, err
 		}
 		if err := c.launcher.Launch(ctx, request); err == nil {
-			return awaitSnapshot(ctx, request.Binding, policy, c.controller.Snapshot)
+			got, err := awaitLiveSnapshot(ctx, request, policy, c.controller.Snapshot)
+			if errors.Is(err, errExactGenerationTransition) {
+				continue
+			}
+			return got, err
 		} else if errors.Is(err, errExactGenerationTransition) {
 			continue
 		} else if !errors.Is(err, errGenerationAlreadyOwned) {

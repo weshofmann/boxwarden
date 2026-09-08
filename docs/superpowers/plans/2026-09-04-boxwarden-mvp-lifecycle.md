@@ -137,11 +137,11 @@ before B; a green foundation alone does not authorize beginning B.
 - [x] Persist `starting + generation G` before runtime mutation and return that
   unchanged non-ready record only after fresh exact backend-running and healthy
   serial-drain proof.
-- [x] Reconnect only while the matching generation remains live; if it validly
-  transitions into cleanup or absence during the bounded wait, re-enter exact
-  admission and relaunch only the same G from an exact structurally resumable
-  stopped namespace. Reject missing, ambiguous, foreign, symlinked, or
-  unexpectedly populated state without adoption.
+- [x] Reconnect and confirm a successful detached launch only while the matching
+  generation remains live; if it validly transitions into cleanup or absence
+  during the bounded wait, re-enter exact admission and relaunch only the same G
+  from an exact structurally resumable stopped namespace. Reject missing,
+  ambiguous, foreign, symlinked, or unexpectedly populated state without adoption.
 - [x] Bind production registration, creation, status, parent start observation,
   and child launch/observation to the admitted absolute Tart executable and exact
   configured Tart home with closed environments.

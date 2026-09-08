@@ -256,6 +256,10 @@ func (l *cleanupRetryLauncher) Launch(_ context.Context, request LaunchRequest) 
 		l.lock = nil
 		return errors.Join(err, closeErr)
 	}
+	if err != nil {
+		return err
+	}
+	l.lock, err = acquireGenerationLock(request)
 	return err
 }
 
@@ -263,8 +267,8 @@ type cleanupRetryController struct{ request LaunchRequest }
 
 func (c cleanupRetryController) Snapshot(_ context.Context, binding Binding) (Snapshot, error) {
 	state, err := classifyExactGeneration(c.request)
-	if err != nil || state != exactGenerationResumable {
-		return Snapshot{}, errors.Join(fmt.Errorf("same-G publication is not resumable"), err)
+	if err != nil || state != exactGenerationLive {
+		return Snapshot{}, errors.Join(fmt.Errorf("same-G publication is not live"), err)
 	}
 	return Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true}, nil
 }
@@ -293,6 +297,11 @@ func TestExactStartRetriesSameGenerationAfterCleanupOwnerFinishes(t *testing.T) 
 		t.Fatal(err)
 	}
 	launcher := &cleanupRetryLauncher{lock: lock}
+	defer func() {
+		if launcher.lock != nil {
+			launcher.lock.Close()
+		}
+	}()
 	controller := &exactStartController{
 		launcher:   launcher,
 		controller: cleanupRetryController{request: request},
@@ -330,6 +339,10 @@ func (l *liveCleanupTransitionLauncher) Launch(_ context.Context, request Launch
 	call := l.calls.Add(1)
 	_, _, err := publishOrAdmitRequest(request)
 	if call != 1 {
+		if err != nil {
+			return err
+		}
+		l.lock, err = acquireGenerationLock(request)
 		return err
 	}
 	if !errors.Is(err, errGenerationAlreadyOwned) {
@@ -367,8 +380,8 @@ func (c *liveCleanupTransitionController) Snapshot(_ context.Context, binding Bi
 		return Snapshot{}, fmt.Errorf("same generation has not been republished")
 	}
 	state, err := classifyExactGeneration(c.request)
-	if err != nil || state != exactGenerationResumable {
-		return Snapshot{}, errors.Join(fmt.Errorf("republished generation is not resumable"), err)
+	if err != nil || state != exactGenerationLive {
+		return Snapshot{}, errors.Join(fmt.Errorf("republished generation is not live"), err)
 	}
 	return Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true}, nil
 }
@@ -425,6 +438,166 @@ func TestExactStartReentersSameGenerationAfterLiveOwnerCleansUp(t *testing.T) {
 	}
 	if _, err := os.Lstat(exactCleanupResiduePath(request)); !os.IsNotExist(err) {
 		t.Fatalf("cleanup residue retained after exact relaunch: %v", err)
+	}
+}
+
+type postLaunchTransitionFixture struct {
+	request      LaunchRequest
+	cleanupFirst bool
+	invalidFirst string
+	lock         *os.File
+	launches     int
+	snapshots    int
+	seen         []LaunchRequest
+}
+
+func (f *postLaunchTransitionFixture) Launch(_ context.Context, request LaunchRequest) error {
+	f.launches++
+	f.seen = append(f.seen, request)
+	if request != f.request {
+		return fmt.Errorf("post-launch retry changed the exact request")
+	}
+	if _, _, err := publishOrAdmitRequest(request); err != nil {
+		return err
+	}
+	lock, err := acquireGenerationLock(request)
+	if err != nil {
+		return err
+	}
+	if f.cleanupFirst && f.launches == 1 {
+		cleanupErr := removeExactGeneration(request, lock)
+		return errors.Join(cleanupErr, lock.Close())
+	}
+	f.lock = lock
+	if f.launches == 1 {
+		switch f.invalidFirst {
+		case "malformed":
+			return os.WriteFile(filepath.Join(request.RuntimeDirectory, requestName), []byte("{"), 0600)
+		case "coexisting":
+			residue := exactCleanupResiduePath(request)
+			if err := os.Mkdir(residue, 0700); err != nil {
+				return err
+			}
+			data, err := os.ReadFile(filepath.Join(request.RuntimeDirectory, requestName))
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(residue, requestName), data, 0600); err != nil {
+				return err
+			}
+			return os.WriteFile(filepath.Join(residue, lockName), nil, 0600)
+		}
+	}
+	return nil
+}
+
+func (f *postLaunchTransitionFixture) Snapshot(_ context.Context, binding Binding) (Snapshot, error) {
+	f.snapshots++
+	if binding != f.request.Binding {
+		return Snapshot{}, fmt.Errorf("post-launch snapshot changed the exact binding")
+	}
+	if f.lock == nil {
+		return Snapshot{}, fmt.Errorf("successful launcher generation has already cleaned up")
+	}
+	state, err := classifyExactGeneration(f.request)
+	if err != nil || state != exactGenerationLive {
+		return Snapshot{}, errors.Join(fmt.Errorf("successful launcher generation is not live"), err)
+	}
+	return Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true}, nil
+}
+
+func (*postLaunchTransitionFixture) Stop(context.Context, Binding) error { return nil }
+
+func (f *postLaunchTransitionFixture) close() {
+	if f.lock != nil {
+		f.lock.Close()
+		f.lock = nil
+	}
+}
+
+// Production break: detached Launch returns nil after observing started, but
+// that owner can reap and clean G before the outer controller's next RPC. The
+// same StartExact call must re-enter admission rather than wait on absent G.
+func TestExactStartReentersSameGenerationAfterSuccessfulLaunchCleansUp(t *testing.T) {
+	request := minimalRequest(t)
+	fixture := &postLaunchTransitionFixture{request: request, cleanupFirst: true}
+	defer fixture.close()
+	exact := &exactStartController{
+		launcher:   fixture,
+		controller: fixture,
+		policy:     startupPolicy{timeout: 500 * time.Millisecond, interval: time.Millisecond},
+	}
+
+	got, err := exact.startExact(context.Background(), request)
+	if err != nil {
+		t.Fatalf("post-launch cleanup retry: %v", err)
+	}
+	if got.Binding != request.Binding || !got.BackendRunning || !got.SerialHealthy {
+		t.Fatalf("fresh post-launch same-G snapshot = %#v", got)
+	}
+	if fixture.launches != 2 || fixture.snapshots != 1 {
+		t.Fatalf("launch/snapshot calls = %d/%d, want one cleaned launch, one same-G relaunch, and one fresh snapshot", fixture.launches, fixture.snapshots)
+	}
+	for i, seen := range fixture.seen {
+		if seen != request {
+			t.Fatalf("launch request %d = %#v, want exact %#v", i, seen, request)
+		}
+	}
+	if state, err := classifyExactGeneration(request); err != nil || state != exactGenerationLive {
+		t.Fatalf("post-launch retry state = %v, %v; want live same G", state, err)
+	}
+	if _, err := os.Lstat(exactCleanupResiduePath(request)); !os.IsNotExist(err) {
+		t.Fatalf("post-launch cleanup residue retained: %v", err)
+	}
+}
+
+func TestExactStartDoesNotDuplicateStableSuccessfulLaunch(t *testing.T) {
+	request := minimalRequest(t)
+	fixture := &postLaunchTransitionFixture{request: request}
+	defer fixture.close()
+	exact := &exactStartController{
+		launcher:   fixture,
+		controller: fixture,
+		policy:     startupPolicy{timeout: 500 * time.Millisecond, interval: time.Millisecond},
+	}
+
+	got, err := exact.startExact(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Binding != request.Binding || !got.BackendRunning || !got.SerialHealthy {
+		t.Fatalf("stable post-launch snapshot = %#v", got)
+	}
+	if fixture.launches != 1 || fixture.snapshots != 1 {
+		t.Fatalf("stable launch/snapshot calls = %d/%d, want 1/1", fixture.launches, fixture.snapshots)
+	}
+}
+
+func TestExactStartFailsClosedAfterSuccessfulLaunchBecomesInvalid(t *testing.T) {
+	for _, test := range []struct {
+		name, want string
+	}{
+		{name: "malformed", want: "generation request is missing, malformed or foreign"},
+		{name: "coexisting", want: "canonical generation and exact cleanup residue coexist"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := minimalRequest(t)
+			fixture := &postLaunchTransitionFixture{request: request, invalidFirst: test.name}
+			defer fixture.close()
+			exact := &exactStartController{
+				launcher:   fixture,
+				controller: fixture,
+				policy:     startupPolicy{timeout: 200 * time.Millisecond, interval: time.Millisecond},
+			}
+
+			_, err := exact.startExact(context.Background(), request)
+			if err == nil || !strings.Contains(err.Error(), test.want) || errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("post-launch %s transition = %v, want immediate fail-closed classification", test.name, err)
+			}
+			if fixture.launches != 1 || fixture.snapshots != 0 {
+				t.Fatalf("post-launch invalid launch/snapshot calls = %d/%d, want 1/0", fixture.launches, fixture.snapshots)
+			}
+		})
 	}
 }
 

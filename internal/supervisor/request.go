@@ -40,6 +40,8 @@ type Controller interface {
 	Snapshot(context.Context, Binding) (Snapshot, error)
 	Stop(context.Context, Binding) error
 }
+
+// Launcher returns nil only after observing the exact supervisor started.
 type Launcher interface {
 	Launch(context.Context, LaunchRequest) error
 }
