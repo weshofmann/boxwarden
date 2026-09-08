@@ -13,6 +13,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/backend/tart"
 	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/execx"
+	"github.com/weshofmann/boxwarden/internal/guestproto"
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/serialx"
 	"github.com/weshofmann/boxwarden/internal/session"
@@ -22,8 +23,14 @@ import (
 
 type serialRuntime interface {
 	TartSlave() string
+	Bootstrap(context.Context, guestproto.SerialRequest) (guestproto.SerialResult, error)
 	Err() error
 	Close() error
+}
+
+type pinStore interface {
+	Admit(context.Context, sshx.Binding, sshx.ObservedHostKey) (sshx.HostKeyPin, error)
+	Load(context.Context, sshx.Binding) (sshx.HostKeyPin, error)
 }
 
 type dependencies struct {
@@ -32,6 +39,8 @@ type dependencies struct {
 	observer       func(string, string) backend.Observer
 	launcher       func(tart.LaunchConfig) backend.Starter
 	serial         func(context.Context, string) (serialRuntime, error)
+	pin            func(sshx.Domain) pinStore
+	newNonce       func() (string, error)
 	pollInterval   time.Duration
 	startupTimeout time.Duration
 }
@@ -39,16 +48,25 @@ type dependencies struct {
 // Owner is a single-use runtime owner. Only the exact returned backend handle
 // and the serialx runtime confer lifetime authority; neither is reconstructed.
 type Owner struct {
-	deps               dependencies
-	mu                 sync.Mutex
-	observationMu      sync.Mutex
-	attempted, active  bool
-	binding            supervisor.Binding
-	observer           backend.Observer
-	handle             backend.Handle
-	serial             serialRuntime
-	stopOnce, waitOnce sync.Once
-	stopErr, waitErr   error
+	deps                dependencies
+	mu                  sync.Mutex
+	observationMu       sync.Mutex
+	bootstrapMu         sync.Mutex
+	attempted, active   bool
+	binding             supervisor.Binding
+	sshBinding          sshx.Binding
+	ca                  sshx.CAIdentity
+	observer            backend.Observer
+	handle              backend.Handle
+	serial              serialRuntime
+	pins                pinStore
+	bootstrapRequest    guestproto.SerialRequest
+	bootstrapResult     guestproto.SerialResult
+	bootstrapResolved   bool
+	expectedPin         sshx.HostKeyPin
+	bootstrapDiagnostic string
+	stopOnce, waitOnce  sync.Once
+	stopErr, waitErr    error
 }
 
 // NewOwner constructs the production detached-child composition. LaunchRequest
@@ -62,6 +80,8 @@ func NewOwner() *Owner {
 		},
 		launcher:     func(c tart.LaunchConfig) backend.Starter { return tart.NewLauncher(c) },
 		serial:       func(ctx context.Context, dir string) (serialRuntime, error) { return serialx.CreateRuntime(ctx, dir) },
+		pin:          func(domain sshx.Domain) pinStore { return sshx.NewPinStore(domain) },
+		newNonce:     sshx.RandomUUID,
 		pollInterval: 100 * time.Millisecond, startupTimeout: 30 * time.Second,
 	}}
 }
@@ -77,7 +97,7 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) err
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if o.deps.host == nil || o.deps.ca == nil || o.deps.observer == nil || o.deps.launcher == nil || o.deps.serial == nil || o.deps.pollInterval <= 0 || o.deps.startupTimeout <= 0 {
+	if o.deps.host == nil || o.deps.ca == nil || o.deps.observer == nil || o.deps.launcher == nil || o.deps.serial == nil || o.deps.pin == nil || o.deps.newNonce == nil || o.deps.pollInterval <= 0 || o.deps.startupTimeout <= 0 {
 		return fmt.Errorf("runtime owner dependencies are required")
 	}
 	if !filepath.IsAbs(request.HostConfigPath) || filepath.Clean(request.HostConfigPath) != request.HostConfigPath {
@@ -115,8 +135,14 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) err
 	for _, d := range loaded.Domains() {
 		domains = append(domains, sshx.Domain{ID: d.ID, StateRoot: d.StateRoot})
 	}
-	if _, err := o.deps.ca.Check(ctx, sshx.Domain{ID: selected.ID, StateRoot: selected.StateRoot}, domains); err != nil {
+	selectedDomain := sshx.Domain{ID: selected.ID, StateRoot: selected.StateRoot}
+	ca, err := o.deps.ca.Check(ctx, selectedDomain, domains)
+	if err != nil {
 		return fmt.Errorf("admit configured domain CAs: %w", err)
+	}
+	pins := o.deps.pin(selectedDomain)
+	if pins == nil {
+		return fmt.Errorf("host-key pin store is required")
 	}
 	observer := o.deps.observer(admission.Host.TartExecutable, admission.Host.TartHome)
 	if observer == nil {
@@ -155,8 +181,9 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) err
 		}
 		return errors.Join(err, serial.Close())
 	}
+	sshBinding := sshx.Binding{Domain: record.Domain, SessionID: record.ID, BackendKind: record.Backend.Kind, BackendObject: record.Backend.ObjectID}
 	o.mu.Lock()
-	o.binding, o.observer, o.handle, o.serial = binding, observer, handle, serial
+	o.binding, o.sshBinding, o.ca, o.observer, o.handle, o.serial, o.pins = binding, sshBinding, ca, observer, handle, serial, pins
 	o.mu.Unlock()
 	if err == nil {
 		err = o.awaitRunning(ctx)
@@ -168,6 +195,66 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) err
 	o.active = true
 	o.mu.Unlock()
 	return nil
+}
+
+// Bootstrap performs the one fixed guest exchange and exact pin admission for
+// this retained runtime. Once serialx has validated a result, a retry reuses it
+// only to repeat absent-or-exact pin admission; it never emits another command.
+func (o *Owner) Bootstrap(ctx context.Context) error {
+	o.bootstrapMu.Lock()
+	defer o.bootstrapMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	o.mu.Lock()
+	active, binding, sshBinding, ca, serial, pins := o.active, o.binding, o.sshBinding, o.ca, o.serial, o.pins
+	resolved, request, result := o.bootstrapResolved, o.bootstrapRequest, o.bootstrapResult
+	o.mu.Unlock()
+	if !active || serial == nil || pins == nil {
+		return fmt.Errorf("exact runtime is not available for bootstrap")
+	}
+	if !resolved {
+		nonce, err := o.deps.newNonce()
+		if err != nil {
+			return fmt.Errorf("generate bootstrap nonce: %w", err)
+		}
+		request = guestproto.SerialRequest{
+			Version: guestproto.Version, Nonce: nonce, StartGeneration: binding.Generation,
+			Association: guestproto.Association{Domain: binding.Domain, SessionID: binding.SessionID, BackendKind: binding.BackendKind, BackendObject: binding.BackendObject},
+			CAPublicKey: ca.PublicKey, CAFingerprint: ca.Fingerprint, Principal: sshBinding.Principal(),
+		}
+		if err := request.Validate(); err != nil {
+			return fmt.Errorf("construct exact serial bootstrap request: %w", err)
+		}
+		result, err = serial.Bootstrap(ctx, request)
+		if err != nil {
+			o.setBootstrapDiagnostic("serial bootstrap failed")
+			return fmt.Errorf("perform exact serial bootstrap: %w", err)
+		}
+		if _, _, err := guestproto.EncodeSerialFrame(request, result); err != nil {
+			o.setBootstrapDiagnostic("serial bootstrap result failed validation")
+			return fmt.Errorf("validate exact serial bootstrap result: %w", err)
+		}
+		o.mu.Lock()
+		o.bootstrapRequest, o.bootstrapResult, o.bootstrapResolved = request, result, true
+		o.mu.Unlock()
+	}
+	pin, err := pins.Admit(ctx, sshBinding, sshx.ObservedHostKey{Algorithm: "ssh-ed25519", PublicKey: result.HostPublicKey})
+	if err != nil {
+		o.setBootstrapDiagnostic("host-key pin admission failed")
+		return fmt.Errorf("admit exact serial-observed host-key pin: %w", err)
+	}
+	o.mu.Lock()
+	o.expectedPin = pin
+	o.bootstrapDiagnostic = ""
+	o.mu.Unlock()
+	return nil
+}
+
+func (o *Owner) setBootstrapDiagnostic(value string) {
+	o.mu.Lock()
+	o.bootstrapDiagnostic = value
+	o.mu.Unlock()
 }
 
 func observeExact(ctx context.Context, observer backend.Observer, object string) (backend.Observation, error) {
@@ -235,7 +322,7 @@ func (o *Owner) Snapshot(ctx context.Context) supervisor.Snapshot {
 	defer o.observationMu.Unlock()
 	o.mu.Lock()
 	snapshot := supervisor.Snapshot{Binding: o.binding, ObservedAt: time.Now()}
-	active, observer, serial := o.active, o.observer, o.serial
+	active, observer, serial, pins, binding, expectedPin, diagnostic := o.active, o.observer, o.serial, o.pins, o.sshBinding, o.expectedPin, o.bootstrapDiagnostic
 	o.mu.Unlock()
 	if !active {
 		return snapshot
@@ -246,8 +333,17 @@ func (o *Owner) Snapshot(ctx context.Context) supervisor.Snapshot {
 	snapshot.ObservedAt = time.Now()
 	snapshot.BackendRunning = o.active && err == nil && observation.State == backend.ObjectRunning
 	snapshot.SerialHealthy = o.active && serial.Err() == nil
+	if snapshot.BackendRunning && snapshot.SerialHealthy && expectedPin.Version != 0 {
+		pin, pinErr := pins.Load(ctx, binding)
+		snapshot.PinPresent = pinErr == nil && pin == expectedPin
+		if !snapshot.PinPresent {
+			diagnostic = "exact host-key pin verification failed"
+		}
+	}
 	if err != nil {
 		snapshot.Diagnostic = "exact backend observation failed"
+	} else {
+		snapshot.Diagnostic = diagnostic
 	}
 	return snapshot
 }

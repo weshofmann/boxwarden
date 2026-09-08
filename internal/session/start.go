@@ -126,7 +126,28 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 			if snapshotErr != nil {
 				return Record{}, fmt.Errorf("inspect exact starting generation: %w", snapshotErr)
 			}
-			return s.acceptStarted(record, snapshot)
+			now := s.start.Now()
+			if snapshot.Binding != startBinding(record) || !snapshot.BackendRunning || snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || now.Sub(snapshot.ObservedAt) > maxReadySnapshotAge {
+				return Record{}, fmt.Errorf("supervisor did not provide a fresh exact running snapshot")
+			}
+			if snapshot.SerialHealthy && snapshot.PinPresent {
+				return record, nil
+			}
+			if !snapshot.SerialHealthy {
+				if stopErr := s.start.Supervisor.Stop(ctx, startBinding(record)); stopErr != nil {
+					return Record{}, fmt.Errorf("stop poisoned exact serial generation: %w", stopErr)
+				}
+				stopped, stoppedErr := s.observeExact(ctx, record.Backend.ObjectID)
+				if stoppedErr != nil {
+					return Record{}, fmt.Errorf("prove exact backend stopped before same-generation relaunch: %w", stoppedErr)
+				}
+				if !stopped.Exists || stopped.State != backend.ObjectStopped {
+					return Record{}, fmt.Errorf("exact backend did not stop before same-generation relaunch")
+				}
+			}
+			// A healthy but incomplete owner reuses its validated exchange or
+			// performs the one bootstrap below. A poisoned owner was explicitly
+			// stopped and relaunches below with the same durable generation.
 		case backend.ObjectStopped:
 			// Relaunch below using only the durable generation.
 		default:
@@ -169,8 +190,8 @@ func startBinding(record Record) supervisor.Binding {
 func (s *Service) acceptStarted(record Record, snapshot supervisor.Snapshot) (Record, error) {
 	want := startBinding(record)
 	now := s.start.Now()
-	if snapshot.Binding != want || !snapshot.BackendRunning || !snapshot.SerialHealthy || snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || now.Sub(snapshot.ObservedAt) > maxReadySnapshotAge {
-		return Record{}, fmt.Errorf("supervisor did not provide a fresh exact started snapshot")
+	if snapshot.Binding != want || !snapshot.BackendRunning || !snapshot.SerialHealthy || !snapshot.PinPresent || snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || now.Sub(snapshot.ObservedAt) > maxReadySnapshotAge {
+		return Record{}, fmt.Errorf("supervisor did not provide a fresh exact bootstrapped snapshot")
 	}
 	return record, nil
 }

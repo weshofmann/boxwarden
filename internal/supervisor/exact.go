@@ -98,14 +98,20 @@ func (c *exactStartController) startExact(ctx context.Context, request LaunchReq
 			if errors.Is(err, errExactGenerationTransition) {
 				continue
 			}
-			return got, err
+			if err != nil {
+				return got, err
+			}
+			return c.bootstrapExact(ctx, request.Binding)
 		}
 		if err := c.launcher.Launch(ctx, request); err == nil {
 			got, err := awaitLiveSnapshot(ctx, request, policy, c.controller.Snapshot)
 			if errors.Is(err, errExactGenerationTransition) {
 				continue
 			}
-			return got, err
+			if err != nil {
+				return got, err
+			}
+			return c.bootstrapExact(ctx, request.Binding)
 		} else if errors.Is(err, errExactGenerationTransition) {
 			continue
 		} else if !errors.Is(err, errGenerationAlreadyOwned) {
@@ -122,6 +128,17 @@ func (c *exactStartController) startExact(ctx context.Context, request LaunchReq
 		case <-timer.C:
 		}
 	}
+}
+
+func (c *exactStartController) bootstrapExact(ctx context.Context, binding Binding) (Snapshot, error) {
+	snapshot, err := c.controller.Bootstrap(ctx, binding)
+	if err != nil {
+		return snapshot, err
+	}
+	if snapshot.Binding != binding || !snapshotBootstrapped(snapshot) {
+		return Snapshot{}, fmt.Errorf("supervisor did not provide an exact bootstrapped snapshot")
+	}
+	return snapshot, nil
 }
 
 // awaitLiveSnapshot watches only an already-owned exact generation. A valid
