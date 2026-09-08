@@ -52,15 +52,20 @@ func TestAbandonedSnapshotObservationDoesNotStarveExactStop(t *testing.T) {
 	waitForControlSocket(t, filepath.Join(directory, "supervisor.sock"))
 
 	client := &supervisor.Client{RuntimeDirectory: directory, MaxSnapshotAge: time.Minute}
-	snapshotDone := make(chan error, 1)
+	type snapshotResult struct {
+		snapshot supervisor.Snapshot
+		err      error
+	}
+	snapshotDone := make(chan snapshotResult, 1)
+	snapshotStartedAt := time.Now()
 	go func() {
-		_, err := client.Snapshot(context.Background(), f.request.Binding)
-		snapshotDone <- err
+		snapshot, err := client.Snapshot(context.Background(), f.request.Binding)
+		snapshotDone <- snapshotResult{snapshot: snapshot, err: err}
 	}()
 	select {
 	case <-observing:
-	case err := <-snapshotDone:
-		t.Fatalf("snapshot RPC ended before reaching the blocking observation: %v", err)
+	case result := <-snapshotDone:
+		t.Fatalf("snapshot RPC ended before reaching the blocking observation: %#v, %v", result.snapshot, result.err)
 	case <-time.After(3 * time.Second):
 		t.Fatal("snapshot never reached the blocking backend observation")
 	}
@@ -83,8 +88,22 @@ func TestAbandonedSnapshotObservationDoesNotStarveExactStop(t *testing.T) {
 		}
 	}
 	select {
-	case err := <-snapshotDone:
-		requirePostWriteReadCompletion(t, err)
+	case result := <-snapshotDone:
+		if result.err != nil {
+			requirePostWriteReadCompletion(t, result.err)
+			break
+		}
+		// The observer and connection share an expiry. If observer
+		// cancellation wins, the server can return its exact fail-closed
+		// snapshot before the connection deadline wins the client read.
+		snapshot := result.snapshot
+		if snapshot.Binding != f.request.Binding ||
+			snapshot.BackendRunning || !snapshot.SerialHealthy || snapshot.PinPresent ||
+			snapshot.CertificateCurrent || snapshot.ProbeOK || snapshot.ZoneMatches ||
+			snapshot.Diagnostic != "exact backend observation failed" ||
+			snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.Before(snapshotStartedAt) || snapshot.ObservedAt.After(time.Now()) {
+			t.Fatalf("active snapshot at expiry = %#v, want fresh exact-bound fail-closed state with healthy serial", snapshot)
+		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("snapshot client did not enforce its RPC budget")
 	}
