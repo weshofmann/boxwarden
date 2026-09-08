@@ -169,7 +169,7 @@ func TestControlReturnsEncodedBoundedUTF8Diagnostics(t *testing.T) {
 				close(served)
 			}()
 			client.SetDeadline(time.Now().Add(time.Second))
-			request, _ := json.Marshal(controlRequest{Version: 1, Action: "stop", Binding: binding, ExpiresAt: time.Now().Add(lifecycleTimeout + controlIOTimeout)})
+			request, _ := json.Marshal(controlRequest{Version: 1, Action: "stop", Binding: binding, ExpiresAt: time.Now().Add(lifecycleTimeout)})
 			if err := writeFrame(client, request); err != nil {
 				t.Fatal(err)
 			}
