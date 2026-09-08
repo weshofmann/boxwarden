@@ -9,11 +9,12 @@ import (
 	"strings"
 )
 
-const (
-	ScreenPath             = "/usr/bin/screen"
-	ScreenExecutableSHA256 = "07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add"
-	ScreenVersionOutput    = "Screen version 4.00.03 (FAU) 23-Oct-06"
-)
+// RuntimeExpectation records one complete healthy Doctor inspection.
+// It contains public toolchain facts; child composition must inspect again.
+type RuntimeExpectation struct {
+	Manifest      Manifest
+	SoftnetBinDir string
+}
 
 type Status string
 
@@ -117,7 +118,35 @@ func NewSystemDoctor() SystemDoctor {
 	return SystemDoctor{inspector: NewOSDoctorInspector()}
 }
 
-func (s SystemDoctor) Doctor(_ context.Context, request Request) Report {
+func (s SystemDoctor) CheckRuntime(ctx context.Context, request Request) (RuntimeExpectation, error) {
+	result := s.inspect(ctx, request)
+	if result.report.Status != Healthy {
+		return RuntimeExpectation{}, fmt.Errorf("host runtime is not healthy")
+	}
+	return result.expectation(), nil
+}
+
+type doctorInspection struct {
+	report   Report
+	manifest Manifest
+}
+
+func (r doctorInspection) expectation() RuntimeExpectation {
+	return RuntimeExpectation{Manifest: r.manifest, SoftnetBinDir: filepath.Dir(QualifiedSoftnetPath)}
+}
+
+func (s SystemDoctor) Doctor(ctx context.Context, request Request) Report {
+	return s.inspect(ctx, request).report
+}
+
+func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspection {
+	if ctx.Err() != nil {
+		return doctorInspection{report: Report{Status: Drifted, Findings: []Finding{{
+			Code: "inspection.canceled", Category: Drifted,
+			Observed: "host inspection canceled", Expected: "complete host inspection",
+			Remedy: "retry the read-only host inspection",
+		}}}}
+	}
 	inspector := s.inspector
 	if inspector == nil {
 		inspector = NewOSDoctorInspector()
@@ -228,13 +257,6 @@ func (s SystemDoctor) Doctor(_ context.Context, request Request) Report {
 	for _, tool := range []struct{ code, path string }{{"ssh", "/usr/bin/ssh"}, {"ssh-keygen", "/usr/bin/ssh-keygen"}} {
 		checkTool(inspector, &report, tool.code, tool.path, "", 0o755, 0, 0)
 	}
-	screenFact, screenInspectable := checkTool(inspector, &report, "screen", ScreenPath, ScreenExecutableSHA256, 0o755, 0, 0)
-	screenOK := screenInspectable && exactToolFact(screenFact, ScreenExecutableSHA256, 0o755, 0, 0)
-	if screenOK {
-		if output, err := inspector.CommandOutput(ScreenPath, "--version"); err != nil || strings.TrimSpace(output) != ScreenVersionOutput {
-			add("screen.version", Drifted, "version did not match", ScreenVersionOutput, "use the exact qualified system Screen")
-		}
-	}
 	homebrew, err := inspector.HomebrewSoftnet()
 	if err != nil {
 		add("homebrew.scan", Drifted, "scan unavailable", "complete read-only mutable Homebrew scan", "inspect mutable Homebrew privilege state manually")
@@ -246,8 +268,11 @@ func (s SystemDoctor) Doctor(_ context.Context, request Request) Report {
 			}
 		}
 	}
+	if ctx.Err() != nil {
+		add("inspection.canceled", Drifted, "host inspection canceled", "complete host inspection", "retry the read-only host inspection")
+	}
 	report.Normalize()
-	return report
+	return doctorInspection{report: report, manifest: manifest}
 }
 
 func checkTool(inspector DoctorInspector, report *Report, code, path, digest string, mode uint32, uid, gid int) (PathFact, bool) {

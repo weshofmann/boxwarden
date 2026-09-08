@@ -40,7 +40,9 @@ bootstrap target locations, but no domain CA public anchor, domain identity, or
 fixed domain principal. The same exact generic golden may be independently
 admitted and selected by multiple domains.
 
-After cloning, V4 starts the VM with ADR 017's retained trusted serial channel.
+After cloning, the pending MVP composition starts the VM with ADR 017's
+amended single private serial bootstrap-and-drain PTY. The retained operator
+recovery console is superseded for MVP; the trust rules below are unchanged.
 Automation performs fresh-nonce, bounded, deadline-controlled command/output
 exchanges associated with exact durable domain, session UUID, and backend
 kind/object plus the current start generation. Through that channel

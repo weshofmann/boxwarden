@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestOnlyCommandCompositionImportsTheTartAdapter(t *testing.T) {
+func TestOnlyApprovedCompositionPackagesImportTheTartAdapter(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -31,8 +31,11 @@ func TestOnlyCommandCompositionImportsTheTartAdapter(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if relative != filepath.Join("cmd", "boxwarden", "main.go") {
-				t.Errorf("%s imports the Tart adapter directly; only command composition may do so", relative)
+			// Slice B adds a focused detached-child composition package. The
+			// common control plane and supervisor remain backend-neutral.
+			packageDirectory := filepath.Dir(relative)
+			if packageDirectory != filepath.Join("cmd", "boxwarden") && packageDirectory != filepath.Join("internal", "sessionruntime") {
+				t.Errorf("%s imports the Tart adapter directly; only cmd/boxwarden and internal/sessionruntime composition may do so", relative)
 			}
 		}
 		return nil

@@ -49,13 +49,14 @@ redacts local account and path values.
 A mutable user-writable Homebrew path never inherits authorization. Any
 setuid/setgid/passwordless-root Softnet in mutable Homebrew state is blocking
 drifted/unsafe state: doctor is nonzero and the implemented V3 `init` refuses
-until attended manual inspection/remediation. A future V4 `start` path must
-likewise refuse; that start behavior is not implemented or qualified.
+until attended manual inspection/remediation. The implemented Slice B `start`
+path likewise refuses before runtime mutation; that refusal has deterministic,
+not attended, evidence.
 Boxwarden never chmods or repairs it. Init also refuses any source file with a
 setuid/setgid bit; only the exact root-owned digest-specific installed copy may
 be `04550`.
 
-Future V4 normal start must use the absolute qualified Tart executable and a closed
+Slice B normal start uses the absolute qualified Tart executable and a closed
 environment whose PATH is exactly the installed digest-specific Softnet
 directory. Other variables are explicitly constructed from validated state:
 the manifested operator user/home, canonical configured `TART_HOME`, private
@@ -72,10 +73,10 @@ and the exact paired-toolchain identity. The manifest binds the single trusted
 operator UID/name/home and exact dedicated group ID/name/membership. Directory
 service membership and effective supplementary membership of the current
 process are distinct checks; init reports a required login-session refresh and
-doctor fails until membership is effective. A future V4 start path must also
-fail until membership is effective. It is diagnostic and never changes
+doctor fails until membership is effective. Slice B start also fails until
+membership is effective. It is diagnostic and never changes
 privilege. Upgrades install adjacent version-and-digest roots, never overwrite a
-qualified tree, and never switch a `current` symlink. Future V4 exact uninstall
+qualified tree, and never switch a `current` symlink. A future exact uninstall
 must name one manifested digest root and refuse while any recorded or live
 supervisor uses it. Replacing either tool requires deliberate requalification and explicit
 re-initialization. Installation, upgrade, uninstall, and real-host qualification
@@ -83,14 +84,13 @@ remain user-attended operations. Neither host-global command requires or
 searches for a security domain; adding another domain does not repeat the
 privileged installation.
 
-**Normative future V4 design — not current operational behavior.** V4 will
-bind `/usr/bin/screen` 4.00.03 (FAU, 23-Oct-06), executable
-SHA-256 `07b706b76c0e7374eb524f9e2e738437f208b4b123d7d9b7b2666019c8881add`,
-root:wheel mode `0755`, one link, on qualified macOS 26.6.2 build 25G83. The
-future V4 doctor/runtime path must verify that exact identity. Its PTY/broker
-behavior and the direct `04550` Softnet execution—including
+MVP host admission has no Screen dependency. ADR 017 supersedes the retained
+console with one supervisor-owned serial PTY for bootstrap and draining.
+Historical Task 0 Screen/socat identities describe only that old harness.
+The new serial implementation and the direct `04550` Softnet execution—including
 argument/environment/dependency use, privilege drop, signals, file writes, and
-absence of sudo—remain Pending attended gates.
+absence of sudo—still need their own controlled evidence and attended
+qualification. Slice A's deterministic tests are not host qualification.
 
 The workstation uses first-party official distributions for ChatGPT Desktop, Claude Desktop/Code, Antigravity, Grok Build, Codex, Chrome, Docker, and language toolchains. Prefer official native ARM64 packages/binaries over npm wrappers when functionality is equivalent.
 

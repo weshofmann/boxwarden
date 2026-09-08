@@ -150,6 +150,20 @@ if [[ -f "${user_data}" ]]; then
     fail "autoinstall does not point SSH CA trust at the future active bootstrap tree"
   grep -Fq 'AuthorizedPrincipalsFile /etc/ssh/boxwarden/active/authorized_principals/%u' "${user_data}" || \
     fail "autoinstall does not point SSH principals at the future active bootstrap tree"
+  grep -Fq 'PermitUserRC no' "${user_data}" || \
+    fail "autoinstall does not prohibit user rc execution for management SSH"
+  grep -Fq '/usr/local/libexec/boxwarden-guest-bootstrap' "${user_data}" || \
+    fail "autoinstall does not install the fixed guest bootstrap helper"
+  grep -Fq '/cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap' "${user_data}" || \
+    fail "autoinstall does not verify the explicitly remastered helper input"
+  locked_helper="${repo_root}/guest/ubuntu-24.04-arm64/artifacts/boxwarden-guest-bootstrap"
+  lock_file="${repo_root}/guest/ubuntu-24.04-arm64/artifacts.lock.json"
+  helper_digest="$(shasum -a 256 "${locked_helper}" | awk '{print $1}')"
+  lock_digest="$(sed -n 's/.*"sha256": "\([0-9a-f]\{64\}\)".*/\1/p' "${lock_file}")"
+  [[ "${helper_digest}" == "${lock_digest}" ]] || \
+    fail "locked guest helper bytes do not match artifacts lock"
+  grep -Fq "'${helper_digest}'" "${user_data}" || \
+    fail "autoinstall checksum does not bind the locked guest helper bytes"
   require_absent '/target/etc/ssh/boxwarden/active' "${user_data}" \
     "autoinstall precreates the active SSH bootstrap tree in the generic golden"
   require_absent '__BOXWARDEN_SSH_CA_PUBLIC_KEY__' "${user_data}" \
@@ -157,11 +171,11 @@ if [[ -f "${user_data}" ]]; then
   require_absent "'boxwarden-task0' > /target/etc/ssh" "${user_data}" \
     "autoinstall retains a fixed management SSH principal"
   grep -Fq 'serial-getty@hvc0.service.d/10-boxwarden-autologin.conf' "${user_data}" || \
-    fail "autoinstall does not configure the qualified Tart hvc0 recovery console"
+    fail "autoinstall does not configure the Tart hvc0 bootstrap getty"
   grep -Fq -- '--autologin boxwarden' "${user_data}" || \
-    fail "autoinstall serial recovery console does not automatically log in the workstation account"
+    fail "autoinstall serial bootstrap getty does not automatically log in the workstation account"
   grep -Fq 'systemctl enable serial-getty@hvc0.service' "${user_data}" || \
-    fail "autoinstall does not enable the serial recovery getty"
+    fail "autoinstall does not enable the serial bootstrap getty"
   grep -Fq 'idle-delay=uint32 0' "${user_data}" || \
     fail "autoinstall does not disable GNOME idle blanking"
   grep -Fq 'idle-activation-enabled=false' "${user_data}" || \
@@ -197,6 +211,35 @@ fi
 if [[ -f "${repo_root}/scripts/spike/bootstrap-tart.sh" ]]; then
   bash -n "${repo_root}/scripts/spike/bootstrap-tart.sh" || fail "bootstrap-tart.sh has invalid shell syntax"
   require_executable "${repo_root}/scripts/spike/bootstrap-tart.sh"
+
+  fake_remaster_bin="${test_tmp}/fake-remaster-bin"
+  fake_xorriso_log="${test_tmp}/fake-xorriso.log"
+  fake_source_iso="${test_tmp}/source.iso"
+  fake_user_data="${test_tmp}/user-data"
+  fake_output_iso="${test_tmp}/output.iso"
+  mkdir -p "${fake_remaster_bin}"
+  : >"${fake_source_iso}"
+  : >"${fake_user_data}"
+  cat >"${fake_remaster_bin}/xorriso" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "-osirrox" ]]; then
+  printf 'linux /casper/vmlinuz ---\n' >"${!#}"
+else
+  printf '%s\n' "$@" >"${FAKE_XORRISO_LOG}"
+fi
+EOF
+  chmod +x "${fake_remaster_bin}/xorriso"
+  if PATH="${fake_remaster_bin}:${PATH}" FAKE_XORRISO_LOG="${fake_xorriso_log}" TART_HOME="${test_tmp}" BW_SPIKE_MIN_FREE_GIB=0 \
+    "${repo_root}/scripts/spike/bootstrap-tart.sh" remaster-iso "${fake_source_iso}" "${fake_user_data}" "${fake_output_iso}"; then
+    grep -Fx -- "-map" "${fake_xorriso_log}" >/dev/null || fail "remaster did not map ISO inputs"
+    grep -Fx -- "${repo_root}/guest/ubuntu-24.04-arm64/artifacts/boxwarden-guest-bootstrap" "${fake_xorriso_log}" >/dev/null || \
+      fail "remaster did not install the locked current-tree helper"
+    grep -Fx -- "/boxwarden-artifacts/boxwarden-guest-bootstrap" "${fake_xorriso_log}" >/dev/null || \
+      fail "remaster mapped the helper to the wrong ISO path"
+  else
+    fail "remaster rejected the locked current-tree helper"
+  fi
 
   zoneinfo_root="${test_tmp}/zoneinfo"
   localtime_path="${test_tmp}/localtime"
@@ -259,6 +302,9 @@ if [[ -f "${repo_root}/scripts/spike/bootstrap-tart.sh" ]]; then
     "candidate launch uses physical host bridging instead of shared NAT"
   require_absent '--net-host' "${repo_root}/scripts/spike/bootstrap-tart.sh" \
     "candidate launch uses host networking instead of shared NAT"
+  # Historical Task 0 console/host-tree harness checks, not MVP dependencies.
+  # Opt in separately to reproduce the superseded socat/Screen topology.
+  if [[ "${BW_RUN_HISTORICAL_SERIAL_TESTS:-0}" == 1 ]]; then
   require_absent '    --serial \' "${repo_root}/scripts/spike/bootstrap-tart.sh" \
     "candidate launch still relies on Tart's unreadable one-shot host PTY"
   grep -Fq 'require_command socat' "${repo_root}/scripts/spike/bootstrap-tart.sh" || \
@@ -430,6 +476,8 @@ EOF
     fail "socat is required for the Task 0 managed serial-relay test"
   fi
 
+  fi
+
   cat >"${test_tmp}/grub.cfg" <<'EOF'
 menuentry "Try or Install Ubuntu" {
 	linux	/casper/vmlinuz  --- quiet splash console=tty0
@@ -451,7 +499,7 @@ if [[ -f "${repo_root}/scripts/spike/finalize-clone.sh" ]]; then
   require_executable "${repo_root}/scripts/spike/finalize-clone.sh"
   require_absent 'systemctl mask "serial-getty@${serial_device}.service"' \
     "${repo_root}/scripts/spike/finalize-clone.sh" \
-    "clone finalization disables the approved host-local recovery shell"
+    "clone finalization disables the host-local bootstrap getty"
 fi
 
 if [[ -f "${evidence_file}" ]]; then

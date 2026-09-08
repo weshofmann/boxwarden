@@ -37,42 +37,30 @@ guest by the qualified VM/backend boundary. Quarantine and narrow credential
 scope limit what a compromised root guest receives; they do not make that guest
 less privileged.
 
-**Normative future V4 design — not current operational behavior.** M1A will
-start Tart with serial hardware through a host-owned persistent two-PTY relay
-and record its detached GNU Screen session as trusted runtime state. The
-runtime directory is private, the exact PTY devices are mode `0600`, Screen
-keeps the operator slave open and drains output while no human is attached, and
-Tart exit removes Screen, relay metadata, and endpoint links. Guest `hvc0`
-automatically logs in the UID-1000 workstation account, which can use
-passwordless sudo. This intentionally creates a general recovery channel for a
-trusted host operator and supersedes ADR 012's earlier bounded-fingerprint-only
-serial restriction. The channel does not weaken guest-to-host isolation: it is
-created and held by host-side control processes and is not reachable through
-guest networking. Attaching to the Screen session is equivalent to access to
-Tart's graphical console and must never be published or passed into another
-guest.
+**Accepted MVP design; Slice B drain composition is live, while bootstrap
+remains pending.** ADR 017 now uses one private supervisor-owned serial PTY for
+bootstrap followed by continuous bounded draining. `serialx` creates a new
+mode-`0700` serial subtree and a mode-`0600` slave; Tart receives only that
+endpoint. Guest `hvc0` automatically logs in
+the workstation account for the fixed helper. The earlier Screen-held recovery
+console and two-PTY topology are superseded for MVP; no operator console is
+provided. The PTY is never published over a network or passed into another guest.
 
-The same ADR 017 channel is the specified initial management-trust bootstrap
-path. V4 is designed to use a supervisor-owned two-PTY broker rather than
-opaque socat forwarding and therefore requires ADR 017 implementation and
-requalification. Tart will open only its slave; exact system Screen will be a
-direct waitable child and sole reader of the operator slave; the bounded broker
-will own both masters, all forwarding, and the serialized
-`idle`/`console`/`automation`/`failed` state. Operator input will reach Tart
-only in `console`; every other mode, including `idle` and `automation`, will
-discard and count it without buffering or replay. Automation will never open
-the operator PTY or use Screen log/hardcopy/input-control facilities. A fresh
-nonce and start generation frame will bound each exchange, but guest `active`
-state will contain only durable domain/session/backend identity, CA fingerprint,
-and derived principal. Later generations will verify that same durable binding
-and the current host key. Missing, duplicate, interleaved, oversized,
-overflowed, or mismatched frames will poison the generation. The CA private key
-will never enter the guest. Network reachability and `tart ip` are not identity
-evidence; TOFU and `StrictHostKeyChecking=no` remain prohibited.
+A single master read pump owns bootstrap exclusively and then permanently
+drains output. It sends the fixed helper command and one canonical bounded
+request line; the serial decoder does not wait for EOF. Fresh nonce, generation,
+domain/session/backend, public CA fingerprint, and derived principal correlate
+one exact bounded response. Missing, duplicate, interleaved, oversized, or
+mismatched framing fails bootstrap. Guest active state contains only durable
+binding and public trust, never nonce/generation or CA private material.
+Later generations verify that durable binding and the current host key.
+Network reachability and `tart ip` are not identity evidence; TOFU and
+`StrictHostKeyChecking=no` remain prohibited.
 
 The generic golden contains only root:root mode-`0755`
-`/etc/ssh/boxwarden`; its `active` child is absent. Future V4 serial bootstrap
-will construct a private root-only sibling and, only after complete verification, publish
+`/etc/ssh/boxwarden`; its `active` child is absent. The implemented guest helper
+constructs a private root-only sibling and, after complete verification,
+atomically publishes an absent-or-exact tree with
 root:root mode-`0755` `active` and `authorized_principals`, root:root mode-`0644`
 public CA and `authorized_principals/boxwarden` files, and a root:root
 mode-`0600` binding manifest with no group/other-writable ancestry. The final
@@ -84,7 +72,9 @@ authentication. Because
 the CA path itself does not receive the principals path's StrictModes walk, the
 helper will independently reject symlinks, non-regular files, wrong ownership,
 writable ancestry, and byte/mode mismatches for the entire tree. The first
-strict certificate SSH probe will be the end-to-end proof.
+strict certificate SSH probe will be the end-to-end proof. An exact existing
+active tree is idempotent success; any conflicting bytes, type, owner, or mode
+fail closed. Publication never silently replaces existing active trust.
 
 Anything admitted from a disposable session into trusted persistent configuration is a persistence attempt until reviewed. M1A accepts only declarative adapter outputs whose exact bytes, normalized manifest, confidentiality, execution trust, paths, limits, and semantic diff have been validated authoritatively by trusted-host code. Guest checks may fail early for usability but are never security controls. Human review renders guest-controlled bytes without terminal control: C0/C1 and ANSI/OSC sequences are escaped, bidi and zero-width/format controls are visibly marked, truncation and byte counts are explicit, and the exact relevant digests are adjacent to the reviewed material. Untrusted candidate content is never passed to a rich Markdown renderer. Restore occurs in a fresh staging directory and is applied only after validation; arbitrary archives and opaque state are rejected.
 
@@ -105,19 +95,21 @@ revoked, while private knowledge and proprietary content cannot be rotated.
 
 Tart provides the macOS VM boundary. Task 0 used Tart's display/input console
 and the exact Tart + Softnet shared/NAT launch policy to qualify the stated
-network properties for that pair. **The following start/lifecycle text is
-normative future V4 design, not current operational behavior.** M1A will omit
-an explicit Softnet host block because the vmnet gateway supplies DNS that must
+network properties for that pair. Slice B now implements the fixed exact launch
+mapping, and its bounded controlled-host check observed that path without
+formally requalifying the network or Softnet runtime. M1A omits an explicit
+Softnet host block because the vmnet gateway supplies DNS that must
 follow host, VPN, split-DNS, and DNS64 state, while current Softnet cannot
-distinguish that service from other gateway ports. V4 must preserve the Task 0
-policy constraints; it has not yet requalified the changed execution path.
+distinguish that service from other gateway ports. Later slices must preserve
+the Task 0 policy constraints; the changed execution path is not yet formally
+requalified.
 
-Private/link-local egress is denied by the qualified Task 0 policy. V4 will
-implement only the exact
-default policy and rejects every Softnet allow flag. ADR 015 permits a future
+Private/link-local egress is denied by the qualified Task 0 policy. Slice B
+implements only the exact default policy and rejects every Softnet allow flag.
+ADR 015 permits a future
 operator opt-in to exact private CIDRs, but implementation must first add the
-allowlist to session creation/records/status and define its CLI semantics; V4
-does not infer or accept it. Such future support may not authorize discovery,
+allowlist to session creation/records/status and define its CLI semantics;
+Slice B does not infer or accept it. Such future support may not authorize discovery,
 broad LAN access, bridging, host networking, or weaker session isolation.
 
 Under ADR 024, the tested Softnet 0.19.0 path requires host root privilege, so Softnet is a
@@ -170,11 +162,11 @@ doctor, and corrected attended idempotent init requirements remain mandatory.
 Init refuses a Softnet source with any setuid/setgid bit. Any setuid or
 passwordless-root Softnet under mutable Homebrew state is drifted/unsafe,
 causes doctor to exit nonzero and blocks the implemented V3 init until attended
-manual inspection/remediation. A future V4 start path must also refuse it.
+manual inspection/remediation. The implemented Slice B start path also refuses it.
 Boxwarden never chmods, repairs, or adopts it;
 only the root-owned digest-specific installed copy may be `04550`.
 
-Future V4 normal start must use the absolute qualified Tart 2.32.1 executable digest
+Slice B normal start uses the absolute qualified Tart 2.32.1 executable digest
 `05b65d5c14e8b41e8e44b6d9fd1278de4bedbc8b735d9b99f3c748f76f75862d`
 with PATH exactly the digest-specific Softnet directory, canonical recorded
 `TART_HOME`, generation-private `TMPDIR`, and fixed validated locale/user
@@ -187,8 +179,8 @@ macOS state, and Tart/Softnet pairing. It reports the current Homebrew setuid
 copy as blocking unsafe state rather than trusting or modifying it. Directory
 service membership and the current process's supplementary group are checked
 separately; init reports the required login-session refresh and doctor fails
-until the group is effective. A future V4 start path must fail until the group
-is effective. Upgrades
+until the group is effective. Slice B start fails until the group is effective.
+Upgrades
 install adjacent digest-specific trees and never overwrite a qualified artifact
 or retarget a `current` symlink; exact uninstall refuses active consumers.
 Real-host install and qualification remain user-attended gates.
@@ -203,12 +195,23 @@ Softnet constrains guest egress but permits incoming guest traffic; its default 
 
 Acceptance tests assert the security properties above and separately test the Tart argument mapping. A test that only searches for Tart flags is not sufficient evidence of the policy.
 
-An observed running VM will not by itself be a ready Boxwarden session. The
-future V4 supervisor design requires a persistent same-user supervisor to hold
-the generation lock and authenticated owner-only socket, own Tart/broker/Screen
-and generation key/certificate, renew the no-extension certificate after
-revalidating immutable CA metadata, and perform a strict read-only SSH probe.
-V4 will require a fresh bounded health snapshot for status and treat stale,
-expired, authentication-failed, zone-mismatched, missing, or unverifiable
-ownership as non-ready without adoption or mutation. This is normative design;
-no V4 start, READY, stop, or destroy behavior is implemented or qualified.
+An observed running VM is not by itself a ready Boxwarden session. Slices A and
+B implement the minimal supervisor, single serial PTY drain, and exact Tart
+launch with deterministic coverage. The bounded controlled-host check in
+`docs/evidence/slice-b-controlled-exact-start.md` observed that start path but
+does not constitute formal qualification. Bootstrap, SSH, and READY composition
+remain pending.
+
+The trusted host and cooperating host processes rely on ordinary ownership
+locks, private bounded typed control, exact durable binding, and retained live
+process handles with a single wait/reap path. Cryptographic same-UID control
+authentication, ownership manifests, and persisted process reconstruction are
+removed by the approved simplification. Ordinary safe path/type/no-follow checks
+remain. This does not relax any guest-facing validation, trust publication,
+credential, SSH, Tart/Softnet, or host-integration restriction.
+
+Eventual READY requires a fresh exact-generation snapshot proving running
+backend, healthy serial drain, bound pin, current short no-extension certificate,
+strict read-only management probe, and time-zone agreement. Missing or stale
+evidence is non-ready. Status does not renew credentials, repair state, or
+adopt an unowned process.

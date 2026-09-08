@@ -17,7 +17,7 @@ Boxwarden defines a general framework for safe, routinely disposable AI-agent wo
           +-- guest applications and workloads
               +-- native processes, language runtimes, or optional guest-local runtimes
 
-The host interacts with GUI applications through Tart display/input, not X11 forwarding. Ordinary administration uses pinned-host-key, short-lived user-certificate SSH without GUI, agent, tunnel, or TCP forwarding. A normal VM uses a Task-0-qualified Tart + Softnet shared/NAT launch policy with clipboard and audio disabled. That policy preserves public Internet, required host-to-guest SSH, host/VPN-provided DNS, work-VPN and scoped/split-DNS behavior, default private/link-local denial, and concurrent-session isolation in the environments Task 0 actually tested. ADR 020 keeps effectively IPv6-only upstream and destination behavior explicitly unqualified rather than blocking implementation or implying support. M1A deliberately retains Softnet's default vmnet-gateway allowance because the gateway is also required network infrastructure and current Softnet cannot isolate gateway services by port. This is a documented host attack surface, not guest-to-host isolation. The VM receives no filesystem share, extra disk, Rosetta share, VNC server, bridged/host network, exposed Tart port, nested virtualization, host Docker, or host service integration beyond the accepted gateway reachability. V4 implements only this default policy and rejects every allow flag. Future ADR 015 private-CIDR support must first add exact persisted and reported session-record/CLI semantics; broad allow-all, implicit LAN access, and any exception that weakens session isolation remain prohibited.
+The host interacts with GUI applications through Tart display/input, not X11 forwarding. Ordinary administration uses pinned-host-key, short-lived user-certificate SSH without GUI, agent, tunnel, or TCP forwarding. A normal VM uses a Task-0-qualified Tart + Softnet shared/NAT launch policy with clipboard and audio disabled. That policy preserves public Internet, required host-to-guest SSH, host/VPN-provided DNS, work-VPN and scoped/split-DNS behavior, default private/link-local denial, and concurrent-session isolation in the environments Task 0 actually tested. ADR 020 keeps effectively IPv6-only upstream and destination behavior explicitly unqualified rather than blocking implementation or implying support. M1A deliberately retains Softnet's default vmnet-gateway allowance because the gateway is also required network infrastructure and current Softnet cannot isolate gateway services by port. This is a documented host attack surface, not guest-to-host isolation. The VM receives no filesystem share, extra disk, Rosetta share, VNC server, bridged/host network, exposed Tart port, nested virtualization, host Docker, or host service integration beyond the accepted gateway reachability. Slice B's fixed Tart launch implements only this default policy and accepts no allow-flag input. Future ADR 015 private-CIDR support must first add exact persisted and reported session-record/CLI semantics; broad allow-all, implicit LAN access, and any exception that weakens session isolation remain prohibited.
 
 The agent owns its disposable workstation, including unrestricted non-interactive
 root access. The explicit UID-1000 workstation account automatically enters the
@@ -29,8 +29,8 @@ productivity formats can be viewed and verified without per-session downloads or
 an independently curated desktop composition.
 The guest also uses the trusted host's current IANA time zone. The host detects
 and validates the zone; whenever a transition actually boots or resumes a
-guest, the common lifecycle applies it through the bounded guest-management
-path and verifies the effective zone before reporting readiness. V2 create
+guest, Slice D will apply it through the bounded guest-management path and
+verify the effective zone before reporting readiness. V2 create
 leaves a stopped clone and performs no guest convergence. This remains common
 workstation policy rather than a Tart backend operation. It controls local
 wall-clock presentation and daylight-saving rules; guest clock synchronization
@@ -40,22 +40,14 @@ Host-issued management SSH disables password and keyboard-interactive login,
 direct root login, agent forwarding, X11 forwarding, stream-local forwarding,
 TCP forwarding, tunnels, and local commands; successful management login as
 the workstation account may elevate inside the guest without another secret.
-Every M1A VM also starts with Tart's host-local serial hardware attached. Its
-`hvc0` getty automatically logs in the same workstation account, providing a
-recovery shell when guest networking or SSH is broken. Production V4 retains
-ADR 017's two-PTY topology but replaces opaque socat forwarding with a bounded
-supervisor-owned broker, so the implementation must requalify ADR 017. The
-supervisor owns both PTY pairs and masters; Tart opens only the Tart slave.
-Exact `/usr/bin/screen -D -m` (qualified system Screen 4.00.03) is a direct
-waitable child and sole reader of the operator slave. The broker alone reads
-the Tart master, queues output to Screen, and arms a fixed-memory raw frame
-parser only during automation. It forwards operator-master input only in
-console mode; every other mode, including `idle` and `automation`, discards and
-counts it without buffering or replay. Automation never opens
-the operator PTY or uses Screen log, hardcopy, paste, `stuff`, or control paths.
-One serialized broker state machine owns `idle`, `console`, `automation`, and
-`failed`; fixed bounds and deadlines make flood, overflow, Screen/broker loss,
-or ambiguous framing poison the generation with no hot repair.
+MVP serial hardware uses ADR 017's amended single supervisor-owned PTY.
+The guest `hvc0` getty logs in the workstation account so the fixed bootstrap
+helper can run with passwordless sudo. `serialx` exclusively creates the private
+`<generation>/serial/` subtree and one mode-`0600` PTY slave for Tart.
+In Slice B the one master read pump starts immediately in bounded discard/drain
+mode. Slice C will give that same exclusive pump one bounded, correlated
+bootstrap exchange before its permanent drain. Operator-console UX is deferred.
+The earlier two-PTY/Screen Task 0 harness remains historical evidence only.
 
 The host-side `boxwarden` program is a small Go control plane split at one narrow backend seam.
 
@@ -80,33 +72,94 @@ anchor, fixed domain principal, provider/browser/session login, private
 authentication material, repository, profile, secret, or checkpoint state. It
 does contain generic strict-sshd configuration and fixed bootstrap target
 locations. Each domain has exactly one explicitly initialized, host-only SSH
-user CA. On first start, ADR 017's trusted serial channel atomically and
-idempotently installs only a durable binding containing domain, session UUID,
+user CA. Slice C will use ADR 017's trusted serial channel to atomically and
+idempotently install only a durable binding containing domain, session UUID,
 backend kind/object, CA fingerprint, and exact derived principal. Start
-generation and exchange nonce remain host runtime/framing correlation echoed in
-the current response; they are never installed in
-`/etc/ssh/boxwarden/active`. Later generations verify the same durable binding
-and current host key. The channel verifies effective sshd configuration and
-obtains the clone's fresh SSH host key for an exact host-side pin. Only after
-that sequence may Boxwarden issue a short-lived no-extension certificate and
-attempt strict SSH. No TOFU or network bootstrap path exists.
+generation and exchange nonce will remain host runtime/framing correlation
+echoed in the current response; they will never be installed in
+`/etc/ssh/boxwarden/active`. Later generations will verify the same durable
+binding and current host key. The channel will verify effective sshd
+configuration and obtain the clone's fresh SSH host key for an exact host-side
+pin. Only after that Slice D sequence may Boxwarden issue a short-lived
+no-extension certificate and attempt strict SSH. No TOFU or network bootstrap
+path exists.
 
-Backend state and workstation readiness are separate. `tart list` may prove
-that the VM process is running while Boxwarden still reports `starting`,
-`drift`, or non-ready. A long-lived same-user supervisor holds the generation
-lock and authenticated owner-only control socket for its lifetime and keeps
-Tart, broker, and Screen as direct/owned children. It never `exec`-replaces
-itself with Tart or uses the initiating CLI's cancellation. Later CLIs reconnect
-by a nonce challenge/response tied to manifest and process-start evidence. The
-supervisor owns the generation client key/certificate, revalidates CA metadata
-before fixed-threshold renewal, and refreshes a strict read-only SSH probe on a
-fixed cadence. READY requires an authenticated bounded health snapshot within
-the maximum evidence age, healthy broker/Screen state, exact pin, current
-certificate, recent probe, and guest-zone agreement. Status observes backend
-and host zone and challenges the supervisor only; it never mints, applies, or
-repairs. A host-zone mismatch is non-ready until idempotent start on the exactly
-proven generation reconverges it. Unproven running ownership is drift/non-ready
-with no mutation or adoption.
+Backend state and workstation readiness are separate. A running VM can remain
+starting or non-ready. The trusted host and cooperating host processes use a
+lightweight detached supervisor, ordinary generation lock, and private bounded
+typed Unix socket bound to the exact domain/session/backend/generation.
+The control listener serves one bounded request at a time. Each typed request
+carries its client's absolute expiry as a liveness bound, never authority. The
+server validates and caps that expiry by its own action deadline, rejects stale
+queued frames, and passes the effective deadline into snapshot observation so
+abandoned work cannot accumulate ahead of an exact stop.
+The supervisor retains the actual Tart handle in memory with one stop/wait/reap
+path; it never reconstructs process authority from persisted PID/inode data.
+The minimal launch request holds only binding and configuration/record locators.
+Slice B's detached child reloads those authoritative records and rechecks
+current host and complete configured-domain CA admission before runtime
+construction. It retains the exact Tart handle and one `serialx` runtime, proves
+the exact backend running and drain healthy, and leaves the durable record at
+`starting + generation G`.
+
+After actual retained-handle reap, serial close, and exact listener-socket
+removal, outer cleanup first validates the complete canonical generation and
+atomically renames it to the deterministic same-parent `.<G>.cleanup` residue.
+The generation lock moves with that rename and remains locked while cleanup is
+active; its inode is moved to an exact sibling lock marker for the final
+marker-owned empty-directory phase. Cleanup fsyncs the residue immediately after request
+removal and before moving the lock to that marker. Directory fsyncs also durably
+separate publication, marker, empty-directory, and completed phases; recovery
+admits the exact request+marker crash image as well as the ordered stages. A
+same-G retry validates and finishes only the exact residue before
+republishing G. Canonical/residue coexistence, foreign bindings, malformed
+state, an ownerless empty residue, unsafe modes or symlinks, unexpected
+entries, and lock contention all fail closed.
+Cleanup remains nonrecursive and the deterministic names are correlation, not
+generic deletion authority.
+
+Whether a stopped-backend retry initially finds the matching generation live
+or its detached launcher has just reported a started snapshot, it reclassifies
+that exact namespace between bounded snapshot attempts. A valid transition
+from live ownership to cleanup, resumable publication, or absence returns to
+the existing exact admission/launch path with the same request and G;
+classification errors remain terminal. Detached-launch contention uses the
+same live wait, so a finishing concurrent winner cannot hide that transition.
+
+The mode-`0600` control socket and its inode authority remain in the canonical
+exact generation. Realistic macOS state-root hierarchies can exceed Darwin's
+AF_UNIX address capacity, so bind/connect may use a transient owner-private short
+directory with one symlink to the already admitted generation. The alias is
+removed immediately on ordinary success/error paths and is never a persisted
+identity or cleanup authority; listener cleanup revalidates and removes only the
+real canonical socket inode.
+
+Slice B also binds public golden registration, session creation, and status to
+the exact configured absolute Tart executable and `TART_HOME`. Start's parent
+and child observations and the fixed child launch use the same admitted Tart
+namespace; ambient PATH/default Tart state cannot select another object. The
+fixed launch is `run --net-softnet --no-audio --no-clipboard --serial-path
+<owned-endpoint> <exact-object>` under the admitted closed environment.
+
+Slices A and B are deterministically implemented. The bounded Slice B
+controlled-host check observed the exact configured Tart object running under a
+retained detached supervisor after the public CLI exited, continuous serial
+drain health, same-generation live retry, exact cleanup, and same-generation
+relaunch. It is current product evidence, not formal ADR 017 or Softnet-runtime
+qualification; see `docs/evidence/slice-b-controlled-exact-start.md`. Slice C
+bootstrap and trust publication and Slice D host-key pin, client
+key/certificate, management address, strict SSH, time-zone convergence, and
+READY publication remain pending. The A–H plan in
+`docs/superpowers/plans/2026-09-04-boxwarden-mvp-lifecycle.md` defines the
+remaining slices and evidence gates.
+
+The eventual supervisor owns generation SSH credentials, renews short-lived
+no-extension certificates after CA revalidation, and refreshes strict read-only
+SSH probes. READY requires a fresh bounded exact-generation health snapshot,
+running backend, healthy serial drain, exact pin, current certificate, recent
+probe, and host/guest-zone agreement. Status reads backend/host-zone and
+supervisor observations only; it never mints, applies, or repairs. Ambiguous
+ownership remains drift/non-ready with no adoption or mutation.
 
 Host-wide prerequisites and domain-owned trust have separate lifetimes.
 `boxwarden init` runs once per trusted host, outside the security-domain

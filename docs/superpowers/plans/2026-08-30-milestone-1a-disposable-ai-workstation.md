@@ -1,5 +1,11 @@
 # Milestone 1A Disposable AI Workstation Implementation Plan
 
+> **Historical milestone plan.** Task 0 console qualification below describes
+> its original socat/Screen recovery harness. That console design is superseded
+> for MVP by amended ADR 017; current lifecycle execution follows the A–H plan
+> in `2026-09-04-boxwarden-mvp-lifecycle.md`. Earlier platform evidence remains
+> limited to the exact mechanisms and environments originally tested.
+
 > **Status: superseded; retained as planning history only. Do not execute any
 > task below.** The corrected V1-V4 sequence, generic-golden model, serial-first
 > trust bootstrap, default-only V4 network policy, and later roadmap are in

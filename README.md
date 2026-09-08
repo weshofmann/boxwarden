@@ -50,10 +50,20 @@ isolation beyond the Task 0 claims. Pending runtime evidence limits those
 claims but is not automatically a software-merge blocker absent a known unsafe
 defect.
 
-V4 start, supervisor/broker, serial bootstrap, and READY behavior remain
-normative future design and pending qualification; no start, readiness, stop,
-destroy, or operational-readiness claim is made. This plan stops after V4.
-File transfer, provider authentication, and other later work remain deferred.
+MVP Slices A and B establish a minimal detached supervisor, one private serial
+PTY with continuous draining, and the public intent-first path that retains the
+exact configured Tart object while returning `STARTING` / non-ready. The
+host/session contracts no longer require Screen or an operator console. A
+bounded controlled-host check directly observed exact launch, retained ownership
+after the CLI exited, same-generation running retry, and same-generation
+relaunch after exact typed stop/cleanup. This is product evidence, not formal
+ADR 017 or Softnet-runtime qualification. Guest bootstrap, strict SSH/READY,
+public stop, and destroy remain pending. The
+[A–H implementation plan](docs/superpowers/plans/2026-09-04-boxwarden-mvp-lifecycle.md)
+continues controlled product checks at the Slice C bootstrap and Slice D SSH
+boundaries. File transfer, provider authentication, and operator-console UX
+remain deferred. See the
+[Slice B controlled exact-start evidence](docs/evidence/slice-b-controlled-exact-start.md).
 
 ## Model
 
@@ -192,8 +202,8 @@ current tree.
   non-final forensic evidence and exposed harness assumptions that are being
   corrected; the complete fresh-run runtime qualification remains pending;
   no completed runtime qualification result is claimed
-- ADR 017 requalification for the V4 supervisor broker (replaces Task 0 socat
-  harness)
+- ADR 017 requalification for the MVP single serial PTY (supersedes the
+  historical Task 0 socat/Screen harness)
 - V2 real-host register/clone gate (requires artifact from corrected generic
   guest definition)
 

@@ -1,5 +1,11 @@
 # M1A explicit host-directory capability spike
 
+> **Historical evidence scope:** Screen/relay/operator-console and related
+> process observations in this record describe the original attended harness,
+> not the current MVP contract. Amended ADR 017 supersedes that console for MVP
+> with one supervisor-owned bootstrap/drain PTY. These observations do not
+> qualify the new serial implementation or impose a Screen admission requirement.
+
 Date: 2026-09-01
 
 Status: Complete experimental evidence; no production capability or promotion

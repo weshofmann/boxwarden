@@ -2,6 +2,7 @@ package hostx
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,72 @@ func TestNewSystemDoctorConstructsAStandaloneReadOnlyDoctor(t *testing.T) {
 	if report := doctor.Doctor(t.Context(), request); report.Status != Healthy {
 		t.Fatalf("Doctor() status = %q, want healthy", report.Status)
 	}
+}
+
+// MVP admission depends on the qualified VM/SSH toolchain, without a console program.
+func TestRuntimeAdmissionDoesNotRequireOperatorConsole(t *testing.T) {
+	inspector, request := healthyDoctorFixture(t)
+	delete(inspector.paths, "/usr/bin/screen")
+	doctor := SystemDoctor{inspector: inspector}
+	if report := doctor.Doctor(t.Context(), request); report.Status != Healthy {
+		t.Fatalf("Doctor() without operator console = %#v", report)
+	}
+	if _, err := doctor.CheckRuntime(t.Context(), request); err != nil {
+		t.Fatalf("CheckRuntime() without operator console: %v", err)
+	}
+	for _, operation := range inspector.operations {
+		if strings.Contains(operation, "/usr/bin/screen") {
+			t.Fatalf("runtime admission accessed an operator console: %s", operation)
+		}
+	}
+}
+
+func TestRuntimeAdmissionHonorsCancellation(t *testing.T) {
+	inspector, request := healthyDoctorFixture(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	doctor := SystemDoctor{inspector: inspector}
+	if _, err := doctor.CheckRuntime(ctx, request); err == nil {
+		t.Fatal("CheckRuntime() admitted a canceled inspection")
+	}
+	if len(inspector.operations) != 0 {
+		t.Fatalf("canceled admission inspected host state: %v", inspector.operations)
+	}
+}
+
+// A successful final inspector operation must not hide cancellation that
+// arrived while the host facts were being collected.
+func TestHostAdmissionRejectsCancellationDuringInspection(t *testing.T) {
+	for _, entry := range []string{"doctor", "runtime"} {
+		t.Run(entry, func(t *testing.T) {
+			inspector, request := healthyDoctorFixture(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			doctor := SystemDoctor{inspector: cancelDuringInspection{DoctorInspector: inspector, cancel: cancel}}
+			if entry == "doctor" {
+				report := doctor.Doctor(ctx, request)
+				if report.Status == Healthy || !hasFinding(report, "inspection.canceled") {
+					t.Fatalf("Doctor() accepted inspection canceled in flight: %#v", report)
+				}
+			} else if _, err := doctor.CheckRuntime(ctx, request); err == nil {
+				t.Fatal("CheckRuntime() accepted inspection canceled in flight")
+			}
+			if ctx.Err() != context.Canceled {
+				t.Fatal("inspection did not reach the cancellation operation")
+			}
+		})
+	}
+}
+
+type cancelDuringInspection struct {
+	DoctorInspector
+	cancel context.CancelFunc
+}
+
+func (i cancelDuringInspection) HomebrewSoftnet() ([]HomebrewSoftnet, error) {
+	facts, err := i.DoctorInspector.HomebrewSoftnet()
+	i.cancel()
+	return facts, err
 }
 
 func TestDoctorReportsHealthyOnlyWhenEveryHostPrerequisiteMatches(t *testing.T) {
@@ -86,34 +153,22 @@ func TestDoctorReportsUnqualifiedBuildAndUnsupportedManifestSchema(t *testing.T)
 	}
 }
 
-func TestDoctorNeverExecutesConfiguredTartAndGatesScreenVersionOnExactIdentity(t *testing.T) {
+func TestCheckRuntimeRequiresCompleteHealthyDoctorReport(t *testing.T) {
 	inspector, request := healthyDoctorFixture(t)
-	if report := (SystemService{inspector: inspector}).Doctor(t.Context(), request); report.Status != Healthy {
-		t.Fatalf("healthy Doctor() = %#v", report)
+	doctor := SystemDoctor{inspector: inspector}
+	expectation, err := doctor.CheckRuntime(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expectation.Manifest.Version != ManifestVersion || expectation.SoftnetBinDir != filepath.Dir(QualifiedSoftnetPath) {
+		t.Fatalf("CheckRuntime() expectation = %#v, want inspected toolchain facts", expectation)
 	}
 	if containsString(inspector.commands, commandKey(request.TartPath, "--version")) {
 		t.Fatalf("doctor executed configured Tart: %v", inspector.commands)
 	}
-	if !containsString(inspector.commands, commandKey(ScreenPath, "--version")) {
-		t.Fatalf("doctor did not verify safe Screen: %v", inspector.commands)
-	}
-
-	for name, mutate := range map[string]func(*PathFact){
-		"digest": func(fact *PathFact) { fact.SHA256 = strings.Repeat("0", 64) },
-		"owner":  func(fact *PathFact) { fact.UID = 501 },
-		"setuid": func(fact *PathFact) { fact.Mode = 0o4755 },
-		"links":  func(fact *PathFact) { fact.Links = 2 },
-	} {
-		t.Run("screen "+name, func(t *testing.T) {
-			inspector, request := healthyDoctorFixture(t)
-			fact := inspector.paths[ScreenPath]
-			mutate(&fact)
-			inspector.paths[ScreenPath] = fact
-			_ = (SystemService{inspector: inspector}).Doctor(t.Context(), request)
-			if containsString(inspector.commands, commandKey(ScreenPath, "--version")) {
-				t.Fatalf("doctor executed unsafe Screen after %s drift", name)
-			}
-		})
+	inspector.paths[QualifiedSoftnetPath] = PathFact{}
+	if _, err := doctor.CheckRuntime(context.Background(), request); err == nil {
+		t.Fatal("CheckRuntime() admitted a doctor report with a Softnet finding")
 	}
 }
 
@@ -376,6 +431,15 @@ func hasFinding(report Report, code string) bool {
 	return false
 }
 
+func hasFindingPrefix(report Report, prefix string) bool {
+	for _, finding := range report.Findings {
+		if strings.HasPrefix(finding.Code, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func healthyDoctorFixture(t *testing.T) (*doctorInspectorFake, Request) {
 	t.Helper()
 	request := Request{ConfiguredStateRoots: []string{"/Users/wes/state/work"}, TartPath: "/opt/qualified/tart", TartHome: "/Users/wes/tart", SoftnetPath: "/opt/homebrew/Cellar/softnet/0.19.0/bin/softnet"}
@@ -402,7 +466,6 @@ func healthyDoctorFixture(t *testing.T) (*doctorInspectorFake, Request) {
 	paths[request.TartHome] = PathFact{Exists: true, Directory: true, Mode: 0o700, UID: 501, GID: 20, Links: 1}
 	paths["/usr/bin/ssh"] = PathFact{Exists: true, Regular: true, Mode: 0o755, UID: 0, GID: 0, Links: 1}
 	paths["/usr/bin/ssh-keygen"] = PathFact{Exists: true, Regular: true, Mode: 0o755, UID: 0, GID: 0, Links: 1}
-	paths[ScreenPath] = PathFact{Exists: true, Regular: true, Mode: 0o755, UID: 0, GID: 0, Links: 1, SHA256: ScreenExecutableSHA256}
 	return &doctorInspectorFake{
 		platform:        PlatformFact{OS: QualifiedPlatform, Arch: QualifiedArch, Release: QualifiedMacOS, Build: QualifiedMacOSBuild},
 		paths:           paths,
@@ -411,9 +474,9 @@ func healthyDoctorFixture(t *testing.T) (*doctorInspectorFake, Request) {
 		effectiveGroups: []int{group.ID},
 		outputs: map[string]string{
 			commandKey(request.TartPath, "--version"): TartVersion,
-			commandKey(ScreenPath, "--version"):       ScreenVersionOutput,
 		},
-		failures: map[string]error{},
+		failures:        map[string]error{},
+		commandFailures: map[string]error{},
 	}, request
 }
 
@@ -426,12 +489,15 @@ type doctorInspectorFake struct {
 	outputs         map[string]string
 	homebrew        []HomebrewSoftnet
 	failures        map[string]error
+	commandFailures map[string]error
 	commands        []string
+	operations      []string
 	mutations       int
 }
 
 func (f *doctorInspectorFake) Platform() PlatformFact { return f.platform }
 func (f *doctorInspectorFake) InspectPath(path string) (PathFact, error) {
+	f.operations = append(f.operations, "inspect:"+path)
 	if err := f.failures[path]; err != nil {
 		return f.paths[path], err
 	}
@@ -448,8 +514,10 @@ func (f *doctorInspectorFake) EffectiveGroups() ([]int, error) {
 	return append([]int(nil), f.effectiveGroups...), nil
 }
 func (f *doctorInspectorFake) CommandOutput(path string, args ...string) (string, error) {
-	f.commands = append(f.commands, commandKey(path, args...))
-	return f.outputs[commandKey(path, args...)], nil
+	key := commandKey(path, args...)
+	f.commands = append(f.commands, key)
+	f.operations = append(f.operations, "command:"+key)
+	return f.outputs[key], f.commandFailures[key]
 }
 func (f *doctorInspectorFake) HomebrewSoftnet() ([]HomebrewSoftnet, error) {
 	return append([]HomebrewSoftnet(nil), f.homebrew...), nil

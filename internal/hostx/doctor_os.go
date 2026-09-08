@@ -5,11 +5,9 @@ package hostx
 import (
 	"context"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"os/user"
 	pathpkg "path"
 	"path/filepath"
@@ -140,7 +138,7 @@ func (i *osDoctorInspector) CommandOutput(path string, args ...string) (string, 
 	if result.Truncated {
 		return "", fmt.Errorf("bounded command inspection failed")
 	}
-	if err != nil && !knownScreenVersionStatusOne(path, args, result, err) {
+	if err != nil {
 		return "", fmt.Errorf("bounded command inspection failed")
 	}
 	output := result.Stdout
@@ -149,17 +147,6 @@ func (i *osDoctorInspector) CommandOutput(path string, args ...string) (string, 
 	}
 	output = strings.TrimSpace(output)
 	return output, nil
-}
-
-// macOS's system Screen prints its stable version string but exits 1 for this
-// exact probe. This exception is intentionally limited to that qualified
-// binary, argument vector, output, and status; other failed probes stay errors.
-func knownScreenVersionStatusOne(path string, args []string, result execx.Result, err error) bool {
-	if path != ScreenPath || len(args) != 1 || args[0] != "--version" || strings.TrimSpace(result.Stdout) != ScreenVersionOutput || strings.TrimSpace(result.Stderr) != "" {
-		return false
-	}
-	var exitError *exec.ExitError
-	return errors.As(err, &exitError) && exitError.ExitCode() == 1
 }
 
 func (i *osDoctorInspector) HomebrewSoftnet() ([]HomebrewSoftnet, error) {

@@ -1,5 +1,13 @@
 # ADR 024 claim-driven runtime qualification
 
+> **Scope note (MVP simplification):** This is a separate attended qualification
+> instrument/runbook, not production lifecycle policy. Screen/relay identities,
+> process observations, and network challenges below describe the historical
+> or proposed qualification harness only. They do not restore Screen admission,
+> a recovery console, or persisted process authority in MVP. Amended ADR 017 and
+> the MVP A–H plan govern the new one-PTY lifecycle, which needs fresh evidence.
+> No qualification work is authorized or performed by Slice A.
+
 This repository contains a private, unprivileged process observer at
 `internal/qualification/adr024/cmd/observe`. It is one attended qualification
 instrument for ADR 024. It is not installed by `boxwarden init`, exposed by the

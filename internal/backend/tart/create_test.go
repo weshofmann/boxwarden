@@ -3,11 +3,55 @@ package tart
 import (
 	"context"
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/execx"
 )
+
+// A qualified creator must never mutate the ambient/default Tart namespace.
+func TestQualifiedCreatorUsesExactExecutableAndClosedObservationEnvironment(t *testing.T) {
+	runner := &creatorRecordingRunner{result: execx.Result{Stdout: "[]"}}
+	adapter := NewQualifiedObserver(runner, "/qualified/bin/tart", "/private/qualified-tart")
+	if _, err := adapter.Observe(context.Background(), "golden-work"); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.Clone(context.Background(), "golden-work", "exact-session"); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.RandomizeMAC(context.Background(), "exact-session"); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"PATH=/usr/bin:/bin", "TART_HOME=/private/qualified-tart", "LANG=C", "LC_ALL=C"}
+	want := []execx.Command{
+		{Path: "/qualified/bin/tart", Args: []string{"list", "--format", "json"}, Env: env},
+		{Path: "/qualified/bin/tart", Args: []string{"clone", "golden-work", "exact-session"}, Env: env},
+		{Path: "/qualified/bin/tart", Args: []string{"set", "exact-session", "--random-mac"}, Env: env},
+	}
+	if !reflect.DeepEqual(runner.commands, want) {
+		t.Fatalf("commands = %#v, want %#v", runner.commands, want)
+	}
+}
+
+func TestQualifiedCreatorRejectsUnqualifiedPathsBeforeMutation(t *testing.T) {
+	for _, paths := range [][2]string{{"tart", "/private/home"}, {"/qualified/tart", ""}, {"/qualified/tart", "relative"}, {"/qualified/../tart", "/private/home"}, {"/qualified/tart", "/private/../home"}} {
+		t.Run(strings.Join(paths[:], "_"), func(t *testing.T) {
+			runner := &creatorRecordingRunner{}
+			adapter := NewQualifiedObserver(runner, paths[0], paths[1])
+			if err := adapter.Clone(context.Background(), "golden-work", "exact-session"); err == nil {
+				t.Error("Clone accepted unqualified paths")
+			}
+			if err := adapter.RandomizeMAC(context.Background(), "exact-session"); err == nil {
+				t.Error("RandomizeMAC accepted unqualified paths")
+			}
+			if len(runner.commands) != 0 {
+				t.Fatalf("unqualified paths caused mutation: %#v", runner.commands)
+			}
+		})
+	}
+}
 
 func TestCreatorUsesOnlyExactCloneAndRandomMACArgv(t *testing.T) {
 	runner := &creatorRecordingRunner{}
