@@ -33,8 +33,9 @@ trust, credentials, and destructive policy; the Tart adapter owns VM mechanics.
   lock, retains the actual Tart handle in memory, and follows one stop/wait/reap
   path. The private bounded typed Unix socket binds each request and response
   to the exact domain/session/backend/generation. It serves one request at a
-  time and passes the bounded snapshot RPC context into backend observation so
-  abandoned work releases the handler for exact stop.
+  time; client expiry is a validated server-capped liveness bound, not authority.
+  Expired queued snapshots receive no fresh observation window, and a live
+  request's effective absolute expiry reaches backend observation.
 - The minimal persisted request contains only binding, runtime/configuration
   locators, and canonical session-record name. It is an expected binding
   record, not authority. Child composition reloads configured domain and durable

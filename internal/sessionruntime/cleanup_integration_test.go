@@ -30,7 +30,8 @@ func TestAbandonedSnapshotObservationDoesNotStarveExactStop(t *testing.T) {
 	var observations atomic.Int32
 	observing, observationCanceled := make(chan struct{}), make(chan struct{})
 	f.observe = func(ctx context.Context, object string) (backend.Observation, error) {
-		switch observations.Add(1) {
+		call := observations.Add(1)
+		switch call {
 		case 1:
 			return backend.Observation{ObjectID: object, Exists: true, State: backend.ObjectStopped}, nil
 		case 2:
@@ -41,7 +42,8 @@ func TestAbandonedSnapshotObservationDoesNotStarveExactStop(t *testing.T) {
 			close(observationCanceled)
 			return backend.Observation{}, ctx.Err()
 		default:
-			return backend.Observation{}, errors.New("unexpected backend observation")
+			<-ctx.Done()
+			return backend.Observation{}, ctx.Err()
 		}
 	}
 	runDone := make(chan error, 1)
@@ -56,22 +58,34 @@ func TestAbandonedSnapshotObservationDoesNotStarveExactStop(t *testing.T) {
 	}()
 	select {
 	case <-observing:
-	case <-time.After(time.Second):
+	case err := <-snapshotDone:
+		t.Fatalf("snapshot RPC ended before reaching the blocking observation: %v", err)
+	case <-time.After(3 * time.Second):
 		t.Fatal("snapshot never reached the blocking backend observation")
+	}
+	const staleSnapshots = 3
+	staleDone := make(chan error, staleSnapshots)
+	for range staleSnapshots {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			defer cancel()
+			_, err := client.Snapshot(ctx, f.request.Binding)
+			staleDone <- err
+		}()
+	}
+	for range staleSnapshots {
+		select {
+		case err := <-staleDone:
+			requireReadTimeout(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("queued snapshot did not expire behind the active request")
+		}
 	}
 	select {
 	case err := <-snapshotDone:
-		var networkError net.Error
-		if !errors.Is(err, context.DeadlineExceeded) && (!errors.As(err, &networkError) || !networkError.Timeout()) {
-			t.Errorf("abandoned snapshot error = %v, want RPC timeout", err)
-		}
+		requireReadTimeout(t, err)
 	case <-time.After(3 * time.Second):
 		t.Fatal("snapshot client did not enforce its RPC budget")
-	}
-	select {
-	case <-observationCanceled:
-	case <-time.After(250 * time.Millisecond):
-		t.Error("abandoned snapshot work outlived the client RPC")
 	}
 
 	stopCtx, cancelStop := context.WithTimeout(context.Background(), time.Second)
@@ -79,6 +93,11 @@ func TestAbandonedSnapshotObservationDoesNotStarveExactStop(t *testing.T) {
 	cancelStop()
 	if err != nil {
 		t.Errorf("exact stop sat behind abandoned snapshot work: %v", err)
+	}
+	select {
+	case <-observationCanceled:
+	default:
+		t.Error("exact stop returned before the abandoned observation released")
 	}
 	select {
 	case err := <-runDone:
@@ -100,6 +119,14 @@ func TestAbandonedSnapshotObservationDoesNotStarveExactStop(t *testing.T) {
 	}
 	if _, err := os.Lstat(directory); !os.IsNotExist(err) {
 		t.Errorf("exact generation retained after stop/reap: %v", err)
+	}
+}
+
+func requireReadTimeout(t *testing.T, err error) {
+	t.Helper()
+	var networkError *net.OpError
+	if !errors.As(err, &networkError) || networkError.Op != "read" || !networkError.Timeout() {
+		t.Fatalf("snapshot RPC error = %v, want read timeout after a fully written request", err)
 	}
 }
 

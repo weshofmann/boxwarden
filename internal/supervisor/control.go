@@ -15,15 +15,16 @@ import (
 	"unicode/utf8"
 )
 
-// The snapshot observer and client RPC share this budget so the server cannot
-// retain an independent, longer observation after its client times out.
+// controlIOTimeout caps snapshot RPC expiry as well as bounded request/response
+// I/O; the client sends its possibly earlier operation deadline on the wire.
 const controlIOTimeout = 2 * time.Second
 const lifecycleTimeout = 5 * time.Second
 
 type controlRequest struct {
-	Version int     `json:"version"`
-	Action  string  `json:"action"`
-	Binding Binding `json:"binding"`
+	Version   int       `json:"version"`
+	Action    string    `json:"action"`
+	Binding   Binding   `json:"binding"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 type controlResponse struct {
 	Version  int      `json:"version"`
@@ -73,7 +74,9 @@ func serveControl(ctx context.Context, listener *controlListener, binding Bindin
 }
 func handleControl(ctx context.Context, connection net.Conn, binding Binding, owner RuntimeOwner, stop func() error) {
 	defer connection.Close()
-	if err := connection.SetDeadline(time.Now().Add(controlIOTimeout)); err != nil {
+	acceptedAt := time.Now()
+	serverDeadline := acceptedAt.Add(controlIOTimeout)
+	if err := connection.SetDeadline(serverDeadline); err != nil {
 		return
 	}
 	data, err := readBounded(connection)
@@ -87,16 +90,30 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 	if request.Version != 1 || request.Binding != binding || (request.Action != "snapshot" && request.Action != "stop") {
 		return
 	}
+	if request.Action == "stop" {
+		serverDeadline = acceptedAt.Add(lifecycleTimeout + controlIOTimeout)
+	}
+	now := time.Now()
+	if request.ExpiresAt.IsZero() || !request.ExpiresAt.After(now) || request.ExpiresAt.After(serverDeadline) {
+		return
+	}
+	effectiveDeadline := request.ExpiresAt
+	if deadline, ok := ctx.Deadline(); ok && deadline.Before(effectiveDeadline) {
+		effectiveDeadline = deadline
+	}
+	if !effectiveDeadline.After(now) {
+		return
+	}
+	if err := connection.SetDeadline(effectiveDeadline); err != nil {
+		return
+	}
 	response := controlResponse{Version: 1, Binding: binding}
 	if request.Action == "stop" {
-		if err := connection.SetDeadline(time.Now().Add(lifecycleTimeout + controlIOTimeout)); err != nil {
-			return
-		}
 		if err := stop(); err != nil {
 			response.Error = err.Error()
 		}
 	}
-	snapshotCtx, cancelSnapshot := context.WithTimeout(ctx, controlIOTimeout)
+	snapshotCtx, cancelSnapshot := context.WithDeadline(ctx, effectiveDeadline)
 	response.Snapshot = owner.Snapshot(snapshotCtx)
 	cancelSnapshot()
 	response.Snapshot.Binding = binding
@@ -240,13 +257,16 @@ func (c *Client) call(ctx context.Context, binding Binding, action string) (cont
 		return response, err
 	}
 	defer connection.Close()
-	deadline, _ := operationCtx.Deadline()
+	deadline, ok := operationCtx.Deadline()
+	if !ok {
+		return response, fmt.Errorf("control operation has no deadline")
+	}
 	if err := connection.SetDeadline(deadline); err != nil {
 		return response, err
 	}
 	cancelIO := context.AfterFunc(operationCtx, func() { connection.SetDeadline(time.Now()) })
 	defer cancelIO()
-	data, err := json.Marshal(controlRequest{Version: 1, Action: action, Binding: binding})
+	data, err := json.Marshal(controlRequest{Version: 1, Action: action, Binding: binding, ExpiresAt: deadline.UTC()})
 	if err != nil {
 		return response, err
 	}

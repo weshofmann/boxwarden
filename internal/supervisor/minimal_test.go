@@ -169,7 +169,7 @@ func TestControlReturnsEncodedBoundedUTF8Diagnostics(t *testing.T) {
 				close(served)
 			}()
 			client.SetDeadline(time.Now().Add(time.Second))
-			request, _ := json.Marshal(controlRequest{Version: 1, Action: "stop", Binding: binding})
+			request, _ := json.Marshal(controlRequest{Version: 1, Action: "stop", Binding: binding, ExpiresAt: time.Now().Add(lifecycleTimeout + controlIOTimeout)})
 			if err := writeFrame(client, request); err != nil {
 				t.Fatal(err)
 			}
@@ -261,6 +261,100 @@ func TestControlRejectsWrongBindingAndUnknownActionBeforeStop(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestControlRejectsMissingExpiredOrOverlongRequestExpiry(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		expiresAt *time.Time
+	}{
+		{name: "missing"},
+		{name: "expired", expiresAt: timePointer(time.Now().Add(-time.Second))},
+		{name: "overlong", expiresAt: timePointer(time.Now().Add(controlIOTimeout + time.Second))},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			binding := minimalRequest(t).Binding
+			owner := &runtimeFixture{done: make(chan struct{})}
+			server, client := net.Pipe()
+			defer client.Close()
+			served := make(chan struct{})
+			go func() {
+				handleControl(context.Background(), server, binding, owner, func() error { return owner.Stop(context.Background()) })
+				close(served)
+			}()
+			request, err := json.Marshal(struct {
+				Version   int        `json:"version"`
+				Action    string     `json:"action"`
+				Binding   Binding    `json:"binding"`
+				ExpiresAt *time.Time `json:"expires_at,omitempty"`
+			}{Version: 1, Action: "snapshot", Binding: binding, ExpiresAt: test.expiresAt})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := client.SetDeadline(time.Now().Add(time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeFrame(client, request); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := readBounded(client); err == nil {
+				t.Fatal("invalid request expiry received a response")
+			}
+			<-served
+			if owner.snapshots.Load() != 0 || owner.stops.Load() != 0 {
+				t.Fatalf("invalid request expiry reached snapshot/stop: %d/%d", owner.snapshots.Load(), owner.stops.Load())
+			}
+		})
+	}
+}
+
+func timePointer(value time.Time) *time.Time { return &value }
+
+type expiringSnapshotRuntime struct {
+	runtimeFixture
+	observing, canceled chan struct{}
+}
+
+func (o *expiringSnapshotRuntime) Snapshot(ctx context.Context) Snapshot {
+	close(o.observing)
+	<-ctx.Done()
+	close(o.canceled)
+	return Snapshot{Binding: o.binding}
+}
+
+func TestControlSnapshotUsesClientAbsoluteExpiry(t *testing.T) {
+	binding := minimalRequest(t).Binding
+	owner := &expiringSnapshotRuntime{
+		runtimeFixture: runtimeFixture{binding: binding, done: make(chan struct{})},
+		observing:      make(chan struct{}),
+		canceled:       make(chan struct{}),
+	}
+	server, client := net.Pipe()
+	defer client.Close()
+	served := make(chan struct{})
+	go func() {
+		handleControl(context.Background(), server, binding, owner, func() error { return owner.Stop(context.Background()) })
+		close(served)
+	}()
+	expiresAt := time.Now().Add(100 * time.Millisecond)
+	request, err := json.Marshal(controlRequest{Version: 1, Action: "snapshot", Binding: binding, ExpiresAt: expiresAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFrame(client, request); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-owner.observing:
+	case <-time.After(time.Second):
+		t.Fatal("fresh bounded snapshot did not reach its observer")
+	}
+	select {
+	case <-owner.canceled:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("snapshot observer received a fresh server timeout instead of its client expiry")
+	}
+	<-served
 }
 
 func TestClientRejectsForeignResponseAndHonorsCancellation(t *testing.T) {
@@ -571,10 +665,11 @@ func TestStopSharesOneLifecycleDeadlineAndRetainsOwnershipUntilReap(t *testing.T
 }
 
 type runtimeFixture struct {
-	binding              Binding
-	done                 chan struct{}
-	once                 sync.Once
-	starts, stops, waits atomic.Int32
+	binding           Binding
+	done              chan struct{}
+	once              sync.Once
+	starts, snapshots atomic.Int32
+	stops, waits      atomic.Int32
 }
 
 func (o *runtimeFixture) Start(_ context.Context, r LaunchRequest) error {
@@ -583,6 +678,7 @@ func (o *runtimeFixture) Start(_ context.Context, r LaunchRequest) error {
 	return nil
 }
 func (o *runtimeFixture) Snapshot(context.Context) Snapshot {
+	o.snapshots.Add(1)
 	return Snapshot{Binding: o.binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true}
 }
 func (o *runtimeFixture) Stop(context.Context) error {
