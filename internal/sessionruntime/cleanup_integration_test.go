@@ -160,11 +160,15 @@ func waitForControlSocket(t *testing.T, path string) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for {
-		if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSocket != 0 {
+		info, err := os.Lstat(path)
+		if err == nil && info.Mode()&os.ModeSocket != 0 && info.Mode().Perm() == 0600 {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("control socket did not appear at %s", path)
+			if err != nil {
+				t.Fatalf("control socket did not become admitted at %s: %v", path, err)
+			}
+			t.Fatalf("control socket did not become admitted at %s: got mode %s, want socket with permissions 0600", path, info.Mode())
 		}
 		time.Sleep(time.Millisecond)
 	}
