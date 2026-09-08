@@ -25,7 +25,8 @@ var ErrRuntimeCleanupUnproven = errors.New("runtime cleanup is unproven; preserv
 // other runtime resources before returning; the generation lock outlives it.
 type RuntimeOwner interface {
 	Start(context.Context, LaunchRequest) error
-	Snapshot() Snapshot
+	// Snapshot must observe within the bounded context supplied by control.
+	Snapshot(context.Context) Snapshot
 	Stop(context.Context) error
 	Wait(context.Context) error
 }

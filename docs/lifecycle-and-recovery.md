@@ -18,7 +18,10 @@ Backend-running and READY are separate. A detached supervisor holds an ordinary
 generation lock and a private bounded typed Unix socket. It retains the actual
 Tart handle and one serial PTY, with one stop/wait/reap path. The host and
 cooperating host processes are trusted; runtime authority is not reconstructed
-from persisted process metadata.
+from persisted process metadata. The control listener remains bounded and
+serves one request at a time: snapshot observation receives the same fixed
+budget as its client RPC, so abandonment cannot strand work ahead of an exact
+stop.
 
 Slice B composes the production public start entry point. `internal/app` invokes
 the start factory only after loading the exact configuration, selecting the

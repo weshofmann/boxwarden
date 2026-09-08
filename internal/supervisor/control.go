@@ -15,6 +15,8 @@ import (
 	"unicode/utf8"
 )
 
+// The snapshot observer and client RPC share this budget so the server cannot
+// retain an independent, longer observation after its client times out.
 const controlIOTimeout = 2 * time.Second
 const lifecycleTimeout = 5 * time.Second
 
@@ -66,10 +68,10 @@ func serveControl(ctx context.Context, listener *controlListener, binding Bindin
 			return err
 		}
 		// One bounded connection at a time; no unbounded handler pool.
-		handleControl(connection, binding, owner, stop)
+		handleControl(ctx, connection, binding, owner, stop)
 	}
 }
-func handleControl(connection net.Conn, binding Binding, owner RuntimeOwner, stop func() error) {
+func handleControl(ctx context.Context, connection net.Conn, binding Binding, owner RuntimeOwner, stop func() error) {
 	defer connection.Close()
 	if err := connection.SetDeadline(time.Now().Add(controlIOTimeout)); err != nil {
 		return
@@ -94,7 +96,9 @@ func handleControl(connection net.Conn, binding Binding, owner RuntimeOwner, sto
 			response.Error = err.Error()
 		}
 	}
-	response.Snapshot = owner.Snapshot()
+	snapshotCtx, cancelSnapshot := context.WithTimeout(ctx, controlIOTimeout)
+	response.Snapshot = owner.Snapshot(snapshotCtx)
+	cancelSnapshot()
 	response.Snapshot.Binding = binding
 	response.Snapshot.ObservedAt = time.Now().UTC()
 	data, err = encodeControlResponse(response)

@@ -4,16 +4,118 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
 )
+
+// Production break: an abandoned snapshot RPC must cancel its exact backend
+// observation. Otherwise the serialized control loop remains stuck behind work
+// whose client has gone away and cannot deliver the exact stop to the retained
+// handle.
+func TestAbandonedSnapshotObservationDoesNotStarveExactStop(t *testing.T) {
+	f := newFixture(t)
+	directory := f.request.RuntimeDirectory
+	requestPath, _ := writeExactGeneration(t, f.request)
+
+	var observations atomic.Int32
+	observing, observationCanceled := make(chan struct{}), make(chan struct{})
+	f.observe = func(ctx context.Context, object string) (backend.Observation, error) {
+		switch observations.Add(1) {
+		case 1:
+			return backend.Observation{ObjectID: object, Exists: true, State: backend.ObjectStopped}, nil
+		case 2:
+			return backend.Observation{ObjectID: object, Exists: true, State: backend.ObjectRunning}, nil
+		case 3:
+			close(observing)
+			<-ctx.Done()
+			close(observationCanceled)
+			return backend.Observation{}, ctx.Err()
+		default:
+			return backend.Observation{}, errors.New("unexpected backend observation")
+		}
+	}
+	runDone := make(chan error, 1)
+	go func() { runDone <- supervisor.Run(context.Background(), requestPath, f.owner) }()
+	waitForControlSocket(t, filepath.Join(directory, "supervisor.sock"))
+
+	client := &supervisor.Client{RuntimeDirectory: directory, MaxSnapshotAge: time.Minute}
+	snapshotDone := make(chan error, 1)
+	go func() {
+		_, err := client.Snapshot(context.Background(), f.request.Binding)
+		snapshotDone <- err
+	}()
+	select {
+	case <-observing:
+	case <-time.After(time.Second):
+		t.Fatal("snapshot never reached the blocking backend observation")
+	}
+	select {
+	case err := <-snapshotDone:
+		var networkError net.Error
+		if !errors.Is(err, context.DeadlineExceeded) && (!errors.As(err, &networkError) || !networkError.Timeout()) {
+			t.Errorf("abandoned snapshot error = %v, want RPC timeout", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("snapshot client did not enforce its RPC budget")
+	}
+	select {
+	case <-observationCanceled:
+	case <-time.After(250 * time.Millisecond):
+		t.Error("abandoned snapshot work outlived the client RPC")
+	}
+
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), time.Second)
+	err := client.Stop(stopCtx, f.request.Binding)
+	cancelStop()
+	if err != nil {
+		t.Errorf("exact stop sat behind abandoned snapshot work: %v", err)
+	}
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Errorf("supervisor run after exact stop: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("supervisor did not finish after exact stop")
+	}
+
+	events := strings.Join(f.trace.all(), ",")
+	for _, event := range []string{"stop", "wait", "reap", "close"} {
+		if strings.Count(events, event) != 1 {
+			t.Errorf("%s count in %q = %d, want 1", event, events, strings.Count(events, event))
+		}
+	}
+	if observations.Load() != 3 {
+		t.Errorf("backend observations = %d, want admission, startup, and abandoned snapshot only", observations.Load())
+	}
+	if _, err := os.Lstat(directory); !os.IsNotExist(err) {
+		t.Errorf("exact generation retained after stop/reap: %v", err)
+	}
+}
+
+func waitForControlSocket(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSocket != 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("control socket did not appear at %s", path)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
 
 // Catch Run treating a returned startup error as unconditional cleanup
 // authority even when the owner cannot prove the exact backend stopped.
@@ -22,20 +124,8 @@ func TestRunPreservesGenerationUnlessFailedStartProvesBackendStopped(t *testing.
 		t.Run(outcome, func(t *testing.T) {
 			f := newFixture(t)
 			directory := f.request.RuntimeDirectory
-			if err := os.MkdirAll(directory, 0700); err != nil {
-				t.Fatal(err)
-			}
-			requestBytes, err := json.Marshal(f.request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			requestPath := filepath.Join(directory, "supervisor-request.json")
+			requestPath, requestBytes := writeExactGeneration(t, f.request)
 			lockPath := filepath.Join(directory, "generation.lock")
-			for path, contents := range map[string][]byte{requestPath: requestBytes, lockPath: nil} {
-				if err := os.WriteFile(path, contents, 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
 			serialDirectory := filepath.Join(directory, "serial")
 			f.owner.deps.serial = func(context.Context, string) (serialRuntime, error) {
 				f.trace.add("serial")
@@ -70,7 +160,7 @@ func TestRunPreservesGenerationUnlessFailedStartProvesBackendStopped(t *testing.
 					return backend.Observation{}, nil
 				}
 			}
-			err = supervisor.Run(context.Background(), requestPath, f.owner)
+			err := supervisor.Run(context.Background(), requestPath, f.owner)
 			if err == nil || !strings.Contains(err.Error(), "startup observation failed") {
 				t.Fatalf("Run did not reach expected post-handle failure: %v", err)
 			}
@@ -107,6 +197,25 @@ func TestRunPreservesGenerationUnlessFailedStartProvesBackendStopped(t *testing.
 			assertGenerationLock(t, lockPath, false)
 		})
 	}
+}
+
+func writeExactGeneration(t *testing.T, request supervisor.LaunchRequest) (string, []byte) {
+	t.Helper()
+	if err := os.MkdirAll(request.RuntimeDirectory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	requestBytes, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestPath := filepath.Join(request.RuntimeDirectory, "supervisor-request.json")
+	if err := os.WriteFile(requestPath, requestBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(request.RuntimeDirectory, "generation.lock"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return requestPath, requestBytes
 }
 
 // The fake owns a real serial directory so Run could remove the now-empty

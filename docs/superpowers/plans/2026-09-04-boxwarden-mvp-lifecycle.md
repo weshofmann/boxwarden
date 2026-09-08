@@ -32,7 +32,9 @@ trust, credentials, and destructive policy; the Tart adapter owns VM mechanics.
 - One lightweight detached supervisor holds an ordinary generation ownership
   lock, retains the actual Tart handle in memory, and follows one stop/wait/reap
   path. The private bounded typed Unix socket binds each request and response
-  to the exact domain/session/backend/generation.
+  to the exact domain/session/backend/generation. It serves one request at a
+  time and passes the bounded snapshot RPC context into backend observation so
+  abandoned work releases the handler for exact stop.
 - The minimal persisted request contains only binding, runtime/configuration
   locators, and canonical session-record name. It is an expected binding
   record, not authority. Child composition reloads configured domain and durable

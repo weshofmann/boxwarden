@@ -150,8 +150,8 @@ type diagnosticRuntime struct {
 	diagnostic string
 }
 
-func (o *diagnosticRuntime) Snapshot() Snapshot {
-	s := o.runtimeFixture.Snapshot()
+func (o *diagnosticRuntime) Snapshot(ctx context.Context) Snapshot {
+	s := o.runtimeFixture.Snapshot(ctx)
 	s.Diagnostic = o.diagnostic
 	return s
 }
@@ -165,7 +165,7 @@ func TestControlReturnsEncodedBoundedUTF8Diagnostics(t *testing.T) {
 			defer client.Close()
 			served := make(chan struct{})
 			go func() {
-				handleControl(server, binding, owner, func() error { owner.stops.Add(1); return errors.New(text) })
+				handleControl(context.Background(), server, binding, owner, func() error { owner.stops.Add(1); return errors.New(text) })
 				close(served)
 			}()
 			client.SetDeadline(time.Now().Add(time.Second))
@@ -241,7 +241,7 @@ func TestControlRejectsWrongBindingAndUnknownActionBeforeStop(t *testing.T) {
 			owner := &runtimeFixture{done: make(chan struct{})}
 			served := make(chan struct{})
 			go func() {
-				handleControl(server, binding, owner, func() error { return owner.Stop(context.Background()) })
+				handleControl(context.Background(), server, binding, owner, func() error { return owner.Stop(context.Background()) })
 				close(served)
 			}()
 			data, err := json.Marshal(request)
@@ -479,9 +479,9 @@ func (o *startFailureRuntime) Start(_ context.Context, request LaunchRequest) er
 	}
 	return o.err
 }
-func (*startFailureRuntime) Snapshot() Snapshot         { return Snapshot{} }
-func (*startFailureRuntime) Stop(context.Context) error { return errors.New("unexpected stop") }
-func (*startFailureRuntime) Wait(context.Context) error { return errors.New("unexpected wait") }
+func (*startFailureRuntime) Snapshot(context.Context) Snapshot { return Snapshot{} }
+func (*startFailureRuntime) Stop(context.Context) error        { return errors.New("unexpected stop") }
+func (*startFailureRuntime) Wait(context.Context) error        { return errors.New("unexpected wait") }
 
 // Production break: retaining a failed generation after RuntimeOwner.Start has
 // completed its partial cleanup would make the same durable retry ambiguous.
@@ -582,7 +582,7 @@ func (o *runtimeFixture) Start(_ context.Context, r LaunchRequest) error {
 	o.binding = r.Binding
 	return nil
 }
-func (o *runtimeFixture) Snapshot() Snapshot {
+func (o *runtimeFixture) Snapshot(context.Context) Snapshot {
 	return Snapshot{Binding: o.binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true}
 }
 func (o *runtimeFixture) Stop(context.Context) error {

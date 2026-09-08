@@ -150,7 +150,7 @@ func TestStartReloadsAdmissionAndRetainsExactRuntimeWithoutReady(t *testing.T) {
 	if f.startRequest != (backend.StartRequest{ObjectID: "boxwarden-work-dev", SerialDevice: f.serial.endpoint, GenerationDirectory: f.request.RuntimeDirectory}) {
 		t.Fatalf("start request = %#v", f.startRequest)
 	}
-	s := f.owner.Snapshot()
+	s := f.owner.Snapshot(context.Background())
 	if s.Binding != f.request.Binding || !s.BackendRunning || !s.SerialHealthy || s.PinPresent || s.CertificateCurrent || s.ProbeOK || s.ZoneMatches || s.ObservedAt.IsZero() {
 		t.Fatalf("snapshot = %#v", s)
 	}
@@ -274,7 +274,7 @@ func TestWaitRetainsSerialUntilActualReapAndStopsOnlyExactHandle(t *testing.T) {
 	if strings.Count(events, "wait") != 1 || strings.Count(events, "stop") != 1 || !strings.HasSuffix(events, "wait,stop,reap,close") {
 		t.Fatalf("lifetime order = %s", events)
 	}
-	if s := f.owner.Snapshot(); s.BackendRunning || s.SerialHealthy {
+	if s := f.owner.Snapshot(context.Background()); s.BackendRunning || s.SerialHealthy {
 		t.Fatalf("snapshot after reap: %#v", s)
 	}
 }
@@ -339,13 +339,13 @@ func TestSnapshotFailsClosedOnSerialPoisonAndObservationError(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.serial.poison()
-	if s := f.owner.Snapshot(); s.SerialHealthy {
+	if s := f.owner.Snapshot(context.Background()); s.SerialHealthy {
 		t.Fatalf("poisoned snapshot = %#v", s)
 	}
 	f.observe = func(context.Context, string) (backend.Observation, error) {
 		return backend.Observation{}, errors.New("observation failed")
 	}
-	if s := f.owner.Snapshot(); s.BackendRunning {
+	if s := f.owner.Snapshot(context.Background()); s.BackendRunning {
 		t.Fatalf("unproved running snapshot = %#v", s)
 	}
 	_ = f.owner.Stop(context.Background())
@@ -364,7 +364,7 @@ func TestSnapshotCannotPublishRunningAfterConcurrentReap(t *testing.T) {
 		return backend.Observation{ObjectID: object, Exists: true, State: backend.ObjectRunning}, nil
 	}
 	snapshotDone := make(chan supervisor.Snapshot, 1)
-	go func() { snapshotDone <- f.owner.Snapshot() }()
+	go func() { snapshotDone <- f.owner.Snapshot(context.Background()) }()
 	<-observing
 	var group sync.WaitGroup
 	for range 8 {

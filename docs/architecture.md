@@ -88,6 +88,9 @@ Backend state and workstation readiness are separate. A running VM can remain
 starting or non-ready. The trusted host and cooperating host processes use a
 lightweight detached supervisor, ordinary generation lock, and private bounded
 typed Unix socket bound to the exact domain/session/backend/generation.
+The control listener serves one bounded request at a time. Snapshot observation
+inherits that RPC's fixed budget, so an abandoned snapshot releases the
+serialized handler for an exact stop instead of leaving observer work behind.
 The supervisor retains the actual Tart handle in memory with one stop/wait/reap
 path; it never reconstructs process authority from persisted PID/inode data.
 The minimal launch request holds only binding and configuration/record locators.

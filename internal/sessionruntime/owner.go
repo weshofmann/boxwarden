@@ -227,9 +227,10 @@ func (o *Owner) failedStart(cause error) error {
 	return errors.Join(cause, stopErr, waitErr, observeErr)
 }
 
-// Snapshot observes afresh and never promotes backend/serial facts into the
-// future guest trust, SSH, time-zone or READY predicates.
-func (o *Owner) Snapshot() supervisor.Snapshot {
+// Snapshot observes afresh within the control caller's bound and never promotes
+// backend/serial facts into future guest trust, SSH, time-zone or READY
+// predicates.
+func (o *Owner) Snapshot(ctx context.Context) supervisor.Snapshot {
 	o.observationMu.Lock()
 	defer o.observationMu.Unlock()
 	o.mu.Lock()
@@ -239,8 +240,6 @@ func (o *Owner) Snapshot() supervisor.Snapshot {
 	if !active {
 		return snapshot
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 	observation, err := observeExact(ctx, observer, snapshot.Binding.BackendObject)
 	o.mu.Lock()
 	defer o.mu.Unlock()
