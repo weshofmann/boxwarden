@@ -141,11 +141,15 @@ namespace; ambient PATH/default Tart state cannot select another object. The
 fixed launch is `run --net-softnet --no-audio --no-clipboard --serial-path
 <owned-endpoint> <exact-object>` under the admitted closed environment.
 
-Slices A and B are deterministically implemented. Slice C bootstrap and trust
-publication and Slice D host-key pin, client key/certificate, management address,
-strict SSH, time-zone convergence, and READY publication remain pending. The
-bounded Slice B controlled-host exact-start check has not yet run and will not be
-treated as formal qualification. The A–H plan in
+Slices A and B are deterministically implemented. The bounded Slice B
+controlled-host check observed the exact configured Tart object running under a
+retained detached supervisor after the public CLI exited, continuous serial
+drain health, same-generation live retry, exact cleanup, and same-generation
+relaunch. It is current product evidence, not formal ADR 017 or Softnet-runtime
+qualification; see `docs/evidence/slice-b-controlled-exact-start.md`. Slice C
+bootstrap and trust publication and Slice D host-key pin, client
+key/certificate, management address, strict SSH, time-zone convergence, and
+READY publication remain pending. The A–H plan in
 `docs/superpowers/plans/2026-09-04-boxwarden-mvp-lifecycle.md` defines the
 remaining slices and evidence gates.
 

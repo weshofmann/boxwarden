@@ -157,9 +157,12 @@ before B; a green foundation alone does not authorize beginning B.
 Deterministic persistence, retry, process-boundary retention, exact cleanup with
 rename/unlink/fsync interruption injection, long-path transport, and
 configured-namespace tests are complete. The bounded controlled real-host
-exact-start check is the next controller-owned gate and has not yet run; it is
-product evidence, not formal qualification. Do not begin C or infer READY from
-this completed Slice B implementation boundary.
+exact-start check passed on the qualified host/toolchain pair: it observed the
+exact backend running, retained ownership after CLI exit, continuous serial
+drain health, same-generation running retry, exact stop/cleanup, and
+same-generation relaunch. This is product evidence, not formal qualification;
+see `docs/evidence/slice-b-controlled-exact-start.md`. Do not begin C or infer
+READY from this completed Slice B boundary.
 
 ### C — Boot and serial bootstrap composition
 

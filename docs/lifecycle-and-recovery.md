@@ -30,9 +30,12 @@ explicit domain, and validating the session name. The parent persists intent and
 launches the detached supervisor; the child reloads the exact configuration,
 domain, and durable session record, requires the identical `starting + G`
 binding, and repeats current host and complete configured-domain CA admission
-before serial or Tart mutation. Controlled product checks begin at this exact
-launch boundary and continue at the later serial-bootstrap and SSH boundaries.
-They have not yet run for Slice B and are not formal qualification.
+before serial or Tart mutation. A bounded controlled product check exercised
+this exact launch boundary, including retained ownership after CLI exit, a live
+same-generation retry, exact typed stop/cleanup, and same-generation relaunch.
+That check is operational product evidence, not formal qualification; later
+checks continue at the serial-bootstrap and SSH boundaries. See
+`docs/evidence/slice-b-controlled-exact-start.md`.
 
 The eventual supervisor owns generation SSH credentials, CA-validated renewal,
 and periodic strict read-only probes. READY requires a fresh exact-generation

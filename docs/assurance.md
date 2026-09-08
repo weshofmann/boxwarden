@@ -15,9 +15,10 @@ Claims in this document draw on evidence from several source scopes:
 - **Pending:** the required evidence does not yet exist in any branch.
 
 V3 implementation, deterministic tests, runbooks, the completed host/domain
-attended-evidence record, and the deterministically tested Slice B exact-start
-implementation are current-tree evidence. Slice B has no controlled real-host
-execution evidence yet and does not promote any bootstrap, SSH, READY, or
+attended-evidence record, the deterministically tested Slice B exact-start
+implementation, and the bounded Slice B controlled exact-start product check
+are current-tree evidence. That controlled check is narrower than formal
+qualification and does not promote any bootstrap, SSH, READY, ADR 017, or
 Softnet-runtime qualification claim.
 
 Security properties are not uniformly "tested" or "qualified." This document
@@ -157,6 +158,18 @@ BLOCKER-1 (vmnet gateway) resolved by ADR 015 acceptance.
 
 Evidence: [`docs/reviews/2026-08-30-independent-architecture-review.md`](reviews/2026-08-30-independent-architecture-review.md)
 
+**Slice B controlled exact-start product check (PASS):** On the exact qualified
+host/toolchain pair, the public CLI created and started one disposable session,
+returned `STARTING` while its detached supervisor retained the exact Tart
+handle, and kept the one-PTY drain healthy. A running retry reused the identical
+generation and process ownership; exact typed stop removed that runtime while
+preserving durable `starting + G`; a stopped retry relaunched the same G under
+new retained processes; final exact stop again cleaned the runtime. This is
+bounded current-product evidence, not formal ADR 017 or Softnet-runtime
+qualification.
+
+Evidence: [`docs/evidence/slice-b-controlled-exact-start.md`](evidence/slice-b-controlled-exact-start.md)
+
 ### Pending gates
 
 - **Softnet runtime gate (S10–S13):** Softnet privilege transition/drop,
@@ -175,8 +188,9 @@ Evidence: [`docs/reviews/2026-08-30-independent-architecture-review.md`](reviews
   Exclusive bounded bootstrap, permanent draining, shutdown/cleanup, and
   behavior under guest output must earn new evidence. Slices A and B have
   deterministic foundation, exact-launch, retention, and cleanup tests. The
-  bounded Slice B controlled product check has not yet run; controlled product
-  checks do not themselves constitute formal qualification.
+  bounded Slice B controlled product check observed launch, healthy drain, and
+  exact shutdown/cleanup, but did not exercise bootstrap framing, hostile guest
+  output, or a formal qualification procedure.
 
 ---
 
@@ -200,17 +214,17 @@ codes when the evidence is multi-dimensional.
 | # | Claim | Dims | Evidence | Limitation |
 |---|---|---|---|---|
 | H1 | No trusted-host filesystem tree is mounted into a guest | D, T | `docs/architecture.md`; backend seam test rejects all sharing flags; `internal/architecture/backend_seam_test.go` | ADR 021 is **PROPOSED**, not accepted; no host-tree capability exists |
-| H2 | No host Docker/Podman/containerd socket or context exposed to guest | D, T | `docs/architecture.md`; backend seam and Slice B runtime architecture tests; fixed Tart launch test | No attended Slice B runtime proof |
+| H2 | No host Docker/Podman/containerd socket or context exposed to guest | D, T | `docs/architecture.md`; backend seam and Slice B runtime architecture tests; fixed Tart launch test; Slice B controlled evidence observed the fixed argv | Controlled check was not a formal hostile-guest or mount inspection |
 | H3 | No host SSH-agent forwarding to guest | D, T | `docs/architecture.md`; `docs/credentials.md`; sshx client test: `IdentityAgent=none`, `ForwardAgent=no` | — |
-| H4 | No host display-server (X11/Wayland/VNC) to guest | D, T | `docs/architecture.md`; backend seam and Slice B runtime architecture tests; fixed Tart launch test | No attended Slice B runtime proof |
-| H5 | No clipboard or audio sharing by default | D, T, Q, I | Design basis: `docs/architecture.md`; `internal/backend/tart/launch_test.go`; Task 0 qualified `--no-audio --no-clipboard` in its launches | Slice B fixes these flags deterministically; detached-supervisor requalification remains pending |
-| H6 | No bridged or host networking | D, T | `docs/architecture.md`; ADR 003 (superseded by ADR 015 for network policy); backend seam and fixed Tart launch tests | No attended Slice B runtime proof |
+| H4 | No host display-server (X11/Wayland/VNC) to guest | D, T | `docs/architecture.md`; backend seam and Slice B runtime architecture tests; fixed Tart launch test; Slice B controlled evidence observed the fixed argv | Controlled check was not a formal host-integration inspection |
+| H5 | No clipboard or audio sharing by default | D, T, Q, I | Design basis: `docs/architecture.md`; `internal/backend/tart/launch_test.go`; Task 0 qualified `--no-audio --no-clipboard`; Slice B controlled evidence observed both flags | Detached-supervisor requalification remains pending |
+| H6 | No bridged or host networking | D, T | `docs/architecture.md`; ADR 003 (superseded by ADR 015 for network policy); backend seam and fixed Tart launch tests; Slice B controlled evidence observed `--net-softnet` | No attended Slice B network probe or formal requalification |
 | H7 | No port exposure | D, T | `docs/architecture.md`; backend seam test | — |
 | H8 | No nested virtualization | D, T | `docs/architecture.md`; backend seam test | — |
 | H9 | No Rosetta share | D, T | `docs/architecture.md`; backend seam test | — |
 | H10 | The serial PTY is not reachable through guest networking | D, T, Q, I | Design basis: `docs/security-model.md`, `docs/decisions/017-host-local-serial-recovery-shell.md`; Slice B fixed launch/one-PTY tests; Task 0 qualified PTY isolation | Slice B uses a different one-PTY path; ADR 017 requalification pending |
 | H11 | Guest-local runtimes (Docker group, etc.) are not treated as a substitute for VM isolation | D | `docs/security-model.md` | — |
-| H12 | Slice B launch accepts no Softnet allow-flag input and its fixed argv excludes `--net-softnet-allow=0.0.0.0/0` | D, T | ADR 015; `docs/architecture.md`; `internal/backend/tart/launch_test.go`; `internal/architecture/backend_seam_test.go` | It disables bridge isolation; attended launch/network qualification remains pending |
+| H12 | Slice B launch accepts no Softnet allow-flag input and its fixed argv excludes `--net-softnet-allow=0.0.0.0/0` | D, T | ADR 015; `docs/architecture.md`; `internal/backend/tart/launch_test.go`; `internal/architecture/backend_seam_test.go`; Slice B controlled evidence observed the exact argv | Allow-all disables bridge isolation; network qualification remains pending |
 
 ### Network isolation
 
@@ -236,11 +250,11 @@ properties (S10–S13) remain pending.
 | # | Claim | Dims | Evidence | Limitation |
 |---|---|---|---|---|
 | S1 | Softnet privilege is bound to an exact root-owned digest-specific artifact, not a mutable Homebrew path | D, Q | ADR 024; V3 attended evidence: exact SHA-256, mode `04550`, path, ancestry |  |
-| S2 | Any setuid/setgid or passwordless-root Homebrew Softnet causes doctor to report `drifted/unsafe` and blocks init/start before runtime mutation | D, T, Q | ADR 024; `internal/hostx/doctor_test.go`; `internal/sessionruntime/owner_test.go` admission-before-mutation cases; V3 attended unsafe-Homebrew refusal | Start-path refusal is deterministic only; no attended Slice B start exists yet |
+| S2 | Any setuid/setgid or passwordless-root Homebrew Softnet causes doctor to report `drifted/unsafe` and blocks init/start before runtime mutation | D, T, Q | ADR 024; `internal/hostx/doctor_test.go`; `internal/sessionruntime/owner_test.go` admission-before-mutation cases; V3 attended unsafe-Homebrew refusal | Unsafe start-path refusal is deterministic only; the bounded positive Slice B start used the admitted installation |
 | S3 | `boxwarden init` refuses a source with any setuid/setgid bit | D, T | ADR 024; `internal/hostx/root_install_test.go` | Same-UID test model; real-host cross-UID semantics confirmed at the V3 gate |
 | S4 | The installed Softnet executable is SHA-256 `ab333619…`, mode `04550`, one link, root-owned, assigned to `boxwarden-operators` | Q | V3 attended evidence: exact inode, link count, ACL absence table | Specific to macOS 26.6.2 / Tart 2.32.1 / Softnet 0.19.0 |
 | S5 | The manifest is `root:wheel 0444`; doctor reads and parses it without privilege | D, T, Q | ADR 024 manifest contract; V3 evidence: `sudo -u nobody` SHA-256 read, healthy doctor post `sudo -k` | The `0444` contract corrects the historical `0400`; the exact attended migration is preserved in V3 evidence |
-| S6 | Slice B Tart launch sets PATH to only the digest-specific Softnet directory and excludes ambient proxy, DYLD, telemetry, and loader variables | D, T | ADR 024; `docs/security-model.md`; `internal/backend/tart/launch_test.go`; `internal/sessionruntime/owner_test.go` exact launch-config coverage | Production mechanism and deterministic tests exist; attended Softnet runtime qualification remains pending |
+| S6 | Slice B Tart launch sets PATH to only the digest-specific Softnet directory and excludes ambient proxy, DYLD, telemetry, and loader variables | D, T | ADR 024; `docs/security-model.md`; `internal/backend/tart/launch_test.go`; `internal/sessionruntime/owner_test.go` exact launch-config coverage; controlled evidence observed exact Tart/Softnet paths and argv | Direct host environment sampling was excluded; attended closed-environment qualification remains pending |
 | S7 | Doctor diagnoses the full tree: path, ancestors, ACLs, symlinks, digests, modes, group, manifest | D, T, Q | ADR 024; `internal/hostx/doctor_test.go`; V3 evidence: full production inspection post-install | Deterministic tests use same-UID synthetic root; cross-UID semantics confirmed at V3 gate |
 | S8 | Doctor is read-only; it never repairs, re-authorizes, or silently mutates | D, T, Q | `docs/operations/init-and-doctor.md`; `internal/hostx/doctor_test.go`: zero-mutation assertions; V3 evidence: post-`sudo -k` doctor | — |
 | S9 | Unsafe Homebrew Softnet blocks `boxwarden init` and is rechecked by start before serial/Tart mutation | D, T, Q | ADR 024; `internal/hostx/init_test.go`; `internal/sessionruntime/owner_test.go`; V3 attended unsafe-Homebrew refusal | Init refusal is attended; start recheck is deterministic only |
@@ -274,11 +288,11 @@ properties (S10–S13) remain pending.
 | L3 | Session lifecycle intent, including `starting + generation G`, is persisted and fsynced before backend mutation | D, T | `docs/lifecycle-and-recovery.md`; `internal/session/start_test.go`; `internal/lifecycle/reconcile_test.go`; `internal/session/store_test.go` | No real-host power-loss/crash test |
 | L4 | Per-session locks serialize conflicting operations | D, T | `docs/lifecycle-and-recovery.md`; `internal/lock/filelock_test.go` (current tree) | — |
 | L5 | A running VM without matching live exact supervisor ownership is drift/non-ready with no mutation or adoption | D, T | `docs/lifecycle-and-recovery.md`; `internal/session/start_test.go`; `internal/supervisor/minimal_test.go` | No attended interference/recovery exercise |
-| L6 | A `starting + G` retry never allocates another generation; it transition-checks both an existing live owner and a successful launcher result, re-enters exact admission after cleanup or absence, waits for exact cleanup ownership, or finishes the exact validated crash residue before relaunching G | D, T | ADR 009; `docs/lifecycle-and-recovery.md`; `internal/session/start_test.go`; `internal/supervisor/generation_cleanup_test.go`; `internal/supervisor/minimal_test.go` | Deterministic transition/interruption injection only; no real-host retry/power-loss exercise |
+| L6 | A `starting + G` retry never allocates another generation; it transition-checks both an existing live owner and a successful launcher result, re-enters exact admission after cleanup or absence, waits for exact cleanup ownership, or finishes the exact validated crash residue before relaunching G | D, T | ADR 009; `docs/lifecycle-and-recovery.md`; `internal/session/start_test.go`; `internal/supervisor/generation_cleanup_test.go`; `internal/supervisor/minimal_test.go`; Slice B controlled same-G running and stopped retries | Controlled retry exercised ordinary exact stop/absence, not power loss, malformed residue, or interference |
 | L7 | No checkpoint operation exists in M1A | D | `docs/lifecycle-and-recovery.md` (explicit deferral); ADR 014 | — |
 | L8 | V2 registration records only operator admission and existing artifact identity; it does not assert provenance, clone-readiness, or qualification evidence | D, T | `docs/lifecycle-and-recovery.md`; README; `internal/golden/register_test.go` (current tree) | V2 real-host gate pending |
-| L9 | Public golden registration, session creation, and session status use the exact configured absolute Tart executable and `TART_HOME`, never ambient PATH/default Tart state | D, T | `cmd/boxwarden/main_test.go`; `internal/app/app_test.go`; `internal/backend/tart/observer_test.go`; `internal/backend/tart/create_test.go` | Deterministic subprocess evidence only; no real Tart operation in this gate |
-| L10 | Successful Slice B start proves the exact backend running plus one healthy serial drain and returns durable `starting + G`, not READY; the detached child retains the exact handle after the initiating CLI exits, and client-expired queued snapshots are rejected without fresh observation windows ahead of exact stop | D, T | `internal/session/start_test.go`; `internal/supervisor/minimal_test.go`; `internal/sessionruntime/owner_test.go`; `internal/sessionruntime/cleanup_integration_test.go`; `internal/sessionruntime/process_test.go`; `cmd/boxwarden/main_test.go` | Bounded controlled-host exact-start check has not run; expiry/cancellation evidence uses deterministic queued clients and a blocking observer; C/D evidence is absent |
+| L9 | Public golden registration, session creation, and session status use the exact configured absolute Tart executable and `TART_HOME`, never ambient PATH/default Tart state | D, T | `cmd/boxwarden/main_test.go`; `internal/app/app_test.go`; `internal/backend/tart/observer_test.go`; `internal/backend/tart/create_test.go`; Slice B controlled isolated-namespace product evidence | Controlled check used an isolated exact Tart home but is not formal qualification |
+| L10 | Successful Slice B start proves the exact backend running plus one healthy serial drain and returns durable `starting + G`, not READY; the detached child retains the exact handle after the initiating CLI exits, and client-expired queued snapshots are rejected without fresh observation windows ahead of exact stop | D, T | `internal/session/start_test.go`; `internal/supervisor/minimal_test.go`; `internal/sessionruntime/owner_test.go`; `internal/sessionruntime/cleanup_integration_test.go`; `internal/sessionruntime/process_test.go`; `cmd/boxwarden/main_test.go`; Slice B controlled exact-start evidence | Bounded product check passed but is not formal qualification; expiry/cancellation remains deterministic evidence; C/D evidence is absent |
 | L11 | Post-handle start failure stops/reaps only the retained handle, closes its serial runtime, requires exact stopped proof, and performs a validated nonrecursive crash-recoverable outer-cleanup transaction; request removal is fsynced before lock-marker publication, exact request+marker replay is admitted, and ambiguous stopped/socket cleanup preserves the canonical generation | D, T | `internal/sessionruntime/cleanup_integration_test.go`; `internal/supervisor/generation_cleanup_test.go`; `internal/supervisor/minimal_test.go`; `internal/sessionruntime/owner_test.go` | Deterministic rename/unlink/fsync interruption injection only; no attended failure/power-loss recovery exercise |
 | L12 | Long Darwin runtime paths use only a transient owner-private short bind/connect alias; the real socket and inode cleanup authority remain in the canonical generation | D, T | `internal/supervisor/transport_test.go`; `internal/supervisor/minimal_test.go`; `internal/sessionruntime/process_test.go` | A hard crash during the brief alias syscall window may leave a non-authoritative private temporary directory; no broad scavenger exists |
 
@@ -290,7 +304,7 @@ properties (S10–S13) remain pending.
 | I2 | Guest-controlled input cannot automatically become trusted persistent host state | D | `docs/security-model.md`; `docs/state-model.md` | Profile persistence not yet implemented |
 | I3 | age private keys are host-only; never enter a guest | D | `docs/credentials.md`; `docs/decisions/005-age-and-explicit-profile-writeback.md` | — |
 | I4 | The installed manifest contains only non-secret metadata; CA material, credentials, and session data are prohibited | D, T, Q | ADR 024; `internal/hostx/manifest_test.go`; V3 evidence: manifest SHA-256 and content verified | — |
-| I5 | Runtime authority is only the live exact supervisor/listener and retained backend handle; no Screen, two-PTY relay, HMAC/control key, ownership manifest, libproc/OFD reconstruction, or persisted PID/start-time authority exists | D, T | `docs/architecture.md`; `internal/architecture/slice_b_runtime_guard_test.go`; retained-handle and exact-cleanup tests in `internal/sessionruntime` and `internal/supervisor` | Trusted cooperating host-process model; no attended Slice B runtime proof |
+| I5 | Runtime authority is only the live exact supervisor/listener and retained backend handle; no Screen, two-PTY relay, HMAC/control key, ownership manifest, libproc/OFD reconstruction, or persisted PID/start-time authority exists | D, T | `docs/architecture.md`; `internal/architecture/slice_b_runtime_guard_test.go`; retained-handle and exact-cleanup tests in `internal/sessionruntime` and `internal/supervisor`; Slice B controlled lock/lineage evidence | Trusted cooperating host-process model; no hostile same-UID test or formal runtime qualification |
 
 ### Golden provenance
 
@@ -324,7 +338,7 @@ status.
 | F4 | Checkpoint and resume | N, P | `docs/lifecycle-and-recovery.md` explicit deferral; any future design must separately address identity, lineage, taint, and compromise containment. |
 | F5 | Provider authentication (AWS, GCP, GitHub, Bitbucket, Jira, Claude Teams) | P | `docs/credentials.md` explicit deferral beyond V1–V4. |
 | F6 | Session stop, destroy, file transfer | P | Public stop/destroy and file transfer remain deferred to later slices; Slice B exposes only internal exact retained-handle stop for cleanup/control. |
-| F7 | ADR 017 requalification for MVP one-PTY serial | P | Slice B deterministically proves one continuously drained PTY and exact retained-handle cleanup, but its controlled-host check has not run. Slice C bootstrap and formal exclusive-framing/permanent-drain/guest-output qualification remain absent; historical Screen recovery-console evidence does not transfer. |
+| F7 | ADR 017 requalification for MVP one-PTY serial | P | Slice B deterministically proves one continuously drained PTY and exact retained-handle cleanup; its bounded controlled check observed drain health and cleanup. Slice C bootstrap and formal exclusive-framing/permanent-drain/guest-output qualification remain absent; historical Screen recovery-console evidence does not transfer. |
 | F8 | V2 real-host register/clone gate | P | Requires artifact rebuilt from corrected generic guest definition (no embedded domain CA). |
 | F9 | IPv6-only upstream environments | N | ADR 020; `NOT YET PROVEN` in evidence matrix. |
 
@@ -337,17 +351,20 @@ available evidence supports, where evidence exists but is not surfaced, or where
 important limitations should be more visible. They are documentation improvement
 targets, not implementation defects.
 
-**EG-1 — Slice B exact start is deterministic, not real-host qualification**
+**EG-1 — Slice B exact start has bounded product evidence, not formal qualification**
 
 Slices A and B implement the ordinary generation lock, minimal expected launch
 binding, private bounded typed socket, authoritative child reload/admission,
 configured Tart namespace, retained exact backend handle, one continuously
 drained PTY, and public STARTING result. Deterministic unit, integration,
 subprocess, failure, long-path, and architecture tests exercise those mechanisms.
-The bounded controlled-host exact-start check has not run, so no operational
-Tart/Softnet launch observation is claimed here. Serial bootstrap and
-trust publication remain Slice C; host-key pin, client certificate, address,
-strict SSH, time-zone convergence, and READY remain Slice D.
+The bounded controlled-host check directly observed the exact Tart launch,
+retained supervisor ownership after CLI exit, healthy drain, live same-G retry,
+exact stop/cleanup, and stopped same-G relaunch. It was not a formal
+qualification procedure and did not exercise bootstrap, hostile guest output,
+power loss, or Softnet runtime claims S10-S13. Serial bootstrap and trust
+publication remain Slice C; host-key pin, client certificate, address, strict
+SSH, time-zone convergence, and READY remain Slice D.
 
 **EG-2 — PROPOSED ADR status requires attention when reading the decisions index**
 
@@ -369,8 +386,9 @@ Claims labeled T where this applies note the same-UID limitation.
 **EG-4 — ADR 017 production qualification remains pending**
 
 ADR 017 now specifies the single-PTY MVP design. Slice B begins bounded
-controlled-host product checks at actual Tart launch, but that B check has not
-yet run. C checks serial bootstrap and D checks strict SSH/READY. Slice H
+controlled-host product checks at actual Tart launch; that bounded check passed
+for exact launch, drain health, lifetime, and orderly cleanup. C checks serial
+bootstrap and D checks strict SSH/READY. Slice H
 consolidates controlled lifecycle and release evidence. The eventual formal
 qualification must cover exclusive framing, hostile guest output, continuous
 bounded drain, lifetime/cleanup, and the fixed containment mapping. Historical

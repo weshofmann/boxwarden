@@ -37,10 +37,11 @@ guest by the qualified VM/backend boundary. Quarantine and narrow credential
 scope limit what a compromised root guest receives; they do not make that guest
 less privileged.
 
-**Accepted MVP design; live composition remains pending.** ADR 017 now uses one
-private supervisor-owned serial PTY for bootstrap followed by continuous bounded
-draining. `serialx` creates a new mode-`0700` serial subtree and a mode-`0600`
-slave; Tart receives only that endpoint. Guest `hvc0` automatically logs in
+**Accepted MVP design; Slice B drain composition is live, while bootstrap
+remains pending.** ADR 017 now uses one private supervisor-owned serial PTY for
+bootstrap followed by continuous bounded draining. `serialx` creates a new
+mode-`0700` serial subtree and a mode-`0600` slave; Tart receives only that
+endpoint. Guest `hvc0` automatically logs in
 the workstation account for the fixed helper. The earlier Screen-held recovery
 console and two-PTY topology are superseded for MVP; no operator console is
 provided. The PTY is never published over a network or passed into another guest.
@@ -94,19 +95,21 @@ revoked, while private knowledge and proprietary content cannot be rotated.
 
 Tart provides the macOS VM boundary. Task 0 used Tart's display/input console
 and the exact Tart + Softnet shared/NAT launch policy to qualify the stated
-network properties for that pair. **The following start/lifecycle text is
-normative future V4 design, not current operational behavior.** M1A will omit
-an explicit Softnet host block because the vmnet gateway supplies DNS that must
+network properties for that pair. Slice B now implements the fixed exact launch
+mapping, and its bounded controlled-host check observed that path without
+formally requalifying the network or Softnet runtime. M1A omits an explicit
+Softnet host block because the vmnet gateway supplies DNS that must
 follow host, VPN, split-DNS, and DNS64 state, while current Softnet cannot
-distinguish that service from other gateway ports. V4 must preserve the Task 0
-policy constraints; it has not yet requalified the changed execution path.
+distinguish that service from other gateway ports. Later slices must preserve
+the Task 0 policy constraints; the changed execution path is not yet formally
+requalified.
 
-Private/link-local egress is denied by the qualified Task 0 policy. V4 will
-implement only the exact
-default policy and rejects every Softnet allow flag. ADR 015 permits a future
+Private/link-local egress is denied by the qualified Task 0 policy. Slice B
+implements only the exact default policy and rejects every Softnet allow flag.
+ADR 015 permits a future
 operator opt-in to exact private CIDRs, but implementation must first add the
-allowlist to session creation/records/status and define its CLI semantics; V4
-does not infer or accept it. Such future support may not authorize discovery,
+allowlist to session creation/records/status and define its CLI semantics;
+Slice B does not infer or accept it. Such future support may not authorize discovery,
 broad LAN access, bridging, host networking, or weaker session isolation.
 
 Under ADR 024, the tested Softnet 0.19.0 path requires host root privilege, so Softnet is a
@@ -159,11 +162,11 @@ doctor, and corrected attended idempotent init requirements remain mandatory.
 Init refuses a Softnet source with any setuid/setgid bit. Any setuid or
 passwordless-root Softnet under mutable Homebrew state is drifted/unsafe,
 causes doctor to exit nonzero and blocks the implemented V3 init until attended
-manual inspection/remediation. A future V4 start path must also refuse it.
+manual inspection/remediation. The implemented Slice B start path also refuses it.
 Boxwarden never chmods, repairs, or adopts it;
 only the root-owned digest-specific installed copy may be `04550`.
 
-Future V4 normal start must use the absolute qualified Tart 2.32.1 executable digest
+Slice B normal start uses the absolute qualified Tart 2.32.1 executable digest
 `05b65d5c14e8b41e8e44b6d9fd1278de4bedbc8b735d9b99f3c748f76f75862d`
 with PATH exactly the digest-specific Softnet directory, canonical recorded
 `TART_HOME`, generation-private `TMPDIR`, and fixed validated locale/user
@@ -176,8 +179,8 @@ macOS state, and Tart/Softnet pairing. It reports the current Homebrew setuid
 copy as blocking unsafe state rather than trusting or modifying it. Directory
 service membership and the current process's supplementary group are checked
 separately; init reports the required login-session refresh and doctor fails
-until the group is effective. A future V4 start path must fail until the group
-is effective. Upgrades
+until the group is effective. Slice B start fails until the group is effective.
+Upgrades
 install adjacent digest-specific trees and never overwrite a qualified artifact
 or retarget a `current` symlink; exact uninstall refuses active consumers.
 Real-host install and qualification remain user-attended gates.
@@ -192,10 +195,12 @@ Softnet constrains guest egress but permits incoming guest traffic; its default 
 
 Acceptance tests assert the security properties above and separately test the Tart argument mapping. A test that only searches for Tart flags is not sufficient evidence of the policy.
 
-An observed running VM is not by itself a ready Boxwarden session. Slice A
-implements the minimal supervisor and single serial PTY foundations with
-deterministic coverage; actual launch/bootstrap/SSH/READY composition remains
-pending and unavailable start composition explicitly fails.
+An observed running VM is not by itself a ready Boxwarden session. Slices A and
+B implement the minimal supervisor, single serial PTY drain, and exact Tart
+launch with deterministic coverage. The bounded controlled-host check in
+`docs/evidence/slice-b-controlled-exact-start.md` observed that start path but
+does not constitute formal qualification. Bootstrap, SSH, and READY composition
+remain pending.
 
 The trusted host and cooperating host processes rely on ordinary ownership
 locks, private bounded typed control, exact durable binding, and retained live
