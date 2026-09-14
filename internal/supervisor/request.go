@@ -38,6 +38,7 @@ type Snapshot struct {
 }
 type Controller interface {
 	Snapshot(context.Context, Binding) (Snapshot, error)
+	Bootstrap(context.Context, Binding) (Snapshot, error)
 	Stop(context.Context, Binding) error
 }
 
@@ -162,9 +163,13 @@ func decodeExact(data []byte, value any) error {
 	return nil
 }
 func snapshotReady(s Snapshot) bool {
-	return snapshotStarted(s) && s.PinPresent && s.CertificateCurrent && s.ProbeOK && s.ZoneMatches
+	return snapshotBootstrapped(s) && s.CertificateCurrent && s.ProbeOK && s.ZoneMatches
 }
 
 func snapshotStarted(s Snapshot) bool {
 	return s.BackendRunning && s.SerialHealthy
+}
+
+func snapshotBootstrapped(s Snapshot) bool {
+	return snapshotStarted(s) && s.PinPresent
 }

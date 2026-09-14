@@ -70,9 +70,8 @@ func TestStartPersistsGenerationBeforeSupervisorMutation(t *testing.T) {
 	}
 }
 
-// Production break: routing every retry through StartExact could relaunch an
-// already-running backend, while minting a replacement generation would lose
-// the durable recovery binding.
+// Production break: a completed Slice C retry must reuse the exact live
+// generation without asking the supervisor to bootstrap again or minting G+1.
 func TestStartingRetryReusesGenerationAndClassifiesBackendBeforeMutation(t *testing.T) {
 	for _, state := range []backend.ObjectState{backend.ObjectRunning, backend.ObjectStopped} {
 		t.Run(string(state), func(t *testing.T) {
@@ -118,6 +117,84 @@ func TestStartingRetryReusesGenerationAndClassifiesBackendBeforeMutation(t *test
 	}
 }
 
+func TestStartingLiveBootstrapIncompleteRetriesSameGeneration(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	created, err := creator.Create(context.Background(), "dev", ModeClean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := saveStartingRecord(t, domainConfig, created)
+	backendFake.SetObservation(backend.Observation{ObjectID: created.Backend.ObjectID, Exists: true, State: backend.ObjectRunning})
+	now := time.Date(2026, 9, 8, 1, 0, 0, 0, time.UTC)
+	control := &startSupervisorFake{
+		snapshot: func(binding supervisor.Binding) (supervisor.Snapshot, error) {
+			snapshot := startedSnapshot(binding, now)
+			snapshot.PinPresent = false
+			return snapshot, nil
+		},
+		start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+			if request.Binding.Generation != before.StartGeneration {
+				return supervisor.Snapshot{}, fmt.Errorf("bootstrap retry changed generation")
+			}
+			return startedSnapshot(request.Binding, now), nil
+		},
+	}
+	service := newStartTestService(domainConfig, backendFake, control, func() time.Time { return now }, func() (string, error) {
+		t.Fatal("bootstrap retry allocated a generation")
+		return "", nil
+	})
+	got, err := service.Start(context.Background(), "dev")
+	if err != nil || got != before {
+		t.Fatalf("same-G bootstrap retry = %#v, %v; want unchanged %#v", got, err, before)
+	}
+	if control.snapshotCalls != 1 || control.startCalls != 1 || control.stopCalls != 0 {
+		t.Fatalf("snapshot/start/stop = %d/%d/%d, want 1/1/0", control.snapshotCalls, control.startCalls, control.stopCalls)
+	}
+}
+
+func TestStartingPoisonedSerialStopsAndRelaunchesSameGeneration(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	created, err := creator.Create(context.Background(), "dev", ModeClean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := saveStartingRecord(t, domainConfig, created)
+	backendFake.SetObservation(backend.Observation{ObjectID: created.Backend.ObjectID, Exists: true, State: backend.ObjectRunning})
+	now := time.Date(2026, 9, 8, 1, 0, 0, 0, time.UTC)
+	control := &startSupervisorFake{
+		snapshot: func(binding supervisor.Binding) (supervisor.Snapshot, error) {
+			snapshot := startedSnapshot(binding, now)
+			snapshot.PinPresent = false
+			snapshot.SerialHealthy = false
+			return snapshot, nil
+		},
+		stop: func(binding supervisor.Binding) error {
+			if binding.Generation != before.StartGeneration {
+				return fmt.Errorf("stopped foreign generation")
+			}
+			backendFake.SetObservation(backend.Observation{ObjectID: created.Backend.ObjectID, Exists: true, State: backend.ObjectStopped})
+			return nil
+		},
+		start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+			if request.Binding.Generation != before.StartGeneration {
+				return supervisor.Snapshot{}, fmt.Errorf("serial recovery changed generation")
+			}
+			return startedSnapshot(request.Binding, now), nil
+		},
+	}
+	service := newStartTestService(domainConfig, backendFake, control, func() time.Time { return now }, func() (string, error) {
+		t.Fatal("serial recovery allocated a generation")
+		return "", nil
+	})
+	got, err := service.Start(context.Background(), "dev")
+	if err != nil || got != before {
+		t.Fatalf("same-G serial recovery = %#v, %v; want unchanged %#v", got, err, before)
+	}
+	if control.snapshotCalls != 1 || control.stopCalls != 1 || control.startCalls != 1 {
+		t.Fatalf("snapshot/stop/start = %d/%d/%d, want 1/1/1", control.snapshotCalls, control.stopCalls, control.startCalls)
+	}
+}
+
 // Production break: accepting inexact live evidence could adopt another
 // generation or an untrustworthy clock sample while claiming retry success.
 func TestRunningBackendRetryRejectsInexactStartedSnapshotWithoutMutation(t *testing.T) {
@@ -131,7 +208,6 @@ func TestRunningBackendRetryRejectsInexactStartedSnapshotWithoutMutation(t *test
 		"backend absent": func(snapshot *supervisor.Snapshot) {
 			snapshot.BackendRunning = false
 		},
-		"serial unhealthy": func(snapshot *supervisor.Snapshot) { snapshot.SerialHealthy = false },
 	} {
 		t.Run(name, func(t *testing.T) {
 			domainConfig, backendFake, creator := createFixture(t)
@@ -278,8 +354,10 @@ func TestRunningRecordStillRequiresFullFreshReadySnapshot(t *testing.T) {
 type startSupervisorFake struct {
 	start         func(supervisor.LaunchRequest) (supervisor.Snapshot, error)
 	snapshot      func(supervisor.Binding) (supervisor.Snapshot, error)
+	stop          func(supervisor.Binding) error
 	startCalls    int
 	snapshotCalls int
+	stopCalls     int
 }
 
 func (f *startSupervisorFake) StartExact(_ context.Context, request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
@@ -296,7 +374,13 @@ func (f *startSupervisorFake) Snapshot(_ context.Context, binding supervisor.Bin
 	}
 	return f.snapshot(binding)
 }
-func (*startSupervisorFake) Stop(context.Context, supervisor.Binding) error { return nil }
+func (f *startSupervisorFake) Stop(_ context.Context, binding supervisor.Binding) error {
+	f.stopCalls++
+	if f.stop == nil {
+		return fmt.Errorf("unexpected Stop")
+	}
+	return f.stop(binding)
+}
 
 type startHostFake struct{}
 
@@ -353,7 +437,7 @@ func assertStoredRecord(t *testing.T, domainConfig config.Domain, want Record) {
 }
 
 func startedSnapshot(binding supervisor.Binding, now time.Time) supervisor.Snapshot {
-	return supervisor.Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, ObservedAt: now.UTC()}
+	return supervisor.Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, ObservedAt: now.UTC()}
 }
 
 func readySnapshot(binding supervisor.Binding, now time.Time) supervisor.Snapshot {
