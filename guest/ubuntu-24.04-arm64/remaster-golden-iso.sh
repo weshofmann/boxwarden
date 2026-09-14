@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+
+# Current generic-golden ISO assembly. The Task 0 spike remaster remains
+# historical; this path includes the current locked bootstrap and finalizer.
+set -euo pipefail
+
+die() { printf 'generic golden remaster: %s\n' "$*" >&2; exit 1; }
+(( $# == 3 )) || die 'usage: remaster-golden-iso.sh SOURCE.iso RENDERED_USER_DATA OUTPUT.iso'
+source_iso="$1"
+rendered_user_data="$2"
+output_iso="$3"
+guest_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+helper="${guest_dir}/artifacts/boxwarden-guest-bootstrap"
+finalizer="${guest_dir}/finalize-golden.sh"
+lock="${guest_dir}/artifacts.lock.json"
+
+command -v xorriso >/dev/null 2>&1 || die 'xorriso is unavailable'
+[[ -f "$source_iso" && -f "$rendered_user_data" && ! -e "$output_iso" && ! -L "$output_iso" ]] || die 'source, rendered user-data, or output path is invalid'
+[[ -f "$helper" && -x "$helper" && -f "$finalizer" ]] || die 'current guest artifacts are missing'
+expected_helper="$(sed -n 's/.*"sha256": "\([0-9a-f]\{64\}\)".*/\1/p' "$lock")"
+[[ "$expected_helper" =~ ^[0-9a-f]{64}$ ]] || die 'helper lock is invalid'
+[[ "$(shasum -a 256 "$helper" | awk '{print $1}')" == "$expected_helper" ]] || die 'helper differs from its lock'
+grep -Fq "'${expected_helper}'" "$rendered_user_data" || die 'rendered user-data does not bind locked helper'
+[[ "$(grep -Fo '__BOXWARDEN_FINALIZER_SHA256__' "$rendered_user_data" | wc -l | tr -d ' ')" == 1 ]] || die 'rendered user-data lacks one finalizer digest slot'
+for required in __BOXWARDEN_RUN_ID__ __BOXWARDEN_TIMEZONE__ __BOXWARDEN_PASSWORD_HASH__; do
+  ! grep -Fq "$required" "$rendered_user_data" || die "rendered user-data retains ${required}"
+done
+grep -Fq '/cdrom/boxwarden-artifacts/finalize-golden.sh' "$rendered_user_data" || die 'rendered user-data does not install current finalizer'
+
+# Render into owner-private temporary storage because the user-data carries a
+# temporary password verifier until finalization of the installed candidate.
+umask 077
+work_dir="$(mktemp -d "${TMPDIR:-/tmp}/boxwarden-golden-remaster.XXXXXX")"
+trap 'rm -rf -- "$work_dir"' EXIT
+finalizer_sha="$(shasum -a 256 "$finalizer" | awk '{print $1}')"
+sed "s/__BOXWARDEN_FINALIZER_SHA256__/${finalizer_sha}/" "$rendered_user_data" >"$work_dir/user-data"
+! grep -Fq __BOXWARDEN_ "$work_dir/user-data" || die 'mapped user-data retains a placeholder'
+
+xorriso -osirrox on -indev "$source_iso" -extract /boot/grub/grub.cfg "$work_dir/grub.cfg"
+sed -E 's/^([[:space:]]*linux[[:space:]]+[^[:space:]]+)[[:space:]]+---/\1 autoinstall ---/' \
+  "$work_dir/grub.cfg" >"$work_dir/grub.autoinstall.cfg"
+grep -Eq '^[[:space:]]*linux[[:space:]]+[^[:space:]]+[[:space:]]+autoinstall[[:space:]]+---([[:space:]]|$)' \
+  "$work_dir/grub.autoinstall.cfg" || die 'GRUB autoinstall boot entry is missing'
+
+xorriso \
+  -indev "$source_iso" \
+  -outdev "$output_iso" \
+  -boot_image any replay \
+  -map "$work_dir/user-data" /autoinstall.yaml \
+  -map "$helper" /boxwarden-artifacts/boxwarden-guest-bootstrap \
+  -map "$finalizer" /boxwarden-artifacts/finalize-golden.sh \
+  -map "$work_dir/grub.autoinstall.cfg" /boot/grub/grub.cfg \
+  -commit \
+  -end

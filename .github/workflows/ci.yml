@@ -28,6 +28,13 @@ jobs:
             bash -n "$script"
           done < <(git ls-files -z -- '*.sh')
 
+      - name: Check generic golden source transitions
+        shell: bash
+        run: |
+          bash guest/ubuntu-24.04-arm64/tests/render-golden-seed.sh
+          bash guest/ubuntu-24.04-arm64/tests/finalize-golden.sh
+          bash guest/ubuntu-24.04-arm64/tests/remaster-golden-iso.sh
+
       - name: Require a module for tracked Go source
         shell: bash
         run: |
