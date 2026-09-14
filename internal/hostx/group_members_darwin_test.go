@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/weshofmann/boxwarden/internal/execx"
 )
@@ -320,13 +321,20 @@ func TestDarwinGroupManagerUsesExactSnapshotBeforeMutationAndRevalidatesAfter(t 
 	caller := Caller{UID: 501, Name: "wes", Home: "/Users/wes"}
 	lookup := func(string) (*user.Group, error) { return &user.Group{Gid: "701", Name: OperatorGroupName}, nil }
 
-	unsafe := exactGroupSnapshotRunner("")
-	unsafe.set(groupReadArgs(), "GroupMembers: CALLER-GUID\nGroupMembership: wes\nNestedGroups: NESTED-GUID\nPrimaryGroupID: 701\nRecordName: boxwarden-operators\n")
-	if _, _, err := (darwinGroupManager{runner: unsafe, lookupGroup: lookup}).Ensure(caller, OperatorGroupName); err == nil {
-		t.Fatal("Ensure() error = nil, want pre-mutation nested-group refusal")
-	}
-	if unsafe.mutations != 0 {
-		t.Fatalf("directory mutations = %d, want zero before exhaustive snapshot", unsafe.mutations)
+	for name, record := range map[string]string{
+		"nested membership": "GroupMembers: CALLER-GUID\nGroupMembership: wes\nNestedGroups: NESTED-GUID\nPrimaryGroupID: 701\nRecordName: boxwarden-operators\n",
+		"unexpected member": "GroupMembers: CALLER-GUID OTHER-GUID\nGroupMembership: wes other\nPrimaryGroupID: 701\nRecordName: boxwarden-operators\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			unsafe := exactGroupSnapshotRunner("")
+			unsafe.set(groupReadArgs(), record)
+			if _, _, err := (darwinGroupManager{runner: unsafe, lookupGroup: lookup}).Ensure(caller, OperatorGroupName); err == nil {
+				t.Fatal("Ensure() error = nil, want pre-mutation unsafe-membership refusal")
+			}
+			if unsafe.mutations != 0 {
+				t.Fatalf("directory mutations = %d, want zero before exhaustive snapshot", unsafe.mutations)
+			}
+		})
 	}
 
 	empty := exactGroupSnapshotRunner("")
@@ -342,13 +350,194 @@ func TestDarwinGroupManagerUsesExactSnapshotBeforeMutationAndRevalidatesAfter(t 
 	}
 }
 
+func TestDarwinGroupManagerCreatedGroupDoesNotRequireImmediateSecondLookup(t *testing.T) {
+	caller := Caller{UID: 501, Name: "wes", Home: "/Users/wes"}
+	runner := exactGroupSnapshotRunner("")
+	runner.set(groupReadArgs(), "PrimaryGroupID: 701\nRecordName: boxwarden-operators\n")
+	runner.allowCreate = true
+	runner.promoteOnEdit = true
+	lookups := 0
+	manager := darwinGroupManager{runner: runner, lookupGroup: func(name string) (*user.Group, error) {
+		lookups++
+		return nil, user.UnknownGroupError(name)
+	}}
+
+	group, changed, err := manager.Ensure(caller, OperatorGroupName)
+	if err != nil || !changed || !reflect.DeepEqual(group, Group{ID: 701, Name: OperatorGroupName, Members: []int{501}}) {
+		t.Fatalf("Ensure(newly visible group) = %#v, %t, %v; want exact caller binding", group, changed, err)
+	}
+	if lookups != 1 || runner.mutations != 2 {
+		t.Fatalf("lookups=%d mutations=%d; want one existence lookup, create, then exact member edit", lookups, runner.mutations)
+	}
+}
+
+func TestDarwinGroupManagerWaitsForOnlyNewlyCreatedMissingRecord(t *testing.T) {
+	caller := Caller{UID: 501, Name: "wes", Home: "/Users/wes"}
+	runner := exactGroupSnapshotRunner("")
+	runner.set(groupReadArgs(), "PrimaryGroupID: 701\nRecordName: boxwarden-operators\n")
+	runner.allowCreate = true
+	runner.promoteOnEdit = true
+	runner.missingGroupReads = 2
+	pauses := 0
+	current := time.Unix(0, 0)
+	manager := darwinGroupManager{runner: runner, now: func() time.Time { return current }, pause: func(delay time.Duration) {
+		pauses++
+		current = current.Add(delay)
+	}, lookupGroup: func(name string) (*user.Group, error) {
+		return nil, user.UnknownGroupError(name)
+	}}
+
+	group, changed, err := manager.Ensure(caller, OperatorGroupName)
+	if err != nil || !changed || !reflect.DeepEqual(group, Group{ID: 701, Name: OperatorGroupName, Members: []int{501}}) {
+		t.Fatalf("Ensure(temporarily missing group) = %#v, %t, %v; want convergence then exact binding", group, changed, err)
+	}
+	if runner.groupReads != 4 || runner.mutations != 2 || pauses != 2 {
+		t.Fatalf("group reads=%d mutations=%d pauses=%d; want two missing reads, exact pre/post snapshots, create and edit", runner.groupReads, runner.mutations, pauses)
+	}
+}
+
+func TestDarwinGroupManagerBoundsNeverVisibleCreatedGroup(t *testing.T) {
+	runner := exactGroupSnapshotRunner("")
+	runner.allowCreate = true
+	runner.missingGroupReads = 100
+	pauses := 0
+	current := time.Unix(0, 0)
+	manager := darwinGroupManager{runner: runner, now: func() time.Time { return current }, pause: func(delay time.Duration) {
+		pauses++
+		current = current.Add(delay)
+	}, lookupGroup: func(name string) (*user.Group, error) {
+		return nil, user.UnknownGroupError(name)
+	}}
+
+	_, _, err := manager.Ensure(Caller{UID: 501, Name: "wes", Home: "/Users/wes"}, OperatorGroupName)
+	if err == nil || !strings.Contains(err.Error(), "new local operator group did not become visible") {
+		t.Fatalf("Ensure(never visible) error = %v; want specific bounded visibility failure", err)
+	}
+	if runner.groupReads != 10 || runner.mutations != 1 || pauses != 10 || current.Sub(time.Unix(0, 0)) != newGroupVisibilityBudget {
+		t.Fatalf("group reads=%d mutations=%d pauses=%d elapsed=%s; want one-second read-only bound after create and no edit", runner.groupReads, runner.mutations, pauses, current.Sub(time.Unix(0, 0)))
+	}
+}
+
+func TestDarwinGroupManagerStopsWhenVisibilityBudgetExpiresDuringRead(t *testing.T) {
+	runner := exactGroupSnapshotRunner("")
+	runner.allowCreate = true
+	runner.missingGroupReads = 100
+	current := time.Unix(0, 0)
+	runner.onGroupRead = func() { current = current.Add(2 * time.Second) }
+	pauses := 0
+	manager := darwinGroupManager{runner: runner, now: func() time.Time { return current }, pause: func(time.Duration) { pauses++ }, lookupGroup: func(name string) (*user.Group, error) {
+		return nil, user.UnknownGroupError(name)
+	}}
+
+	_, _, err := manager.Ensure(Caller{UID: 501, Name: "wes", Home: "/Users/wes"}, OperatorGroupName)
+	if err == nil || !strings.Contains(err.Error(), "new local operator group did not become visible") || runner.groupReads != 1 || pauses != 0 || runner.mutations != 1 {
+		t.Fatalf("Ensure(slow missing read) error=%v reads=%d pauses=%d mutations=%d; want bounded stop before another read", err, runner.groupReads, pauses, runner.mutations)
+	}
+}
+
+func TestDarwinGroupManagerStopsWhenVisibilityBudgetExpiresDuringPause(t *testing.T) {
+	runner := exactGroupSnapshotRunner("")
+	runner.set(groupReadArgs(), "PrimaryGroupID: 701\nRecordName: boxwarden-operators\n")
+	runner.allowCreate = true
+	runner.promoteOnEdit = true
+	runner.missingGroupReads = 1
+	current := time.Unix(0, 0)
+	pauses := 0
+	manager := darwinGroupManager{runner: runner, now: func() time.Time { return current }, pause: func(time.Duration) {
+		pauses++
+		current = current.Add(2 * time.Second)
+	}, lookupGroup: func(name string) (*user.Group, error) {
+		return nil, user.UnknownGroupError(name)
+	}}
+
+	_, _, err := manager.Ensure(Caller{UID: 501, Name: "wes", Home: "/Users/wes"}, OperatorGroupName)
+	if err == nil || !strings.Contains(err.Error(), "new local operator group did not become visible") || runner.groupReads != 1 || pauses != 1 || runner.mutations != 1 {
+		t.Fatalf("Ensure(overshot pause) error=%v reads=%d pauses=%d mutations=%d; want stop before a late read or member edit", err, runner.groupReads, pauses, runner.mutations)
+	}
+}
+
+func TestDarwinGroupManagerRefusesUnsafeCreatedGroupWithoutRetry(t *testing.T) {
+	runner := exactGroupSnapshotRunner("")
+	runner.set(groupReadArgs(), "GroupMembers: OTHER-GUID\nPrimaryGroupID: 701\nRecordName: boxwarden-operators\n")
+	runner.allowCreate = true
+	manager := darwinGroupManager{runner: runner, lookupGroup: func(name string) (*user.Group, error) {
+		return nil, user.UnknownGroupError(name)
+	}}
+
+	_, _, err := manager.Ensure(Caller{UID: 501, Name: "wes", Home: "/Users/wes"}, OperatorGroupName)
+	if err == nil || runner.groupReads != 1 || runner.mutations != 1 {
+		t.Fatalf("Ensure(unsafe newly created group) error=%v reads=%d mutations=%d; want immediate refusal before edit", err, runner.groupReads, runner.mutations)
+	}
+}
+
+func TestDarwinGroupManagerDoesNotRetryNonTransientDirectoryFailures(t *testing.T) {
+	for name, evidence := range map[string]struct {
+		result execx.Result
+		err    error
+	}{
+		"wrong exit code":   {result: execx.Result{Stderr: dsclRecordNotFoundStderr}, err: fakeDirectoryExit{code: 55}},
+		"wrong diagnostic":  {result: execx.Result{Stderr: "<dscl_cmd> DS Error: -14090 (eDSAuthFailed)\n"}, err: fakeDirectoryExit{code: 56}},
+		"unexpected stdout": {result: execx.Result{Stdout: "partial record", Stderr: dsclRecordNotFoundStderr}, err: fakeDirectoryExit{code: 56}},
+		"truncated output":  {result: execx.Result{Stderr: dsclRecordNotFoundStderr, Truncated: true}, err: fakeDirectoryExit{code: 56}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			runner := exactGroupSnapshotRunner("")
+			runner.allowCreate = true
+			runner.results[scriptedKey(groupReadArgs())] = evidence.result
+			runner.failures[scriptedKey(groupReadArgs())] = evidence.err
+			pauses := 0
+			manager := darwinGroupManager{runner: runner, pause: func(time.Duration) { pauses++ }, lookupGroup: func(groupName string) (*user.Group, error) {
+				return nil, user.UnknownGroupError(groupName)
+			}}
+			_, _, err := manager.Ensure(Caller{UID: 501, Name: "wes", Home: "/Users/wes"}, OperatorGroupName)
+			if err == nil || errors.Is(err, errLocalOperatorGroupNotVisible) || runner.groupReads != 1 || runner.mutations != 1 || pauses != 0 {
+				t.Fatalf("Ensure(%s) error=%v reads=%d mutations=%d pauses=%d; want immediate non-transient refusal", name, err, runner.groupReads, runner.mutations, pauses)
+			}
+		})
+	}
+}
+
+func TestDarwinGroupManagerDoesNotRetryMissingPreexistingGroup(t *testing.T) {
+	runner := exactGroupSnapshotRunner("")
+	runner.missingGroupReads = 2
+	pauses := 0
+	manager := darwinGroupManager{runner: runner, pause: func(time.Duration) { pauses++ }, lookupGroup: func(string) (*user.Group, error) {
+		return &user.Group{Gid: "701", Name: OperatorGroupName}, nil
+	}}
+	_, _, err := manager.Ensure(Caller{UID: 501, Name: "wes", Home: "/Users/wes"}, OperatorGroupName)
+	if !errors.Is(err, errLocalOperatorGroupNotVisible) || runner.groupReads != 1 || runner.mutations != 0 || pauses != 0 {
+		t.Fatalf("Ensure(pre-existing but missing) error=%v reads=%d mutations=%d pauses=%d; want immediate refusal", err, runner.groupReads, runner.mutations, pauses)
+	}
+}
+
+func TestDarwinGroupManagerPreservesDirectoryExitWithoutRawOutput(t *testing.T) {
+	exit := fakeDirectoryExit{code: 70}
+	manager := darwinGroupManager{runner: fixedDirectoryResult{result: execx.Result{Stdout: "private stdout", Stderr: "password=hunter2"}, err: exit}}
+	err := manager.run("/usr/sbin/dseditgroup", "-o", "edit", "-n", "/Local/Default", "-a", "wes", "-t", "user", OperatorGroupName)
+	if !errors.Is(err, exit) || !strings.Contains(err.Error(), "exit status 70") || strings.Contains(err.Error(), "hunter2") || strings.Contains(err.Error(), "private stdout") {
+		t.Fatalf("directory command error = %v; want wrapped exit status without raw command output", err)
+	}
+}
+
+func TestDarwinGroupManagerNamesTruncatedDirectoryOutput(t *testing.T) {
+	manager := darwinGroupManager{runner: fixedDirectoryResult{result: execx.Result{Stderr: "partial secret", Truncated: true}}}
+	err := manager.run("/usr/sbin/dseditgroup", "-o", "edit", "-n", "/Local/Default", "-a", "wes", "-t", "user", OperatorGroupName)
+	if err == nil || !strings.Contains(err.Error(), "truncated") || strings.Contains(err.Error(), "partial secret") {
+		t.Fatalf("directory command error = %v; want explicit truncation without partial output", err)
+	}
+}
+
 type scriptedGroupRunner struct {
-	results       map[string]execx.Result
-	failures      map[string]error
-	truncated     map[string]bool
-	commands      []execx.Command
-	mutations     int
-	promoteOnEdit bool
+	results           map[string]execx.Result
+	failures          map[string]error
+	truncated         map[string]bool
+	commands          []execx.Command
+	mutations         int
+	allowCreate       bool
+	groupReads        int
+	missingGroupReads int
+	onGroupRead       func()
+	promoteOnEdit     bool
 }
 
 func exactGroupSnapshotRunner(primaryUsers string) *scriptedGroupRunner {
@@ -382,6 +571,11 @@ func (r *scriptedGroupRunner) set(args []string, stdout string) {
 func (r *scriptedGroupRunner) Run(_ context.Context, command execx.Command) (execx.Result, error) {
 	r.commands = append(r.commands, command)
 	if command.Path == "/usr/sbin/dseditgroup" {
+		create := []string{"-o", "create", "-n", "/Local/Default", OperatorGroupName}
+		if r.allowCreate && reflect.DeepEqual(command.Args, create) && reflect.DeepEqual(command.Env, []string{"LC_ALL=C", "LANG=C"}) {
+			r.mutations++
+			return execx.Result{}, nil
+		}
 		want := []string{"-o", "edit", "-n", "/Local/Default", "-a", "wes", "-t", "user", OperatorGroupName}
 		if !r.promoteOnEdit || !reflect.DeepEqual(command.Args, want) || !reflect.DeepEqual(command.Env, []string{"LC_ALL=C", "LANG=C"}) {
 			return execx.Result{}, fmt.Errorf("unexpected directory mutation: %#v", command)
@@ -391,10 +585,34 @@ func (r *scriptedGroupRunner) Run(_ context.Context, command execx.Command) (exe
 		return execx.Result{}, nil
 	}
 	key := scriptedKey(command.Args)
+	if command.Path == "/usr/bin/dscl" && key == scriptedKey(groupReadArgs()) {
+		r.groupReads++
+		if r.onGroupRead != nil {
+			r.onGroupRead()
+		}
+		if r.missingGroupReads > 0 {
+			r.missingGroupReads--
+			return execx.Result{Stderr: "<dscl_cmd> DS Error: -14136 (eDSRecordNotFound)\n"}, fakeDirectoryExit{code: 56}
+		}
+	}
 	result, ok := r.results[key]
 	if !ok {
 		return execx.Result{}, fmt.Errorf("unexpected command: %v", command.Args)
 	}
-	result.Truncated = r.truncated[key]
+	result.Truncated = result.Truncated || r.truncated[key]
 	return result, r.failures[key]
+}
+
+type fakeDirectoryExit struct{ code int }
+
+func (e fakeDirectoryExit) Error() string { return fmt.Sprintf("exit status %d", e.code) }
+func (e fakeDirectoryExit) ExitCode() int { return e.code }
+
+type fixedDirectoryResult struct {
+	result execx.Result
+	err    error
+}
+
+func (r fixedDirectoryResult) Run(context.Context, execx.Command) (execx.Result, error) {
+	return r.result, r.err
 }
