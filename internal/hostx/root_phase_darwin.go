@@ -4,6 +4,7 @@ package hostx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/user"
 	"time"
@@ -12,6 +13,9 @@ import (
 )
 
 const productionToolchainRoot = "/Library/Boxwarden"
+const newGroupVisibilityReads = 11
+const newGroupVisibilityPause = 100 * time.Millisecond
+const newGroupVisibilityBudget = time.Second
 
 // RunRootHostInstall is the hidden root-phase entry point. The public CLI must
 // dispatch to it only for the exact `internal host-install` argv and pass its
@@ -42,6 +46,8 @@ func RunRootHostInstall(ctx context.Context, input []byte) ([]byte, error) {
 type darwinGroupManager struct {
 	runner      execx.Runner
 	lookupGroup func(string) (*user.Group, error)
+	pause       func(time.Duration)
+	now         func() time.Time
 }
 
 func (m darwinGroupManager) Ensure(caller Caller, name string) (Group, bool, error) {
@@ -62,12 +68,33 @@ func (m darwinGroupManager) Ensure(caller Caller, name string) (Group, bool, err
 			return Group{}, false, fmt.Errorf("create dedicated operator group: %w", err)
 		}
 		changed = true
-		_, lookupErr = lookupGroup(name)
-		if lookupErr != nil {
-			return Group{}, false, fmt.Errorf("lookup newly created operator group: %w", lookupErr)
+	}
+	clock := m.now
+	if clock == nil {
+		clock = time.Now
+	}
+	deadline := clock().Add(newGroupVisibilityBudget)
+	group, err := inspectExactLocalOperatorGroup(m.runner, Operator{UID: caller.UID, Name: caller.Name, Home: caller.Home}, name, true)
+	if changed {
+		pause := m.pause
+		if pause == nil {
+			pause = time.Sleep
+		}
+		for reads := 1; errors.Is(err, errLocalOperatorGroupNotVisible); reads++ {
+			if reads == newGroupVisibilityReads || !clock().Before(deadline) {
+				return Group{}, false, fmt.Errorf("new local operator group did not become visible within bounded exact reads: %w", err)
+			}
+			delay := newGroupVisibilityPause
+			if remaining := deadline.Sub(clock()); remaining < delay {
+				delay = remaining
+			}
+			pause(delay)
+			if !clock().Before(deadline) {
+				return Group{}, false, fmt.Errorf("new local operator group did not become visible within bounded exact reads: %w", err)
+			}
+			group, err = inspectExactLocalOperatorGroup(m.runner, Operator{UID: caller.UID, Name: caller.Name, Home: caller.Home}, name, true)
 		}
 	}
-	group, err := inspectExactLocalOperatorGroup(m.runner, Operator{UID: caller.UID, Name: caller.Name, Home: caller.Home}, name, true)
 	if err != nil {
 		return Group{}, false, err
 	}
@@ -94,8 +121,11 @@ func (m darwinGroupManager) run(path string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	result, err := m.runner.Run(ctx, execx.Command{Path: path, Args: args, Env: []string{"LC_ALL=C", "LANG=C"}})
-	if err != nil || result.Truncated {
-		return fmt.Errorf("directory-service command failed")
+	if result.Truncated {
+		return fmt.Errorf("directory-service command output truncated")
+	}
+	if err != nil {
+		return fmt.Errorf("directory-service command failed: %w", err)
 	}
 	return nil
 }

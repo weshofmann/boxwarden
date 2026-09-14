@@ -14,6 +14,27 @@ last, and report when a new group membership needs a login-session refresh.
 It does not store administrator credentials, repair unsafe Homebrew state, or
 select a mutable `current` link.
 
+On a fresh qualified macOS host, a successful local `dseditgroup` create may
+precede Directory Services visibility of the new group record. Init does not
+use an immediate second `os/user.LookupGroup` result as proof of enrollment.
+It performs the exact `/Local/Default` group and caller inspection instead;
+only the fixed `dscl` record-not-found result for the newly created operator
+group may be retried, with at most eleven exact reads and one second of
+scheduled visibility wait. A pre-existing group is inspected once without this
+retry. Malformed, partial, aliased, unexpected, truncated, or otherwise unsafe
+records fail immediately; membership is added only after the complete exact
+inspection succeeds. If the newly created record never becomes visible, init
+reports a specific bounded convergence failure and does not publish the host
+toolchain tree.
+
+The attended public command carries only recognized, bounded Boxwarden
+root-phase group diagnostics across the sudo boundary, including the fixed
+stage and process exit status. Arbitrary sudo output, raw Directory Services
+stdout/stderr, request stdin, and control characters are not surfaced. The
+fresh-create convergence correction has deterministic fake-Directory-Services
+coverage but has not been re-exercised on the host that exposed the failure:
+its exact empty group is preserved for a separately approved attended retry.
+
 The installed host-toolchain `manifest.json` is a regular one-link
 `root:wheel 0444` file with no extended ACL. It is intentionally non-secret
 local host metadata, and its integrity comes from root ownership, no write bits,

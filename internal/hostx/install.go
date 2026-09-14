@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 
 	"github.com/weshofmann/boxwarden/internal/execx"
 )
 
 const maxInstallRequestBytes = 16 << 10
+const maxRootInstallDiagnosticBytes = 256
 
 // InstallRequest is the sole versioned parent-to-root message. It contains no
 // passwords, key bytes, environment, or caller-supplied destination path.
@@ -183,17 +186,52 @@ func InvokeRootInstall(ctx context.Context, runner PrivilegeRunner, executable s
 		return RootInstallResult{}, err
 	}
 	result, err := runner.Run(ctx, execx.Command{Path: "/usr/bin/sudo", Args: []string{"--", executable, "internal", "host-install"}, Env: []string{}, Stdin: data})
-	if err != nil {
-		return RootInstallResult{}, fmt.Errorf("run root host-install phase: %w", err)
-	}
 	if result.Truncated {
+		if err != nil {
+			return RootInstallResult{}, fmt.Errorf("run root host-install phase: output truncated: %w", err)
+		}
 		return RootInstallResult{}, fmt.Errorf("root host-install result was truncated")
+	}
+	if err != nil {
+		if diagnostic := recognizedRootInstallDiagnostic(result.Stderr); diagnostic != "" {
+			return RootInstallResult{}, fmt.Errorf("run root host-install phase: %w: %s", err, diagnostic)
+		}
+		return RootInstallResult{}, fmt.Errorf("run root host-install phase: %w", err)
 	}
 	decoded, err := DecodeRootInstallResult([]byte(result.Stdout))
 	if err != nil {
 		return RootInstallResult{}, err
 	}
 	return decoded, nil
+}
+
+// Only fixed, non-secret root host-install failure shapes cross the sudo
+// boundary. Sudo diagnostics and arbitrary child output remain unavailable.
+func recognizedRootInstallDiagnostic(stderr string) string {
+	if len(stderr) == 0 || len(stderr) > maxRootInstallDiagnosticBytes || !strings.HasSuffix(stderr, "\n") {
+		return ""
+	}
+	line := strings.TrimSuffix(stderr, "\n")
+	const prefix = "boxwarden: ensure operator group: "
+	if !strings.HasPrefix(line, prefix) {
+		return ""
+	}
+	const visibility = "new local operator group did not become visible within bounded exact reads: local operator group record not visible"
+	if line == prefix+visibility {
+		return strings.TrimPrefix(line, "boxwarden: ")
+	}
+	for _, operation := range []string{"create dedicated operator group", "add exact trusted operator"} {
+		const commandFailure = ": directory-service command failed: run \"/usr/sbin/dseditgroup\": exit status "
+		status, found := strings.CutPrefix(line, prefix+operation+commandFailure)
+		if !found || len(status) == 0 || len(status) > 3 {
+			continue
+		}
+		code, err := strconv.Atoi(status)
+		if err == nil && code > 0 && code <= 255 && strconv.Itoa(code) == status {
+			return strings.TrimPrefix(line, "boxwarden: ")
+		}
+	}
+	return ""
 }
 
 func EncodeRootInstallResult(result RootInstallResult) ([]byte, error) {

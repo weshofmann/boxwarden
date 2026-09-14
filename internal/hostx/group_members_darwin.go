@@ -4,6 +4,7 @@ package hostx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -14,6 +15,9 @@ import (
 )
 
 var localDirectoryEnvironment = []string{"LC_ALL=C", "LANG=C"}
+var errLocalOperatorGroupNotVisible = errors.New("local operator group record not visible")
+
+const dsclRecordNotFoundStderr = "<dscl_cmd> DS Error: -14136 (eDSRecordNotFound)\n"
 
 func inspectExactLocalOperatorGroup(runner execx.Runner, caller Operator, name string, allowEmpty bool) (Group, error) {
 	if runner == nil || name != OperatorGroupName || caller.UID <= 0 || !validDirectoryRecordName(caller.Name) {
@@ -152,6 +156,10 @@ func runLocalDirectoryQuery(runner execx.Runner, args []string) (string, error) 
 	defer cancel()
 	result, err := runner.Run(ctx, execx.Command{Path: "/usr/bin/dscl", Args: append([]string(nil), args...), Env: append([]string(nil), localDirectoryEnvironment...)})
 	if err != nil || result.Truncated {
+		var exitStatus interface{ ExitCode() int }
+		if err != nil && !result.Truncated && len(args) == 3 && args[0] == "/Local/Default" && args[1] == "-read" && args[2] == "/Groups/"+OperatorGroupName && result.Stdout == "" && result.Stderr == dsclRecordNotFoundStderr && errors.As(err, &exitStatus) && exitStatus.ExitCode() == 56 {
+			return "", errLocalOperatorGroupNotVisible
+		}
 		return "", fmt.Errorf("inspect exact local directory state")
 	}
 	return result.Stdout, nil
