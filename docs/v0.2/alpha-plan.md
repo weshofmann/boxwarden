@@ -88,7 +88,47 @@ launch mission sets the alpha scope and acceptance criteria.
   validate installation and launch while reporting that functional limitation;
   use the official IDE integration if the desktop package fails in the guest.
 
+## Publication cadence
+
+The integration branch is `weshofmann/feature/v02-alpha` with one Draft PR
+against `main`. Publish each meaningful, independently reviewable increment
+after targeted verification, aiming for a pushed checkpoint every 30–60
+minutes of active work when there is publishable progress. Push every verified
+commit promptly. Before a substantial handoff or subsystem switch, update
+this plan or `alpha-progress.md` and the Draft PR with the actual state.
+Distinguish targeted checks from full-suite and real-host qualification.
+Worker-owned incomplete files stay unstaged; a sanitized progress-only commit
+is appropriate when code is not yet safe. Never use an empty commit to imply
+progress, rewrite published history, or integrate into `main`.
+
+## Planned guest-only recipe execution contract
+
+The current management SSH path accepts only probe and time-zone operations.
+Recipe commands need a separate typed guest operation, carried over the same
+exact-generation pinned SSH transport after READY. The trusted host supplies
+bounded JSON argv and phase identity to a fixed guest helper path; the helper
+spawns argv elements directly inside the disposable guest with a closed
+environment, bounded output, and a deadline. No recipe bytes become a host
+shell command. The host checks the session lock, backend observation, live
+generation, pin, certificate, and operation result before recording progress.
+
+`prepare` mutations occur on a disposable candidate before fresh-clone cache
+qualification. A failed or indeterminate prepare attempt is retained and a
+fresh candidate is required. `once` steps record a digest-bound guest receipt
+after success; an interrupted step without a receipt is reported as
+indeterminate rather than silently replayed. `reconfigure` is explicit, and
+`startup` runs only after a successful start. A step's output is diagnostic
+evidence, not a claim that the guest or its package repository is trustworthy.
+This contract and its recovery tests must be implemented before accepting
+recipes that include packages or custom steps.
+
 ## Current next action
 
-Finish the independent plan review, resolve concrete findings, and implement
-the alpha context and first public recipe/prepare path in small verified commits.
+The corrected generic r2 candidate and a fresh public clone reached READY,
+displayed GNOME and Firefox, and passed same-system stop/restart persistence.
+The source-only installer launcher and Linux formatter helper now exist.
+Resolve builder cache identity, input staging, and serial ACL review findings;
+publish the builder foundation. Then implement fresh qualification and the
+public recipe launch command while proving the zero-NIC inspector and wiring
+the workspace formatter. Qualify rebuild/reattach and controlled export on
+fresh synthetic resources before claiming the alpha ready.
