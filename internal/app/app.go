@@ -17,6 +17,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/golden"
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/lifecycle"
+	"github.com/weshofmann/boxwarden/internal/recipe"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/sshx"
 )
@@ -124,6 +125,15 @@ func Run(ctx context.Context, args []string, options Options) error {
 	}
 
 	switch command.kind {
+	case commandAlphaRecipeCheck:
+		if _, err := recipe.Load(command.recipePath); err != nil {
+			return fmt.Errorf("check alpha recipe: %w", err)
+		}
+		if err := recipe.VerifyISO(command.isoPath); err != nil {
+			return fmt.Errorf("check alpha installer: %w", err)
+		}
+		_, err := fmt.Fprintf(options.Output, "domain: %s\nrecipe: valid\ninstaller: verified\n", command.domain)
+		return err
 	case commandInit:
 		if options.HostInit == nil {
 			return errors.New("host initializer is required")
@@ -234,6 +244,7 @@ const (
 	commandInit
 	commandDoctor
 	commandDomainInit
+	commandAlphaRecipeCheck
 )
 
 type parsedCommand struct {
@@ -242,6 +253,8 @@ type parsedCommand struct {
 	domain     string
 	name       string
 	mode       session.Mode
+	recipePath string
+	isoPath    string
 }
 
 func (c parsedCommand) requiresDomain() bool {
@@ -296,6 +309,21 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		return parsedCommand{}, errors.New("domain is required; pass --domain or set BOXWARDEN_DOMAIN")
 	}
 	base.domain = *domain
+	if len(remaining) >= 3 && remaining[0] == "alpha" && remaining[1] == "recipe" && remaining[2] == "check" {
+		checkSet := flag.NewFlagSet("alpha recipe check", flag.ContinueOnError)
+		checkSet.SetOutput(io.Discard)
+		recipePath := checkSet.String("recipe", "", "versioned recipe JSON")
+		isoPath := checkSet.String("iso", "", "local installer ISO")
+		if err := checkSet.Parse(remaining[3:]); err != nil {
+			return parsedCommand{}, fmt.Errorf("parse alpha recipe check: %w", err)
+		}
+		if len(checkSet.Args()) != 0 || *recipePath == "" || *isoPath == "" {
+			return parsedCommand{}, errors.New("alpha recipe check requires --recipe PATH and --iso PATH")
+		}
+		base.kind = commandAlphaRecipeCheck
+		base.recipePath, base.isoPath = *recipePath, *isoPath
+		return base, nil
+	}
 	if len(remaining) == 3 && remaining[0] == "session" && remaining[1] == "status" {
 		base.kind = commandSessionStatus
 		base.name = remaining[2]
@@ -333,7 +361,7 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.name = remaining[2]
 		return base, nil
 	}
-	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] <session>, session start <session>, session status <session>")
+	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] <session>, session start <session>, session status <session>, alpha recipe check --recipe PATH --iso PATH")
 }
 
 func writeInit(output io.Writer, result hostx.InitResult) error {

@@ -229,6 +229,7 @@ func sshArguments(connection Connection) []string {
 		"HostKeyAlias=" + HostKeyAlias(connection.Binding.SessionID), "UserKnownHostsFile=" + connection.KnownHostsFile,
 		"GlobalKnownHostsFile=/dev/null", "StrictHostKeyChecking=yes", "CheckHostIP=no", "BatchMode=yes",
 		"IdentitiesOnly=yes", "IdentityAgent=none", "HostKeyAlgorithms=ssh-ed25519", "UpdateHostKeys=no",
+		"PubkeyAcceptedAlgorithms=ssh-ed25519-cert-v01@openssh.com",
 		"VerifyHostKeyDNS=no", "CanonicalizeHostname=no", "ProxyCommand=none", "ProxyJump=none",
 		"ControlMaster=no", "ControlPath=none", "RequestTTY=no", "PasswordAuthentication=no",
 		"KbdInteractiveAuthentication=no", "ForwardAgent=no", "ForwardX11=no", "ClearAllForwardings=yes",

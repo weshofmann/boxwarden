@@ -7,6 +7,26 @@ import (
 	"testing"
 )
 
+// The image starts with conservative guest defaults while the live bootstrap
+// only requires the CA/principal settings needed by Boxwarden management.
+var goldenSSHD = map[string]string{
+	"pubkeyauthentication": "yes",
+	"trustedusercakeys": "/etc/ssh/boxwarden/active/trusted-user-ca.pub",
+	"authorizedprincipalsfile": "/etc/ssh/boxwarden/active/authorized_principals/%u",
+	"authorizedkeysfile": ".ssh/authorized_keys",
+	"permituserenvironment": "no",
+	"permituserrc": "no",
+	"passwordauthentication": "no",
+	"kbdinteractiveauthentication": "no",
+	"permitrootlogin": "no",
+	"x11forwarding": "no",
+	"allowagentforwarding": "no",
+	"allowtcpforwarding": "no",
+	"allowstreamlocalforwarding": "no",
+	"gatewayports": "no",
+	"permittunnel": "no",
+}
+
 // A golden built from autoinstall must satisfy the same effective sshd contract
 // that serial bootstrap checks before publishing domain trust. This compares
 // the tracked generated drop-in with the production guard, not a second copy of
@@ -49,16 +69,13 @@ func TestGoldenSSHDDefinitionMatchesBootstrapContract(t *testing.T) {
 	if inside || len(settings) == 0 {
 		t.Fatal("generated sshd drop-in missing or unterminated")
 	}
-	for key, want := range requiredSSHD {
+	for key, want := range goldenSSHD {
 		if got := settings[key]; got != want {
 			t.Errorf("generated sshd %s = %q, bootstrap requires %q", key, got, want)
 		}
 	}
-	if settings["pubkeyauthentication"] != "yes" {
-		t.Errorf("generated sshd pubkeyauthentication = %q, want yes", settings["pubkeyauthentication"])
-	}
-	if len(settings) != len(requiredSSHD)+1 {
-		t.Errorf("generated sshd has %d directives, want %d", len(settings), len(requiredSSHD)+1)
+	if len(settings) != len(goldenSSHD) {
+		t.Errorf("generated sshd has %d directives, want %d", len(settings), len(goldenSSHD))
 	}
 }
 
@@ -98,15 +115,12 @@ func TestGoldenFinalizerSSHDGuardMatchesBootstrapContract(t *testing.T) {
 	if inside || len(settings) == 0 {
 		t.Fatal("finalizer sshd guard missing or unterminated")
 	}
-	for key, want := range requiredSSHD {
+	for key, want := range goldenSSHD {
 		if got := settings[key]; got != want {
 			t.Errorf("finalizer sshd %s = %q, bootstrap requires %q", key, got, want)
 		}
 	}
-	if settings["pubkeyauthentication"] != "yes" {
-		t.Errorf("finalizer sshd pubkeyauthentication = %q, want yes", settings["pubkeyauthentication"])
-	}
-	if len(settings) != len(requiredSSHD)+1 {
-		t.Errorf("finalizer sshd guard has %d directives, want %d", len(settings), len(requiredSSHD)+1)
+	if len(settings) != len(goldenSSHD) {
+		t.Errorf("finalizer sshd guard has %d directives, want %d", len(settings), len(goldenSSHD))
 	}
 }

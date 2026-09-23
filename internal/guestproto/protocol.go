@@ -29,7 +29,7 @@ var requiredInstalledSHA256 = map[string]struct{}{
 var requiredSSHD = map[string]string{
 	"trustedusercakeys":            "/etc/ssh/boxwarden/active/trusted-user-ca.pub",
 	"authorizedprincipalsfile":     "/etc/ssh/boxwarden/active/authorized_principals/%u",
-	"authorizedkeysfile":           "none",
+	"authorizedkeysfile":           ".ssh/authorized_keys",
 	"permituserenvironment":        "no",
 	"permituserrc":                 "no",
 	"passwordauthentication":       "no",

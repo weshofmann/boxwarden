@@ -59,7 +59,7 @@ autoinstall:
       KbdInteractiveAuthentication no
       PermitRootLogin no
       PubkeyAuthentication yes
-      AuthorizedKeysFile none
+      AuthorizedKeysFile .ssh/authorized_keys
       TrustedUserCAKeys /etc/ssh/boxwarden/active/trusted-user-ca.pub
       AuthorizedPrincipalsFile /etc/ssh/boxwarden/active/authorized_principals/%u
       AllowAgentForwarding no
@@ -72,7 +72,7 @@ autoinstall:
       PermitUserRC no
       EOF
     - install -d -o root -g root -m 0755 /target/usr/local/libexec
-    - "printf '%s  %s\\n' 'b350cc7fe6d861f39107b4922b4f8987e56e687c7c802dfe8c106fec71f7df60' '/cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap' | sha256sum -c -"
+    - "printf '%s  %s\\n' '3d22d6d1a65928306fb095c4e4870de72e82dc0d4db6ec978cd7723884914e16' '/cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap' | sha256sum -c -"
     - install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap /target/usr/local/libexec/boxwarden-guest-bootstrap
     - "printf '%s  %s\\n' '__BOXWARDEN_FINALIZER_SHA256__' '/cdrom/boxwarden-artifacts/finalize-golden.sh' | sha256sum -c -"
     - install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/finalize-golden.sh /target/usr/local/libexec/boxwarden-finalize-golden

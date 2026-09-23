@@ -121,7 +121,7 @@ cat >"${sshd_good}" <<'EOF'
 pubkeyauthentication yes
 trustedusercakeys /etc/ssh/boxwarden/active/trusted-user-ca.pub
 authorizedprincipalsfile /etc/ssh/boxwarden/active/authorized_principals/%u
-authorizedkeysfile none
+authorizedkeysfile .ssh/authorized_keys
 permituserenvironment no
 permituserrc no
 passwordauthentication no
@@ -188,6 +188,14 @@ run_firstboot() {
 good="$test_dir/good"
 make_fixture "$good"
 run_finalizer "$good" >"$test_dir/good.out" || fail 'finalizer rejected a valid candidate fixture'
+
+builder_ssh="$test_dir/builder-ssh"
+make_fixture "$builder_ssh"
+mkdir -p "$builder_ssh/root/.ssh" "$builder_ssh/home/boxwarden/.ssh"
+printf '%s\n' 'builder-root-key' >"$builder_ssh/root/.ssh/authorized_keys"
+printf '%s\n' 'builder-workstation-key' >"$builder_ssh/home/boxwarden/.ssh/authorized_keys"
+run_finalizer "$builder_ssh" >"$test_dir/builder-ssh.out" || fail 'finalizer rejected removable builder SSH state'
+[[ ! -e "$builder_ssh/root/.ssh" && ! -e "$builder_ssh/home/boxwarden/.ssh" ]] || fail 'builder SSH authentication state survived finalization'
 [[ "$(awk -F: '$1=="boxwarden" {print $2}' "$good/etc/shadow")" == '!' ]] || fail 'build password verifier survived'
 [[ ! -e "$good/etc/shadow-" ]] || fail 'shadow backup retained build password verifier'
 [[ ! -e "$good/var/backups/shadow.bak" ]] || fail 'periodic shadow backup retained build password verifier'
@@ -265,7 +273,7 @@ if run_finalizer "$wrong_helper" >"$test_dir/wrong-helper.out" 2>&1; then fail '
 
 bad_sshd="$test_dir/bad-sshd"
 make_fixture "$bad_sshd"
-sed 's/^authorizedkeysfile none$/authorizedkeysfile .ssh\/authorized_keys/' "$sshd_good" >"$test_dir/sshd-bad"
+sed 's#^authorizedkeysfile .ssh/authorized_keys$#authorizedkeysfile none#' "$sshd_good" >"$test_dir/sshd-bad"
 if BW_TEST_SSHD_OUTPUT="$test_dir/sshd-bad" run_finalizer "$bad_sshd" >"$test_dir/bad-sshd.out" 2>&1; then fail 'weak sshd policy was admitted'; fi
 [[ ! -e "$bad_sshd/var/lib/boxwarden/golden-clone-ready" ]] || fail 'weak sshd produced clone-ready marker'
 

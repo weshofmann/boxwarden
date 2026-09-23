@@ -23,7 +23,9 @@ Strict SSH uses absolute `/usr/bin/ssh`, `-F /dev/null`, exact generation
 alias-keyed exact `UserKnownHostsFile`, `GlobalKnownHostsFile=/dev/null`,
 `StrictHostKeyChecking=yes`, `CheckHostIP=no`, `BatchMode=yes`,
 `IdentitiesOnly=yes`, `IdentityAgent=none`,
-`HostKeyAlgorithms=ssh-ed25519`, `UpdateHostKeys=no`,
+`HostKeyAlgorithms=ssh-ed25519`,
+`PubkeyAcceptedAlgorithms=ssh-ed25519-cert-v01@openssh.com`,
+`UpdateHostKeys=no`,
 `VerifyHostKeyDNS=no`, `CanonicalizeHostname=no`, `ProxyCommand=none`,
 `ProxyJump=none`, `ControlMaster=no`, `ControlPath=none`, `RequestTTY=no`,
 `PasswordAuthentication=no`, `KbdInteractiveAuthentication=no`,
@@ -33,7 +35,13 @@ command is `/usr/bin/sudo -n -- /usr/local/libexec/boxwarden-guest-bootstrap man
 Only typed fixed request shapes for `probe`, `timezone-apply`, and
 `timezone-read` travel separately on stdin—there is no generic argv API. Guest
 sshd verification checks `PermitUserEnvironment no`, `PermitUserRC no`,
-forwarding/tunnel and CA/principal paths, and `AuthorizedKeysFile none`;
+forwarding/tunnel and CA/principal paths, and the generic
+`AuthorizedKeysFile .ssh/authorized_keys` baseline;
 `PermitLocalCommand=no` remains a client option, not a server field.
+The client accepts only the certificate algorithm for its own authentication,
+so the generation's raw key cannot become a fallback if its certificate is
+rejected. This does not prevent the guest owner from adding separate keys for
+guest-local access. The current live bootstrap still requires the other strict
+effective sshd defaults; changing those settings makes management non-ready.
 First-connection TOFU, changed-key acceptance, cross-domain fallback, and
 `StrictHostKeyChecking=no` are prohibited.

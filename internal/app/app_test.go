@@ -68,6 +68,36 @@ func TestBackendFactoryBindsRegisterCreateAndStatusToAdmittedConfigAndDomain(t *
 	}
 }
 
+func TestAlphaRecipeCheckRequiresExactDomainAndInstaller(t *testing.T) {
+	configPath, _ := writeV2DomainFixture(t, "alpha")
+	recipePath := filepath.Join(t.TempDir(), "recipe.json")
+	recipeData := `{"version":1,"source":{"kind":"ubuntu-24.04.4-desktop-arm64","sha256":"c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"},"machine":{"cpus":4,"memory_mib":4096,"system_disk_gib":30}}`
+	if err := os.WriteFile(recipePath, []byte(recipeData), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	isoPath := filepath.Join(t.TempDir(), "wrong.iso")
+	if err := os.WriteFile(isoPath, []byte("wrong"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, prefix := range map[string][]string{
+		"missing-domain": {"--config", configPath},
+		"unknown-domain": {"--config", configPath, "--domain", "other"},
+		"wrong-iso":      {"--config", configPath, "--domain", "alpha"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var output bytes.Buffer
+			args := append(append([]string(nil), prefix...), "alpha", "recipe", "check", "--recipe", recipePath, "--iso", isoPath)
+			if err := Run(context.Background(), args, Options{Output: &output}); err == nil || output.Len() != 0 {
+				t.Fatalf("unverified recipe succeeded or emitted success: err=%v output=%q", err, output.String())
+			}
+		})
+	}
+	parsed, err := parseCommand([]string{"--config", configPath, "--domain", "alpha", "alpha", "recipe", "check", "--recipe", recipePath, "--iso", isoPath}, Options{})
+	if err != nil || parsed.kind != commandAlphaRecipeCheck || parsed.domain != "alpha" || parsed.recipePath != recipePath || parsed.isoPath != isoPath {
+		t.Fatalf("alpha recipe command = %+v, %v", parsed, err)
+	}
+}
+
 func TestBackendFactoryIsUnreachableForInvalidInputAndOtherCommands(t *testing.T) {
 	path, _ := writeV2DomainFixture(t, "work")
 	for _, args := range [][]string{

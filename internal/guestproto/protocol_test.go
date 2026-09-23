@@ -314,7 +314,13 @@ func (r *fakeRunner) Run(_ context.Context, path string, args ...string) ([]byte
 	return []byte(r.output), nil
 }
 func sshdOutput() string {
-	return strings.Join([]string{"trustedusercakeys /etc/ssh/boxwarden/active/trusted-user-ca.pub", "authorizedprincipalsfile /etc/ssh/boxwarden/active/authorized_principals/%u", "authorizedkeysfile none", "permituserenvironment no", "permituserrc no", "passwordauthentication no", "kbdinteractiveauthentication no", "permitrootlogin no", "x11forwarding no", "allowagentforwarding no", "allowtcpforwarding no", "allowstreamlocalforwarding no", "gatewayports no", "permittunnel no", ""}, "\n")
+	return strings.Join([]string{"pubkeyauthentication yes", "trustedusercakeys /etc/ssh/boxwarden/active/trusted-user-ca.pub", "authorizedprincipalsfile /etc/ssh/boxwarden/active/authorized_principals/%u", "authorizedkeysfile .ssh/authorized_keys", "permituserenvironment no", "permituserrc no", "passwordauthentication no", "kbdinteractiveauthentication no", "permitrootlogin no", "x11forwarding no", "allowagentforwarding no", "allowtcpforwarding no", "allowstreamlocalforwarding no", "gatewayports no", "permittunnel no", ""}, "\n")
+}
+
+func TestVerifySSHDAllowsWorkstationAuthorizedKeys(t *testing.T) {
+	if _, err := NewBootstrapper(t.TempDir(), &fakeRunner{output: sshdOutput()}).verifySSHD(context.Background()); err != nil {
+		t.Fatalf("workstation authorized_keys blocked management bootstrap: %v", err)
+	}
 }
 
 // This fails if removing or changing any golden-set effective sshd guard is

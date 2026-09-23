@@ -1,5 +1,21 @@
 # Boxwarden agent invariants
 
+## v0.2 alpha branch scope
+
+The owner-approved v0.2 alpha mission is recorded in `docs/v0.2/alpha-mission.md`.
+For this branch, implement one supported Ubuntu Desktop ARM64 recipe with
+automatic prepared-base reuse, named persistent sandboxes, and independent
+Boxwarden-managed workspace disk files. A workspace disk is attached to one
+stopped sandbox at a time with one writable owner; it is not host filesystem
+sharing. The normal alpha workflow must not require manual golden registration.
+Owner-added guest SSH public keys may coexist with Boxwarden's certificate-only,
+host-key-pinned management client. These v0.2 scope choices supersede the
+v0.1-only exclusions below for this branch. Preserve the guest-root threat
+model, admitted Tart/Softnet host boundary, exact ownership, data safety,
+private-network restrictions, and evidence requirements. Do not claim a
+capability has been implemented or qualified merely because this scope permits
+it.
+
 - The repository is a host-neutral framework for disposable AI-agent workstations. M1A uses Tart as the security boundary on macOS; future backends must satisfy the same policy properties. Boxwarden does not prescribe guest workload execution: native processes, language runtimes, Docker, Podman, other guest-local runtimes, and no runtime are all compatible with the model. OCI is an optional portability format, not a substitute for VM isolation.
 - The explicit agent workstation account has full control of its disposable guest, including unrestricted passwordless sudo. Backend containment must hold against a malicious guest root; do not treat sudoers restrictions, guest firewall state, routes, or other guest-enforced policy as a host security boundary.
 - MVP uses one private supervisor-owned Tart serial PTY for a fixed bootstrap exchange followed by continuous bounded draining. Guest `hvc0` automatically logs in the workstation account so the fixed guest helper can run with passwordless sudo. ADR 017 is amended: retained recovery-console UX, GNU Screen, a second/operator PTY, console leases, and generalized console arbitration are deferred. `serialx` exclusively creates and cleans `<generation>/serial/`; never pre-create or adopt that subtree. Restrict the slave to mode `0600` and runtime directories to `0700`; never expose this channel over a network or share it with another guest.

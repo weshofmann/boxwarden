@@ -103,7 +103,7 @@ func (helperRunner) Run(_ context.Context, path string, args ...string) ([]byte,
 		return nil, nil
 	}
 	if len(args) == 3 && args[0] == "-T" {
-		return []byte("trustedusercakeys /etc/ssh/boxwarden/active/trusted-user-ca.pub\nauthorizedprincipalsfile /etc/ssh/boxwarden/active/authorized_principals/%u\nauthorizedkeysfile none\npermituserenvironment no\npermituserrc no\npasswordauthentication no\nkbdinteractiveauthentication no\npermitrootlogin no\nx11forwarding no\nallowagentforwarding no\nallowtcpforwarding no\nallowstreamlocalforwarding no\ngatewayports no\npermittunnel no\n"), nil
+		return []byte("trustedusercakeys /etc/ssh/boxwarden/active/trusted-user-ca.pub\nauthorizedprincipalsfile /etc/ssh/boxwarden/active/authorized_principals/%u\nauthorizedkeysfile .ssh/authorized_keys\npermituserenvironment no\npermituserrc no\npasswordauthentication no\nkbdinteractiveauthentication no\npermitrootlogin no\nx11forwarding no\nallowagentforwarding no\nallowtcpforwarding no\nallowstreamlocalforwarding no\ngatewayports no\npermittunnel no\n"), nil
 	}
 	return nil, errors.New("unexpected sshd arguments")
 }
