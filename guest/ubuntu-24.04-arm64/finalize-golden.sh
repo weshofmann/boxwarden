@@ -6,7 +6,7 @@
 set -euo pipefail
 
 readonly acknowledgement="--acknowledge-generic-golden-finalization"
-readonly helper_sha256="c6d605ab9c1525000191bdaf8d1f13e380f950568896936e051453f6c2ee4e69"
+readonly helper_sha256="6de9793392144adf6c06bb92c41527337cdeb0cab14a398a27a70a5bb477685c"
 
 die() { printf 'generic golden finalization: %s\n' "$*" >&2; exit 1; }
 
