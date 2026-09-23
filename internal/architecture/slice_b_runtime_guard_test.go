@@ -38,6 +38,7 @@ func TestSliceCPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
 		{"alternate PTY provider", "internal/backend/terminal.go", `package backend; import terminal "github.com/creack/pty"; func f() { _, _, _ = terminal.Open() }`, "alternate PTY provider"},
 		{"renamed SSH wrapper", "internal/backend/start.go", `package backend; import trust "github.com/weshofmann/boxwarden/internal/sshx"; func f() { trust.EstablishManagement() }`, "unapproved foundation selector"},
 		{"renamed bootstrap wrapper", "internal/lifecycle/start.go", `package lifecycle; import serialtransport "github.com/weshofmann/boxwarden/internal/serialx"; func f() { serialtransport.RunBootstrap() }`, "unapproved foundation selector"},
+		{"installer serial outside builder", "internal/backend/start.go", `package backend; import serialtransport "github.com/weshofmann/boxwarden/internal/serialx"; func f() { serialtransport.CreateInstallerRuntime() }`, "unapproved foundation selector"},
 		{"blank foundation import", "internal/backend/start.go", `package backend; import _ "github.com/weshofmann/boxwarden/internal/sshx"`, "unsupported foundation import"},
 		{"dot foundation import", "internal/lifecycle/start.go", `package lifecycle; import . "github.com/weshofmann/boxwarden/internal/serialx"`, "unsupported foundation import"},
 		{"alternate process field", "internal/backend/state.go", `package backend; type State struct { ProcessID int }`, "persisted process authority"},
@@ -397,6 +398,9 @@ func sliceBFoundation(importPath string) (string, bool) {
 }
 
 func allowedFoundationSelector(path, foundation, selector string) bool {
+	if foundation == "serialx" && selector == "CreateInstallerRuntime" {
+		return path == "internal/basebuild/installer_launcher.go"
+	}
 	allowed := map[string]map[string]bool{
 		"guestproto": {
 			"Association":         true,

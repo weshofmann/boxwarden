@@ -13,13 +13,28 @@ type Command struct {
 }
 
 func RenderCommand(request RenderRequest) (Command, error) {
-	if request.RunID != "run-1" && request.RunID != "run-2" {
+	if !validRunID(request.RunID) {
 		return Command{}, errors.New("unsupported guest build run ID")
 	}
 	if !absoluteClean(request.GuestDefinitionRoot) || !absoluteClean(request.VerifierFile) || !absoluteClean(request.OutputDirectory) {
 		return Command{}, errors.New("render paths must be canonical and absolute")
 	}
 	return Command{Path: filepath.Join(request.GuestDefinitionRoot, "render-golden-seed.sh"), Args: []string{request.RunID, request.VerifierFile, request.OutputDirectory}}, nil
+}
+
+func validRunID(value string) bool {
+	if value == "run-1" || value == "run-2" {
+		return true
+	}
+	if len(value) != len("run-")+12 || value[:4] != "run-" {
+		return false
+	}
+	for _, c := range value[4:] {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 func RemasterCommand(request RemasterRequest) (Command, error) {

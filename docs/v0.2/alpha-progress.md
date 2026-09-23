@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-23 19:09 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-23 19:14 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -10,13 +10,13 @@ resumable handoff if unfinished.
 | --- | --- | --- |
 | Baseline | verified | Clean `e16f23962b43337f02de1fbe2779df00a28f3f1a`; `weshofmann/feature/v02-alpha` isolated worktree |
 | Host admission | verified | Elevated read-only doctor: `status: healthy` on original and alpha-only configs |
-| Source verification | verified with limits | Full local Go tests and vet passed before the current builder and qualifier edits; targeted formatter, managed-disk, and inspector checks passed before their respective commits. The current in-flight tree has not had a clean full-suite result. Hosted CI is unavailable |
+| Source verification | verified with limits | Full local Go tests and vet passed at the 19:14 UTC working-tree snapshot, including current uncommitted qualifier source. Targeted builder race tests, vet, and guest seed fixture pass for this checkpoint; targeted formatter, managed-disk, and inspector checks passed before their respective commits. Hosted CI is unavailable |
 | VM inventory | verified | Admitted `TART_HOME` has eight stopped alpha-owned objects plus one protected stopped historical object; exact names and states are in the private ownership manifest |
 | Alpha ownership | prepared | Exact resource paths and identities are retained only in the private ownership manifest |
 | Installer input | verified | Ubuntu 24.04.4 ARM64 Desktop ISO: good Canonical detached signature and exact `c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe` SHA-256; private cache only |
 | Recipe schema | source implemented | Versioned strict JSON loader and exact ISO verification have focused passing tests; no public preparation command yet |
 | Serial bootstrap and READY | real fresh clone verified | Corrected generic r2 candidate and public qualr2c clone completed serial bootstrap, host-key pin, certificate, strict SSH probe, time-zone convergence, READY, stop, restart to READY, and consistent stop. The management fixes are published |
-| Automatic base preparation | source under review, public path missing | Installer launcher, seed/remaster, journal, and admission source passes local tests. Independent review found cache object-identity and input-staging gaps; fixes are in progress before publication. A real qualifier, guest recipe execution, and public CLI integration remain |
+| Automatic base preparation | source verified, public path missing | Installer launcher, seed/remaster, journal, and admission source pass targeted tests. Cache reuse binds a stopped Tart bundle identity; build stages the exact verified ISO and guest definition; installer serial admission checks private ACLs. A real qualifier, guest recipe execution, and public CLI integration remain |
 | Inspector capability | synthetic boot verified, ext4 pending | Pinned Tart has no NIC-off mode. A signed Virtualization.framework guest booted with zero NICs, one read-only synthetic disk, and two serial channels; the guest reported loopback only and returned a typed report. Ext4 inspection and real workspace export remain closed |
 | Graphical sandbox | same-clone GUI verified | Public qualr2c reached READY, GNOME Desktop and Firefox opened through Tart GUI, and Nautilus showed synthetic `bw-alpha-system-persist-r2c` in guest home after stop/restart. This is system-disk persistence only. No guest agent account sign-in or recipe-installed application has been observed |
 | Workspace lifecycle | source foundation published, real path missing | Volume-owned record, attachment/use transitions, private format journal, Linux ARM64 ext4 helper, and retained exact Tart disk/lock leases have targeted tests. Guest formatter VM adapter, public attach/rebuild/reattach, and fresh synthetic qualification remain |
@@ -59,11 +59,10 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 
 ## Next executable action
 
-Resolve the independently reviewed base-cache identity, immutable input,
-and serial ACL gaps; publish that coherent builder checkpoint. Extend the
-zero-NIC inspector from synthetic block/serial proof to read-only ext4
-inspection. Then wire fresh-clone qualification and public recipe launch while
-advancing the formatter VM adapter and workspace lifecycle. The current r2 engineering candidate predates
+Complete the fresh-clone qualifier and guest-only recipe software execution,
+then wire public automatic preparation. Extend the zero-NIC inspector from
+synthetic block/serial proof to read-only ext4 inspection while advancing the
+formatter VM adapter and workspace lifecycle. The current r2 engineering candidate predates
 the builder's changed tracked definition and cannot qualify its cache key.
 Serial text is evidence of the finalizer exchange, not an attestation.
 Before each further VM mutation, reread the private ownership manifest,

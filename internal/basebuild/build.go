@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +36,9 @@ const (
 	PhaseFinalizing       Phase = "finalizing"
 	PhaseStopping         Phase = "stopping"
 	PhaseCandidateStopped Phase = "candidate-stopped"
+	PhaseQualifying       Phase = "qualifying"
+	PhaseAdmissionPending Phase = "admission-pending"
+	PhaseAdmitted         Phase = "admitted"
 	PhaseFailed           Phase = "failed"
 )
 
@@ -49,11 +53,13 @@ type Inputs struct {
 }
 
 type Attempt struct {
-	Version        int    `json:"version"`
-	CandidateID    string `json:"candidate_id"`
-	PreparationKey string `json:"preparation_key"`
-	Phase          Phase  `json:"phase"`
-	Failure        string `json:"failure,omitempty"`
+	Version           int                   `json:"version"`
+	CandidateID       string                `json:"candidate_id"`
+	PreparationKey    string                `json:"preparation_key"`
+	Phase             Phase                 `json:"phase"`
+	Failure           string                `json:"failure,omitempty"`
+	Qualification     *QualificationReceipt `json:"qualification,omitempty"`
+	CandidateIdentity string                `json:"candidate_identity,omitempty"`
 }
 
 type Result struct {
@@ -69,9 +75,11 @@ type CandidateState string
 
 const CandidateStopped CandidateState = "stopped-unqualified"
 
-// Checks verifies the exact ISO and tracked guest definition and returns the
-// recipe preparation key. RecipeChecks is the production implementation.
-type Checks interface{ Verify(Inputs) (string, error) }
+// Checks verifies source intent and stages the exact bytes used by the build.
+type Checks interface {
+	Verify(Inputs) (string, error)
+	Stage(context.Context, Inputs, string, string) (Inputs, error)
+}
 
 type RecipeChecks struct{}
 
@@ -84,6 +92,21 @@ func (RecipeChecks) Verify(in Inputs) (string, error) {
 		return "", err
 	}
 	return recipe.PreparationKey(in.Recipe, digest)
+}
+
+func (c RecipeChecks) Stage(ctx context.Context, in Inputs, attemptDir, expectedKey string) (Inputs, error) {
+	staged, err := stageBuildInputs(ctx, in, attemptDir)
+	if err != nil {
+		return Inputs{}, err
+	}
+	key, err := c.Verify(staged)
+	if err != nil {
+		return Inputs{}, fmt.Errorf("verify staged build inputs: %w", err)
+	}
+	if key != expectedKey {
+		return Inputs{}, errors.New("staged build inputs differ from verified preparation key")
+	}
+	return staged, nil
 }
 
 // SeedBuilder is deliberately separate from the guest recipe. Its verifier
@@ -118,6 +141,7 @@ type ConfigureRequest struct {
 }
 type InstallerRequest struct {
 	CandidateID     string
+	RunID           string
 	ISOPath         string
 	SerialDirectory string
 }
@@ -182,10 +206,20 @@ func Build(ctx context.Context, in Inputs, deps Dependencies) (result Result, er
 		}
 	}()
 	setPhase := func(phase Phase) error { state.Phase = phase; return writeAttempt(attemptDir, state) }
+	staged, err := deps.Checks.Stage(ctx, in, attemptDir, key)
+	if err != nil {
+		return Result{}, fmt.Errorf("stage exact build inputs: %w", err)
+	}
+	if staged.ISOPath == "" || staged.GuestDefinitionRoot == "" {
+		return Result{}, errors.New("staged build inputs are incomplete")
+	}
 
 	verifier, err := deps.Seed.BuilderVerifier(ctx, attemptDir)
 	if privateVerifierPath(attemptDir, verifier) {
 		defer func() {
+			if errors.Is(err, ErrScriptReapUnproven) {
+				return // An unproven script may still be reading this staging input.
+			}
 			if removeErr := os.Remove(verifier); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
 				result = Result{}
 				err = errors.Join(err, fmt.Errorf("remove temporary builder verifier: %w", removeErr))
@@ -199,11 +233,11 @@ func Build(ctx context.Context, in Inputs, deps Dependencies) (result Result, er
 		return Result{}, err
 	}
 	seedDir := filepath.Join(attemptDir, "seed")
-	if err := deps.Seed.Render(ctx, RenderRequest{GuestDefinitionRoot: in.GuestDefinitionRoot, RunID: in.RunID, VerifierFile: verifier, OutputDirectory: seedDir}); err != nil {
+	if err := deps.Seed.Render(ctx, RenderRequest{GuestDefinitionRoot: staged.GuestDefinitionRoot, RunID: in.RunID, VerifierFile: verifier, OutputDirectory: seedDir}); err != nil {
 		return Result{}, fmt.Errorf("render installer seed: %w", err)
 	}
 	installerISO := filepath.Join(attemptDir, "installer.iso")
-	if err := deps.Seed.Remaster(ctx, RemasterRequest{GuestDefinitionRoot: in.GuestDefinitionRoot, SourceISO: in.ISOPath, RenderedUserData: filepath.Join(seedDir, "user-data"), OutputISO: installerISO}); err != nil {
+	if err := deps.Seed.Remaster(ctx, RemasterRequest{GuestDefinitionRoot: staged.GuestDefinitionRoot, SourceISO: staged.ISOPath, RenderedUserData: filepath.Join(seedDir, "user-data"), OutputISO: installerISO}); err != nil {
 		return Result{}, fmt.Errorf("remaster installer: %w", err)
 	}
 	if err := setPhase(PhaseRendered); err != nil {
@@ -228,7 +262,7 @@ func Build(ctx context.Context, in Inputs, deps Dependencies) (result Result, er
 	if err := setPhase(PhaseRunning); err != nil {
 		return Result{}, err
 	}
-	handle, startErr := deps.VM.RunInstaller(ctx, InstallerRequest{CandidateID: in.CandidateID, ISOPath: installerISO, SerialDirectory: filepath.Join(attemptDir, "serial")})
+	handle, startErr := deps.VM.RunInstaller(ctx, InstallerRequest{CandidateID: in.CandidateID, RunID: in.RunID, ISOPath: installerISO, SerialDirectory: filepath.Join(attemptDir, "serial")})
 	if handle == nil {
 		return Result{}, errors.Join(errors.New("installer returned no owned handle"), startErr)
 	}
@@ -293,7 +327,7 @@ func validate(in Inputs, deps Dependencies) error {
 	if deps.VM == nil {
 		return errors.New("candidate VM adapter is required")
 	}
-	if in.RunID != "run-1" && in.RunID != "run-2" {
+	if !validRunID(in.RunID) {
 		return errors.New("unsupported guest build run ID")
 	}
 	if err := backend.ValidateObjectID(in.CandidateID); err != nil {
@@ -395,9 +429,39 @@ func writeAttemptWithHook(dir string, state Attempt, afterCreate func() error) (
 }
 
 func ReadAttempt(dir string) (Attempt, error) {
-	data, err := os.ReadFile(filepath.Join(dir, "attempt.json"))
+	if !absoluteClean(dir) {
+		return Attempt{}, errors.New("attempt directory must be canonical and absolute")
+	}
+	if err := privateStateRoot(dir); err != nil {
+		return Attempt{}, err
+	}
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return Attempt{}, err
+	}
+	defer root.Close()
+	entry, err := root.Lstat("attempt.json")
+	if err != nil {
+		return Attempt{}, err
+	}
+	if err := privateRegular(filepath.Join(dir, "attempt.json"), entry); err != nil {
+		return Attempt{}, err
+	}
+	file, err := root.OpenFile("attempt.json", os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return Attempt{}, err
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !os.SameFile(entry, opened) {
+		return Attempt{}, errors.New("attempt journal changed while opening")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, 4097))
+	if err != nil {
+		return Attempt{}, err
+	}
+	if len(data) > 4096 || int64(len(data)) != entry.Size() {
+		return Attempt{}, errors.New("attempt journal exceeds limit or changed while reading")
 	}
 	var state Attempt
 	if err := json.Unmarshal(data, &state); err != nil {

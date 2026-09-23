@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -12,8 +13,31 @@ import (
 	"github.com/weshofmann/boxwarden/internal/recipe"
 )
 
+type noExtendedACL struct{}
+
+func (noExtendedACL) HasExtendedACL(string) (bool, error) { return false, nil }
+
+func usePortableACLFixture(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "darwin" {
+		return
+	}
+	previous := basebuildACLInspector
+	basebuildACLInspector = noExtendedACL{}
+	t.Cleanup(func() { basebuildACLInspector = previous })
+}
+
 func TestAttemptWriteFailureLeavesCommittedPhaseAndPermitsFailureJournal(t *testing.T) {
+	usePortableACLFixture(t)
 	dir := t.TempDir()
+	var err error
+	dir, err = filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	before := Attempt{Version: 1, CandidateID: "candidate", PreparationKey: strings.Repeat("a", 64), Phase: PhaseRunning}
 	if err := writeAttempt(dir, before); err != nil {
 		t.Fatal(err)
@@ -36,14 +60,44 @@ func TestAttemptWriteFailureLeavesCommittedPhaseAndPermitsFailureJournal(t *test
 	}
 }
 
-type fakeChecks struct{ called int }
+func TestFreshRunIDContract(t *testing.T) {
+	for _, valid := range []string{"run-1", "run-2", "run-0123456789ab"} {
+		if !validRunID(valid) {
+			t.Fatalf("valid run ID rejected: %q", valid)
+		}
+	}
+	for _, invalid := range []string{"run-3", "run-0123456789AB", "run-0123456789a", "run-0123456789abc", "run-0123456789ab/"} {
+		if validRunID(invalid) {
+			t.Fatalf("invalid run ID accepted: %q", invalid)
+		}
+	}
+	if _, err := RenderCommand(RenderRequest{GuestDefinitionRoot: "/private/guest", RunID: "run-0123456789ab", VerifierFile: "/private/hash", OutputDirectory: "/private/seed"}); err != nil {
+		t.Fatalf("fresh run ID could not render: %v", err)
+	}
+}
+
+type fakeChecks struct {
+	called int
+	staged Inputs
+}
 
 func (f *fakeChecks) Verify(Inputs) (string, error) {
 	f.called++
 	return strings.Repeat("a", 64), nil
 }
 
-type fakeSeed struct{ events *[]string }
+func (f *fakeChecks) Stage(_ context.Context, in Inputs, _ string, _ string) (Inputs, error) {
+	if f.staged.ISOPath != "" {
+		return f.staged, nil
+	}
+	return in, nil
+}
+
+type fakeSeed struct {
+	events      *[]string
+	renderReq   *RenderRequest
+	remasterReq *RemasterRequest
+}
 
 func (f fakeSeed) BuilderVerifier(_ context.Context, attemptDir string) (string, error) {
 	*f.events = append(*f.events, "verifier")
@@ -53,21 +107,55 @@ func (f fakeSeed) BuilderVerifier(_ context.Context, attemptDir string) (string,
 	}
 	return path, nil
 }
-func (f fakeSeed) Render(context.Context, RenderRequest) error {
+func (f fakeSeed) Render(_ context.Context, req RenderRequest) error {
 	*f.events = append(*f.events, "render")
+	if f.renderReq != nil {
+		*f.renderReq = req
+	}
 	return nil
 }
-func (f fakeSeed) Remaster(context.Context, RemasterRequest) error {
+func (f fakeSeed) Remaster(_ context.Context, req RemasterRequest) error {
 	*f.events = append(*f.events, "remaster")
+	if f.remasterReq != nil {
+		*f.remasterReq = req
+	}
 	return nil
 }
 
+func TestBuildPassesStagedSourcesToSeedBuilder(t *testing.T) {
+	usePortableACLFixture(t)
+	in := exampleInputs(t)
+	events := []string{}
+	staged := in
+	staged.ISOPath = filepath.Join(in.AttemptRoot, in.AttemptID, "source.iso")
+	staged.GuestDefinitionRoot = filepath.Join(in.AttemptRoot, in.AttemptID, "guest-definition")
+	checks := &fakeChecks{staged: staged}
+	var render RenderRequest
+	var remaster RemasterRequest
+	seed := fakeSeed{events: &events, renderReq: &render, remasterReq: &remaster}
+	vm := &fakeVM{events: &events, run: &fakeRun{events: &events}}
+	if _, err := Build(context.Background(), in, Dependencies{Checks: checks, Seed: seed, VM: vm}); err != nil {
+		t.Fatal(err)
+	}
+	if render.GuestDefinitionRoot != staged.GuestDefinitionRoot || remaster.GuestDefinitionRoot != staged.GuestDefinitionRoot || remaster.SourceISO != staged.ISOPath {
+		t.Fatalf("builder consumed original source paths: render=%+v remaster=%+v", render, remaster)
+	}
+}
+
 type fakeVM struct {
-	events *[]string
-	state  backend.ObjectState
-	exists bool
-	run    *fakeRun
-	failAt string
+	events   *[]string
+	state    backend.ObjectState
+	exists   bool
+	run      *fakeRun
+	failAt   string
+	identity string
+}
+
+func (f *fakeVM) CandidateIdentity(_ context.Context, _ string) (string, error) {
+	if f.identity == "" {
+		return strings.Repeat("b", 64), nil
+	}
+	return f.identity, nil
 }
 
 func (f *fakeVM) Observe(_ context.Context, id string) (backend.Observation, error) {
@@ -144,6 +232,7 @@ func (f *fakeRun) Wait(context.Context) error {
 
 func exampleInputs(t *testing.T) Inputs {
 	t.Helper()
+	usePortableACLFixture(t)
 	root := t.TempDir()
 	var err error
 	root, err = filepath.EvalSymlinks(root)

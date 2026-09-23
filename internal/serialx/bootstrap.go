@@ -22,6 +22,9 @@ const (
 // Bootstrap performs the runtime's only exchange, using a fixed helper and one
 // canonical request line. The pump alone reads and validates the response.
 func (r *Runtime) Bootstrap(ctx context.Context, request guestproto.SerialRequest) (guestproto.SerialResult, error) {
+	if r.installer != nil {
+		return guestproto.SerialResult{}, fmt.Errorf("installer serial runtime cannot perform session bootstrap")
+	}
 	if err := ctx.Err(); err != nil {
 		return guestproto.SerialResult{}, err
 	}
