@@ -14,6 +14,7 @@ type StartRequest struct {
 	ObjectID            string
 	SerialDevice        string
 	GenerationDirectory string
+	ManagedDisks        *ManagedDiskSet
 }
 
 // Handle owns the exact process lifetime created by a successful start.
@@ -45,6 +46,11 @@ func ValidateStartRequest(request StartRequest) error {
 	}
 	if !canonicalAbsolutePath(request.GenerationDirectory) {
 		return fmt.Errorf("generation directory must be canonical and absolute")
+	}
+	if request.ManagedDisks != nil {
+		if err := request.ManagedDisks.ValidateForStart(request); err != nil {
+			return fmt.Errorf("managed disk launch admission: %w", err)
+		}
 	}
 	return nil
 }

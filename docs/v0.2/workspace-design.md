@@ -1,7 +1,9 @@
 # Independent workspace disks: alpha contract
 
-Status: design reviewed on 2026-09-23; implementation and real VM proof are
-pending. The existing v0.1 session record is not a workspace registry.
+Status: design reviewed on 2026-09-23. Volume records, formatter journal, and
+an unwired backend attachment lease exist; lifecycle integration and real VM
+proof remain pending. The existing v0.1 session record is not a workspace
+registry.
 
 ## Ownership model
 
@@ -33,6 +35,30 @@ size and device/inode identity. Reject symlink/hard-link replacement, unresolved
 operations, duplicate volume IDs or overlapping guest mount paths. The
 backend accepts a bounded typed list of managed disk files; it does not accept
 arbitrary `--disk` operands or host devices from a guest or recipe.
+
+The backend transport now accepts at most four one-use managed raw-file leases.
+Every lease in one launch must name the same state root and security domain.
+Each lease binds a UUID-derived path below a private state root, one opened
+regular 0600 file with exact device/inode/length, no extended ACL, the live
+`volume-<domain>-<volume UUID>` advisory lock under the same exact state root
+(including the root, lock-directory, and lock-file identities, owner-private
+modes, and absence of ACLs), and one Tart object/generation.
+The path cannot contain `:`, which Tart 2.32.1 parses as an option delimiter.
+The launcher passes `--disk` and that path as separate argv elements, with no
+sync or read-only option; this is the intended writable workspace attachment.
+The retained handle holds the file and lock through exact Tart process reap,
+including failed launches that returned a handle. Spawn failure closes both.
+Canceled or unverifiable waits retain them. The durable `Use` reservation still
+requires a later backend-stopped observation before it can be cleared.
+
+No public session launch supplies these leases yet. Common lifecycle code must
+coordinate session/storage/use locking, compare the exact `Use` reservation,
+attachment, disk identity, and verified formatter journal, then transfer the
+lease to the backend. Current volume transitions do not acquire volume-use
+locks, so this coordination needs an explicit lock-order design before wiring.
+The host file descriptor pins identity for admission, but Tart opens the path
+itself; trusted-host code must recheck immediately before launch. A malicious
+same-UID host process racing after the check is outside the guest-root boundary.
 
 ## Lifecycle
 

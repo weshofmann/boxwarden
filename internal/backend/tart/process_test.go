@@ -2,14 +2,64 @@ package tart
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
 )
+
+func TestOwnedProcessChildObservesExactDiskArgv(t *testing.T) {
+	if !supportsOwnedProcessGroups() {
+		t.Skip("owned Tart process groups are Darwin-only")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "argv.json")
+	want := []string{"-test.run=^TestOwnedProcessArgvChild$", "--", "run", "--disk", "/private/state with spaces/volumes/00112233-4455-4677-8899-aabbccddeeff.raw", "boxwarden-work-dev"}
+	handle, err := (osProcessStarter{}).start(context.Background(), processSpec{
+		path: executable, args: want, env: []string{"BOXWARDEN_TEST_ARGV_OUTPUT=" + output}, dir: "/",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := handle.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var observed []string
+	if err := json.Unmarshal(raw, &observed); err != nil {
+		t.Fatal(err)
+	}
+	if !sameLifecycleStrings(observed, want) {
+		t.Fatalf("child argv = %#v, want exact elements %#v", observed, want)
+	}
+}
+
+func TestOwnedProcessArgvChild(t *testing.T) {
+	output := os.Getenv("BOXWARDEN_TEST_ARGV_OUTPUT")
+	if output == "" {
+		return
+	}
+	raw, err := json.Marshal(os.Args[1:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(output, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestOwnedProcessUsesRealDirectChildWait(t *testing.T) {
 	if !supportsOwnedProcessGroups() {

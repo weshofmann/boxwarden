@@ -68,13 +68,26 @@ func (l Launcher) Start(ctx context.Context, request backend.StartRequest) (back
 	if l.process == nil {
 		return nil, fmt.Errorf("start Tart: process starter is required")
 	}
+	var disks []*backend.ManagedDiskLifetime
+	if request.ManagedDisks != nil {
+		var err error
+		disks, err = request.ManagedDisks.TakeForStart(request)
+		if err != nil {
+			return nil, fmt.Errorf("start Tart: acquire managed disk lifetimes: %w", err)
+		}
+	}
 	scratch, scratchInfo, err := createScratch(request.GenerationDirectory)
 	if err != nil {
-		return nil, fmt.Errorf("start Tart: %w", err)
+		return nil, errors.Join(fmt.Errorf("start Tart: %w", err), closeManagedDiskLifetimes(disks))
 	}
+	args := []string{"run", "--net-softnet", "--no-audio", "--no-clipboard", "--serial-path", request.SerialDevice}
+	for _, disk := range disks {
+		args = append(args, "--disk", disk.Operand())
+	}
+	args = append(args, request.ObjectID)
 	spec := processSpec{
 		path: l.config.TartPath,
-		args: []string{"run", "--net-softnet", "--no-audio", "--no-clipboard", "--serial-path", request.SerialDevice, request.ObjectID},
+		args: args,
 		env: []string{
 			"PATH=" + l.config.SoftnetBinDir,
 			"HOME=" + l.config.OperatorHome,
@@ -92,9 +105,12 @@ func (l Launcher) Start(ctx context.Context, request backend.StartRequest) (back
 		if err == nil {
 			err = fmt.Errorf("start Tart process: no owned handle returned")
 		}
-		return nil, errors.Join(err, cleanupScratch(scratch, scratchInfo))
+		return nil, errors.Join(err, cleanupScratch(scratch, scratchInfo), closeManagedDiskLifetimes(disks))
 	}
-	owned := &scratchHandle{Handle: handle, path: scratch, info: scratchInfo}
+	owned := backend.Handle(&scratchHandle{Handle: handle, path: scratch, info: scratchInfo})
+	if len(disks) != 0 {
+		owned = &managedDiskHandle{Handle: owned, disks: disks}
+	}
 	if err != nil {
 		// A returned handle remains the sole stop/reap authority even when
 		// startup reports an error after creating the process.
