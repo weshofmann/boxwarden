@@ -25,6 +25,15 @@ func (s *Service) Stop(ctx context.Context, rawName string) (record Record, err 
 	if err != nil {
 		return Record{}, err
 	}
+	transition, err := lock.Acquire(ctx, s.domain.StateRoot, "transition-"+string(domainID)+"-"+string(name))
+	if err != nil {
+		return Record{}, fmt.Errorf("acquire session transition lock: %w", err)
+	}
+	defer func() {
+		if releaseErr := transition.Release(); err == nil && releaseErr != nil {
+			err = fmt.Errorf("release session transition lock: %w", releaseErr)
+		}
+	}()
 	held, err := lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
 	if err != nil {
 		return Record{}, fmt.Errorf("acquire session lock: %w", err)
@@ -76,8 +85,31 @@ func (s *Service) Stop(ctx context.Context, rawName string) (record Record, err 
 			return Record{}, fmt.Errorf("persist stopping intent: %w", err)
 		}
 	}
+	// The owner may need the session lock while ending a volume lease. The
+	// persisted stopping intent prevents a new generation during this wait.
+	if err := held.Release(); err != nil {
+		return Record{}, fmt.Errorf("release session lock before supervisor stop: %w", err)
+	}
 	if err := s.start.Supervisor.Stop(ctx, startBinding(record)); err != nil {
 		return Record{}, fmt.Errorf("stop exact generation: %w", err)
+	}
+	held, err = lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
+	if err != nil {
+		return Record{}, fmt.Errorf("reacquire session lock after supervisor stop: %w", err)
+	}
+	current, err := LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+	if err != nil {
+		return Record{}, fmt.Errorf("reload session after supervisor stop: %w", err)
+	}
+	if !sameStoppedIdentity(record, current) {
+		return Record{}, fmt.Errorf("session binding changed during supervisor stop")
+	}
+	if current.IntendedState != StateStopping && current.IntendedState != StateStopped {
+		return Record{}, fmt.Errorf("session intent changed to %q during supervisor stop", current.IntendedState)
+	}
+	if current.IntendedState == StateStopping && current.StartGeneration != record.StartGeneration ||
+		current.IntendedState == StateStopped && current.StartGeneration != "" {
+		return Record{}, fmt.Errorf("session generation changed during supervisor stop")
 	}
 	observation, err = s.observeExact(ctx, record.Backend.ObjectID)
 	if err != nil {
@@ -86,7 +118,15 @@ func (s *Service) Stop(ctx context.Context, rawName string) (record Record, err 
 	if !observation.Exists || observation.State != backend.ObjectStopped {
 		return Record{}, fmt.Errorf("supervisor stop did not prove exact backend stopped")
 	}
-	return s.persistStopped(record)
+	if current.IntendedState == StateStopped {
+		return current, nil
+	}
+	return s.persistStopped(current)
+}
+
+func sameStoppedIdentity(before, after Record) bool {
+	return before.Domain == after.Domain && before.Name == after.Name && before.ID == after.ID &&
+		before.Mode == after.Mode && before.Backend == after.Backend && before.GoldenRevision == after.GoldenRevision
 }
 
 func (s *Service) persistStopped(record Record) (Record, error) {

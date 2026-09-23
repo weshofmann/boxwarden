@@ -8,8 +8,36 @@ import (
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/backend/fake"
+	"github.com/weshofmann/boxwarden/internal/lock"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
 )
+
+func TestStopReleasesSessionLockDuringSupervisorStop(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	created, err := creator.Create(context.Background(), "dev", ModeClean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	running := saveRunningRecord(t, domainConfig, created)
+	backendFake.SetObservation(backend.Observation{ObjectID: running.Backend.ObjectID, Exists: true, State: backend.ObjectRunning})
+	control := &startSupervisorFake{stop: func(supervisor.Binding) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		held, err := lock.AcquireSession(ctx, domainConfig.StateRoot, "work", "dev")
+		if err != nil {
+			return err
+		}
+		if err := held.Release(); err != nil {
+			return err
+		}
+		backendFake.SetObservation(backend.Observation{ObjectID: running.Backend.ObjectID, Exists: true, State: backend.ObjectStopped})
+		return nil
+	}}
+	service := newStartTestService(domainConfig, backendFake, control, time.Now, nil)
+	if _, err := service.Stop(context.Background(), "dev"); err != nil {
+		t.Fatalf("supervisor stop was blocked by parent session lock: %v", err)
+	}
+}
 
 func TestStopPersistsIntentBeforeExactSupervisorStop(t *testing.T) {
 	domainConfig, backendFake, creator := createFixture(t)

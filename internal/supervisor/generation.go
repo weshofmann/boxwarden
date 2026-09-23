@@ -24,7 +24,9 @@ type exactCleanupResidue struct {
 	directory, request, lock, marker bool
 }
 
-// publishOrAdmitRequest is called under the common session operation lock.
+// Production public starts serialize this publication under the session's
+// transition lock, which spans the long StartExact call while the ordinary
+// session lock is released for child-side volume admission.
 // Stage a complete request and ordinary empty lock before publishing the
 // generation. Never create serial/: that subtree belongs exclusively to serialx.
 func publishOrAdmitRequest(r LaunchRequest) (string, bool, error) {

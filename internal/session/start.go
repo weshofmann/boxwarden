@@ -73,6 +73,15 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 	if err != nil {
 		return Record{}, err
 	}
+	transition, err := lock.Acquire(ctx, s.domain.StateRoot, "transition-"+string(domainID)+"-"+string(name))
+	if err != nil {
+		return Record{}, fmt.Errorf("acquire session transition lock: %w", err)
+	}
+	defer func() {
+		if releaseErr := transition.Release(); err == nil && releaseErr != nil {
+			err = fmt.Errorf("release session transition lock: %w", releaseErr)
+		}
+	}()
 	held, err := lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
 	if err != nil {
 		return Record{}, fmt.Errorf("acquire session lock: %w", err)
@@ -143,9 +152,21 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 				return s.acceptStarted(record, ready)
 			}
 			if !snapshot.SerialHealthy {
+				if releaseErr := held.Release(); releaseErr != nil {
+					return Record{}, fmt.Errorf("release session lock before poisoned-generation stop: %w", releaseErr)
+				}
 				if stopErr := s.start.Supervisor.Stop(ctx, startBinding(record)); stopErr != nil {
 					return Record{}, fmt.Errorf("stop poisoned exact serial generation: %w", stopErr)
 				}
+				held, err = lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
+				if err != nil {
+					return Record{}, fmt.Errorf("reacquire session lock after poisoned-generation stop: %w", err)
+				}
+				current, loadErr := LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+				if loadErr != nil || !sameLaunchIdentity(record, current) || current.IntendedState != StateStarting {
+					return Record{}, fmt.Errorf("poisoned-generation stop changed starting record: %w", loadErr)
+				}
+				record = current
 				stopped, stoppedErr := s.observeExact(ctx, record.Backend.ObjectID)
 				if stoppedErr != nil {
 					return Record{}, fmt.Errorf("prove exact backend stopped before same-generation relaunch: %w", stoppedErr)
@@ -176,11 +197,40 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 		HostConfigPath:    s.start.ConfigPath,
 		SessionRecordName: string(record.Name),
 	}
+	// The exact child may need the same session lock to admit managed volume
+	// leases. Durable starting intent carries authority across this handoff.
+	if err := held.Release(); err != nil {
+		return Record{}, fmt.Errorf("release session lock before supervisor launch: %w", err)
+	}
 	snapshot, err := s.start.Supervisor.StartExact(ctx, request)
 	if err != nil {
 		return Record{}, fmt.Errorf("start exact generation: %w", err)
 	}
-	return s.acceptStarted(record, snapshot)
+	held, err = lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
+	if err != nil {
+		return Record{}, fmt.Errorf("reacquire session lock after supervisor launch: %w", err)
+	}
+	current, err := LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+	if err != nil {
+		return Record{}, fmt.Errorf("reload session after supervisor launch: %w", err)
+	}
+	if !sameLaunchIdentity(record, current) {
+		return Record{}, fmt.Errorf("session launch binding changed during supervisor handoff")
+	}
+	switch current.IntendedState {
+	case StateStarting:
+		return s.acceptStarted(current, snapshot)
+	case StateRunning:
+		return s.reconcileReady(ctx, current)
+	default:
+		return Record{}, fmt.Errorf("session intent changed to %q during supervisor handoff", current.IntendedState)
+	}
+}
+
+func sameLaunchIdentity(before, after Record) bool {
+	return before.Domain == after.Domain && before.Name == after.Name && before.ID == after.ID &&
+		before.Mode == after.Mode && before.Backend == after.Backend &&
+		before.GoldenRevision == after.GoldenRevision && before.StartGeneration == after.StartGeneration
 }
 
 func (s *Service) reconcileReady(ctx context.Context, record Record) (Record, error) {

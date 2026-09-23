@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -10,11 +11,95 @@ import (
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/hostx"
+	"github.com/weshofmann/boxwarden/internal/lock"
 	"github.com/weshofmann/boxwarden/internal/sshx"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
 )
 
 const testStartGeneration = "11111111-2222-4333-8444-555555555555"
+
+func TestStartReleasesSessionLockDuringSupervisorLaunch(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	if _, err := creator.Create(context.Background(), "dev", ModeClean); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	control := &startSupervisorFake{start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		held, err := lock.AcquireSession(ctx, domainConfig.StateRoot, "work", "dev")
+		if err != nil {
+			return supervisor.Snapshot{}, fmt.Errorf("supervisor could not acquire session lock: %w", err)
+		}
+		if err := held.Release(); err != nil {
+			return supervisor.Snapshot{}, err
+		}
+		return startedSnapshot(request.Binding, now), nil
+	}}
+	service := newStartTestService(domainConfig, backendFake, control, func() time.Time { return now }, func() (string, error) { return testStartGeneration, nil })
+	if _, err := service.Start(context.Background(), "dev"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStopCannotPreemptInFlightExactStart(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	if _, err := creator.Create(context.Background(), "dev", ModeClean); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	var service *Service
+	control := &startSupervisorFake{
+		start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			defer cancel()
+			if _, err := service.Stop(ctx, "dev"); !errors.Is(err, context.DeadlineExceeded) {
+				return supervisor.Snapshot{}, fmt.Errorf("stop preempted in-flight exact start: %v", err)
+			}
+			return readySnapshot(request.Binding, now), nil
+		},
+		stop: func(supervisor.Binding) error { return nil },
+	}
+	service = newStartTestService(domainConfig, backendFake, control, func() time.Time { return now }, func() (string, error) { return testStartGeneration, nil })
+	if _, err := service.Start(context.Background(), "dev"); err != nil {
+		t.Fatal(err)
+	}
+	if got := assertStoredState(t, domainConfig, "dev", StateRunning); got.StartGeneration != testStartGeneration || got.Readiness.Status != ReadinessReady {
+		t.Fatalf("started record = %#v", got)
+	}
+}
+
+func TestStartRejectsChangedIntentAfterSupervisorReturns(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	if _, err := creator.Create(context.Background(), "dev", ModeClean); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	control := &startSupervisorFake{start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+		held, err := lock.AcquireSession(context.Background(), domainConfig.StateRoot, "work", "dev")
+		if err != nil {
+			return supervisor.Snapshot{}, err
+		}
+		defer held.Release()
+		current, err := LoadRecord(domainConfig.StateRoot, "work", "dev")
+		if err != nil {
+			return supervisor.Snapshot{}, err
+		}
+		current.IntendedState = StateStopping
+		current.Readiness = ReadinessRecord{Status: ReadinessNotReady}
+		if err := SaveRecord(domainConfig.StateRoot, domainConfig.ID, current); err != nil {
+			return supervisor.Snapshot{}, err
+		}
+		return readySnapshot(request.Binding, now), nil
+	}}
+	service := newStartTestService(domainConfig, backendFake, control, func() time.Time { return now }, func() (string, error) { return testStartGeneration, nil })
+	if _, err := service.Start(context.Background(), "dev"); err == nil {
+		t.Fatal("changed intent was restored to READY")
+	}
+	if got := assertStoredState(t, domainConfig, "dev", StateStopping); got.Readiness.Status != ReadinessNotReady {
+		t.Fatalf("changed intent was overwritten: %#v", got)
+	}
+}
 
 // Production break: moving persistence below StartExact would let a runtime
 // namespace exist without a durable generation to bind or recover it.
@@ -192,6 +277,15 @@ func TestStartingPoisonedSerialStopsAndRelaunchesSameGeneration(t *testing.T) {
 		stop: func(binding supervisor.Binding) error {
 			if binding.Generation != before.StartGeneration {
 				return fmt.Errorf("stopped foreign generation")
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			defer cancel()
+			held, err := lock.AcquireSession(ctx, domainConfig.StateRoot, "work", "dev")
+			if err != nil {
+				return fmt.Errorf("poisoned owner could not acquire session lock: %w", err)
+			}
+			if err := held.Release(); err != nil {
+				return err
 			}
 			backendFake.SetObservation(backend.Observation{ObjectID: created.Backend.ObjectID, Exists: true, State: backend.ObjectStopped})
 			return nil

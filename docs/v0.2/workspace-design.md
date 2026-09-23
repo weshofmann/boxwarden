@@ -21,12 +21,14 @@ so workspace association survives without a transfer between records.
 
 ## Locks and admission
 
-Operations without a volume-use lock acquire session operation locks first, in
-stable name order, then the domain storage operation lock, then the golden lock
-if needed. Volume-only record operations start with storage. Any operation that
-needs a volume-use lock acquires those locks first, in volume UUID order, then
-session locks in stable name order, then storage. Never wait for a volume-use
-lock while holding a session or storage lock: the retained backend lease holds
+Public session start and stop hold an outer per-session transition lock across
+their long supervisor operation. Within that gate, operations without a
+volume-use lock acquire session operation locks first, in stable name order,
+then the domain storage operation lock, then the golden lock if needed.
+Volume-only record operations start with storage. Any operation that needs a
+volume-use lock acquires those locks first, in volume UUID order, then session
+locks in stable name order, then storage. Never wait for a volume-use lock
+while holding a session or storage lock: the retained backend lease holds
 it while stop and use-release may need session and storage locks. Hold each
 volume-use lock for the entire VM/inspector/formatter lifetime through exact
 stop, wait, and reap. A released lock after a supervisor crash does not prove
@@ -93,11 +95,14 @@ be changed before connecting workspace leases:
    freshly observe the exact backend stopped, and clear the matching durable
    `Use`. A crashed owner leaves `Use` set until that same observation succeeds.
 
-This sequence also requires the session start/stop paths to release their
-session lock before waiting for the supervisor and to recheck the exact durable
-generation after reacquisition. The exact-generation supervisor control must
-serialize duplicate starts and stop requests during the handoff. These session
-lifecycle changes are not implemented by the current workspace foundation.
+Session start/stop now release their session lock before waiting for the
+supervisor, then reacquire it and recheck the exact durable generation. Their
+outer transition lock serializes public starts and stops, including a
+poisoned-serial recovery stop, through the handoff. This is a lifecycle
+foundation only: volume reservations, child-side lease admission, and use
+release are not wired into these paths yet. A future volume-enabled start must
+reserve `Use` while the session is still durably stopped, before persisting
+`Starting`; `ReserveUse` deliberately rejects an already starting session.
 The host file descriptor pins identity for admission, but Tart opens the path
 itself; trusted-host code must recheck immediately before launch. A malicious
 same-UID host process racing after the check is outside the guest-root boundary.
