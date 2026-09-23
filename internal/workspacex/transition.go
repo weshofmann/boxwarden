@@ -37,6 +37,18 @@ func Attach(ctx context.Context, stateRoot string, domainID domain.ID, volumeID,
 	if err != nil {
 		return Record{}, err
 	}
+	attached, err := listSessionAttachments(ctx, stateRoot, domainID, target.ID, sessionName)
+	if err != nil {
+		return Record{}, fmt.Errorf("inspect session workspace attachments: %w", err)
+	}
+	if len(attached) >= maxSessionAttachments {
+		return Record{}, fmt.Errorf("session already has %d workspace attachments", maxSessionAttachments)
+	}
+	for _, prior := range attached {
+		if prior.FilesystemUUID == record.FilesystemUUID {
+			return Record{}, fmt.Errorf("session already attaches this filesystem UUID")
+		}
+	}
 	record.Attachment = &Attachment{SessionID: target.ID, SessionName: sessionName, MountPath: mountPath}
 	if err := saveRecordTransition(stateRoot, domainID, record, mutationAttach, nil); err != nil {
 		return Record{}, err

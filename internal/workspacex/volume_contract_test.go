@@ -228,6 +228,45 @@ func TestAttachRejectsOverlappingMountForSameSandbox(t *testing.T) {
 	}
 }
 
+func TestAttachRejectsFifthVolumeAndDuplicateFilesystemUUID(t *testing.T) {
+	for _, test := range []struct {
+		name                string
+		preexisting         int
+		duplicateFilesystem bool
+	}{
+		{name: "fifth volume", preexisting: 4},
+		{name: "duplicate filesystem UUID", preexisting: 1, duplicateFilesystem: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := privateRoot(t)
+			writeStoppedSession(t, root, "dev", testSessionID, "bw-work-dev")
+			for i := 1; i <= test.preexisting; i++ {
+				prior := fixtureRecord()
+				prior.VolumeID = "00000000-0000-4000-8000-00000000000" + string('0'+byte(i))
+				prior.FilesystemUUID = "10000000-0000-4000-8000-00000000000" + string('0'+byte(i))
+				prior.State = StateAvailable
+				prior.Disk = &DiskIdentity{Device: 1, Inode: uint64(i)}
+				prior.Attachment = &Attachment{SessionID: testSessionID, SessionName: "dev", MountPath: "/home/boxwarden/workspaces/prior" + string('0'+byte(i))}
+				writeRawVolumeRecord(t, root, prior.VolumeID, mustJSON(t, prior))
+			}
+			candidate := fixtureRecord()
+			candidate.State = StateAvailable
+			candidate.Disk = &DiskIdentity{Device: 1, Inode: 9}
+			if test.duplicateFilesystem {
+				candidate.FilesystemUUID = "10000000-0000-4000-8000-000000000001"
+			}
+			writeRawVolumeRecord(t, root, candidate.VolumeID, mustJSON(t, candidate))
+			if _, err := Attach(context.Background(), root, domain.ID("work"), candidate.VolumeID, "dev", "/home/boxwarden/workspaces/candidate", stoppedObserver{state: backend.ObjectStopped, object: "bw-work-dev"}); err == nil {
+				t.Fatal("unsafe fifth or duplicate filesystem attachment accepted")
+			}
+			unchanged, err := LoadRecord(root, domain.ID("work"), candidate.VolumeID)
+			if err != nil || unchanged.Attachment != nil {
+				t.Fatalf("failed attach changed candidate: %#v, %v", unchanged, err)
+			}
+		})
+	}
+}
+
 func writeStoppedSession(t *testing.T, root, name, id, object string) {
 	t.Helper()
 	parsed, err := session.ParseName(name)

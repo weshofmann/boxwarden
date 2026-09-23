@@ -20,6 +20,9 @@ rejects corrupt records, mismatched session name/UUID, duplicate filesystem
 UUIDs, overlapping mount paths, and more than four attachments. A
 rebuild preserves the session UUID while replacing its system backend object,
 so workspace association survives without a transfer between records.
+The Attach transition consults that same registry under its held session and
+storage locks, so a fifth or duplicate-filesystem attachment is refused before
+the new binding is persisted.
 
 ## Locks and admission
 
