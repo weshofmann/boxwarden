@@ -228,3 +228,22 @@ func TestHostSeedBuilderRejectsToolDigestDriftBeforeExecution(t *testing.T) {
 		t.Fatalf("verifier created: %v", err)
 	}
 }
+
+func TestHostSeedBuilderChecksBothExecutablesBeforeAttempt(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	openssl, opensslHash := seedTool(t, root, "openssl")
+	xorriso, xorrisoHash := seedTool(t, root, "xorriso")
+	builder := HostSeedBuilder{OpenSSLPath: openssl, OpenSSLSHA256: opensslHash, XorrisoPath: xorriso, XorrisoSHA256: xorrisoHash}
+	if err := builder.CheckTools(); err != nil {
+		t.Fatalf("qualified tools rejected: %v", err)
+	}
+	if err := os.WriteFile(xorriso, []byte("drifted"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := builder.CheckTools(); err == nil {
+		t.Fatal("drifted ISO remaster executable admitted before attempt")
+	}
+}

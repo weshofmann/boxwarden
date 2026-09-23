@@ -32,6 +32,18 @@ type HostSeedBuilder struct {
 	XorrisoSHA256 string
 }
 
+// CheckTools admits both exact host executables before reserving a build
+// attempt. Each use still rechecks its executable to detect later drift.
+func (b HostSeedBuilder) CheckTools() error {
+	if err := exactExecutable(b.OpenSSLPath, "openssl", b.OpenSSLSHA256); err != nil {
+		return fmt.Errorf("SHA-512 crypt producer: %w", err)
+	}
+	if err := exactExecutable(b.XorrisoPath, "xorriso", b.XorrisoSHA256); err != nil {
+		return fmt.Errorf("ISO remaster tool: %w", err)
+	}
+	return nil
+}
+
 func (b HostSeedBuilder) BuilderVerifier(ctx context.Context, attemptDir string) (string, error) {
 	if b.Runner == nil {
 		return "", errors.New("seed command runner is required")

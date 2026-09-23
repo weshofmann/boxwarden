@@ -132,9 +132,12 @@ custom steps.
 
 The corrected generic r2 candidate and a fresh public clone reached READY,
 displayed GNOME and Firefox, and passed same-system stop/restart persistence.
-The source-only installer launcher and Linux formatter helper now exist.
-Resolve builder cache identity, input staging, and serial ACL review findings;
-publish the builder foundation. Then implement fresh qualification and the
-public recipe launch command while proving the zero-NIC inspector and wiring
-the workspace formatter. Qualify rebuild/reattach and controlled export on
-fresh synthetic resources before claiming the alpha ready.
+The source-only installer launcher, prepared-base cache identity, exact input
+staging, serial ACL admission, fixed guest preparation, fresh-clone qualifier,
+typed package inspection, host/CA preflight, and builder composition are
+published. The current r2 candidate predates the latest tracked guest
+definition. Compose the qualification lifecycle and complete guest acceptance
+checks before exposing automatic preparation through the public CLI. Prove
+live zero-NIC ext4 inspection, wire the workspace formatter and lifecycle, and
+qualify rebuild/reattach and controlled export on fresh synthetic resources
+before claiming the alpha ready.
