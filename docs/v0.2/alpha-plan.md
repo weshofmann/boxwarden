@@ -134,10 +134,10 @@ The corrected generic r2 candidate and a fresh public clone reached READY,
 displayed GNOME and Firefox, and passed same-system stop/restart persistence.
 The source-only installer launcher, prepared-base cache identity, exact input
 staging, serial ACL admission, fixed guest preparation, fresh-clone qualifier,
-typed package inspection, host/CA preflight, and builder composition are
-published. The current r2 candidate predates the latest tracked guest
-definition. Compose the qualification lifecycle and complete guest acceptance
-checks before exposing automatic preparation through the public CLI. Prove
+typed package inspection, host/CA preflight, builder composition, and production
+qualification lifecycle composition are published. The current r2 candidate
+predates the latest tracked guest definition. Complete guest acceptance checks
+and join the preparation pieces before exposing the public CLI. Prove
 live zero-NIC ext4 inspection, wire the workspace formatter and lifecycle, and
 qualify rebuild/reattach and controlled export on fresh synthetic resources
 before claiming the alpha ready.
