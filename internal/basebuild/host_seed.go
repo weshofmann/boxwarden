@@ -32,14 +32,34 @@ type HostSeedBuilder struct {
 	XorrisoSHA256 string
 }
 
-// CheckTools admits both exact host executables before reserving a build
-// attempt. Each use still rechecks its executable to detect later drift.
+// CheckTools admits both exact host executables and the capabilities the build
+// needs before reserving an attempt. Each use still rechecks its executable to
+// detect later drift.
 func (b HostSeedBuilder) CheckTools() error {
+	if b.Runner == nil {
+		return errors.New("seed command runner is required")
+	}
 	if err := exactExecutable(b.OpenSSLPath, "openssl", b.OpenSSLSHA256); err != nil {
 		return fmt.Errorf("SHA-512 crypt producer: %w", err)
 	}
 	if err := exactExecutable(b.XorrisoPath, "xorriso", b.XorrisoSHA256); err != nil {
 		return fmt.Errorf("ISO remaster tool: %w", err)
+	}
+	probeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := b.Runner.Run(probeCtx, execx.Command{Path: b.OpenSSLPath, Args: []string{"passwd", "-6", "-stdin"}, Env: []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C"}, Stdin: []byte("boxwarden-preflight-probe\n")})
+	if err != nil {
+		return fmt.Errorf("SHA-512 crypt producer cannot run required mode: %w", err)
+	}
+	if result.Truncated || len(result.Stdout) > 256 || !sha512CryptOutput.MatchString(strings.TrimSuffix(result.Stdout, "\n")) {
+		return errors.New("SHA-512 crypt producer did not return a valid verifier")
+	}
+	result, err = b.Runner.Run(probeCtx, execx.Command{Path: b.XorrisoPath, Args: []string{"-version"}, Env: []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C"}})
+	if err != nil {
+		return fmt.Errorf("ISO remaster tool cannot report its version: %w", err)
+	}
+	if result.Truncated || len(result.Stdout) > 4096 || !strings.Contains(result.Stdout, "xorriso version") {
+		return errors.New("ISO remaster tool returned invalid version output")
 	}
 	return nil
 }

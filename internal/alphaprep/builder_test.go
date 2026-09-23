@@ -1,10 +1,12 @@
 package alphaprep
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/weshofmann/boxwarden/internal/backend/fake"
@@ -12,6 +14,18 @@ import (
 	"github.com/weshofmann/boxwarden/internal/execx"
 	"github.com/weshofmann/boxwarden/internal/hostx"
 )
+
+type fixtureToolProbeRunner struct{}
+
+func (fixtureToolProbeRunner) Run(_ context.Context, command execx.Command) (execx.Result, error) {
+	if filepath.Base(command.Path) == "openssl" && strings.Join(command.Args, "|") == "passwd|-6|-stdin" {
+		return execx.Result{Stdout: "$6$abcdefghijklmnop$" + strings.Repeat("A", 86) + "\n"}, nil
+	}
+	if filepath.Base(command.Path) == "xorriso" && strings.Join(command.Args, "|") == "-version" {
+		return execx.Result{Stdout: "GNU xorriso\nxorriso version : 1.5.8\n"}, nil
+	}
+	return execx.Result{}, fmt.Errorf("unexpected tool probe: %s %v", command.Path, command.Args)
+}
 
 func buildComponentsFixture(t *testing.T) (BuildComponents, hostx.RuntimeExpectation) {
 	t.Helper()
@@ -30,7 +44,7 @@ func buildComponentsFixture(t *testing.T) (BuildComponents, hostx.RuntimeExpecta
 	tart, tartHash := writeTool("tart")
 	openssl, opensslHash := writeTool("openssl")
 	xorriso, xorrisoHash := writeTool("xorriso")
-	components := BuildComponents{Runner: execx.OSRunner{}, Observer: fake.New(), ScriptRunner: basebuild.OSOwnedScriptRunner{}, Launcher: basebuild.OSInstallerLauncher{}, OpenSSLPath: openssl, OpenSSLSHA256: opensslHash, XorrisoPath: xorriso, XorrisoSHA256: xorrisoHash}
+	components := BuildComponents{Runner: fixtureToolProbeRunner{}, Observer: fake.New(), ScriptRunner: basebuild.OSOwnedScriptRunner{}, Launcher: basebuild.OSInstallerLauncher{}, OpenSSLPath: openssl, OpenSSLSHA256: opensslHash, XorrisoPath: xorriso, XorrisoSHA256: xorrisoHash}
 	runtime := hostx.RuntimeExpectation{Manifest: hostx.Manifest{Version: hostx.ManifestVersion, Tart: hostx.ToolIdentity{Path: tart, ExecutableSHA256: tartHash}, Softnet: hostx.ToolIdentity{Path: "/qualified/softnet/softnet"}, Operator: hostx.Operator{Name: "operator", Home: root}, TartHome: filepath.Join(root, "tart-home")}, SoftnetBinDir: "/qualified/softnet"}
 	return components, runtime
 }

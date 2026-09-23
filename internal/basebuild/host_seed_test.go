@@ -41,6 +41,9 @@ func (r *seedCommandRunner) Run(_ context.Context, command execx.Command) (execx
 		}
 	}
 	r.commands = append(r.commands, command)
+	if len(command.Args) == 1 && command.Args[0] == "-version" {
+		return execx.Result{Stdout: "GNU xorriso\nxorriso version : 1.5.8\n"}, nil
+	}
 	return r.result, nil
 }
 
@@ -236,14 +239,34 @@ func TestHostSeedBuilderChecksBothExecutablesBeforeAttempt(t *testing.T) {
 	}
 	openssl, opensslHash := seedTool(t, root, "openssl")
 	xorriso, xorrisoHash := seedTool(t, root, "xorriso")
-	builder := HostSeedBuilder{OpenSSLPath: openssl, OpenSSLSHA256: opensslHash, XorrisoPath: xorriso, XorrisoSHA256: xorrisoHash}
+	runner := &seedCommandRunner{result: execx.Result{Stdout: "$6$abcdefghijklmnop$" + strings.Repeat("A", 86) + "\n"}}
+	builder := HostSeedBuilder{Runner: runner, OpenSSLPath: openssl, OpenSSLSHA256: opensslHash, XorrisoPath: xorriso, XorrisoSHA256: xorrisoHash}
 	if err := builder.CheckTools(); err != nil {
 		t.Fatalf("qualified tools rejected: %v", err)
+	}
+	if len(runner.commands) == 0 || runner.commands[0].Path != openssl || strings.Join(runner.commands[0].Args, "|") != "passwd|-6|-stdin" {
+		t.Fatalf("SHA-512 crypt capability not checked before attempt: %+v", runner.commands)
+	}
+	if len(runner.commands) != 2 || runner.commands[1].Path != xorriso || strings.Join(runner.commands[1].Args, "|") != "-version" {
+		t.Fatalf("ISO remaster capability not checked before attempt: %+v", runner.commands)
 	}
 	if err := os.WriteFile(xorriso, []byte("drifted"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := builder.CheckTools(); err == nil {
 		t.Fatal("drifted ISO remaster executable admitted before attempt")
+	}
+}
+
+func TestHostSeedBuilderRejectsUnsupportedCryptBeforeAttempt(t *testing.T) {
+	root := t.TempDir()
+	openssl, opensslHash := seedTool(t, root, "openssl")
+	xorriso, xorrisoHash := seedTool(t, root, "xorriso")
+	for _, result := range []execx.Result{{Stdout: "unknown option -6\n"}, {Stdout: "$1$legacy$hash\n"}, {Stdout: "$6$abcdefghijklmnop$" + strings.Repeat("A", 86) + "\n", Truncated: true}} {
+		runner := &seedCommandRunner{result: result}
+		builder := HostSeedBuilder{Runner: runner, OpenSSLPath: openssl, OpenSSLSHA256: opensslHash, XorrisoPath: xorriso, XorrisoSHA256: xorrisoHash}
+		if err := builder.CheckTools(); err == nil {
+			t.Fatalf("unsupported SHA-512 producer admitted: %+v", result)
+		}
 	}
 }
