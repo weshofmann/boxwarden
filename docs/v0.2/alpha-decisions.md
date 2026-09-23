@@ -129,6 +129,9 @@ the marker and falsely admitted such a path. Treat any nonempty ACL entry line
 as extended ACL, in addition to the legacy marker. This shared fix protects
 private prepared-base and workspace paths as well as existing host-toolchain
 admission. A Darwin `chmod +a` regression test and focused package tests pass.
+The SSH credential package had an independent copy of the same parser; its
+private path check and real-ACL regression were corrected before credential
+admission could rely on this result.
 
 ## Recipe-specific session source, 2026-09-23
 
