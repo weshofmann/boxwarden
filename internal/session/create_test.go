@@ -425,6 +425,44 @@ func TestCreateRetryUsesRecordedGoldenAfterCurrentPointerChanges(t *testing.T) {
 	}
 }
 
+func TestCreateFromRevisionSelectsExactRegisteredBase(t *testing.T) {
+	domainConfig, backendFake, service := createFixture(t)
+	backendFake.SetObservation(backend.Observation{ObjectID: "golden-r2", Exists: true, State: backend.ObjectStopped})
+	if _, err := golden.Register(context.Background(), domainConfig, "golden-r2", backendFake); err != nil {
+		t.Fatal(err)
+	}
+
+	record, err := service.CreateFromRevision(context.Background(), "dev", ModeClean, "golden-r1")
+	if err != nil {
+		t.Fatalf("CreateFromRevision: %v", err)
+	}
+	if record.GoldenRevision != "golden-r1" {
+		t.Fatalf("recorded revision = %q", record.GoldenRevision)
+	}
+	if got := backendFake.CloneCalls(); len(got) != 1 || got[0].SourceID != "golden-r1" {
+		t.Fatalf("clone source = %#v, want exact requested base", got)
+	}
+	if _, err := service.CreateFromRevision(context.Background(), "dev", ModeClean, "golden-r2"); err == nil {
+		t.Fatal("existing session accepted a different requested base")
+	}
+	if len(backendFake.CloneCalls()) != 1 {
+		t.Fatal("mismatched retry cloned another base")
+	}
+}
+
+func TestCreateFromRevisionRejectsUnregisteredBaseBeforeIntent(t *testing.T) {
+	domainConfig, backendFake, service := createFixture(t)
+	if _, err := service.CreateFromRevision(context.Background(), "dev", ModeClean, "golden-unregistered"); err == nil {
+		t.Fatal("unregistered base was accepted")
+	}
+	if _, err := LoadRecord(domainConfig.StateRoot, "work", "dev"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unregistered base persisted intent: %v", err)
+	}
+	if len(backendFake.CloneCalls()) != 0 {
+		t.Fatal("unregistered base was cloned")
+	}
+}
+
 func TestCreateIsIdempotentForConsistentStoppedRecord(t *testing.T) {
 	_, backendFake, service := createFixture(t)
 	first, err := service.Create(context.Background(), "dev", ModeClean)

@@ -50,6 +50,21 @@ func NewService(configured config.Domain, observer backend.Observer, creator bac
 // lock is held across observation, state persistence, and backend mutation so
 // retries for the same name cannot race one another.
 func (s *Service) Create(ctx context.Context, rawName string, mode Mode) (record Record, err error) {
+	return s.create(ctx, rawName, mode, "")
+}
+
+// CreateFromRevision binds a new session to one exact registered, stopped
+// revision. It is used by recipe preparation so a concurrent change to the
+// domain-wide current pointer cannot select another base. A retry must name
+// the same revision already persisted in the session intent.
+func (s *Service) CreateFromRevision(ctx context.Context, rawName string, mode Mode, revision string) (Record, error) {
+	if err := backend.ValidateObjectID(revision); err != nil {
+		return Record{}, fmt.Errorf("invalid explicit base revision: %w", err)
+	}
+	return s.create(ctx, rawName, mode, revision)
+}
+
+func (s *Service) create(ctx context.Context, rawName string, mode Mode, revision string) (record Record, err error) {
 	if s == nil {
 		return Record{}, fmt.Errorf("session service is required")
 	}
@@ -83,7 +98,7 @@ func (s *Service) Create(ctx context.Context, rawName string, mode Mode) (record
 		if !errors.Is(err, os.ErrNotExist) {
 			return Record{}, fmt.Errorf("load existing session intent: %w", err)
 		}
-		record, err = s.reserveIntent(ctx, domainID, name, mode)
+		record, err = s.reserveIntent(ctx, domainID, name, mode, revision)
 		if err != nil {
 			return Record{}, err
 		}
@@ -93,6 +108,9 @@ func (s *Service) Create(ctx context.Context, rawName string, mode Mode) (record
 	} else {
 		if record.Mode != mode {
 			return Record{}, fmt.Errorf("session %q already exists with mode %q", name, record.Mode)
+		}
+		if revision != "" && record.GoldenRevision != revision {
+			return Record{}, fmt.Errorf("session %q is bound to base %q, not %q", name, record.GoldenRevision, revision)
 		}
 		switch record.IntendedState {
 		case StateStopped:
@@ -133,7 +151,7 @@ func (s *Service) Create(ctx context.Context, rawName string, mode Mode) (record
 	return s.reconcileCreating(ctx, record)
 }
 
-func (s *Service) reserveIntent(ctx context.Context, domainID domain.ID, name Name, mode Mode) (record Record, err error) {
+func (s *Service) reserveIntent(ctx context.Context, domainID domain.ID, name Name, mode Mode, revision string) (record Record, err error) {
 	held, err := golden.AcquireLock(ctx, s.domain)
 	if err != nil {
 		return Record{}, fmt.Errorf("acquire golden while reserving session: %w", err)
@@ -144,9 +162,17 @@ func (s *Service) reserveIntent(ctx context.Context, domainID domain.ID, name Na
 		}
 	}()
 
-	selected, err := golden.LoadCurrentLocked(s.domain)
-	if err != nil {
-		return Record{}, fmt.Errorf("resolve current golden: %w", err)
+	var selected golden.Record
+	if revision == "" {
+		selected, err = golden.LoadCurrentLocked(s.domain)
+		if err != nil {
+			return Record{}, fmt.Errorf("resolve current golden: %w", err)
+		}
+	} else {
+		selected, err = golden.LoadRevisionLocked(s.domain, revision)
+		if err != nil {
+			return Record{}, fmt.Errorf("resolve explicit base revision %q: %w", revision, err)
+		}
 	}
 	if err := s.requireStoppedGolden(ctx, selected); err != nil {
 		return Record{}, err

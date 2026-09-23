@@ -58,6 +58,33 @@ func TestRegisterStoresAndLoadsObservedStoppedGolden(t *testing.T) {
 	}
 }
 
+func TestRegisterRevisionPreservesDomainCurrentPointer(t *testing.T) {
+	domainConfig := testDomain(t, "work")
+	observer := &countingObserver{observation: backend.Observation{ObjectID: "golden-r1", Exists: true, State: backend.ObjectStopped}}
+	first, err := Register(context.Background(), domainConfig, "golden-r1", observer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer.observation = backend.Observation{ObjectID: "golden-r2", Exists: true, State: backend.ObjectStopped}
+	second, err := RegisterRevision(context.Background(), domainConfig, "golden-r2", observer)
+	if err != nil {
+		t.Fatalf("RegisterRevision: %v", err)
+	}
+	held, err := AcquireLock(context.Background(), domainConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, loadErr := LoadRevisionLocked(domainConfig, "golden-r2")
+	releaseErr := held.Release()
+	if loadErr != nil || releaseErr != nil || loaded != second {
+		t.Fatalf("explicit revision = %#v, load=%v release=%v", loaded, loadErr, releaseErr)
+	}
+	current, err := LoadCurrent(context.Background(), domainConfig)
+	if err != nil || current != first {
+		t.Fatalf("current pointer changed to %#v: %v", current, err)
+	}
+}
+
 func TestRegisterAllowsSeparateDomainAdmissionOfSameStoppedGolden(t *testing.T) {
 	observer := &countingObserver{observation: backend.Observation{
 		ObjectID: "golden-r1",

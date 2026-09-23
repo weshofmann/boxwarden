@@ -129,3 +129,16 @@ the marker and falsely admitted such a path. Treat any nonempty ACL entry line
 as extended ACL, in addition to the legacy marker. This shared fix protects
 private prepared-base and workspace paths as well as existing host-toolchain
 admission. A Darwin `chmod +a` regression test and focused package tests pass.
+
+## Recipe-specific session source, 2026-09-23
+
+The v0.1 creator selects the domain-wide current golden while reserving a
+session. Alpha recipes can prepare different bases concurrently, so using that
+pointer would allow another registration to change the selected source before
+the session intent is durable. Admit each qualified prepared candidate as an
+exact revision without moving `current.json`, then create through an explicit
+revision method. The session lock and golden lock preserve the existing order;
+the requested revision is persisted before cloning, and a retry naming another
+revision is rejected. Existing `golden register` and `session create` keep
+their v0.1 current-pointer behavior. The new source seam has focused tests and
+an independent static review; public recipe composition remains pending.
