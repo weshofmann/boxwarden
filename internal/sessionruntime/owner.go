@@ -42,6 +42,7 @@ type certificateIssuer interface {
 type managementClient interface {
 	timezonex.ZoneClient
 	Probe(context.Context, sshx.Connection, sshx.ProbeRequest) (sshx.ProbeResult, error)
+	InspectPackages(context.Context, sshx.Connection, []string) ([]sshx.PackageVersion, error)
 }
 
 type dependencies struct {
@@ -398,6 +399,39 @@ func (o *Owner) maintainCertificate(ctx context.Context, done chan struct{}) {
 		_ = o.Ready(attemptCtx)
 		cancel()
 	}
+}
+
+// InspectPackages uses only the current pinned management connection retained
+// by this owner. Both observations must still prove READY for this generation.
+func (o *Owner) InspectPackages(ctx context.Context, names []string) ([]supervisor.PackageVersion, error) {
+	if o == nil || o.deps.client == nil {
+		return nil, fmt.Errorf("runtime package inspector is unavailable")
+	}
+	o.readyMu.Lock()
+	defer o.readyMu.Unlock()
+	before := o.Snapshot(ctx)
+	if !before.BackendRunning || !before.SerialHealthy || !before.PinPresent || !before.CertificateCurrent || !before.ProbeOK || !before.ZoneMatches {
+		return nil, fmt.Errorf("exact runtime is not ready for package inspection")
+	}
+	o.mu.Lock()
+	connection, binding, sshBinding, runtimePath := o.connection, o.binding, o.sshBinding, o.runtimePath
+	o.mu.Unlock()
+	if before.Binding != binding || connection.Binding != sshBinding || connection.Binding.SessionID != binding.SessionID || connection.Binding.BackendObject != binding.BackendObject || connection.RuntimeDirectory != runtimePath {
+		return nil, fmt.Errorf("management connection no longer matches exact runtime")
+	}
+	observed, err := o.deps.client.InspectPackages(ctx, connection, names)
+	if err != nil {
+		return nil, err
+	}
+	after := o.Snapshot(ctx)
+	if after.Binding != binding || !after.BackendRunning || !after.SerialHealthy || !after.PinPresent || !after.CertificateCurrent || !after.ProbeOK || !after.ZoneMatches {
+		return nil, fmt.Errorf("exact runtime changed during package inspection")
+	}
+	result := make([]supervisor.PackageVersion, 0, len(observed))
+	for _, pkg := range observed {
+		result = append(result, supervisor.PackageVersion{Name: pkg.Name, Version: pkg.Version})
+	}
+	return result, nil
 }
 
 func errOrProbe(err error) error {

@@ -237,6 +237,69 @@ func TestReadyControlIsExactBoundAndReturnsFreshSnapshot(t *testing.T) {
 	}
 }
 
+func TestPackageInspectionUsesExactReadySupervisorAndTypedNames(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &runtimeFixture{done: make(chan struct{})}
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(context.Background(), path, owner) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, MaxSnapshotAge: time.Minute}
+	if _, err := awaitSnapshot(context.Background(), request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	wrong := request.Binding
+	wrong.Generation = "foreign"
+	if _, err := client.InspectPackages(context.Background(), wrong, []string{"git"}); err == nil || owner.inspections.Load() != 0 {
+		t.Fatalf("foreign inspection reached owner: %v", err)
+	}
+	if _, err := client.InspectPackages(context.Background(), request.Binding, []string{"git;id"}); err == nil || owner.inspections.Load() != 0 {
+		t.Fatalf("untyped inspection reached owner: %v", err)
+	}
+	packages, err := client.InspectPackages(context.Background(), request.Binding, []string{"git"})
+	if err != nil || len(packages) != 1 || packages[0].Name != "git" || owner.inspections.Load() != 1 {
+		t.Fatalf("exact package inspection = %#v, calls=%d, err=%v", packages, owner.inspections.Load(), err)
+	}
+	if err := client.Stop(context.Background(), request.Binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+type mismatchedPackageRuntime struct{ runtimeFixture }
+
+func (o *mismatchedPackageRuntime) InspectPackages(context.Context, []string) ([]PackageVersion, error) {
+	return []PackageVersion{{Name: "curl", Version: "1"}}, nil
+}
+
+func TestPackageInspectionRejectsMismatchedOwnerResult(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &mismatchedPackageRuntime{runtimeFixture: runtimeFixture{done: make(chan struct{})}}
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(context.Background(), path, owner) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, MaxSnapshotAge: time.Minute}
+	if _, err := awaitSnapshot(context.Background(), request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.InspectPackages(context.Background(), request.Binding, []string{"git"}); err == nil {
+		t.Fatal("mismatched package report accepted")
+	}
+	if err := client.Stop(context.Background(), request.Binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTypedControlBounds(t *testing.T) {
 	for _, size := range []uint32{0, maxControlBytes + 1, ^uint32(0)} {
 		var wire bytes.Buffer
@@ -869,6 +932,7 @@ type runtimeFixture struct {
 	stops, waits      atomic.Int32
 	bootstraps        atomic.Int32
 	readies           atomic.Int32
+	inspections       atomic.Int32
 	pinPresent        *atomic.Bool
 	bootstrapErr      error
 }
@@ -894,6 +958,13 @@ func (o *runtimeFixture) Bootstrap(context.Context) error {
 	return o.bootstrapErr
 }
 func (o *runtimeFixture) Ready(context.Context) error { o.readies.Add(1); return nil }
+func (o *runtimeFixture) InspectPackages(_ context.Context, names []string) ([]PackageVersion, error) {
+	o.inspections.Add(1)
+	if len(names) != 1 || names[0] != "git" {
+		return nil, fmt.Errorf("unexpected package request")
+	}
+	return []PackageVersion{{Name: "git", Version: "1:2.45.3-1ubuntu2"}}, nil
+}
 func (o *runtimeFixture) Stop(context.Context) error {
 	o.stops.Add(1)
 	o.once.Do(func() { close(o.done) })

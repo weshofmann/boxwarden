@@ -24,18 +24,77 @@ const lifecycleTimeout = 5 * time.Second
 // observation for the response snapshot.
 const bootstrapTimeout = 4 * time.Minute
 const readyTimeout = 5 * time.Minute
+const inspectTimeout = 90 * time.Second
 
 type controlRequest struct {
 	Version   int       `json:"version"`
 	Action    string    `json:"action"`
 	Binding   Binding   `json:"binding"`
 	ExpiresAt time.Time `json:"expires_at"`
+	Packages  []string  `json:"packages,omitempty"`
 }
 type controlResponse struct {
-	Version  int      `json:"version"`
-	Binding  Binding  `json:"binding"`
-	Snapshot Snapshot `json:"snapshot"`
-	Error    string   `json:"error"`
+	Version  int              `json:"version"`
+	Binding  Binding          `json:"binding"`
+	Snapshot Snapshot         `json:"snapshot"`
+	Error    string           `json:"error"`
+	Packages []PackageVersion `json:"packages,omitempty"`
+}
+
+// PackageInspector is an optional read-only capability of a live runtime
+// owner. The ordinary lifecycle owner interface carries no generic exec API.
+type PackageInspector interface {
+	InspectPackages(context.Context, []string) ([]PackageVersion, error)
+}
+
+func validControlAction(request controlRequest) bool {
+	switch request.Action {
+	case "snapshot", "bootstrap", "ready", "stop":
+		return len(request.Packages) == 0
+	case "inspect_packages":
+		if len(request.Packages) == 0 || len(request.Packages) > 32 {
+			return false
+		}
+		seen := make(map[string]bool, len(request.Packages))
+		for _, name := range request.Packages {
+			if !validControlPackageName(name) || seen[name] {
+				return false
+			}
+			seen[name] = true
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func validControlPackageName(name string) bool {
+	if len(name) == 0 || len(name) > 128 || name[0] < 'a' || name[0] > 'z' {
+		return false
+	}
+	for _, c := range name[1:] {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '+' || c == '.' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func sameControlPackages(names []string, packages []PackageVersion) bool {
+	if len(names) != len(packages) {
+		return false
+	}
+	for i, pkg := range packages {
+		if pkg.Name != names[i] || len(pkg.Version) == 0 || len(pkg.Version) > 128 {
+			return false
+		}
+		for _, c := range pkg.Version {
+			if c < 0x21 || c > 0x7e {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func listenSocket(path string) (*controlListener, error) {
@@ -92,7 +151,7 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 	if err := decodeExact(data, &request); err != nil {
 		return
 	}
-	if request.Version != 1 || request.Binding != binding || (request.Action != "snapshot" && request.Action != "bootstrap" && request.Action != "ready" && request.Action != "stop") {
+	if request.Version != 1 || request.Binding != binding || !validControlAction(request) {
 		return
 	}
 	if request.Action == "bootstrap" {
@@ -101,6 +160,8 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 		serverDeadline = acceptedAt.Add(readyTimeout)
 	} else if request.Action == "stop" {
 		serverDeadline = acceptedAt.Add(lifecycleTimeout + controlIOTimeout)
+	} else if request.Action == "inspect_packages" {
+		serverDeadline = acceptedAt.Add(inspectTimeout)
 	}
 	now := time.Now()
 	if request.ExpiresAt.IsZero() || !request.ExpiresAt.After(now) || request.ExpiresAt.After(serverDeadline) {
@@ -131,10 +192,29 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 		if err := stop(); err != nil {
 			response.Error = err.Error()
 		}
+	} else if request.Action == "inspect_packages" {
+		before := owner.Snapshot(operationCtx)
+		if before.Binding != binding || !snapshotReady(before) {
+			response.Error = "exact runtime is not ready for package inspection"
+		} else if inspector, ok := owner.(PackageInspector); !ok {
+			response.Error = "package inspector is unavailable"
+		} else {
+			response.Packages, err = inspector.InspectPackages(operationCtx, request.Packages)
+			if err != nil {
+				response.Error = "package inspection failed"
+			}
+		}
 	}
 	response.Snapshot = owner.Snapshot(operationCtx)
+	exactAfterBinding := response.Snapshot.Binding == binding
 	response.Snapshot.Binding = binding
 	response.Snapshot.ObservedAt = time.Now().UTC()
+	if request.Action == "inspect_packages" && (!exactAfterBinding || !snapshotReady(response.Snapshot) || !sameControlPackages(request.Packages, response.Packages)) {
+		response.Packages = nil
+		if response.Error == "" {
+			response.Error = "package inspection result or readiness changed"
+		}
+	}
 	data, err = encodeControlResponse(response)
 	if err != nil {
 		return
@@ -259,7 +339,27 @@ func (c *Client) Stop(ctx context.Context, binding Binding) error {
 	_, err := c.call(ctx, binding, "stop")
 	return err
 }
+func (c *Client) InspectPackages(ctx context.Context, binding Binding, names []string) ([]PackageVersion, error) {
+	request := controlRequest{Action: "inspect_packages", Packages: append([]string(nil), names...)}
+	if !validControlAction(request) {
+		return nil, fmt.Errorf("invalid package inspection request")
+	}
+	response, err := c.callWithPackages(ctx, binding, request.Action, request.Packages)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.validateSnapshot(response.Snapshot); err != nil {
+		return nil, err
+	}
+	if !snapshotReady(response.Snapshot) || !sameControlPackages(names, response.Packages) {
+		return nil, fmt.Errorf("exact package inspection result is not ready or matching")
+	}
+	return response.Packages, nil
+}
 func (c *Client) call(ctx context.Context, binding Binding, action string) (controlResponse, error) {
+	return c.callWithPackages(ctx, binding, action, nil)
+}
+func (c *Client) callWithPackages(ctx context.Context, binding Binding, action string, packages []string) (controlResponse, error) {
 	var response controlResponse
 	if err := ctx.Err(); err != nil {
 		return response, err
@@ -293,6 +393,8 @@ func (c *Client) call(ctx context.Context, binding Binding, action string) (cont
 		timeout = readyTimeout
 	} else if action == "stop" {
 		timeout += lifecycleTimeout
+	} else if action == "inspect_packages" {
+		timeout = inspectTimeout
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -310,7 +412,7 @@ func (c *Client) call(ctx context.Context, binding Binding, action string) (cont
 	}
 	cancelIO := context.AfterFunc(operationCtx, func() { connection.SetDeadline(time.Now()) })
 	defer cancelIO()
-	data, err := json.Marshal(controlRequest{Version: 1, Action: action, Binding: binding, ExpiresAt: deadline.UTC()})
+	data, err := json.Marshal(controlRequest{Version: 1, Action: action, Binding: binding, ExpiresAt: deadline.UTC(), Packages: packages})
 	if err != nil {
 		return response, err
 	}

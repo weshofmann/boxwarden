@@ -51,6 +51,19 @@ func (r *ExactSnapshotReader) Snapshot(ctx context.Context, binding Binding) (Sn
 	return (&Client{RuntimeDirectory: directory, MaxSnapshotAge: time.Minute}).Snapshot(ctx, binding)
 }
 
+// InspectPackages routes a bounded read-only guest query to the same exact
+// live generation as Snapshot; it cannot publish or launch runtime state.
+func (r *ExactSnapshotReader) InspectPackages(ctx context.Context, binding Binding, names []string) ([]PackageVersion, error) {
+	if r == nil {
+		return nil, fmt.Errorf("exact snapshot reader is required")
+	}
+	directory, err := exactRuntimeDirectory(r.runtimeRoot, binding)
+	if err != nil {
+		return nil, err
+	}
+	return (&Client{RuntimeDirectory: directory, MaxSnapshotAge: time.Minute}).InspectPackages(ctx, binding, names)
+}
+
 func NewExactController(runtimeRoot string, launcher Launcher) (*ExactController, error) {
 	if !canonicalAbsolute(runtimeRoot) || launcher == nil {
 		return nil, fmt.Errorf("root supervisor dependencies are required")

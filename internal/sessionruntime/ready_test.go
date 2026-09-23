@@ -27,10 +27,11 @@ func (f readyIssuer) Issue(ctx context.Context, binding sshx.Binding, root, key 
 }
 
 type readyClient struct {
-	probe func(sshx.Connection) error
-	zone  string
-	read  func(sshx.Connection) (string, error)
-	apply func(sshx.Connection, string) error
+	probe   func(sshx.Connection) error
+	zone    string
+	read    func(sshx.Connection) (string, error)
+	apply   func(sshx.Connection, string) error
+	inspect func(sshx.Connection, []string) ([]sshx.PackageVersion, error)
 }
 
 func (c *readyClient) Probe(_ context.Context, connection sshx.Connection, _ sshx.ProbeRequest) (sshx.ProbeResult, error) {
@@ -53,6 +54,12 @@ func (c *readyClient) ReadZone(_ context.Context, connection sshx.Connection, _ 
 		return c.read(connection)
 	}
 	return c.zone, nil
+}
+func (c *readyClient) InspectPackages(_ context.Context, connection sshx.Connection, names []string) ([]sshx.PackageVersion, error) {
+	if c.inspect == nil {
+		return nil, errors.New("package inspection was not configured")
+	}
+	return c.inspect(connection, names)
 }
 
 func readyFixture(t *testing.T) (*fixture, *readyClient) {
@@ -113,6 +120,40 @@ func TestReadyConvergesCurrentGenerationAndSnapshotRechecksLiveEvidence(t *testi
 	client.probe = func(connection sshx.Connection) error { return errors.New("probe failed") }
 	if snapshot := f.owner.Snapshot(context.Background()); snapshot.ProbeOK || snapshot.ZoneMatches || !strings.Contains(snapshot.Diagnostic, "probe") {
 		t.Fatalf("snapshot reused old probe: %#v", snapshot)
+	}
+	_ = f.owner.Stop(context.Background())
+	_ = f.owner.Wait(context.Background())
+}
+
+func TestOwnerPackageInspectionRequiresCurrentReadyGeneration(t *testing.T) {
+	f, client := readyFixture(t)
+	called := 0
+	client.inspect = func(connection sshx.Connection, names []string) ([]sshx.PackageVersion, error) {
+		called++
+		if connection.Binding.SessionID != f.record.ID || len(names) != 1 || names[0] != "git" {
+			t.Fatalf("inspection binding/names = %#v/%#v", connection.Binding, names)
+		}
+		return []sshx.PackageVersion{{Name: "git", Version: "1:2.45.3-1ubuntu2"}}, nil
+	}
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.owner.InspectPackages(context.Background(), []string{"git"}); err == nil || called != 0 {
+		t.Fatalf("inspection before READY = %v, calls=%d", err, called)
+	}
+	if err := f.owner.Bootstrap(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	packages, err := f.owner.InspectPackages(context.Background(), []string{"git"})
+	if err != nil || len(packages) != 1 || packages[0].Name != "git" || called != 1 {
+		t.Fatalf("ready inspection = %#v, calls=%d, err=%v", packages, called, err)
+	}
+	client.probe = func(sshx.Connection) error { return errors.New("probe failed") }
+	if _, err := f.owner.InspectPackages(context.Background(), []string{"git"}); err == nil || called != 1 {
+		t.Fatalf("inspection after readiness loss = %v, calls=%d", err, called)
 	}
 	_ = f.owner.Stop(context.Background())
 	_ = f.owner.Wait(context.Background())

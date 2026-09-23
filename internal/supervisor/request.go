@@ -36,6 +36,10 @@ type Snapshot struct {
 	ObservedAt                                                                          time.Time `json:"observed_at"`
 	Diagnostic                                                                          string    `json:"diagnostic"`
 }
+type PackageVersion struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
 type Controller interface {
 	Snapshot(context.Context, Binding) (Snapshot, error)
 	Bootstrap(context.Context, Binding) (Snapshot, error)
