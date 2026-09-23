@@ -39,6 +39,27 @@ func TestStartDoesNotLaunchAfterWorkspaceReservationFailure(t *testing.T) {
 	assertStoredState(t, domainConfig, "dev", StateStopped)
 }
 
+func TestStartReconcilesStoppedUsesBeforeNewGeneration(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	if _, err := creator.Create(context.Background(), "dev", ModeClean); err != nil {
+		t.Fatal(err)
+	}
+	control := &startSupervisorFake{start: func(supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+		t.Fatal("supervisor reached before stopped-use reconciliation")
+		return supervisor.Snapshot{}, nil
+	}}
+	service := newStartTestService(domainConfig, backendFake, control, time.Now, func() (string, error) {
+		t.Fatal("generation allocated before stopped-use reconciliation")
+		return "", nil
+	})
+	injected := errors.New("partial Use cannot yet be cleared")
+	service.start.Workspaces = startWorkspaceFake{release: func() error { return injected }}
+	if _, err := service.Start(context.Background(), "dev"); !errors.Is(err, injected) {
+		t.Fatalf("Start() error = %v, want stopped reconciliation error", err)
+	}
+	assertStoredState(t, domainConfig, "dev", StateStopped)
+}
+
 func TestStartUpgradesLegacyStoppedRecordBeforeWorkspaceReservation(t *testing.T) {
 	domainConfig, backendFake, creator := createFixture(t)
 	created, err := creator.Create(context.Background(), "dev", ModeClean)
@@ -577,6 +598,7 @@ func (f startCAFake) Check(context.Context, sshx.Domain, []sshx.Domain) (sshx.CA
 type startWorkspaceFake struct {
 	prepare func() error
 	verify  func() error
+	release func() error
 }
 
 func (f startWorkspaceFake) PrepareStart(_ context.Context, stateRoot string, domainID domain.ID, stopped Record, generation string, _ backend.Observer) (Record, error) {
@@ -595,6 +617,13 @@ func (f startWorkspaceFake) PrepareStart(_ context.Context, stateRoot string, do
 func (f startWorkspaceFake) VerifyUses(context.Context, string, domain.ID, Record) error {
 	if f.verify != nil {
 		return f.verify()
+	}
+	return nil
+}
+
+func (f startWorkspaceFake) ReleaseUses(context.Context, string, domain.ID, Record, backend.Observer) error {
+	if f.release != nil {
+		return f.release()
 	}
 	return nil
 }

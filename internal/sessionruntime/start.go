@@ -74,6 +74,10 @@ func (workspaceStartCoordinator) VerifyUses(ctx context.Context, stateRoot strin
 	return workspacex.VerifySessionUses(ctx, stateRoot, domainID, record)
 }
 
+func (workspaceStartCoordinator) ReleaseUses(ctx context.Context, stateRoot string, domainID domain.ID, record session.Record, observer backend.Observer) error {
+	return workspacex.ReleaseSessionUses(ctx, stateRoot, domainID, record, observer)
+}
+
 // caCheckOnly deliberately removes CA creation from start's capability surface.
 type caCheckOnly struct {
 	check func(context.Context, sshx.Domain, []sshx.Domain) (sshx.CAIdentity, error)

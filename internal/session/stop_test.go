@@ -98,6 +98,49 @@ func TestStopFailureRetainsExactStoppingIntent(t *testing.T) {
 	}
 }
 
+func TestStopReleasesUsesBeforePersistingStopped(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	created, err := creator.Create(context.Background(), "dev", ModeClean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	running := saveRunningRecord(t, domainConfig, created)
+	backendFake.SetObservation(backend.Observation{ObjectID: running.Backend.ObjectID, Exists: true, State: backend.ObjectRunning})
+	control := &startSupervisorFake{stop: func(supervisor.Binding) error {
+		backendFake.SetObservation(backend.Observation{ObjectID: running.Backend.ObjectID, Exists: true, State: backend.ObjectStopped})
+		return nil
+	}}
+	service := newStartTestService(domainConfig, backendFake, control, time.Now, nil)
+	injected := errors.New("workspace release failed")
+	releaseCalls := 0
+	service.start.Workspaces = startWorkspaceFake{release: func() error {
+		releaseCalls++
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		held, err := lock.AcquireSession(ctx, domainConfig.StateRoot, "work", "dev")
+		if err != nil {
+			return err
+		}
+		defer held.Release()
+		current, err := LoadRecord(domainConfig.StateRoot, "work", "dev")
+		if err != nil || current.IntendedState != StateStopping {
+			return errors.New("workspace release ran after Stopped marker")
+		}
+		if releaseCalls == 1 {
+			return injected
+		}
+		return nil
+	}}
+	if _, err := service.Stop(context.Background(), "dev"); !errors.Is(err, injected) {
+		t.Fatalf("Stop() error = %v, want release failure", err)
+	}
+	assertStoredState(t, domainConfig, "dev", StateStopping)
+	stopped, err := service.Stop(context.Background(), "dev")
+	if err != nil || stopped.IntendedState != StateStopped || releaseCalls != 2 {
+		t.Fatalf("release retry = %#v, %v, calls=%d", stopped, err, releaseCalls)
+	}
+}
+
 func TestStopRetryReconcilesReapedSocketGoneGeneration(t *testing.T) {
 	domainConfig, backendFake, creator := createFixture(t)
 	created, err := creator.Create(context.Background(), "dev", ModeClean)

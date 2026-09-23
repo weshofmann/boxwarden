@@ -42,11 +42,12 @@ type SupervisorControl interface {
 	Quiesced(context.Context, supervisor.Binding) (bool, error)
 }
 
-// WorkspaceStartCoordinator owns the volume-first batch transaction. Session
-// code cannot import the volume package because volume records bind sessions.
-type WorkspaceStartCoordinator interface {
+// WorkspaceLifecycle owns the volume-first batch transactions. Session code
+// cannot import the volume package because volume records bind sessions.
+type WorkspaceLifecycle interface {
 	PrepareStart(context.Context, string, domain.ID, Record, string, backend.Observer) (Record, error)
 	VerifyUses(context.Context, string, domain.ID, Record) error
+	ReleaseUses(context.Context, string, domain.ID, Record, backend.Observer) error
 }
 
 type StartDependencies struct {
@@ -56,7 +57,7 @@ type StartDependencies struct {
 	CA                CAValidator
 	ConfiguredDomains []sshx.Domain
 	Supervisor        SupervisorControl
-	Workspaces        WorkspaceStartCoordinator
+	Workspaces        WorkspaceLifecycle
 	RuntimeRoot       string
 	ConfigPath        string
 	NewGeneration     func() (string, error)
@@ -135,6 +136,20 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 			if err != nil || record.Version != recordVersion || record.IntendedState != StateStopped || !sameStoppedIdentity(legacy, record) {
 				return Record{}, fmt.Errorf("stopped session upgrade did not retain exact identity: %w", err)
 			}
+		}
+		if releaseErr := held.Release(); releaseErr != nil {
+			return Record{}, fmt.Errorf("release session lock before stopped workspace reconciliation: %w", releaseErr)
+		}
+		if releaseErr := s.start.Workspaces.ReleaseUses(ctx, s.domain.StateRoot, domainID, record, s.observer); releaseErr != nil {
+			return Record{}, fmt.Errorf("reconcile stopped workspace uses before start: %w", releaseErr)
+		}
+		held, err = lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
+		if err != nil {
+			return Record{}, fmt.Errorf("reacquire session lock after stopped workspace reconciliation: %w", err)
+		}
+		current, loadErr := LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+		if loadErr != nil || current != record {
+			return Record{}, fmt.Errorf("stopped session changed during workspace reconciliation: %w", loadErr)
 		}
 		generation, generationErr := s.start.NewGeneration()
 		if generationErr != nil || !validUUID(generation) {

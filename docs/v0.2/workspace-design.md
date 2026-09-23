@@ -3,7 +3,7 @@
 Status: design reviewed on 2026-09-23. Volume records, a bounded strict
 attachment registry reader, a formatter journal-to-record promotion, and
 child-side exact-generation lease admission exist. Parent-side batch Use
-reservation is wired; stop-side release and real VM proof remain pending. The
+reservation and stop-side release are wired; real VM proof remains pending. The
 existing v0.1 session record is not a workspace registry.
 
 ## Ownership model
@@ -116,11 +116,14 @@ Session start/stop now release their session lock before waiting for the
 supervisor, then reacquire it and recheck the exact durable generation. Their
 outer transition lock serializes public starts and stops, including a
 poisoned-serial recovery stop, through the handoff. Parent batch reservation
-and child-side lease admission are wired; batch use release is not wired into
-Stop yet. `PrepareSessionStart` reserves `Use` while the session is still
-durably stopped, before persisting `Starting`. A failed intermediate write
-retains any partial Uses and blocks another start until exact stopped-state
-reconciliation. `ReserveUse` deliberately rejects an already starting session.
+and child-side lease admission are wired. Stop keeps `Stopping` while the
+supervisor stops and reaps, then clears matching Uses under volume-first locks
+before persisting `Stopped`. An interrupted release retains `Stopping` and
+retries only the remaining exact Uses. `PrepareSessionStart` reserves `Use`
+while the session is still durably stopped, before persisting `Starting`.
+A failed intermediate write retains any partial Uses; a later stopped-state
+start or stop clears them only after a fresh exact backend-stopped observation.
+`ReserveUse` deliberately rejects an already starting session.
 The host file descriptor pins identity for admission, but Tart opens the path
 itself; trusted-host code must recheck immediately before launch. A malicious
 same-UID host process racing after the check is outside the guest-root boundary.

@@ -14,7 +14,7 @@ import (
 // supervisor. A failed or ambiguous stop retains that generation as stopping;
 // it cannot become a new start or a stopped volume handoff by assertion.
 func (s *Service) Stop(ctx context.Context, rawName string) (record Record, err error) {
-	if s == nil || s.start == nil || s.observer == nil || s.start.Supervisor == nil {
+	if s == nil || s.start == nil || s.observer == nil || s.start.Supervisor == nil || s.start.Workspaces == nil {
 		return Record{}, fmt.Errorf("session stop dependencies are required")
 	}
 	domainID, err := domain.Parse(string(s.domain.ID))
@@ -61,7 +61,7 @@ func (s *Service) Stop(ctx context.Context, rawName string) (record Record, err 
 		if observation.State != backend.ObjectStopped {
 			return Record{}, fmt.Errorf("stopped intent conflicts with running backend")
 		}
-		return record, nil
+		return s.finishStopped(ctx, domainID, name, record, &held)
 	}
 	if record.IntendedState != StateStarting && record.IntendedState != StateRunning && record.IntendedState != StateStopping {
 		return Record{}, fmt.Errorf("session %q has incompatible stop state %q", name, record.IntendedState)
@@ -75,7 +75,7 @@ func (s *Service) Stop(ctx context.Context, rawName string) (record Record, err 
 			return Record{}, fmt.Errorf("prove exact generation quiesced: %w", proofErr)
 		}
 		if quiesced {
-			return s.persistStopped(record)
+			return s.finishStopped(ctx, domainID, name, record, &held)
 		}
 	}
 	if record.IntendedState != StateStopping {
@@ -93,25 +93,33 @@ func (s *Service) Stop(ctx context.Context, rawName string) (record Record, err 
 	if err := s.start.Supervisor.Stop(ctx, startBinding(record)); err != nil {
 		return Record{}, fmt.Errorf("stop exact generation: %w", err)
 	}
-	held, err = lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
+	return s.finishStopped(ctx, domainID, name, record, &held)
+}
+
+// finishStopped releases the session lock before the volume-first batch, then
+// reacquires it to publish Stopped only after exact Use release. The caller
+// already proved stop/wait/reap for Stopping, or has durable Stopped intent
+// with no launch commit to reconcile.
+func (s *Service) finishStopped(ctx context.Context, domainID domain.ID, name Name, expected Record, held **lock.Held) (Record, error) {
+	if err := (*held).Release(); err != nil {
+		return Record{}, fmt.Errorf("release session lock before workspace use release: %w", err)
+	}
+	if err := s.start.Workspaces.ReleaseUses(ctx, s.domain.StateRoot, domainID, expected, s.observer); err != nil {
+		return Record{}, fmt.Errorf("release exact workspace uses after stop: %w", err)
+	}
+	var err error
+	*held, err = lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
 	if err != nil {
-		return Record{}, fmt.Errorf("reacquire session lock after supervisor stop: %w", err)
+		return Record{}, fmt.Errorf("reacquire session lock after workspace use release: %w", err)
 	}
 	current, err := LoadRecord(s.domain.StateRoot, string(domainID), string(name))
 	if err != nil {
-		return Record{}, fmt.Errorf("reload session after supervisor stop: %w", err)
+		return Record{}, fmt.Errorf("reload session after workspace use release: %w", err)
 	}
-	if !sameStoppedIdentity(record, current) {
-		return Record{}, fmt.Errorf("session binding changed during supervisor stop")
+	if current != expected {
+		return Record{}, fmt.Errorf("session changed during workspace use release")
 	}
-	if current.IntendedState != StateStopping && current.IntendedState != StateStopped {
-		return Record{}, fmt.Errorf("session intent changed to %q during supervisor stop", current.IntendedState)
-	}
-	if current.IntendedState == StateStopping && current.StartGeneration != record.StartGeneration ||
-		current.IntendedState == StateStopped && current.StartGeneration != "" {
-		return Record{}, fmt.Errorf("session generation changed during supervisor stop")
-	}
-	observation, err = s.observeExact(ctx, record.Backend.ObjectID)
+	observation, err := s.observeExact(ctx, current.Backend.ObjectID)
 	if err != nil {
 		return Record{}, fmt.Errorf("observe exact backend after stop: %w", err)
 	}
