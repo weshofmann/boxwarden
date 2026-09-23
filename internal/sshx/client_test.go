@@ -133,6 +133,31 @@ func TestClientInspectsOnlyExactRequestedPackages(t *testing.T) {
 	}
 }
 
+func TestClientInspectsFreshGuestIdentityThroughPinnedManagementCommand(t *testing.T) {
+	connection := testConnection(t)
+	runner := &fakeRunner{onRun: func(Command) Result {
+		return Result{Stdout: `{"version":1,"machine_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","hostname":"boxwarden-bbbbbbbbbbbb"}`}
+	}}
+	identity, err := NewClient(runner).InspectIdentity(context.Background(), connection)
+	if err != nil || identity.MachineID != strings.Repeat("b", 32) || identity.Hostname != "boxwarden-bbbbbbbbbbbb" {
+		t.Fatalf("identity inspection = %+v, %v", identity, err)
+	}
+	var request managementRequest
+	if err := json.Unmarshal(runner.commands[0].Stdin, &request); err != nil || request.Kind != "inspect_identity" || request.Zone != "" || len(request.Packages) != 0 {
+		t.Fatalf("identity request = %+v, %v", request, err)
+	}
+	for _, response := range []string{
+		`{"version":1,"machine_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","hostname":"boxwarden-bbbbbbbbbbbb","extra":true}`,
+		`{"version":1,"machine_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","hostname":"boxwarden-aaaaaaaaaaaa"}`,
+		`{"version":1,"machine_id":"00000000000000000000000000000000","hostname":"boxwarden-000000000000"}`,
+	} {
+		runner.onRun = func(Command) Result { return Result{Stdout: response} }
+		if _, err := NewClient(runner).InspectIdentity(context.Background(), connection); err == nil {
+			t.Fatalf("accepted malformed clone identity %s", response)
+		}
+	}
+}
+
 func testConnection(t *testing.T) Connection {
 	t.Helper()
 	root := privateRoot(t)

@@ -438,7 +438,7 @@ func allowedFoundationSelector(path, foundation, selector string) bool {
 		switch foundation {
 		case "sshx":
 			switch selector {
-			case "Certificate", "Connection", "PackageVersion", "ProbeRequest", "ProbeResult", "ReadZoneRequest", "EnsureClientKey", "NewCertificateIssuer", "NewClient", "WriteKnownHosts", "RenewalRequired", "CleanupGenerationCredentials":
+			case "Certificate", "Connection", "PackageVersion", "GuestIdentity", "ProbeRequest", "ProbeResult", "ReadZoneRequest", "EnsureClientKey", "NewCertificateIssuer", "NewClient", "WriteKnownHosts", "RenewalRequired", "CleanupGenerationCredentials":
 				return true
 			}
 		case "timezonex":

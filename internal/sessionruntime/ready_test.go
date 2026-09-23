@@ -27,11 +27,12 @@ func (f readyIssuer) Issue(ctx context.Context, binding sshx.Binding, root, key 
 }
 
 type readyClient struct {
-	probe   func(sshx.Connection) error
-	zone    string
-	read    func(sshx.Connection) (string, error)
-	apply   func(sshx.Connection, string) error
-	inspect func(sshx.Connection, []string) ([]sshx.PackageVersion, error)
+	probe    func(sshx.Connection) error
+	zone     string
+	read     func(sshx.Connection) (string, error)
+	apply    func(sshx.Connection, string) error
+	inspect  func(sshx.Connection, []string) ([]sshx.PackageVersion, error)
+	identity func(sshx.Connection) (sshx.GuestIdentity, error)
 }
 
 func (c *readyClient) Probe(_ context.Context, connection sshx.Connection, _ sshx.ProbeRequest) (sshx.ProbeResult, error) {
@@ -60,6 +61,12 @@ func (c *readyClient) InspectPackages(_ context.Context, connection sshx.Connect
 		return nil, errors.New("package inspection was not configured")
 	}
 	return c.inspect(connection, names)
+}
+func (c *readyClient) InspectIdentity(_ context.Context, connection sshx.Connection) (sshx.GuestIdentity, error) {
+	if c.identity == nil {
+		return sshx.GuestIdentity{}, errors.New("identity inspection was not configured")
+	}
+	return c.identity(connection)
 }
 
 func readyFixture(t *testing.T) (*fixture, *readyClient) {
@@ -154,6 +161,40 @@ func TestOwnerPackageInspectionRequiresCurrentReadyGeneration(t *testing.T) {
 	client.probe = func(sshx.Connection) error { return errors.New("probe failed") }
 	if _, err := f.owner.InspectPackages(context.Background(), []string{"git"}); err == nil || called != 1 {
 		t.Fatalf("inspection after readiness loss = %v, calls=%d", err, called)
+	}
+	_ = f.owner.Stop(context.Background())
+	_ = f.owner.Wait(context.Background())
+}
+
+func TestOwnerIdentityInspectionRequiresCurrentReadyGeneration(t *testing.T) {
+	f, client := readyFixture(t)
+	called := 0
+	client.identity = func(connection sshx.Connection) (sshx.GuestIdentity, error) {
+		called++
+		if connection.Binding.SessionID != f.record.ID {
+			t.Fatalf("foreign identity binding: %+v", connection.Binding)
+		}
+		return sshx.GuestIdentity{MachineID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Hostname: "boxwarden-bbbbbbbbbbbb"}, nil
+	}
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.owner.InspectIdentity(context.Background()); err == nil || called != 0 {
+		t.Fatalf("identity inspection before READY = %v, calls=%d", err, called)
+	}
+	if err := f.owner.Bootstrap(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := f.owner.InspectIdentity(context.Background())
+	if err != nil || identity.MachineID != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" || called != 1 {
+		t.Fatalf("identity inspection = %+v, calls=%d, err=%v", identity, called, err)
+	}
+	client.probe = func(sshx.Connection) error { return errors.New("probe failed") }
+	if _, err := f.owner.InspectIdentity(context.Background()); err == nil || called != 1 {
+		t.Fatalf("identity query after readiness loss = %v, calls=%d", err, called)
 	}
 	_ = f.owner.Stop(context.Background())
 	_ = f.owner.Wait(context.Background())

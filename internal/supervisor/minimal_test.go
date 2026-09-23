@@ -300,6 +300,36 @@ func TestPackageInspectionRejectsMismatchedOwnerResult(t *testing.T) {
 	}
 }
 
+func TestIdentityInspectionUsesExactReadySupervisor(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &runtimeFixture{done: make(chan struct{})}
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(context.Background(), path, owner) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, MaxSnapshotAge: time.Minute}
+	if _, err := awaitSnapshot(context.Background(), request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	wrong := request.Binding
+	wrong.Generation = "foreign"
+	if _, err := client.InspectIdentity(context.Background(), wrong); err == nil || owner.identities.Load() != 0 {
+		t.Fatalf("foreign identity query reached owner: %v", err)
+	}
+	identity, err := client.InspectIdentity(context.Background(), request.Binding)
+	if err != nil || identity.MachineID != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" || identity.Hostname != "boxwarden-bbbbbbbbbbbb" || owner.identities.Load() != 1 {
+		t.Fatalf("exact identity inspection = %+v, calls=%d, err=%v", identity, owner.identities.Load(), err)
+	}
+	if err := client.Stop(context.Background(), request.Binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTypedControlBounds(t *testing.T) {
 	for _, size := range []uint32{0, maxControlBytes + 1, ^uint32(0)} {
 		var wire bytes.Buffer
@@ -933,6 +963,7 @@ type runtimeFixture struct {
 	bootstraps        atomic.Int32
 	readies           atomic.Int32
 	inspections       atomic.Int32
+	identities        atomic.Int32
 	pinPresent        *atomic.Bool
 	bootstrapErr      error
 }
@@ -964,6 +995,10 @@ func (o *runtimeFixture) InspectPackages(_ context.Context, names []string) ([]P
 		return nil, fmt.Errorf("unexpected package request")
 	}
 	return []PackageVersion{{Name: "git", Version: "1:2.45.3-1ubuntu2"}}, nil
+}
+func (o *runtimeFixture) InspectIdentity(context.Context) (GuestIdentity, error) {
+	o.identities.Add(1)
+	return GuestIdentity{MachineID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Hostname: "boxwarden-bbbbbbbbbbbb"}, nil
 }
 func (o *runtimeFixture) Stop(context.Context) error {
 	o.stops.Add(1)

@@ -151,7 +151,7 @@ func (r ManagementRequest) Validate() error {
 		return fmt.Errorf("invalid management request")
 	}
 	switch r.Kind {
-	case "probe", "read_zone":
+	case "probe", "read_zone", "inspect_identity":
 		if r.Zone != "" || len(r.Packages) != 0 {
 			return fmt.Errorf("management request has unexpected parameters")
 		}

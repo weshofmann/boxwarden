@@ -44,6 +44,10 @@ type PackageVersion struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 }
+type GuestIdentity struct {
+	MachineID string `json:"machine_id"`
+	Hostname  string `json:"hostname"`
+}
 
 // managementRequest is intentionally package-private: callers choose only a concrete typed method.
 type managementRequest struct {
@@ -155,6 +159,42 @@ func (c *Client) InspectPackages(ctx context.Context, connection Connection, nam
 		result = append(result, pkg)
 	}
 	return result, nil
+}
+
+// InspectIdentity requests only the fixed clone identity check from the
+// pinned management helper. The response is guest diagnostic evidence.
+func (c *Client) InspectIdentity(ctx context.Context, connection Connection) (GuestIdentity, error) {
+	output, err := c.run(ctx, connection, managementRequestFor(connection.Binding, "inspect_identity", ""))
+	if err != nil {
+		return GuestIdentity{}, err
+	}
+	fields, err := decodeExactObject(output, "version", "machine_id", "hostname")
+	if err != nil {
+		return GuestIdentity{}, fmt.Errorf("parse guest identity: %w", err)
+	}
+	var version int
+	var identity GuestIdentity
+	if err := decodeField(fields, "version", &version); err != nil {
+		return GuestIdentity{}, err
+	}
+	if err := decodeField(fields, "machine_id", &identity.MachineID); err != nil {
+		return GuestIdentity{}, err
+	}
+	if err := decodeField(fields, "hostname", &identity.Hostname); err != nil {
+		return GuestIdentity{}, err
+	}
+	if version != 1 || len(identity.MachineID) != 32 || identity.MachineID == strings.Repeat("0", 32) {
+		return GuestIdentity{}, fmt.Errorf("guest identity version or machine ID is invalid")
+	}
+	for _, c := range identity.MachineID {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return GuestIdentity{}, fmt.Errorf("guest machine ID is malformed")
+		}
+	}
+	if identity.Hostname != "boxwarden-"+identity.MachineID[:12] {
+		return GuestIdentity{}, fmt.Errorf("guest hostname does not match machine ID")
+	}
+	return identity, nil
 }
 
 func validPackageName(value string) bool {

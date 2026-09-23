@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-23 20:22 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-23 20:38 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -10,7 +10,7 @@ resumable handoff if unfinished.
 | --- | --- | --- |
 | Baseline | verified | Clean `e16f23962b43337f02de1fbe2779df00a28f3f1a`; `weshofmann/feature/v02-alpha` isolated worktree |
 | Host admission | verified | Elevated read-only doctor: `status: healthy` on original and alpha-only configs |
-| Source verification | verified with limits | Full local Go tests and vet passed at the 20:22 UTC working-tree snapshot; targeted alpha preparation and base builder race tests passed. A separate read-only reviewer found no actionable new defect in the qualifier composition and ran focused alphaprep/alphaqual tests; broader guest acceptance remains pending. Earlier targeted race tests passed for serial/basebuild, guestproto/sshx, supervisor/sessionruntime, and alphaqual. Guest shell fixtures passed after the synchronized helper digest update. Hosted CI is unavailable |
+| Source verification | verified with limits | Full local Go tests, vet, targeted identity-path race checks, and guest shell fixtures passed at the 20:38 UTC snapshot. Independent review found an effective-hostname acceptance gap, which is closed and regression-tested. Hosted CI is unavailable |
 | VM inventory | verified | Admitted `TART_HOME` has eight stopped alpha-owned objects plus one protected stopped historical object; exact names and states are in the private ownership manifest |
 | Alpha ownership | prepared | Exact resource paths and identities are retained only in the private ownership manifest |
 | Installer input | verified | Ubuntu 24.04.4 ARM64 Desktop ISO: good Canonical detached signature and exact `c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe` SHA-256; private cache only |
@@ -22,6 +22,13 @@ resumable handoff if unfinished.
 | Workspace lifecycle | source foundation published, real path missing | Volume-owned record, attachment/use transitions, private format journal, Linux ARM64 ext4 helper, and retained exact Tart disk/lock leases have targeted tests. Guest formatter VM adapter, public attach/rebuild/reattach, and fresh synthetic qualification remain |
 | Controlled export | receiver implemented, acceptance closed | Host stream receiver has hostile fixtures and independent review; zero-NIC synthetic boot/transport passed, but ext4 inspection, volume lock admission, hostile exits, and real export remain unproved, so public export remains disabled |
 | Hosted CI | unavailable | Local verification is required; do not report CI passed |
+
+The current source checkpoint adds a fixed guest identity inspection through the
+retained pinned SSH connection and exact-generation supervisor. It checks a
+fresh machine ID, derived persisted and effective hostname, consumed build
+markers, and absence of the builder password verifier and backup. It remains
+guest-reported qualification evidence; it has not been exercised on a new
+candidate, and the public preparation command remains closed.
 
 Draft PR #12 tracks the published alpha branch. Commits `06884de` and
 `1ef30ab` published the formatter and managed-disk foundations separately.
@@ -59,7 +66,7 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 
 ## Next executable action
 
-Complete the guest acceptance matrix and join preflight, builder, and qualifier
+Compose the complete guest acceptance inspector and join preflight, builder, and qualifier
 in one production preparation operation, then wire public automatic
 preparation. Extend the zero-NIC inspector from
 synthetic block/serial proof to read-only ext4 inspection while advancing the

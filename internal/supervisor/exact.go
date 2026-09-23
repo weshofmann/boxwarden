@@ -64,6 +64,17 @@ func (r *ExactSnapshotReader) InspectPackages(ctx context.Context, binding Bindi
 	return (&Client{RuntimeDirectory: directory, MaxSnapshotAge: time.Minute}).InspectPackages(ctx, binding, names)
 }
 
+func (r *ExactSnapshotReader) InspectIdentity(ctx context.Context, binding Binding) (GuestIdentity, error) {
+	if r == nil {
+		return GuestIdentity{}, fmt.Errorf("exact snapshot reader is required")
+	}
+	directory, err := exactRuntimeDirectory(r.runtimeRoot, binding)
+	if err != nil {
+		return GuestIdentity{}, err
+	}
+	return (&Client{RuntimeDirectory: directory, MaxSnapshotAge: time.Minute}).InspectIdentity(ctx, binding)
+}
+
 func NewExactController(runtimeRoot string, launcher Launcher) (*ExactController, error) {
 	if !canonicalAbsolute(runtimeRoot) || launcher == nil {
 		return nil, fmt.Errorf("root supervisor dependencies are required")

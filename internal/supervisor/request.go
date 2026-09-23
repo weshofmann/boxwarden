@@ -40,6 +40,10 @@ type PackageVersion struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 }
+type GuestIdentity struct {
+	MachineID string `json:"machine_id"`
+	Hostname  string `json:"hostname"`
+}
 type Controller interface {
 	Snapshot(context.Context, Binding) (Snapshot, error)
 	Bootstrap(context.Context, Binding) (Snapshot, error)

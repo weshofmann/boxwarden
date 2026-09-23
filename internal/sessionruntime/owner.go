@@ -43,6 +43,7 @@ type managementClient interface {
 	timezonex.ZoneClient
 	Probe(context.Context, sshx.Connection, sshx.ProbeRequest) (sshx.ProbeResult, error)
 	InspectPackages(context.Context, sshx.Connection, []string) ([]sshx.PackageVersion, error)
+	InspectIdentity(context.Context, sshx.Connection) (sshx.GuestIdentity, error)
 }
 
 type dependencies struct {
@@ -432,6 +433,35 @@ func (o *Owner) InspectPackages(ctx context.Context, names []string) ([]supervis
 		result = append(result, supervisor.PackageVersion{Name: pkg.Name, Version: pkg.Version})
 	}
 	return result, nil
+}
+
+// InspectIdentity uses the retained pinned SSH connection for one fixed
+// read-only clone identity query. It is valid only during current READY.
+func (o *Owner) InspectIdentity(ctx context.Context) (supervisor.GuestIdentity, error) {
+	if o == nil || o.deps.client == nil {
+		return supervisor.GuestIdentity{}, fmt.Errorf("runtime identity inspector is unavailable")
+	}
+	o.readyMu.Lock()
+	defer o.readyMu.Unlock()
+	before := o.Snapshot(ctx)
+	if !before.BackendRunning || !before.SerialHealthy || !before.PinPresent || !before.CertificateCurrent || !before.ProbeOK || !before.ZoneMatches {
+		return supervisor.GuestIdentity{}, fmt.Errorf("exact runtime is not ready for identity inspection")
+	}
+	o.mu.Lock()
+	connection, binding, sshBinding, runtimePath := o.connection, o.binding, o.sshBinding, o.runtimePath
+	o.mu.Unlock()
+	if before.Binding != binding || connection.Binding != sshBinding || connection.Binding.SessionID != binding.SessionID || connection.Binding.BackendObject != binding.BackendObject || connection.RuntimeDirectory != runtimePath {
+		return supervisor.GuestIdentity{}, fmt.Errorf("management connection no longer matches exact runtime")
+	}
+	observed, err := o.deps.client.InspectIdentity(ctx, connection)
+	if err != nil {
+		return supervisor.GuestIdentity{}, err
+	}
+	after := o.Snapshot(ctx)
+	if after.Binding != binding || !after.BackendRunning || !after.SerialHealthy || !after.PinPresent || !after.CertificateCurrent || !after.ProbeOK || !after.ZoneMatches {
+		return supervisor.GuestIdentity{}, fmt.Errorf("exact runtime changed during identity inspection")
+	}
+	return supervisor.GuestIdentity{MachineID: observed.MachineID, Hostname: observed.Hostname}, nil
 }
 
 func errOrProbe(err error) error {

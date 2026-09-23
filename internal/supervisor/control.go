@@ -39,6 +39,7 @@ type controlResponse struct {
 	Snapshot Snapshot         `json:"snapshot"`
 	Error    string           `json:"error"`
 	Packages []PackageVersion `json:"packages,omitempty"`
+	Identity *GuestIdentity   `json:"identity,omitempty"`
 }
 
 // PackageInspector is an optional read-only capability of a live runtime
@@ -46,10 +47,13 @@ type controlResponse struct {
 type PackageInspector interface {
 	InspectPackages(context.Context, []string) ([]PackageVersion, error)
 }
+type IdentityInspector interface {
+	InspectIdentity(context.Context) (GuestIdentity, error)
+}
 
 func validControlAction(request controlRequest) bool {
 	switch request.Action {
-	case "snapshot", "bootstrap", "ready", "stop":
+	case "snapshot", "bootstrap", "ready", "stop", "inspect_identity":
 		return len(request.Packages) == 0
 	case "inspect_packages":
 		if len(request.Packages) == 0 || len(request.Packages) > 32 {
@@ -95,6 +99,18 @@ func sameControlPackages(names []string, packages []PackageVersion) bool {
 		}
 	}
 	return true
+}
+
+func validControlIdentity(identity *GuestIdentity) bool {
+	if identity == nil || len(identity.MachineID) != 32 || identity.MachineID == strings.Repeat("0", 32) {
+		return false
+	}
+	for _, c := range identity.MachineID {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return identity.Hostname == "boxwarden-"+identity.MachineID[:12]
 }
 
 func listenSocket(path string) (*controlListener, error) {
@@ -160,7 +176,7 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 		serverDeadline = acceptedAt.Add(readyTimeout)
 	} else if request.Action == "stop" {
 		serverDeadline = acceptedAt.Add(lifecycleTimeout + controlIOTimeout)
-	} else if request.Action == "inspect_packages" {
+	} else if request.Action == "inspect_packages" || request.Action == "inspect_identity" {
 		serverDeadline = acceptedAt.Add(inspectTimeout)
 	}
 	now := time.Now()
@@ -204,6 +220,20 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 				response.Error = "package inspection failed"
 			}
 		}
+	} else if request.Action == "inspect_identity" {
+		before := owner.Snapshot(operationCtx)
+		if before.Binding != binding || !snapshotReady(before) {
+			response.Error = "exact runtime is not ready for identity inspection"
+		} else if inspector, ok := owner.(IdentityInspector); !ok {
+			response.Error = "identity inspector is unavailable"
+		} else {
+			identity, inspectErr := inspector.InspectIdentity(operationCtx)
+			if inspectErr != nil {
+				response.Error = "identity inspection failed"
+			} else {
+				response.Identity = &identity
+			}
+		}
 	}
 	response.Snapshot = owner.Snapshot(operationCtx)
 	exactAfterBinding := response.Snapshot.Binding == binding
@@ -213,6 +243,12 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 		response.Packages = nil
 		if response.Error == "" {
 			response.Error = "package inspection result or readiness changed"
+		}
+	}
+	if request.Action == "inspect_identity" && (!exactAfterBinding || !snapshotReady(response.Snapshot) || !validControlIdentity(response.Identity)) {
+		response.Identity = nil
+		if response.Error == "" {
+			response.Error = "identity inspection result or readiness changed"
 		}
 	}
 	data, err = encodeControlResponse(response)
@@ -356,6 +392,19 @@ func (c *Client) InspectPackages(ctx context.Context, binding Binding, names []s
 	}
 	return response.Packages, nil
 }
+func (c *Client) InspectIdentity(ctx context.Context, binding Binding) (GuestIdentity, error) {
+	response, err := c.call(ctx, binding, "inspect_identity")
+	if err != nil {
+		return GuestIdentity{}, err
+	}
+	if err := c.validateSnapshot(response.Snapshot); err != nil {
+		return GuestIdentity{}, err
+	}
+	if !snapshotReady(response.Snapshot) || !validControlIdentity(response.Identity) {
+		return GuestIdentity{}, fmt.Errorf("exact identity inspection result is not ready or valid")
+	}
+	return *response.Identity, nil
+}
 func (c *Client) call(ctx context.Context, binding Binding, action string) (controlResponse, error) {
 	return c.callWithPackages(ctx, binding, action, nil)
 }
@@ -393,7 +442,7 @@ func (c *Client) callWithPackages(ctx context.Context, binding Binding, action s
 		timeout = readyTimeout
 	} else if action == "stop" {
 		timeout += lifecycleTimeout
-	} else if action == "inspect_packages" {
+	} else if action == "inspect_packages" || action == "inspect_identity" {
 		timeout = inspectTimeout
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, timeout)

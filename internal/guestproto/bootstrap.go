@@ -53,12 +53,13 @@ func (b *boundedBuffer) Write(data []byte) (int, error) {
 }
 
 type Bootstrapper struct {
-	Root            string
-	Runner          Runner
-	HostKeyPath     string
-	ZonePath        string
-	Failpoint       func(string) error
-	renameNoReplace func(string, string) error
+	Root              string
+	Runner            Runner
+	HostKeyPath       string
+	ZonePath          string
+	Failpoint         func(string) error
+	effectiveHostname func() (string, error)
+	renameNoReplace   func(string, string) error
 }
 
 func NewBootstrapper(root string, runner Runner) *Bootstrapper {
@@ -68,7 +69,7 @@ func NewBootstrapper(root string, runner Runner) *Bootstrapper {
 	if runner == nil {
 		runner = ExecRunner{}
 	}
-	return &Bootstrapper{Root: root, Runner: runner, HostKeyPath: "/etc/ssh/ssh_host_ed25519_key.pub", ZonePath: "/etc/timezone", renameNoReplace: renameWithoutReplacement}
+	return &Bootstrapper{Root: root, Runner: runner, HostKeyPath: "/etc/ssh/ssh_host_ed25519_key.pub", ZonePath: "/etc/timezone", effectiveHostname: os.Hostname, renameNoReplace: renameWithoutReplacement}
 }
 
 func (b *Bootstrapper) Serial(ctx context.Context, request SerialRequest) (SerialResult, error) {
@@ -190,6 +191,8 @@ func (b *Bootstrapper) Management(ctx context.Context, request ManagementRequest
 		return []byte(`{"version":1,"ok":true}`), nil
 	case "inspect_packages":
 		return b.inspectPackages(ctx, request.Packages)
+	case "inspect_identity":
+		return b.inspectIdentity()
 	}
 	return nil, fmt.Errorf("unsupported management request")
 }

@@ -59,6 +59,81 @@ func TestSerialRequestRejectsNoncanonicalOrUnboundedLine(t *testing.T) {
 	}
 }
 
+func TestManagementIdentityInspectionAcceptsNoCallerParameters(t *testing.T) {
+	request := ManagementRequest{Version: Version, Kind: "inspect_identity", Association: testRequest().Association}
+	if err := request.Validate(); err != nil {
+		t.Fatalf("fixed identity inspection rejected: %v", err)
+	}
+	request.Packages = []string{"git"}
+	if err := request.Validate(); err == nil {
+		t.Fatal("identity inspection accepted caller-selected package input")
+	}
+	request.Packages = nil
+	request.Zone = "America/Denver"
+	if err := request.Validate(); err == nil {
+		t.Fatal("identity inspection accepted a time-zone mutation parameter")
+	}
+}
+
+func TestInspectIdentityRejectsBuildResidueAndReportsFreshMachineIdentity(t *testing.T) {
+	root := t.TempDir()
+	for _, directory := range []string{"etc", "var/lib/boxwarden"} {
+		if err := os.MkdirAll(filepath.Join(root, directory), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(name, value string, mode os.FileMode) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, name), []byte(value), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	machineID := strings.Repeat("b", 32)
+	write("etc/machine-id", machineID+"\n", 0644)
+	write("etc/hostname", "boxwarden-"+machineID[:12]+"\n", 0644)
+	write("etc/shadow", "root:!:1:0:99999:7:::\nboxwarden:!:1:0:99999:7:::\n", 0600)
+	b := NewBootstrapper(root, nil)
+	b.effectiveHostname = func() (string, error) { return "boxwarden-" + machineID[:12], nil }
+	result, err := b.inspectIdentity()
+	want := `{"version":1,"machine_id":"` + machineID + `","hostname":"boxwarden-` + machineID[:12] + `"}`
+	if err != nil || string(result) != want {
+		t.Fatalf("fresh identity = %s, %v; want %s", result, err, want)
+	}
+	b.effectiveHostname = func() (string, error) { return "boxwarden-task0-run-1", nil }
+	if _, err := b.inspectIdentity(); err == nil {
+		t.Fatal("stale effective kernel hostname accepted")
+	}
+	b.effectiveHostname = func() (string, error) { return "boxwarden-" + machineID[:12], nil }
+	write("etc/boxwarden-task0-spike", "run-1\n", 0644)
+	if _, err := b.inspectIdentity(); err == nil {
+		t.Fatal("build marker survived identity inspection")
+	}
+	if err := os.Remove(filepath.Join(root, "etc/boxwarden-task0-spike")); err != nil {
+		t.Fatal(err)
+	}
+	write("var/lib/boxwarden/golden-clone-ready", "", 0644)
+	if _, err := b.inspectIdentity(); err == nil {
+		t.Fatal("unconsumed clone-ready marker accepted")
+	}
+	if err := os.Remove(filepath.Join(root, "var/lib/boxwarden/golden-clone-ready")); err != nil {
+		t.Fatal(err)
+	}
+	write("etc/shadow", "boxwarden:$6$recoverable:1:0:99999:7:::\n", 0600)
+	if _, err := b.inspectIdentity(); err == nil {
+		t.Fatal("recoverable builder verifier accepted")
+	}
+	write("etc/shadow", "boxwarden:!:1:0:99999:7:::\n", 0600)
+	write("etc/hostname", "boxwarden-task0-run-1\n", 0644)
+	if _, err := b.inspectIdentity(); err == nil {
+		t.Fatal("build hostname accepted")
+	}
+	write("etc/hostname", "boxwarden-"+machineID[:12]+"\n", 0644)
+	write("etc/shadow-", "boxwarden:$6$recoverable:1:0:99999:7:::\n", 0600)
+	if _, err := b.inspectIdentity(); err == nil {
+		t.Fatal("backup builder verifier accepted")
+	}
+}
+
 func testRequest() SerialRequest {
 	return SerialRequest{Version: Version, Nonce: "nonce-1", StartGeneration: testGeneration, Association: Association{Domain: "work", SessionID: testSession, BackendKind: "tart", BackendObject: "workstation"}, CAPublicKey: testKey, CAFingerprint: testFingerprint(testKey), Principal: "boxwarden-session-" + testSession}
 }
