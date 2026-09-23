@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-23 19:14 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-23 19:17 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -16,7 +16,7 @@ resumable handoff if unfinished.
 | Installer input | verified | Ubuntu 24.04.4 ARM64 Desktop ISO: good Canonical detached signature and exact `c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe` SHA-256; private cache only |
 | Recipe schema | source implemented | Versioned strict JSON loader and exact ISO verification have focused passing tests; no public preparation command yet |
 | Serial bootstrap and READY | real fresh clone verified | Corrected generic r2 candidate and public qualr2c clone completed serial bootstrap, host-key pin, certificate, strict SSH probe, time-zone convergence, READY, stop, restart to READY, and consistent stop. The management fixes are published |
-| Automatic base preparation | source verified, public path missing | Installer launcher, seed/remaster, journal, and admission source pass targeted tests. Cache reuse binds a stopped Tart bundle identity; build stages the exact verified ISO and guest definition; installer serial admission checks private ACLs. A real qualifier, guest recipe execution, and public CLI integration remain |
+| Automatic base preparation | source verified, public path missing | Installer launcher, seed/remaster, journal, and admission source pass targeted tests. Cache reuse binds a stopped Tart bundle identity; build stages the exact verified ISO and guest definition; installer serial admission checks private ACLs. Fresh-clone qualifier source now requires exact READY, guest inspection, and stopped proof; its production guest inspector/lifecycle composition, recipe execution, and public CLI integration remain |
 | Inspector capability | synthetic boot verified, ext4 pending | Pinned Tart has no NIC-off mode. A signed Virtualization.framework guest booted with zero NICs, one read-only synthetic disk, and two serial channels; the guest reported loopback only and returned a typed report. Ext4 inspection and real workspace export remain closed |
 | Graphical sandbox | same-clone GUI verified | Public qualr2c reached READY, GNOME Desktop and Firefox opened through Tart GUI, and Nautilus showed synthetic `bw-alpha-system-persist-r2c` in guest home after stop/restart. This is system-disk persistence only. No guest agent account sign-in or recipe-installed application has been observed |
 | Workspace lifecycle | source foundation published, real path missing | Volume-owned record, attachment/use transitions, private format journal, Linux ARM64 ext4 helper, and retained exact Tart disk/lock leases have targeted tests. Guest formatter VM adapter, public attach/rebuild/reattach, and fresh synthetic qualification remain |
@@ -59,8 +59,8 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 
 ## Next executable action
 
-Complete the fresh-clone qualifier and guest-only recipe software execution,
-then wire public automatic preparation. Extend the zero-NIC inspector from
+Implement the trusted guest-inspection adapter and guest-only recipe software
+execution, then wire public automatic preparation. Extend the zero-NIC inspector from
 synthetic block/serial proof to read-only ext4 inspection while advancing the
 formatter VM adapter and workspace lifecycle. The current r2 engineering candidate predates
 the builder's changed tracked definition and cannot qualify its cache key.

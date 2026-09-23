@@ -450,6 +450,50 @@ func TestCreateFromRevisionSelectsExactRegisteredBase(t *testing.T) {
 	}
 }
 
+func TestCreateFreshFromRevisionRejectsExistingSession(t *testing.T) {
+	_, backendFake, service := createFixture(t)
+	created, err := service.CreateFreshFromRevision(context.Background(), "dev", ModeClean, "golden-r1")
+	if err != nil || !created.Created || created.Record.IntendedState != StateStopped || created.Record.GoldenRevision != "golden-r1" {
+		t.Fatalf("fresh creation = %+v, %v", created, err)
+	}
+	if reused, err := service.CreateFreshFromRevision(context.Background(), "dev", ModeClean, "golden-r1"); err == nil || reused.Created {
+		t.Fatalf("existing record returned fresh witness: %+v, %v", reused, err)
+	}
+	if got := backendFake.CloneCalls(); len(got) != 1 {
+		t.Fatalf("clone calls = %#v, want one", got)
+	}
+}
+
+func TestCreateFreshFromRevisionSerializesSameName(t *testing.T) {
+	_, backendFake, service := createFixture(t)
+	start := make(chan struct{})
+	type result struct {
+		creation FreshCreation
+		err      error
+	}
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			<-start
+			creation, err := service.CreateFreshFromRevision(context.Background(), "dev", ModeClean, "golden-r1")
+			results <- result{creation, err}
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	successes := 0
+	for _, got := range []result{first, second} {
+		if got.err == nil && got.creation.Created && got.creation.Record.IntendedState == StateStopped {
+			successes++
+		} else if got.err == nil || got.creation.Created {
+			t.Fatalf("ambiguous concurrent result: %+v", got)
+		}
+	}
+	if successes != 1 || len(backendFake.CloneCalls()) != 1 {
+		t.Fatalf("fresh successes=%d clone calls=%#v", successes, backendFake.CloneCalls())
+	}
+}
+
 func TestCreateFromRevisionRejectsUnregisteredBaseBeforeIntent(t *testing.T) {
 	domainConfig, backendFake, service := createFixture(t)
 	if _, err := service.CreateFromRevision(context.Background(), "dev", ModeClean, "golden-unregistered"); err == nil {

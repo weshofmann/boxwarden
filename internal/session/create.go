@@ -50,7 +50,7 @@ func NewService(configured config.Domain, observer backend.Observer, creator bac
 // lock is held across observation, state persistence, and backend mutation so
 // retries for the same name cannot race one another.
 func (s *Service) Create(ctx context.Context, rawName string, mode Mode) (record Record, err error) {
-	return s.create(ctx, rawName, mode, "")
+	return s.create(ctx, rawName, mode, "", false)
 }
 
 // CreateFromRevision binds a new session to one exact registered, stopped
@@ -61,10 +61,32 @@ func (s *Service) CreateFromRevision(ctx context.Context, rawName string, mode M
 	if err := backend.ValidateObjectID(revision); err != nil {
 		return Record{}, fmt.Errorf("invalid explicit base revision: %w", err)
 	}
-	return s.create(ctx, rawName, mode, revision)
+	return s.create(ctx, rawName, mode, revision, false)
 }
 
-func (s *Service) create(ctx context.Context, rawName string, mode Mode, revision string) (record Record, err error) {
+// FreshCreation is returned only after this call reserved a previously absent
+// session name and reconciled its new exact backend clone to stopped. A
+// preexisting stopped or creating record never yields the Created witness.
+type FreshCreation struct {
+	Record  Record
+	Created bool
+}
+
+// CreateFreshFromRevision is the create-only variant used for qualification.
+// Its absence check and reservation run under the same session lock, so an
+// idempotent retry cannot be misreported as a newly created test clone.
+func (s *Service) CreateFreshFromRevision(ctx context.Context, rawName string, mode Mode, revision string) (FreshCreation, error) {
+	if err := backend.ValidateObjectID(revision); err != nil {
+		return FreshCreation{}, fmt.Errorf("invalid explicit base revision: %w", err)
+	}
+	record, err := s.create(ctx, rawName, mode, revision, true)
+	if err != nil {
+		return FreshCreation{}, err
+	}
+	return FreshCreation{Record: record, Created: true}, nil
+}
+
+func (s *Service) create(ctx context.Context, rawName string, mode Mode, revision string, freshOnly bool) (record Record, err error) {
 	if s == nil {
 		return Record{}, fmt.Errorf("session service is required")
 	}
@@ -106,6 +128,9 @@ func (s *Service) create(ctx context.Context, rawName string, mode Mode, revisio
 			return Record{}, err
 		}
 	} else {
+		if freshOnly {
+			return Record{}, fmt.Errorf("session %q already exists; fresh clone required", name)
+		}
 		if record.Mode != mode {
 			return Record{}, fmt.Errorf("session %q already exists with mode %q", name, record.Mode)
 		}
