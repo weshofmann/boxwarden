@@ -106,3 +106,26 @@ static Linux ARM64 helper digest changes, so the original generic candidate
 cannot be promoted: rebuild from corrected autoinstall input and freshly
 qualify a new clone. The serial error path still lacks structured guest
 diagnostics; failure evidence required a bounded private console capture.
+
+## SSH argv and certificate pairing, 2026-09-23
+
+Fresh r2 clones exposed two distinct OpenSSH invocation defects. `-o
+IdentityFile=/.../Application Support/...` passed the path as one argv element,
+but OpenSSH still parsed its internal option string on spaces. Quoting the
+path inside that option fixed parsing; credential path admission now rejects
+characters that could trigger OpenSSH expansion. A separate explicit
+`CertificateFile` option caused OpenSSH to treat the public certificate file as
+a signing identity. Require the exact `IdentityFile` + `-cert.pub` companion
+and let OpenSSH discover it. A bounded manual SSH probe isolated the second
+failure; a new fresh public clone, qualr2c, subsequently reached READY through
+the regular management path. Keep both failed clones as immutable evidence.
+
+## macOS ACL admission, 2026-09-23
+
+An integration test for prepared-base metadata found that `/bin/ls -lde` can
+print `@` in the first mode marker while printing an extended ACL on the next
+line. The shared `hostx.OSACLInspector` had checked only for `+` at the end of
+the marker and falsely admitted such a path. Treat any nonempty ACL entry line
+as extended ACL, in addition to the legacy marker. This shared fix protects
+private prepared-base and workspace paths as well as existing host-toolchain
+admission. A Darwin `chmod +a` regression test and focused package tests pass.

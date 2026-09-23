@@ -3,6 +3,8 @@ package sshx
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -52,6 +54,31 @@ func TestClientRejectsKnownHostsContentThatDiffersFromDurablePin(t *testing.T) {
 	}
 }
 
+func TestClientRejectsCertificateOutsideIdentityCompanionPath(t *testing.T) {
+	connection := testConnection(t)
+	connection.CertificateFile = filepath.Join(connection.RuntimeDirectory, "different-cert.pub")
+	mustWrite(t, connection.CertificateFile, []byte("certificate"), 0o644)
+	runner := &fakeRunner{onRun: func(Command) Result { return Result{Stdout: `{"version":1,"ok":true}`} }}
+	if _, err := NewClient(runner).Probe(context.Background(), connection, ProbeRequest{}); err == nil {
+		t.Fatal("Probe accepted a detached certificate path")
+	}
+	if len(runner.commands) != 0 {
+		t.Fatal("Probe invoked SSH with a detached certificate path")
+	}
+}
+
+func TestClientRejectsOpenSSHPathExpansion(t *testing.T) {
+	connection := testConnection(t)
+	connection.IdentityFile = filepath.Join(connection.RuntimeDirectory, "${HOME}")
+	runner := &fakeRunner{onRun: func(Command) Result { return Result{Stdout: `{"version":1,"ok":true}`} }}
+	if _, err := NewClient(runner).Probe(context.Background(), connection, ProbeRequest{}); err == nil {
+		t.Fatal("Probe accepted an OpenSSH-expanding path")
+	}
+	if len(runner.commands) != 0 {
+		t.Fatal("Probe invoked SSH with an OpenSSH-expanding path")
+	}
+}
+
 func TestClientOnlyAcceptsTypedBoundedRequests(t *testing.T) {
 	runner := &fakeRunner{onRun: func(command Command) Result {
 		if strings.Contains(string(command.Stdin), `"kind":"read_zone"`) {
@@ -91,8 +118,8 @@ func testConnection(t *testing.T) Connection {
 
 func expectedSSHArgs(connection Connection) []string {
 	options := []string{
-		"IdentityFile=" + connection.IdentityFile, "CertificateFile=" + connection.CertificateFile,
-		"HostKeyAlias=" + HostKeyAlias(testUUID), "UserKnownHostsFile=" + connection.KnownHostsFile,
+		"IdentityFile=" + sshQuotedPath(connection.IdentityFile),
+		"HostKeyAlias=" + HostKeyAlias(testUUID), "UserKnownHostsFile=" + sshQuotedPath(connection.KnownHostsFile),
 		"GlobalKnownHostsFile=/dev/null", "StrictHostKeyChecking=yes", "CheckHostIP=no", "BatchMode=yes",
 		"IdentitiesOnly=yes", "IdentityAgent=none", "HostKeyAlgorithms=ssh-ed25519", "UpdateHostKeys=no",
 		"PubkeyAcceptedAlgorithms=ssh-ed25519-cert-v01@openssh.com",
@@ -107,4 +134,28 @@ func expectedSSHArgs(connection Connection) []string {
 	}
 	args = append(args, "-p", "22", "boxwarden@192.0.2.8", "/usr/bin/sudo", "-n", "--", "/usr/local/libexec/boxwarden-guest-bootstrap", "management")
 	return args
+}
+
+func TestOpenSSHParsesCredentialPathsContainingSpaces(t *testing.T) {
+	if _, err := os.Stat(sshPath); err != nil {
+		t.Skipf("OpenSSH unavailable: %v", err)
+	}
+	root := filepath.Join(t.TempDir(), "Application Support")
+	connection := Connection{
+		Address: "192.0.2.8", Port: 22,
+		Binding: Binding{SessionID: testUUID},
+		IdentityFile: filepath.Join(root, "client"), CertificateFile: filepath.Join(root, "client-cert.pub"), KnownHostsFile: filepath.Join(root, "known_hosts"),
+	}
+	output, err := exec.Command(sshPath, append([]string{"-G"}, sshArguments(connection)...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("OpenSSH rejected argv: %v: %s", err, output)
+	}
+	for _, want := range []string{
+		"identityfile " + connection.IdentityFile,
+		"userknownhostsfile " + connection.KnownHostsFile,
+	} {
+		if !strings.Contains(string(output), want+"\n") {
+			t.Errorf("OpenSSH did not retain exact option %q", want)
+		}
+	}
 }

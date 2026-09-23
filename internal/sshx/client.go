@@ -195,6 +195,19 @@ func validateConnection(connection Connection) error {
 		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 			return fmt.Errorf("SSH credential paths must be canonical and absolute")
 		}
+		// OpenSSH parses -o operands as configuration text even when each is
+		// passed as one argv element. Reject characters that could escape the
+		// quoted path or trigger OpenSSH token expansion.
+		if strings.ContainsAny(path, "\"\\%$") || strings.IndexFunc(path, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+			return fmt.Errorf("SSH credential path cannot be represented safely in OpenSSH configuration")
+		}
+	}
+	// OpenSSH pairs an IdentityFile with its conventional -cert.pub companion.
+	// An explicit CertificateFile made it try that public file as a private
+	// signing key on the qualified host; require and validate only this exact
+	// companion path before letting OpenSSH discover it.
+	if connection.CertificateFile != connection.IdentityFile+"-cert.pub" {
+		return fmt.Errorf("SSH certificate must be the identity key's exact companion")
 	}
 	if _, err := requireRuntimeFile(connection.RuntimeDirectory, connection.IdentityFile, privateFileMode); err != nil {
 		return fmt.Errorf("SSH identity file: %w", err)
@@ -225,8 +238,8 @@ func verifyKnownHostsPin(connection Connection) error {
 
 func sshArguments(connection Connection) []string {
 	options := []string{
-		"IdentityFile=" + connection.IdentityFile, "CertificateFile=" + connection.CertificateFile,
-		"HostKeyAlias=" + HostKeyAlias(connection.Binding.SessionID), "UserKnownHostsFile=" + connection.KnownHostsFile,
+		"IdentityFile=" + sshQuotedPath(connection.IdentityFile),
+		"HostKeyAlias=" + HostKeyAlias(connection.Binding.SessionID), "UserKnownHostsFile=" + sshQuotedPath(connection.KnownHostsFile),
 		"GlobalKnownHostsFile=/dev/null", "StrictHostKeyChecking=yes", "CheckHostIP=no", "BatchMode=yes",
 		"IdentitiesOnly=yes", "IdentityAgent=none", "HostKeyAlgorithms=ssh-ed25519", "UpdateHostKeys=no",
 		"PubkeyAcceptedAlgorithms=ssh-ed25519-cert-v01@openssh.com",
@@ -242,6 +255,8 @@ func sshArguments(connection Connection) []string {
 	arguments = append(arguments, "-p", strconv.Itoa(int(connection.Port)), "boxwarden@"+connection.Address, "/usr/bin/sudo", "-n", "--", guestManagementHelper, "management")
 	return arguments
 }
+
+func sshQuotedPath(path string) string { return "\"" + path + "\"" }
 
 func validZone(value string) bool {
 	if len(value) == 0 || len(value) > 127 || strings.Contains(value, "..") {
