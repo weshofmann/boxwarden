@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-23 21:01 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-23 21:10 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -10,7 +10,7 @@ resumable handoff if unfinished.
 | --- | --- | --- |
 | Baseline | verified | Clean `e16f23962b43337f02de1fbe2779df00a28f3f1a`; `weshofmann/feature/v02-alpha` isolated worktree |
 | Host admission | verified | Elevated read-only doctor: `status: healthy` on original and alpha-only configs |
-| Source verification | verified with limits | Full local Go tests and vet passed at the 21:01 UTC public command snapshot; targeted app/alphaprep/cmd race tests passed. Identity-path race checks and guest shell fixtures passed at the 20:38 UTC snapshot. Hosted CI is unavailable |
+| Source verification | verified with limits | Full local Go tests and vet passed at the 21:01 UTC public command snapshot; targeted app/alphaprep/cmd race tests passed. The later planned-ID/interrupt update passed targeted cmd race and vet. Identity-path race checks and guest shell fixtures passed at the 20:38 UTC snapshot. Hosted CI is unavailable |
 | VM inventory | verified | Admitted `TART_HOME` has eight stopped alpha-owned objects plus one protected stopped historical object; exact names and states are in the private ownership manifest |
 | Alpha ownership | prepared | Exact resource paths and identities are retained only in the private ownership manifest |
 | Installer input | verified | Ubuntu 24.04.4 ARM64 Desktop ISO: good Canonical detached signature and exact `c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe` SHA-256; private cache only |
@@ -43,6 +43,12 @@ The public `alpha prepare` command now invokes this operation in source with
 fresh attempt IDs and explicit exact-digest OpenSSL/xorriso inputs. App tests
 reject missing domain, invalid command inputs, and nonpassing cache receipts
 before printing success. It has not yet run against a real candidate.
+The command prints planned attempt and candidate IDs before mutation and uses
+an interrupt-aware context so its owned installer cleanup can run after a
+single terminal interrupt. The first real-run read-only preflight found a
+healthy host, verified tracked recipe and installer bytes, all VMs stopped,
+and sufficient RAM/free disk at the observation time. The resolved regular
+xorriso executable has the expected digest; no new VM was started.
 
 Draft PR #12 tracks the published alpha branch. Commits `06884de` and
 `1ef30ab` published the formatter and managed-disk foundations separately.

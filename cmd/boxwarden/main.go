@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/weshofmann/boxwarden/internal/alphaprep"
 	"github.com/weshofmann/boxwarden/internal/app"
@@ -30,7 +32,9 @@ func main() {
 		return
 	}
 
-	err = app.Run(ctx, os.Args[1:], publicOptions(os.Stdout))
+	publicCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	err = app.Run(publicCtx, os.Args[1:], publicOptions(os.Stdout))
+	stopSignals()
 	finish(err)
 }
 
@@ -85,6 +89,9 @@ func publicOptions(output io.Writer) app.Options {
 			request, err := alphaprep.NewRequest(selected, value, input.ISOPath, input.GuestDefinitionRoot)
 			if err != nil {
 				return basebuild.PreparedResult{}, err
+			}
+			if _, err := fmt.Fprintf(output, "preparation-attempt: %s\nplanned-candidate: %s\n", request.Inputs.AttemptID, request.Inputs.CandidateID); err != nil {
+				return basebuild.PreparedResult{}, fmt.Errorf("report alpha preparation plan: %w", err)
 			}
 			host, err := loaded.Host()
 			if err != nil {
