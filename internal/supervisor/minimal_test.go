@@ -126,6 +126,87 @@ func TestAwaitSnapshotReturnsAtBackendPlusSerialStartedBoundary(t *testing.T) {
 	}
 }
 
+// Slice C production break: reconnecting to the exact live generation must
+// trigger the one fixed bootstrap action and must not return the pre-bootstrap
+// Slice B snapshot as if guest trust and the host-key pin were established.
+func TestStartExactInvokesTypedBootstrapAfterExactStartedProof(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := &atomic.Bool{}
+	owner := &runtimeFixture{done: make(chan struct{}), pinPresent: pin}
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(runCtx, path, owner) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, MaxSnapshotAge: time.Minute}
+	if _, err := awaitSnapshot(context.Background(), request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	launcher := &rejectLauncher{}
+	runtimeRoot := filepath.Dir(filepath.Dir(filepath.Dir(request.RuntimeDirectory)))
+	control, err := NewExactController(runtimeRoot, launcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control.policy = startupPolicy{timeout: time.Second, interval: time.Millisecond}
+	snapshot, err := control.StartExact(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.BackendRunning || !snapshot.SerialHealthy || !snapshot.PinPresent {
+		t.Fatalf("Slice C snapshot = %#v", snapshot)
+	}
+	if owner.bootstraps.Load() != 1 || launcher.calls.Load() != 0 {
+		t.Fatalf("bootstrap/launch calls = %d/%d, want 1/0", owner.bootstraps.Load(), launcher.calls.Load())
+	}
+	if err := client.Stop(context.Background(), request.Binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBootstrapControlRejectsWrongBindingAndReturnsPreciseFailure(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &runtimeFixture{done: make(chan struct{}), bootstrapErr: errors.New("host-key pin conflict")}
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(runCtx, path, owner) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, MaxSnapshotAge: time.Minute}
+	if _, err := awaitSnapshot(context.Background(), request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	wrong := request.Binding
+	wrong.Generation = "foreign"
+	if _, err := client.Bootstrap(context.Background(), wrong); err == nil {
+		t.Fatal("wrong bootstrap binding accepted")
+	}
+	if owner.bootstraps.Load() != 0 {
+		t.Fatal("wrong binding reached runtime owner")
+	}
+	if _, err := client.Bootstrap(context.Background(), request.Binding); err == nil || !strings.Contains(err.Error(), "host-key pin conflict") {
+		t.Fatalf("bootstrap error = %v, want bounded precise cause", err)
+	}
+	if owner.bootstraps.Load() != 1 {
+		t.Fatalf("bootstrap calls = %d, want 1", owner.bootstraps.Load())
+	}
+	if err := client.Stop(context.Background(), request.Binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTypedControlBounds(t *testing.T) {
 	for _, size := range []uint32{0, maxControlBytes + 1, ^uint32(0)} {
 		var wire bytes.Buffer
@@ -423,6 +504,43 @@ func TestClientRejectsForeignResponseAndHonorsCancellation(t *testing.T) {
 	}
 }
 
+func TestBootstrapClientRejectsStaleCompletionSnapshot(t *testing.T) {
+	request := minimalRequest(t)
+	if _, _, err := publishOrAdmitRequest(request); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := acquireGenerationLock(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	listener, err := listenSocket(filepath.Join(request.RuntimeDirectory, socketName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		connection, err := listener.AcceptUnix()
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		if _, err := readBounded(connection); err != nil {
+			return
+		}
+		response := controlResponse{Version: 1, Binding: request.Binding, Snapshot: Snapshot{Binding: request.Binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, ObservedAt: time.Now().Add(-2 * time.Minute).UTC()}}
+		data, _ := json.Marshal(response)
+		_ = writeFrame(connection, data)
+	}()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, MaxSnapshotAge: time.Minute}
+	if _, err := client.Bootstrap(context.Background(), request.Binding); err == nil || !strings.Contains(err.Error(), "stale") {
+		t.Fatalf("stale bootstrap snapshot accepted: %v", err)
+	}
+	<-done
+}
+
 func TestRunCancellationStopsAndReapsOnce(t *testing.T) {
 	request := minimalRequest(t)
 	path, _, err := publishOrAdmitRequest(request)
@@ -574,8 +692,11 @@ func (o *startFailureRuntime) Start(_ context.Context, request LaunchRequest) er
 	return o.err
 }
 func (*startFailureRuntime) Snapshot(context.Context) Snapshot { return Snapshot{} }
-func (*startFailureRuntime) Stop(context.Context) error        { return errors.New("unexpected stop") }
-func (*startFailureRuntime) Wait(context.Context) error        { return errors.New("unexpected wait") }
+func (*startFailureRuntime) Bootstrap(context.Context) error {
+	return errors.New("unexpected bootstrap")
+}
+func (*startFailureRuntime) Stop(context.Context) error { return errors.New("unexpected stop") }
+func (*startFailureRuntime) Wait(context.Context) error { return errors.New("unexpected wait") }
 
 // Production break: retaining a failed generation after RuntimeOwner.Start has
 // completed its partial cleanup would make the same durable retry ambiguous.
@@ -670,6 +791,9 @@ type runtimeFixture struct {
 	once              sync.Once
 	starts, snapshots atomic.Int32
 	stops, waits      atomic.Int32
+	bootstraps        atomic.Int32
+	pinPresent        *atomic.Bool
+	bootstrapErr      error
 }
 
 func (o *runtimeFixture) Start(_ context.Context, r LaunchRequest) error {
@@ -679,7 +803,18 @@ func (o *runtimeFixture) Start(_ context.Context, r LaunchRequest) error {
 }
 func (o *runtimeFixture) Snapshot(context.Context) Snapshot {
 	o.snapshots.Add(1)
-	return Snapshot{Binding: o.binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true}
+	pinPresent := true
+	if o.pinPresent != nil {
+		pinPresent = o.pinPresent.Load()
+	}
+	return Snapshot{Binding: o.binding, BackendRunning: true, SerialHealthy: true, PinPresent: pinPresent, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true}
+}
+func (o *runtimeFixture) Bootstrap(context.Context) error {
+	o.bootstraps.Add(1)
+	if o.bootstrapErr == nil && o.pinPresent != nil {
+		o.pinPresent.Store(true)
+	}
+	return o.bootstrapErr
 }
 func (o *runtimeFixture) Stop(context.Context) error {
 	o.stops.Add(1)

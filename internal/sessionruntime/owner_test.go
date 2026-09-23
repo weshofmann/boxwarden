@@ -2,6 +2,8 @@ package sessionruntime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -14,12 +16,21 @@ import (
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/backend/tart"
+	"github.com/weshofmann/boxwarden/internal/guestproto"
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/serialx"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/sshx"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
 )
+
+const ownerTestPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+func ownerTestFingerprint() string {
+	raw, _ := base64.StdEncoding.DecodeString(strings.Fields(ownerTestPublicKey)[1])
+	sum := sha256.Sum256(raw)
+	return "SHA256:" + base64.RawStdEncoding.EncodeToString(sum[:])
+}
 
 // Keep configuration and durable session loading real. Only external host
 // qualification, CA inspection, PTY allocation and VM mechanics are doubled.
@@ -34,6 +45,7 @@ type fixture struct {
 	observe                                     func(context.Context, string) (backend.Observation, error)
 	hostErr, caErr, launchErr                   error
 	serialErr                                   error
+	pin                                         pinStore
 	launchConfig                                tart.LaunchConfig
 	startRequest                                backend.StartRequest
 	observationPaths                            [2]string
@@ -82,7 +94,7 @@ func newFixture(t *testing.T) *fixture {
 			if selected != (sshx.Domain{ID: "work", StateRoot: f.root}) || !reflect.DeepEqual(all, []sshx.Domain{{ID: "personal", StateRoot: f.personal}, {ID: "work", StateRoot: f.root}}) {
 				t.Errorf("CA selection/configuration = %#v/%#v", selected, all)
 			}
-			return sshx.CAIdentity{Domain: "work"}, f.caErr
+			return sshx.CAIdentity{Domain: "work", Algorithm: "ssh-ed25519", PublicKey: ownerTestPublicKey, Fingerprint: ownerTestFingerprint(), PrivateKeyPath: filepath.Join(f.root, "identity", "ssh-user-ca", "ca")}, f.caErr
 		}),
 		observer: func(path, home string) backend.Observer {
 			f.observationPaths = [2]string{path, home}
@@ -114,6 +126,13 @@ func newFixture(t *testing.T) *fixture {
 			}
 			return f.serial, nil
 		},
+		pin: func(domain sshx.Domain) pinStore {
+			if f.pin != nil {
+				return f.pin
+			}
+			return sshx.NewPinStore(domain)
+		},
+		newNonce: func() (string, error) { return "nonce-1", nil },
 		launcher: func(c tart.LaunchConfig) backend.Starter {
 			f.launchConfig = c
 			return starterFunc(func(_ context.Context, r backend.StartRequest) (backend.Handle, error) {
@@ -132,7 +151,7 @@ func newFixture(t *testing.T) *fixture {
 
 // Catch omitted authoritative reload, narrowed CA/host admission, request
 // fields used as launch authority, or readiness inferred from process start.
-func TestStartReloadsAdmissionAndRetainsExactRuntimeWithoutReady(t *testing.T) {
+func TestBootstrapUsesReloadedAuthorityPersistsExactPinWithoutReady(t *testing.T) {
 	f := newFixture(t)
 	if err := f.owner.Start(context.Background(), f.request); err != nil {
 		t.Fatal(err)
@@ -150,8 +169,26 @@ func TestStartReloadsAdmissionAndRetainsExactRuntimeWithoutReady(t *testing.T) {
 	if f.startRequest != (backend.StartRequest{ObjectID: "boxwarden-work-dev", SerialDevice: f.serial.endpoint, GenerationDirectory: f.request.RuntimeDirectory}) {
 		t.Fatalf("start request = %#v", f.startRequest)
 	}
+	if err := f.owner.Bootstrap(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if f.serial.bootstrapCalls != 1 {
+		t.Fatalf("serial bootstrap calls = %d, want 1", f.serial.bootstrapCalls)
+	}
+	wantRequest := guestproto.SerialRequest{
+		Version: 1, Nonce: "nonce-1", StartGeneration: f.record.StartGeneration,
+		Association: guestproto.Association{Domain: "work", SessionID: f.record.ID, BackendKind: "tart", BackendObject: f.record.Backend.ObjectID},
+		CAPublicKey: ownerTestPublicKey, CAFingerprint: ownerTestFingerprint(), Principal: "boxwarden-session-" + f.record.ID,
+	}
+	if f.serial.bootstrapRequest != wantRequest {
+		t.Fatalf("bootstrap request = %#v, want authoritative %#v", f.serial.bootstrapRequest, wantRequest)
+	}
+	pin, err := sshx.NewPinStore(sshx.Domain{ID: "work", StateRoot: f.root}).Load(context.Background(), sshx.Binding{Domain: "work", SessionID: f.record.ID, BackendKind: "tart", BackendObject: f.record.Backend.ObjectID})
+	if err != nil || pin.PublicKey != ownerTestPublicKey || pin.Algorithm != "ssh-ed25519" {
+		t.Fatalf("persisted pin = %#v, %v", pin, err)
+	}
 	s := f.owner.Snapshot(context.Background())
-	if s.Binding != f.request.Binding || !s.BackendRunning || !s.SerialHealthy || s.PinPresent || s.CertificateCurrent || s.ProbeOK || s.ZoneMatches || s.ObservedAt.IsZero() {
+	if s.Binding != f.request.Binding || !s.BackendRunning || !s.SerialHealthy || !s.PinPresent || s.CertificateCurrent || s.ProbeOK || s.ZoneMatches || s.ObservedAt.IsZero() {
 		t.Fatalf("snapshot = %#v", s)
 	}
 	stored, err := session.LoadRecord(f.root, "work", "dev")
@@ -164,6 +201,96 @@ func TestStartReloadsAdmissionAndRetainsExactRuntimeWithoutReady(t *testing.T) {
 	if err := f.owner.Wait(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestBootstrapRetriesPinFromValidatedResultWithoutSecondSerialCommand(t *testing.T) {
+	f := newFixture(t)
+	pins := &flakyPinStore{failures: 1}
+	f.pin = pins
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Bootstrap(context.Background()); err == nil || !strings.Contains(err.Error(), "pin write interrupted") {
+		t.Fatalf("first bootstrap error = %v", err)
+	}
+	if err := f.owner.Bootstrap(context.Background()); err != nil {
+		t.Fatalf("exact pin retry: %v", err)
+	}
+	if f.serial.bootstrapCalls != 1 || pins.admitCalls != 2 {
+		t.Fatalf("serial/pin calls = %d/%d, want 1/2", f.serial.bootstrapCalls, pins.admitCalls)
+	}
+	if snapshot := f.owner.Snapshot(context.Background()); !snapshot.PinPresent {
+		t.Fatalf("pin retry snapshot = %#v", snapshot)
+	}
+	_ = f.owner.Stop(context.Background())
+	_ = f.owner.Wait(context.Background())
+}
+
+func TestBootstrapSerialResultAndPinConflictsFailClosed(t *testing.T) {
+	for name, mutate := range map[string]func(*fixture){
+		"wrong generation": func(f *fixture) {
+			f.serial.resultMutation = func(r *guestproto.SerialResult) { r.StartGeneration = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" }
+		},
+		"wrong session": func(f *fixture) {
+			f.serial.resultMutation = func(r *guestproto.SerialResult) { r.SessionID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" }
+		},
+		"wrong domain": func(f *fixture) { f.serial.resultMutation = func(r *guestproto.SerialResult) { r.Domain = "personal" } },
+		"wrong backend": func(f *fixture) {
+			f.serial.resultMutation = func(r *guestproto.SerialResult) { r.BackendObject = "other" }
+		},
+		"invalid host key": func(f *fixture) {
+			f.serial.resultMutation = func(r *guestproto.SerialResult) { r.HostPublicKey = "ssh-ed25519 invalid" }
+		},
+		"pin conflict": func(f *fixture) {
+			f.pin = &flakyPinStore{conflict: true}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			mutate(f)
+			if err := f.owner.Start(context.Background(), f.request); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.owner.Bootstrap(context.Background()); err == nil {
+				t.Fatal("conflicting bootstrap accepted")
+			}
+			if snapshot := f.owner.Snapshot(context.Background()); snapshot.PinPresent {
+				t.Fatalf("conflict published pin: %#v", snapshot)
+			}
+			_ = f.owner.Stop(context.Background())
+			_ = f.owner.Wait(context.Background())
+		})
+	}
+}
+
+func TestConcurrentBootstrapEmitsOneGuestRequestAndSnapshotRechecksPin(t *testing.T) {
+	f := newFixture(t)
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	var group sync.WaitGroup
+	for range 8 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			if err := f.owner.Bootstrap(context.Background()); err != nil {
+				t.Errorf("concurrent bootstrap: %v", err)
+			}
+		}()
+	}
+	group.Wait()
+	if f.serial.bootstrapCalls != 1 {
+		t.Fatalf("serial bootstrap calls = %d, want 1", f.serial.bootstrapCalls)
+	}
+	pinPath := filepath.Join(f.root, "identity", "ssh-host-pins", f.record.ID+".json")
+	if err := os.Remove(pinPath); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := f.owner.Snapshot(context.Background()); snapshot.PinPresent || !strings.Contains(snapshot.Diagnostic, "host-key pin") {
+		t.Fatalf("snapshot trusted stale in-memory pin: %#v", snapshot)
+	}
+	_ = f.owner.Stop(context.Background())
+	_ = f.owner.Wait(context.Background())
 }
 
 func TestStartRejectsBindingOrAdmissionBeforeMutation(t *testing.T) {
@@ -476,17 +603,35 @@ func (l *traceLog) all() []string {
 }
 
 type fakeSerial struct {
-	mu       sync.Mutex
-	trace    *traceLog
-	endpoint string
-	err      error
-	closeErr error
+	mu               sync.Mutex
+	trace            *traceLog
+	endpoint         string
+	err              error
+	closeErr         error
+	bootstrapCalls   int
+	bootstrapRequest guestproto.SerialRequest
+	bootstrapErr     error
+	resultMutation   func(*guestproto.SerialResult)
 }
 
 func (s *fakeSerial) TartSlave() string { return s.endpoint }
 func (s *fakeSerial) Err() error        { s.mu.Lock(); defer s.mu.Unlock(); return s.err }
-func (s *fakeSerial) poison()           { s.mu.Lock(); defer s.mu.Unlock(); s.err = serialx.ErrPoisoned }
-func (s *fakeSerial) Close() error      { s.trace.add("close"); s.poison(); return s.closeErr }
+func (s *fakeSerial) Bootstrap(_ context.Context, request guestproto.SerialRequest) (guestproto.SerialResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bootstrapCalls++
+	s.bootstrapRequest = request
+	if s.bootstrapErr != nil {
+		return guestproto.SerialResult{}, s.bootstrapErr
+	}
+	result := guestproto.SerialResult{Version: 1, StartGeneration: request.StartGeneration, Association: request.Association, CAFingerprint: request.CAFingerprint, Principal: request.Principal, HostPublicKey: ownerTestPublicKey}
+	if s.resultMutation != nil {
+		s.resultMutation(&result)
+	}
+	return result, nil
+}
+func (s *fakeSerial) poison()      { s.mu.Lock(); defer s.mu.Unlock(); s.err = serialx.ErrPoisoned }
+func (s *fakeSerial) Close() error { s.trace.add("close"); s.poison(); return s.closeErr }
 
 type fakeHandle struct {
 	trace            *traceLog
@@ -534,4 +679,30 @@ type starterFunc func(context.Context, backend.StartRequest) (backend.Handle, er
 
 func (f starterFunc) Start(c context.Context, r backend.StartRequest) (backend.Handle, error) {
 	return f(c, r)
+}
+
+type flakyPinStore struct {
+	failures, admitCalls int
+	conflict             bool
+	pin                  sshx.HostKeyPin
+}
+
+func (s *flakyPinStore) Admit(_ context.Context, binding sshx.Binding, observed sshx.ObservedHostKey) (sshx.HostKeyPin, error) {
+	s.admitCalls++
+	if s.failures > 0 {
+		s.failures--
+		return sshx.HostKeyPin{}, errors.New("pin write interrupted")
+	}
+	if s.conflict {
+		return sshx.HostKeyPin{}, errors.New("existing host-key pin differs")
+	}
+	s.pin = sshx.HostKeyPin{Version: 1, Domain: binding.Domain, SessionID: binding.SessionID, BackendKind: binding.BackendKind, BackendObject: binding.BackendObject, Algorithm: observed.Algorithm, PublicKey: observed.PublicKey, Fingerprint: ownerTestFingerprint()}
+	return s.pin, nil
+}
+
+func (s *flakyPinStore) Load(_ context.Context, _ sshx.Binding) (sshx.HostKeyPin, error) {
+	if s.pin.Version == 0 {
+		return sshx.HostKeyPin{}, errors.New("host-key pin missing")
+	}
+	return s.pin, nil
 }
