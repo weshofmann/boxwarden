@@ -137,10 +137,10 @@ displayed GNOME and Firefox, and passed same-system stop/restart persistence.
 The source-only installer launcher, prepared-base cache identity, exact input
 staging, serial ACL admission, fixed guest preparation, fresh-clone qualifier,
 typed package and identity inspection, host/CA preflight, builder composition,
-production qualification lifecycle, and ordered preparation composition are
-published. The current r2 candidate predates the latest tracked guest
-definition. Wire the public automatic preparation command and exercise a fresh
-candidate before treating a prepared cache entry as verified. Prove
+production qualification lifecycle, ordered preparation composition, and the
+public alpha preparation command are source-verified. The current r2 candidate
+predates the latest tracked guest definition. Exercise a fresh candidate
+through the public command before treating a prepared cache entry as verified. Prove
 live zero-NIC ext4 inspection, wire the workspace formatter and lifecycle, and
 qualify rebuild/reattach and controlled export on fresh synthetic resources
 before claiming the alpha ready.

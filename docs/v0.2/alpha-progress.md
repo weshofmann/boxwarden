@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-23 20:53 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-23 21:01 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -10,13 +10,13 @@ resumable handoff if unfinished.
 | --- | --- | --- |
 | Baseline | verified | Clean `e16f23962b43337f02de1fbe2779df00a28f3f1a`; `weshofmann/feature/v02-alpha` isolated worktree |
 | Host admission | verified | Elevated read-only doctor: `status: healthy` on original and alpha-only configs |
-| Source verification | verified with limits | Full local Go tests and vet passed at the 20:53 UTC source snapshot; targeted alphaprep/alphaqual/basebuild race checks passed. Identity-path race checks and guest shell fixtures passed at the 20:38 UTC snapshot. Hosted CI is unavailable |
+| Source verification | verified with limits | Full local Go tests and vet passed at the 21:01 UTC public command snapshot; targeted app/alphaprep/cmd race tests passed. Identity-path race checks and guest shell fixtures passed at the 20:38 UTC snapshot. Hosted CI is unavailable |
 | VM inventory | verified | Admitted `TART_HOME` has eight stopped alpha-owned objects plus one protected stopped historical object; exact names and states are in the private ownership manifest |
 | Alpha ownership | prepared | Exact resource paths and identities are retained only in the private ownership manifest |
 | Installer input | verified | Ubuntu 24.04.4 ARM64 Desktop ISO: good Canonical detached signature and exact `c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe` SHA-256; private cache only |
 | Recipe schema | source implemented | Versioned strict JSON loader and exact ISO verification have passing tests. The fixed guest-only preparation helper validates package/argv payloads and executes exact argv with a closed environment in source tests. The builder writes a private payload, binds helper/payload digests into the installer, and sends a fixed prepare command before finalization; failure prevents cache admission. No candidate has run this revision and no public preparation command exists |
 | Serial bootstrap and READY | real fresh clone verified | Corrected generic r2 candidate and public qualr2c clone completed serial bootstrap, host-key pin, certificate, strict SSH probe, time-zone convergence, READY, stop, restart to READY, and consistent stop. The management fixes are published |
-| Automatic base preparation | source verified, public path missing | Installer launcher, seed/remaster, journal, and admission source pass tests. Cache reuse binds a stopped Tart bundle identity; build stages exact verified inputs; serial admission checks private ACLs. Source tests prove prepare precedes finalization and failure leaves no admitted cache. A typed package query passes through the live exact-generation supervisor with READY checks around its pinned SSH call. The static guest helper has matching lock, installer, and finalizer digests. A recipe-bound qualifier adapter checks baseline and requested packages in 32-name chunks and records versions in a BOM in fake fresh-clone tests. Read-only production preflight checks the fully admitted host runtime and selected CA. Builder composition binds exact admitted Tart/Softnet facts and verifies OpenSSL/xorriso digests before reserving a build attempt; the VM and seed adapters recheck at use. Production qualifier composition now uses exact revision registration, public create-only clone/start/stop, and exact supervisor snapshots, while requiring a trusted guest inspector. These pieces are not yet invoked by a public command. Full guest acceptance and public CLI integration remain |
+| Automatic base preparation | public command source wired, real run pending | Installer launcher, seed/remaster, journal, and admission source pass tests. Cache reuse binds a stopped Tart bundle identity; build stages exact verified inputs; serial admission checks private ACLs. Source tests prove prepare precedes finalization and failure leaves no admitted cache. A typed package query passes through the live exact-generation supervisor with READY checks around its pinned SSH call. The static guest helper has matching lock, installer, and finalizer digests. A recipe-bound qualifier adapter checks baseline and requested packages in 32-name chunks and records versions in a BOM in fake fresh-clone tests. Read-only production preflight checks the fully admitted host runtime and selected CA. Builder composition binds exact admitted Tart/Softnet facts and verifies OpenSSL/xorriso digests before reserving a build attempt; the VM and seed adapters recheck at use. Production qualifier composition now uses exact revision registration, public create-only clone/start/stop, and exact supervisor snapshots, while requiring a trusted guest inspector. The public alpha prepare command now invokes these pieces in source; a real run and broader alpha acceptance remain |
 | Inspector capability | synthetic boot verified, ext4 runtime pending | Pinned Tart has no NIC-off mode. A signed Virtualization.framework guest booted with zero NICs, one read-only synthetic disk, and two serial channels; the guest reported loopback only and returned a typed report. A source-only 64 MiB ext4 fixture contract and guest read-only mount path have targeted tests, but no ext4 image or live mount proof exists. Real workspace export remains closed |
 | Graphical sandbox | same-clone GUI verified | Public qualr2c reached READY, GNOME Desktop and Firefox opened through Tart GUI, and Nautilus showed synthetic `bw-alpha-system-persist-r2c` in guest home after stop/restart. This is system-disk persistence only. No guest agent account sign-in or recipe-installed application has been observed |
 | Workspace lifecycle | source foundation published, real path missing | Volume-owned record, attachment/use transitions, private format journal, Linux ARM64 ext4 helper, and retained exact Tart disk/lock leases have targeted tests. Guest formatter VM adapter, public attach/rebuild/reattach, and fresh synthetic qualification remain |
@@ -39,7 +39,10 @@ The production preparation operation now orders exact domain path checks,
 read-only host/CA preflight, admitted tool and source verification, and
 same-backend builder/qualifier composition before creating an attempt root.
 Tests confirm preflight and invalid source failures create no attempt root.
-The public CLI has not yet invoked this operation.
+The public `alpha prepare` command now invokes this operation in source with
+fresh attempt IDs and explicit exact-digest OpenSSL/xorriso inputs. App tests
+reject missing domain, invalid command inputs, and nonpassing cache receipts
+before printing success. It has not yet run against a real candidate.
 
 Draft PR #12 tracks the published alpha branch. Commits `06884de` and
 `1ef30ab` published the formatter and managed-disk foundations separately.
@@ -77,8 +80,8 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 
 ## Next executable action
 
-Wire the composed preparation operation into a public automatic base command,
-then run a fresh candidate and record actual package, identity, READY, and
+Run the new public preparation command on a fresh candidate and record actual
+package, identity, READY, and
 stopped-object evidence. Extend the zero-NIC inspector from
 synthetic block/serial proof to read-only ext4 inspection while advancing the
 formatter VM adapter and workspace lifecycle. The current r2 engineering candidate predates

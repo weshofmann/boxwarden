@@ -7,11 +7,14 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/weshofmann/boxwarden/internal/alphaprep"
 	"github.com/weshofmann/boxwarden/internal/app"
 	"github.com/weshofmann/boxwarden/internal/backend/tart"
+	"github.com/weshofmann/boxwarden/internal/basebuild"
 	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/execx"
 	"github.com/weshofmann/boxwarden/internal/hostx"
+	"github.com/weshofmann/boxwarden/internal/recipe"
 	"github.com/weshofmann/boxwarden/internal/sessionruntime"
 	"github.com/weshofmann/boxwarden/internal/sshx"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
@@ -69,6 +72,29 @@ func publicOptions(output io.Writer) app.Options {
 				return nil, fmt.Errorf("status requires exact configured domain")
 			}
 			return supervisor.NewExactSnapshotReader(filepath.Join(selected.StateRoot, "runtime"))
+		},
+		AlphaPrepare: func(ctx context.Context, loaded config.Config, selected config.Domain, configPath string, input app.AlphaPrepareInput) (basebuild.PreparedResult, error) {
+			admitted, err := loaded.Domain(string(selected.ID))
+			if err != nil || admitted != selected {
+				return basebuild.PreparedResult{}, fmt.Errorf("alpha preparation requires exact configured domain")
+			}
+			value, err := recipe.Load(input.RecipePath)
+			if err != nil {
+				return basebuild.PreparedResult{}, fmt.Errorf("load alpha recipe: %w", err)
+			}
+			request, err := alphaprep.NewRequest(selected, value, input.ISOPath, input.GuestDefinitionRoot)
+			if err != nil {
+				return basebuild.PreparedResult{}, err
+			}
+			host, err := loaded.Host()
+			if err != nil {
+				return basebuild.PreparedResult{}, err
+			}
+			runner := execx.OSRunner{MaxOutputBytes: 1 << 20}
+			observer := tart.NewQualifiedObserver(runner, host.TartExecutable, host.TartHome)
+			components := alphaprep.BuildComponents{Runner: runner, Observer: observer, ScriptRunner: basebuild.OSOwnedScriptRunner{}, Launcher: basebuild.OSInstallerLauncher{},
+				OpenSSLPath: input.OpenSSLPath, OpenSSLSHA256: input.OpenSSLSHA256, XorrisoPath: input.XorrisoPath, XorrisoSHA256: input.XorrisoSHA256}
+			return alphaprep.Prepare(ctx, loaded, selected, configPath, request, hostDoctor, caStore, components)
 		},
 		Output: output,
 	}

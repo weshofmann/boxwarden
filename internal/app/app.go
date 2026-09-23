@@ -87,6 +87,7 @@ type Options struct {
 	SessionStopper        SessionStopper
 	SessionStopperFactory SessionStopperFactory
 	StatusSnapshotFactory StatusSnapshotFactory
+	AlphaPrepare          AlphaPrepareFunc
 	Output                io.Writer
 }
 
@@ -144,6 +145,15 @@ func Run(ctx context.Context, args []string, options Options) error {
 	}
 
 	switch command.kind {
+	case commandAlphaPrepare:
+		if options.AlphaPrepare == nil {
+			return errors.New("alpha base preparer is required")
+		}
+		result, err := options.AlphaPrepare(ctx, loaded, selectedDomain, command.configPath, command.alphaPrepare)
+		if err != nil {
+			return fmt.Errorf("prepare alpha base: %w", err)
+		}
+		return writeAlphaPrepared(options.Output, selectedDomain, result)
 	case commandAlphaRecipeCheck:
 		if _, err := recipe.Load(command.recipePath); err != nil {
 			return fmt.Errorf("check alpha recipe: %w", err)
@@ -288,16 +298,18 @@ const (
 	commandDoctor
 	commandDomainInit
 	commandAlphaRecipeCheck
+	commandAlphaPrepare
 )
 
 type parsedCommand struct {
-	kind       commandKind
-	configPath string
-	domain     string
-	name       string
-	mode       session.Mode
-	recipePath string
-	isoPath    string
+	kind         commandKind
+	configPath   string
+	domain       string
+	name         string
+	mode         session.Mode
+	recipePath   string
+	isoPath      string
+	alphaPrepare AlphaPrepareInput
 }
 
 func (c parsedCommand) requiresDomain() bool {
@@ -352,6 +364,29 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		return parsedCommand{}, errors.New("domain is required; pass --domain or set BOXWARDEN_DOMAIN")
 	}
 	base.domain = *domain
+	if len(remaining) >= 2 && remaining[0] == "alpha" && remaining[1] == "prepare" {
+		prepareSet := flag.NewFlagSet("alpha prepare", flag.ContinueOnError)
+		prepareSet.SetOutput(io.Discard)
+		input := AlphaPrepareInput{}
+		prepareSet.StringVar(&input.RecipePath, "recipe", "", "versioned recipe JSON")
+		prepareSet.StringVar(&input.ISOPath, "iso", "", "local installer ISO")
+		prepareSet.StringVar(&input.GuestDefinitionRoot, "guest-definition", "", "tracked generic guest definition")
+		prepareSet.StringVar(&input.OpenSSLPath, "openssl", "", "pinned OpenSSL executable")
+		prepareSet.StringVar(&input.OpenSSLSHA256, "openssl-sha256", "", "pinned OpenSSL digest")
+		prepareSet.StringVar(&input.XorrisoPath, "xorriso", "", "pinned xorriso executable")
+		prepareSet.StringVar(&input.XorrisoSHA256, "xorriso-sha256", "", "pinned xorriso digest")
+		if err := prepareSet.Parse(remaining[2:]); err != nil {
+			return parsedCommand{}, fmt.Errorf("parse alpha prepare: %w", err)
+		}
+		if len(prepareSet.Args()) != 0 {
+			return parsedCommand{}, errors.New("alpha prepare accepts only named inputs")
+		}
+		if err := validAlphaPrepareInput(input); err != nil {
+			return parsedCommand{}, err
+		}
+		base.kind, base.alphaPrepare = commandAlphaPrepare, input
+		return base, nil
+	}
 	if len(remaining) >= 3 && remaining[0] == "alpha" && remaining[1] == "recipe" && remaining[2] == "check" {
 		checkSet := flag.NewFlagSet("alpha recipe check", flag.ContinueOnError)
 		checkSet.SetOutput(io.Discard)
@@ -409,7 +444,7 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.name = remaining[2]
 		return base, nil
 	}
-	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] <session>, session start <session>, session stop <session>, session status <session>, alpha recipe check --recipe PATH --iso PATH")
+	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] <session>, session start <session>, session stop <session>, session status <session>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
 }
 
 func writeInit(output io.Writer, result hostx.InitResult) error {

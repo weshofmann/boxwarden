@@ -14,6 +14,7 @@ import (
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/backend/fake"
+	"github.com/weshofmann/boxwarden/internal/basebuild"
 	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/golden"
 	"github.com/weshofmann/boxwarden/internal/hostx"
@@ -97,6 +98,60 @@ func TestAlphaRecipeCheckRequiresExactDomainAndInstaller(t *testing.T) {
 	parsed, err := parseCommand([]string{"--config", configPath, "--domain", "alpha", "alpha", "recipe", "check", "--recipe", recipePath, "--iso", isoPath}, Options{})
 	if err != nil || parsed.kind != commandAlphaRecipeCheck || parsed.domain != "alpha" || parsed.recipePath != recipePath || parsed.isoPath != isoPath {
 		t.Fatalf("alpha recipe command = %+v, %v", parsed, err)
+	}
+}
+
+func TestAlphaPrepareRoutesExactDomainAndReportsOnlyPassingCacheReceipt(t *testing.T) {
+	configPath, _ := writeV2DomainFixture(t, "alpha")
+	loaded, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := loaded.Domain("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	input := AlphaPrepareInput{RecipePath: filepath.Join(root, "recipe.json"), ISOPath: filepath.Join(root, "ubuntu.iso"), GuestDefinitionRoot: filepath.Join(root, "guest"), OpenSSLPath: "/usr/bin/openssl", OpenSSLSHA256: strings.Repeat("a", 64), XorrisoPath: "/opt/homebrew/bin/xorriso", XorrisoSHA256: strings.Repeat("b", 64)}
+	args := []string{"--config", configPath, "--domain", "alpha", "alpha", "prepare", "--recipe", input.RecipePath, "--iso", input.ISOPath, "--guest-definition", input.GuestDefinitionRoot, "--openssl", input.OpenSSLPath, "--openssl-sha256", input.OpenSSLSHA256, "--xorriso", input.XorrisoPath, "--xorriso-sha256", input.XorrisoSHA256}
+	called := 0
+	result := basebuild.PreparedResult{Disposition: basebuild.PreparedBuilt, Record: basebuild.PreparedRecord{Version: 2, CandidateID: "boxwarden-alpha-base-abc", CandidateIdentity: strings.Repeat("c", 64), PreparationKey: strings.Repeat("d", 64), AttemptDirectory: filepath.Join(selected.StateRoot, "prepared-attempts", "alpha-attempt-abc"), Qualification: basebuild.QualificationReceipt{CandidateID: "boxwarden-alpha-base-abc", PreparationKey: strings.Repeat("d", 64), CloneID: "boxwarden-alpha-clone-abc", EvidenceSHA256: strings.Repeat("e", 64), BOMSHA256: strings.Repeat("f", 64), Passed: true}}}
+	preparer := func(_ context.Context, loaded config.Config, selected config.Domain, path string, got AlphaPrepareInput) (basebuild.PreparedResult, error) {
+		called++
+		admitted, err := loaded.Domain("alpha")
+		if err != nil || selected != admitted || path != configPath || got != input {
+			t.Fatalf("preparer binding = %+v, %q, %+v, %v", selected, path, got, err)
+		}
+		return result, nil
+	}
+	var output bytes.Buffer
+	if err := Run(context.Background(), args, Options{Output: &output, AlphaPrepare: preparer}); err != nil || called != 1 || !strings.Contains(output.String(), "prepared-base: boxwarden-alpha-base-abc") {
+		t.Fatalf("prepare result = %v, calls=%d, output=%q", err, called, output.String())
+	}
+	output.Reset()
+	result.Record.Qualification.Passed = false
+	if err := Run(context.Background(), args, Options{Output: &output, AlphaPrepare: preparer}); err == nil || output.Len() != 0 {
+		t.Fatalf("invalid cache receipt emitted success: %v, %q", err, output.String())
+	}
+	output.Reset()
+	withoutDomain := append([]string{"--config", configPath}, args[4:]...)
+	if err := Run(context.Background(), withoutDomain, Options{Output: &output, AlphaPrepare: preparer}); err == nil || called != 2 {
+		t.Fatalf("missing domain reached preparer: %v, calls=%d", err, called)
+	}
+	for _, invalid := range [][]string{
+		args[:len(args)-2],
+		append(append([]string(nil), args...), "unexpected"),
+		func() []string { bad := append([]string(nil), args...); bad[11] = "relative/guest"; return bad }(),
+		func() []string {
+			bad := append([]string(nil), args...)
+			bad[len(bad)-1] = strings.Repeat("A", 64)
+			return bad
+		}(),
+	} {
+		output.Reset()
+		if err := Run(context.Background(), invalid, Options{Output: &output, AlphaPrepare: preparer}); err == nil || output.Len() != 0 || called != 2 {
+			t.Fatalf("invalid command reached preparer: %v, output=%q calls=%d", err, output.String(), called)
+		}
 	}
 }
 

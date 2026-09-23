@@ -142,11 +142,17 @@ func TestProductionPublicOptionsWireAdmittedStarterFactory(t *testing.T) {
 	if options.StatusSnapshotFactory == nil {
 		t.Fatal("production status has no exact supervisor snapshot reader")
 	}
+	if options.AlphaPrepare == nil {
+		t.Fatal("production alpha preparation is not composed")
+	}
 	if _, err := options.SessionStarterFactory(config.Config{}, config.Domain{}, "/private/config.json"); err == nil {
 		t.Fatal("production factory accepted unadmitted configuration")
 	}
 	if _, err := options.StatusSnapshotFactory(config.Config{}, config.Domain{}); err == nil {
 		t.Fatal("production status factory accepted unadmitted configuration")
+	}
+	if _, err := options.AlphaPrepare(context.Background(), config.Config{}, config.Domain{}, "/private/config.json", app.AlphaPrepareInput{}); err == nil {
+		t.Fatal("production alpha preparation accepted unadmitted configuration")
 	}
 }
 
