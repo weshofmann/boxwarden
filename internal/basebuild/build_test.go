@@ -227,10 +227,15 @@ func (f *fakeRun) WaitFor(_ context.Context, marker string) error {
 	switch marker {
 	case InstalledPrompt("run-1"):
 		*f.events = append(*f.events, "installed")
+	case PrepareReadyMarker:
+		*f.events = append(*f.events, "prepared")
 	case CloneReadyMarker:
 		*f.events = append(*f.events, "finalized")
 	default:
 		return errors.New("unexpected marker")
+	}
+	if f.failAt == "prepared" && marker == PrepareReadyMarker {
+		return errors.New("guest preparation failed")
 	}
 	if f.failAt == "finalized" && marker == CloneReadyMarker {
 		return errors.New("finalizer failed")
@@ -239,6 +244,8 @@ func (f *fakeRun) WaitFor(_ context.Context, marker string) error {
 }
 func (f *fakeRun) SendLine(_ context.Context, line string) error {
 	switch line {
+	case PrepareCommand:
+		*f.events = append(*f.events, "prepare-command")
 	case FinalizerCommand:
 		*f.events = append(*f.events, "finalizer-command")
 	case PoweroffCommand:
@@ -290,7 +297,7 @@ func TestBuildPreservesStoppedCandidateWithoutClaimingQualification(t *testing.T
 	if checks.called != 1 {
 		t.Fatalf("verification calls = %d", checks.called)
 	}
-	want := "observe,verifier,render,remaster,create,observe,configure,run,installed,finalizer-command,finalized,poweroff-command,wait,observe"
+	want := "observe,verifier,render,remaster,create,observe,configure,run,installed,prepare-command,prepared,finalizer-command,finalized,poweroff-command,wait,observe"
 	if got := strings.Join(events, ","); got != want {
 		t.Fatalf("events: %s\nwant: %s", got, want)
 	}
@@ -306,6 +313,24 @@ func TestBuildPreservesStoppedCandidateWithoutClaimingQualification(t *testing.T
 	}
 	if state.Phase != PhaseCandidateStopped || state.CandidateID != inputs.CandidateID {
 		t.Fatalf("state: %+v", state)
+	}
+}
+
+func TestBuildDoesNotFinalizeAfterGuestPreparationFailure(t *testing.T) {
+	inputs := exampleInputs(t)
+	inputs.Recipe.AptPackages = []string{"git"}
+	events := []string{}
+	run := &fakeRun{events: &events, failAt: "prepared"}
+	vm := &fakeVM{events: &events, run: run}
+	if _, err := Build(context.Background(), inputs, Dependencies{Checks: &fakeChecks{}, Seed: fakeSeed{events: &events}, VM: vm}); err == nil || !strings.Contains(err.Error(), "guest preparation failed") {
+		t.Fatalf("preparation failure = %v", err)
+	}
+	if strings.Contains(strings.Join(events, ","), "finalizer-command") || !run.stopped || !run.waited {
+		t.Fatalf("failed preparation finalized or was not contained: %v", events)
+	}
+	state, err := ReadAttempt(filepath.Join(inputs.AttemptRoot, inputs.AttemptID))
+	if err != nil || state.Phase != PhaseFailed || state.Failure != "build failed during preparing" {
+		t.Fatalf("failed preparation journal = %+v, %v", state, err)
 	}
 }
 

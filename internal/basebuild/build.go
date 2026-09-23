@@ -19,9 +19,11 @@ import (
 )
 
 const (
-	CloneReadyMarker = "generic golden clone-ready; power off without another boot"
-	FinalizerCommand = "sudo -n -- /usr/local/libexec/boxwarden-finalize-golden --acknowledge-generic-golden-finalization"
-	PoweroffCommand  = "sudo -n -- /usr/bin/systemctl poweroff"
+	CloneReadyMarker   = "generic golden clone-ready; power off without another boot"
+	PrepareReadyMarker = "boxwarden recipe prepare complete"
+	PrepareCommand     = "sudo -n -- /usr/bin/python3 /usr/local/libexec/boxwarden-recipe-prepare --run"
+	FinalizerCommand   = "sudo -n -- /usr/local/libexec/boxwarden-finalize-golden --acknowledge-generic-golden-finalization"
+	PoweroffCommand    = "sudo -n -- /usr/bin/systemctl poweroff"
 )
 
 func InstalledPrompt(runID string) string { return "boxwarden@boxwarden-task0-" + runID + ":" }
@@ -33,6 +35,7 @@ const (
 	PhaseRendered         Phase = "rendered"
 	PhaseCreated          Phase = "created"
 	PhaseRunning          Phase = "installer-running"
+	PhasePreparing        Phase = "preparing"
 	PhaseFinalizing       Phase = "finalizing"
 	PhaseStopping         Phase = "stopping"
 	PhaseCandidateStopped Phase = "candidate-stopped"
@@ -290,6 +293,17 @@ func Build(ctx context.Context, in Inputs, deps Dependencies) (result Result, er
 	defer cancel()
 	if err := handle.WaitFor(installCtx, InstalledPrompt(in.RunID)); err != nil {
 		return Result{}, fmt.Errorf("wait for installed guest: %w", err)
+	}
+	if err := setPhase(PhasePreparing); err != nil {
+		return Result{}, err
+	}
+	prepareCtx, cancel := context.WithTimeout(ctx, 40*time.Minute)
+	defer cancel()
+	if err := handle.SendLine(prepareCtx, PrepareCommand); err != nil {
+		return Result{}, fmt.Errorf("send fixed guest preparation command: %w", err)
+	}
+	if err := handle.WaitFor(prepareCtx, PrepareReadyMarker); err != nil {
+		return Result{}, fmt.Errorf("wait for guest preparation: %w", err)
 	}
 	if err := setPhase(PhaseFinalizing); err != nil {
 		return Result{}, err

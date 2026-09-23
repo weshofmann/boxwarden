@@ -96,14 +96,6 @@ func Prepare(ctx context.Context, request PrepareRequest, deps PrepareDependenci
 	if !ok {
 		return PreparedResult{}, errors.New("candidate object identity verifier is required")
 	}
-	if len(request.Inputs.Recipe.AptPackages) != 0 {
-		return PreparedResult{}, errors.New("reusable recipe preparation is unavailable for apt packages")
-	}
-	for _, step := range request.Inputs.Recipe.Steps {
-		if step.Phase == "prepare" {
-			return PreparedResult{}, errors.New("reusable recipe preparation is unavailable for prepare steps")
-		}
-	}
 	if !absoluteClean(request.StateRoot) {
 		return PreparedResult{}, errors.New("state root must be canonical and absolute")
 	}

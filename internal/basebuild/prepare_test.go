@@ -370,18 +370,32 @@ func TestPrepareRequiresQualifierBeforeAnyStateMutation(t *testing.T) {
 	}
 }
 
-func TestPrepareRefusesToClaimUnexecutedRecipeSoftware(t *testing.T) {
-	request, deps, _, _, _ := prepareFixture(t)
+func TestPrepareRejectsFailedGuestSoftwareBeforeCacheAdmission(t *testing.T) {
+	request, deps, _, vm, qualifier := prepareFixture(t)
 	request.Inputs.Recipe.AptPackages = []string{"git"}
-	if _, err := Prepare(context.Background(), request, deps); err == nil || !strings.Contains(err.Error(), "reusable recipe preparation") {
-		t.Fatalf("unexecuted apt package accepted: %v", err)
-	}
-	request.Inputs.Recipe.AptPackages = nil
 	request.Inputs.Recipe.Steps = []recipe.Step{{ID: "base-step", Phase: "prepare", Argv: []string{"/bin/true"}}}
-	if _, err := Prepare(context.Background(), request, deps); err == nil || !strings.Contains(err.Error(), "reusable recipe preparation") {
-		t.Fatalf("unexecuted prepare step accepted: %v", err)
+	vm.run.failAt = "prepared"
+	if _, err := Prepare(context.Background(), request, deps); err == nil || !strings.Contains(err.Error(), "guest preparation failed") {
+		t.Fatalf("failed guest preparation was admitted: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(request.Inputs.AttemptRoot, request.Inputs.AttemptID)); !os.IsNotExist(err) {
-		t.Fatalf("attempt created: %v", err)
+	if qualifier.calls != 0 {
+		t.Fatal("qualifier ran after guest preparation failure")
+	}
+	if _, err := os.Stat(filepath.Join(request.StateRoot, "prepared", "records", strings.Repeat("a", 64)+".json")); !os.IsNotExist(err) {
+		t.Fatalf("failed guest preparation published cache: %v", err)
+	}
+}
+
+func TestPrepareAdmitsGuestSoftwareOnlyAfterPrepareAndQualification(t *testing.T) {
+	request, deps, _, vm, qualifier := prepareFixture(t)
+	request.Inputs.Recipe.AptPackages = []string{"git"}
+	request.Inputs.Recipe.Steps = []recipe.Step{{ID: "base-step", Phase: "prepare", Argv: []string{"/bin/true"}}}
+	result, err := Prepare(context.Background(), request, deps)
+	if err != nil || result.Disposition != PreparedBuilt || qualifier.calls != 1 {
+		t.Fatalf("prepared recipe admission = %+v, qualifier calls=%d, err=%v", result, qualifier.calls, err)
+	}
+	joined := strings.Join(*vm.events, ",")
+	if !strings.Contains(joined, "prepare-command,prepared,finalizer-command") {
+		t.Fatalf("software prepare did not precede finalizer: %s", joined)
 	}
 }

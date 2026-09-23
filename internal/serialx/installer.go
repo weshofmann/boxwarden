@@ -10,19 +10,22 @@ import (
 )
 
 const (
-	installerReadyMarker = "generic golden clone-ready; power off without another boot"
-	installerFinalizer   = "sudo -n -- /usr/local/libexec/boxwarden-finalize-golden --acknowledge-generic-golden-finalization"
-	installerPoweroff    = "sudo -n -- /usr/bin/systemctl poweroff"
-	installerTailBytes   = 256
+	installerReadyMarker    = "generic golden clone-ready; power off without another boot"
+	installerPreparedMarker = "boxwarden recipe prepare complete"
+	installerFailureMarker  = "boxwarden recipe prepare failed:"
+	installerPrepare        = "sudo -n -- /usr/bin/python3 /usr/local/libexec/boxwarden-recipe-prepare --run"
+	installerFinalizer      = "sudo -n -- /usr/local/libexec/boxwarden-finalize-golden --acknowledge-generic-golden-finalization"
+	installerPoweroff       = "sudo -n -- /usr/bin/systemctl poweroff"
+	installerTailBytes      = 256
 )
 
 type installerExchange struct {
-	tail                        []byte
-	expectedPrompt              string
-	seenPrompt, seenReady       bool
-	finalizerSent, poweroffSent bool
-	wake                        chan struct{}
-	writeMu                     sync.Mutex
+	tail                                               []byte
+	expectedPrompt                                     string
+	seenPrompt, seenPrepared, prepareFailed, seenReady bool
+	prepareSent, finalizerSent, poweroffSent           bool
+	wake                                               chan struct{}
+	writeMu                                            sync.Mutex
 }
 
 func newInstallerExchange(runID string) *installerExchange {
@@ -53,6 +56,12 @@ func (e *installerExchange) feed(chunk []byte) {
 	if !e.seenPrompt && bytes.Contains(joined, []byte(e.expectedPrompt)) {
 		e.seenPrompt, changed = true, true
 	}
+	if e.prepareSent && !e.seenPrepared && bytes.Contains(joined, []byte(installerPreparedMarker)) {
+		e.seenPrepared, changed = true, true
+	}
+	if e.prepareSent && !e.prepareFailed && bytes.Contains(joined, []byte(installerFailureMarker)) {
+		e.prepareFailed, changed = true, true
+	}
 	if e.finalizerSent && !e.seenReady && bytes.Contains(joined, []byte(installerReadyMarker)) {
 		e.seenReady, changed = true, true
 	}
@@ -70,8 +79,8 @@ func (e *installerExchange) notify() {
 	e.wake = make(chan struct{})
 }
 
-// InstallerWaitFor recognizes only the bound run prompt and the fixed
-// clone-ready marker. It never returns console text to a caller.
+// InstallerWaitFor recognizes only the bound prompt and fixed preparation and
+// clone-ready markers. It never returns console text to a caller.
 func (r *Runtime) InstallerWaitFor(ctx context.Context, marker string) error {
 	if r == nil || r.installer == nil {
 		return errors.New("installer serial runtime is required")
@@ -80,6 +89,8 @@ func (r *Runtime) InstallerWaitFor(ctx context.Context, marker string) error {
 	switch marker {
 	case r.installer.expectedPrompt:
 		limit = 90 * time.Minute
+	case installerPreparedMarker:
+		limit = 40 * time.Minute
 	case installerReadyMarker:
 		limit = 10 * time.Minute
 	default:
@@ -90,12 +101,16 @@ func (r *Runtime) InstallerWaitFor(ctx context.Context, marker string) error {
 	for {
 		r.mu.Lock()
 		e := r.installer
-		seen := marker == e.expectedPrompt && e.seenPrompt || marker == installerReadyMarker && e.seenReady
+		seen := marker == e.expectedPrompt && e.seenPrompt || marker == installerPreparedMarker && e.seenPrepared || marker == installerReadyMarker && e.seenReady
+		failed := marker == installerPreparedMarker && e.prepareFailed
 		err := r.err
 		wake := e.wake
 		r.mu.Unlock()
 		if err != nil {
 			return err
+		}
+		if failed {
+			return errors.New("guest preparation reported failure")
 		}
 		if seen {
 			return nil
@@ -109,8 +124,8 @@ func (r *Runtime) InstallerWaitFor(ctx context.Context, marker string) error {
 	}
 }
 
-// InstallerSendLine permits only the tracked finalizer and poweroff commands
-// in order, once each. A timeout poisons the sole serial transport.
+// InstallerSendLine permits only the tracked prepare, finalizer, and poweroff
+// commands in order, once each. A timeout poisons the sole serial transport.
 func (r *Runtime) InstallerSendLine(ctx context.Context, line string) error {
 	if r == nil || r.installer == nil {
 		return errors.New("installer serial runtime is required")
@@ -125,8 +140,15 @@ func (r *Runtime) InstallerSendLine(ctx context.Context, line string) error {
 		return err
 	}
 	switch line {
+	case installerPrepare:
+		if !e.seenPrompt || e.prepareSent {
+			r.mu.Unlock()
+			return errors.New("installer preparation is out of order")
+		}
+		e.prepareSent = true
+		e.tail = nil
 	case installerFinalizer:
-		if !e.seenPrompt || e.finalizerSent {
+		if !e.seenPrepared || e.prepareFailed || e.finalizerSent {
 			r.mu.Unlock()
 			return errors.New("installer finalizer is out of order")
 		}
