@@ -111,11 +111,33 @@ func runProcessOwner(path string) error {
 		}
 		return filesystemSerial{serialRuntime: &fakeSerial{trace: trace, endpoint: filepath.Join(dir, "tart-serial")}, directory: dir}, nil
 	}
+	owner.deps.key = func(_ context.Context, directory string) (string, error) {
+		key := filepath.Join(directory, "client")
+		if err := os.WriteFile(key, []byte("test-client-key"), 0o600); err != nil {
+			return "", err
+		}
+		return key, nil
+	}
+	owner.deps.issuer = func(sshx.CAIdentity) certificateIssuer {
+		return readyIssuer(func(_ context.Context, binding sshx.Binding, _ string, key string) (sshx.Certificate, error) {
+			path := key + "-cert.pub"
+			if err := os.WriteFile(path, []byte("test-certificate"), 0o644); err != nil {
+				return sshx.Certificate{}, err
+			}
+			return sshx.Certificate{Path: path, Identity: binding.CertificateIdentity(), Principal: binding.Principal(), NotAfter: time.Now().Add(15 * time.Minute)}, nil
+		})
+	}
+	owner.deps.address = func(string, string) backend.AddressResolver {
+		return readyAddress(func(context.Context, string) (string, error) { return "192.0.2.10", nil })
+	}
+	owner.deps.client = &readyClient{}
+	owner.deps.zone = func() (string, error) { return "America/Denver", nil }
 	// A failed test cannot leave an unbounded helper behind. The ordinary
 	// successful path terminates earlier through the exact retained handle.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := supervisor.Run(ctx, path, owner); err != nil {
+		_ = os.WriteFile(request.HostConfigPath+".reaped-error", []byte(err.Error()), 0o600)
 		return err
 	}
 	marker := request.HostConfigPath + ".reaped"
@@ -141,14 +163,14 @@ func TestInitiatingProcessReturnsWhileDetachedSupervisorRetainsRuntime(t *testin
 	if err != nil {
 		t.Fatalf("initiating process: %v\n%s", err, output)
 	}
-	if got, want := string(output), "domain: work\nsession: dev\nstate: starting\nreadiness: starting\n"; got != want {
+	if got, want := string(output), "domain: work\nsession: dev\nstate: running\nreadiness: ready\n"; got != want {
 		t.Fatalf("output = %q", got)
 	}
 	stored, err := session.LoadRecord(f.root, "work", "dev")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.IntendedState != session.StateStarting || stored.Readiness.Status != session.ReadinessStarting || len(stored.StartGeneration) != 36 {
+	if stored.IntendedState != session.StateRunning || stored.Readiness.Status != session.ReadinessReady || len(stored.StartGeneration) != 36 {
 		t.Fatalf("durable start = %#v", stored)
 	}
 	binding := f.request.Binding
@@ -161,7 +183,7 @@ func TestInitiatingProcessReturnsWhileDetachedSupervisorRetainsRuntime(t *testin
 		_ = client.Stop(ctx, binding)
 	})
 	snapshot, err := client.Snapshot(ctx, binding)
-	if err != nil || snapshot.Binding != binding || !snapshot.BackendRunning || !snapshot.SerialHealthy || !snapshot.PinPresent || snapshot.CertificateCurrent || snapshot.ProbeOK || snapshot.ZoneMatches {
+	if err != nil || snapshot.Binding != binding || !snapshot.BackendRunning || !snapshot.SerialHealthy || !snapshot.PinPresent || !snapshot.CertificateCurrent || !snapshot.ProbeOK || !snapshot.ZoneMatches {
 		t.Fatalf("post-initiator snapshot = %#v %v", snapshot, err)
 	}
 	assertGenerationLock(t, filepath.Join(directory, "generation.lock"), true)
@@ -177,6 +199,9 @@ func TestInitiatingProcessReturnsWhileDetachedSupervisorRetainsRuntime(t *testin
 		if err == nil {
 			break
 		}
+		if failed, failureErr := os.ReadFile(f.request.HostConfigPath + ".reaped-error"); failureErr == nil {
+			t.Fatalf("detached owner cleanup failed: %s", failed)
+		}
 		select {
 		case <-ctx.Done():
 			t.Fatal("detached owner did not finish exact reap/cleanup")
@@ -191,6 +216,6 @@ func TestInitiatingProcessReturnsWhileDetachedSupervisorRetainsRuntime(t *testin
 	}
 	after, err := session.LoadRecord(f.root, "work", "dev")
 	if err != nil || after != stored {
-		t.Fatalf("detached lifetime changed durable STARTING: %#v %v", after, err)
+		t.Fatalf("detached lifetime changed durable RUNNING: %#v %v", after, err)
 	}
 }

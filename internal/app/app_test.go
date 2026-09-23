@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/backend/fake"
@@ -18,6 +19,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/sshx"
+	"github.com/weshofmann/boxwarden/internal/supervisor"
 )
 
 func TestBackendFactoryBindsRegisterCreateAndStatusToAdmittedConfigAndDomain(t *testing.T) {
@@ -109,7 +111,6 @@ func TestBackendFactoryIsUnreachableForInvalidInputAndOtherCommands(t *testing.T
 		{"--config", path, "--domain", "work", "golden", "register", "../bad"},
 		{"--config", path, "--domain", "work", "session", "create", "--mode", "bad", "dev"},
 		{"--config", path, "--domain", "work", "session", "status", "dev", "extra"},
-		{"--config", path, "--domain", "work", "session", "stop", "dev"},
 		{"--config", path, "--domain", "work", "session", "start", "dev"},
 		{"--config", path, "--domain", "work", "domain", "init"},
 		{"--config", path, "init"},
@@ -264,6 +265,40 @@ func (s *sessionStarterFake) Start(_ context.Context, name string) (session.Reco
 	return s.record, nil
 }
 
+type sessionStopperFake struct {
+	name   string
+	record session.Record
+}
+
+func (s *sessionStopperFake) Stop(_ context.Context, name string) (session.Record, error) {
+	s.name = name
+	return s.record, nil
+}
+
+func TestSessionStopUsesExactAdmittedFactoryAndReportsStoppedState(t *testing.T) {
+	path, selected := writeV2DomainFixture(t, "work")
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopper := &sessionStopperFake{record: session.Record{Domain: selected.ID, Name: "dev", IntendedState: session.StateStopped, Readiness: session.ReadinessRecord{Status: session.ReadinessNotReady}}}
+	var output bytes.Buffer
+	calls := 0
+	err = Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "stop", "dev"}, Options{
+		Output: &output,
+		SessionStopperFactory: func(got config.Config, domain config.Domain, exactPath string) (SessionStopper, error) {
+			calls++
+			if !reflect.DeepEqual(got, loaded) || domain != selected || exactPath != path {
+				t.Fatalf("stop factory inputs = %#v, %#v, %q", got, domain, exactPath)
+			}
+			return stopper, nil
+		},
+	})
+	if err != nil || calls != 1 || stopper.name != "dev" || output.String() != "domain: work\nsession: dev\nstate: stopped\nreadiness: not_ready\n" {
+		t.Fatalf("stop = %v; calls=%d name=%q output=%q", err, calls, stopper.name, output.String())
+	}
+}
+
 func TestSessionStatusRendersPersistedAndObservedState(t *testing.T) {
 	configPath := writeStatusFixture(t, "work", "dev")
 	recordPath := filepath.Join(filepath.Dir(configPath), "sessions", "dev.json")
@@ -277,6 +312,10 @@ func TestSessionStatusRendersPersistedAndObservedState(t *testing.T) {
 			"boxwarden-work-dev": {ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectStopped},
 		}},
 		Output: &output,
+		StatusSnapshotFactory: func(config.Config, config.Domain) (StatusSnapshotReader, error) {
+			t.Fatal("stopped status must not ask for supervisor evidence")
+			return nil, nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -292,6 +331,141 @@ func TestSessionStatusRendersPersistedAndObservedState(t *testing.T) {
 	}
 	if !bytes.Equal(after, before) {
 		t.Fatalf("session status rewrote version 1 record = %q, want %q", after, before)
+	}
+}
+
+type statusSnapshotFake struct {
+	snapshot supervisor.Snapshot
+	err      error
+	calls    int
+	binding  supervisor.Binding
+}
+
+func (f *statusSnapshotFake) Snapshot(_ context.Context, binding supervisor.Binding) (supervisor.Snapshot, error) {
+	f.calls++
+	f.binding = binding
+	return f.snapshot, f.err
+}
+
+func writeRunningStatusFixture(t *testing.T, readiness session.ReadinessStatus) (string, []byte) {
+	t.Helper()
+	path := writeStatusFixture(t, "work", "dev")
+	recordPath := filepath.Join(filepath.Dir(path), "sessions", "dev.json")
+	record := []byte(fmt.Sprintf(`{"version":2,"domain":"work","name":"dev","id":"00000000-0000-4000-8000-000000000001","mode":"clean","intended_state":"running","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-work-r1","start_generation":"11111111-2222-4333-8444-555555555555","readiness":{"status":%q,"diagnostic":""}}`, readiness))
+	if err := os.WriteFile(recordPath, record, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path, record
+}
+
+func TestSessionStatusRequiresFreshExactReadyEvidence(t *testing.T) {
+	now := time.Now().UTC()
+	binding := supervisor.Binding{Domain: "work", SessionID: "00000000-0000-4000-8000-000000000001", BackendKind: "tart", BackendObject: "boxwarden-work-dev", Generation: "11111111-2222-4333-8444-555555555555"}
+	ready := supervisor.Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true, ObservedAt: now}
+	for _, test := range []struct {
+		name      string
+		mutate    func(*supervisor.Snapshot)
+		readerErr error
+		want      string
+	}{
+		{name: "ready", want: "ready"},
+		{name: "wrong generation", mutate: func(s *supervisor.Snapshot) { s.Binding.Generation = "foreign" }, want: "drift"},
+		{name: "stale", mutate: func(s *supervisor.Snapshot) { s.ObservedAt = now.Add(-time.Minute) }, want: "drift"},
+		{name: "future", mutate: func(s *supervisor.Snapshot) { s.ObservedAt = now.Add(time.Minute) }, want: "drift"},
+		{name: "backend not proved", mutate: func(s *supervisor.Snapshot) { s.BackendRunning = false }, want: "drift"},
+		{name: "serial poisoned", mutate: func(s *supervisor.Snapshot) { s.SerialHealthy = false }, want: "drift"},
+		{name: "pin absent", mutate: func(s *supervisor.Snapshot) { s.PinPresent = false }, want: "drift"},
+		{name: "certificate stale", mutate: func(s *supervisor.Snapshot) { s.CertificateCurrent = false }, want: "drift"},
+		{name: "probe failed", mutate: func(s *supervisor.Snapshot) { s.ProbeOK = false }, want: "drift"},
+		{name: "zone mismatch", mutate: func(s *supervisor.Snapshot) { s.ZoneMatches = false }, want: "drift"},
+		{name: "supervisor unavailable", readerErr: errors.New("control socket unavailable"), want: "drift"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path, before := writeRunningStatusFixture(t, session.ReadinessReady)
+			snapshot := ready
+			if test.mutate != nil {
+				test.mutate(&snapshot)
+			}
+			reader := &statusSnapshotFake{snapshot: snapshot, err: test.readerErr}
+			var output bytes.Buffer
+			err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "status", "dev"}, Options{
+				Observer: fake.Observer{Observations: map[string]backend.Observation{"boxwarden-work-dev": {ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectRunning}}},
+				StatusSnapshotFactory: func(loaded config.Config, selected config.Domain) (StatusSnapshotReader, error) {
+					if selected.ID != "work" || selected.StateRoot != filepath.Dir(path) {
+						t.Fatalf("status factory got wrong domain: %#v", selected)
+					}
+					return reader, nil
+				},
+				Output: &output,
+			})
+			if err != nil || reader.calls != 1 || reader.binding != binding {
+				t.Fatalf("status error/calls/binding = %v/%d/%#v", err, reader.calls, reader.binding)
+			}
+			if !strings.Contains(output.String(), "readiness: "+test.want+"\n") || !strings.Contains(output.String(), "consistency: "+map[string]string{"ready": "consistent", "drift": "drift"}[test.want]+"\n") {
+				t.Fatalf("status output = %q, want live readiness %q", output.String(), test.want)
+			}
+			after, err := os.ReadFile(filepath.Join(filepath.Dir(path), "sessions", "dev.json"))
+			if err != nil || !bytes.Equal(after, before) {
+				t.Fatalf("status changed durable record: %v", err)
+			}
+		})
+	}
+}
+
+func TestSessionStatusReportsDriftWithoutSupervisorReader(t *testing.T) {
+	path, _ := writeRunningStatusFixture(t, session.ReadinessReady)
+	var output bytes.Buffer
+	err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "status", "dev"}, Options{
+		Observer: fake.Observer{Observations: map[string]backend.Observation{"boxwarden-work-dev": {ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectRunning}}},
+		Output:   &output,
+	})
+	if err != nil || !strings.Contains(output.String(), "consistency: drift\nreadiness: drift\n") || !strings.Contains(output.String(), "exact live supervisor readiness is unavailable") {
+		t.Fatalf("missing supervisor status = %q, %v", output.String(), err)
+	}
+}
+
+func TestSessionStatusDoesNotPromotePersistedDriftOrStoppedBackend(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		readiness session.ReadinessStatus
+		backend   backend.ObjectState
+	}{
+		{name: "persisted drift", readiness: session.ReadinessDrift, backend: backend.ObjectRunning},
+		{name: "backend stopped", readiness: session.ReadinessReady, backend: backend.ObjectStopped},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path, _ := writeRunningStatusFixture(t, test.readiness)
+			var output bytes.Buffer
+			readerCalls := 0
+			err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "status", "dev"}, Options{
+				Observer: fake.Observer{Observations: map[string]backend.Observation{"boxwarden-work-dev": {ObjectID: "boxwarden-work-dev", Exists: true, State: test.backend}}},
+				StatusSnapshotFactory: func(config.Config, config.Domain) (StatusSnapshotReader, error) {
+					readerCalls++
+					return &statusSnapshotFake{}, nil
+				},
+				Output: &output,
+			})
+			if err != nil || !strings.Contains(output.String(), "readiness: drift\n") || !strings.Contains(output.String(), "consistency: drift\n") || readerCalls != 0 {
+				t.Fatalf("status = %q, err=%v reader calls=%d", output.String(), err, readerCalls)
+			}
+		})
+	}
+}
+
+func TestSessionStatusRejectsForeignBackendObservationBeforeSupervisor(t *testing.T) {
+	path, _ := writeRunningStatusFixture(t, session.ReadinessReady)
+	var output bytes.Buffer
+	readerCalls := 0
+	err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "status", "dev"}, Options{
+		Observer: fake.Observer{Observations: map[string]backend.Observation{"boxwarden-work-dev": {ObjectID: "boxwarden-work-foreign", Exists: true, State: backend.ObjectRunning}}},
+		StatusSnapshotFactory: func(config.Config, config.Domain) (StatusSnapshotReader, error) {
+			readerCalls++
+			return &statusSnapshotFake{}, nil
+		},
+		Output: &output,
+	})
+	if err != nil || readerCalls != 0 || !strings.Contains(output.String(), "consistency: drift\n") || !strings.Contains(output.String(), "readiness: drift\n") {
+		t.Fatalf("foreign backend status = %q, err=%v reader calls=%d", output.String(), err, readerCalls)
 	}
 }
 

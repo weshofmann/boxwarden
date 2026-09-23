@@ -139,8 +139,14 @@ func TestProductionPublicOptionsWireAdmittedStarterFactory(t *testing.T) {
 	if options.SessionStarter != nil || options.SessionStarterFactory == nil {
 		t.Fatal("production public start is not factory-composed")
 	}
+	if options.StatusSnapshotFactory == nil {
+		t.Fatal("production status has no exact supervisor snapshot reader")
+	}
 	if _, err := options.SessionStarterFactory(config.Config{}, config.Domain{}, "/private/config.json"); err == nil {
 		t.Fatal("production factory accepted unadmitted configuration")
+	}
+	if _, err := options.StatusSnapshotFactory(config.Config{}, config.Domain{}); err == nil {
+		t.Fatal("production status factory accepted unadmitted configuration")
 	}
 }
 

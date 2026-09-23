@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/config"
@@ -20,6 +21,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/recipe"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/sshx"
+	"github.com/weshofmann/boxwarden/internal/supervisor"
 )
 
 type HostInitializer interface {
@@ -43,6 +45,20 @@ type SessionStarter interface {
 // SessionStarterFactory receives only the admitted configuration, selected
 // domain, and exact configuration locator for the detached child's reload.
 type SessionStarterFactory func(config.Config, config.Domain, string) (SessionStarter, error)
+
+type SessionStopper interface {
+	Stop(context.Context, string) (session.Record, error)
+}
+
+type SessionStopperFactory func(config.Config, config.Domain, string) (SessionStopper, error)
+
+// StatusSnapshotReader is read-only evidence from one exact live supervisor.
+// A backend process observation or persisted success cannot substitute for it.
+type StatusSnapshotReader interface {
+	Snapshot(context.Context, supervisor.Binding) (supervisor.Snapshot, error)
+}
+
+type StatusSnapshotFactory func(config.Config, config.Domain) (StatusSnapshotReader, error)
 
 // BackendDependencies keeps observation and creation in one backend namespace.
 type BackendDependencies struct {
@@ -68,6 +84,9 @@ type Options struct {
 	CAInit                CAInitializer
 	SessionStarter        SessionStarter
 	SessionStarterFactory SessionStarterFactory
+	SessionStopper        SessionStopper
+	SessionStopperFactory SessionStopperFactory
+	StatusSnapshotFactory StatusSnapshotFactory
 	Output                io.Writer
 }
 
@@ -188,7 +207,11 @@ func Run(ctx context.Context, args []string, options Options) error {
 			return fmt.Errorf("observe backend object %q: %w", record.Backend.ObjectID, err)
 		}
 		reconciled := lifecycle.Reconcile(record.IntendedState, observed)
-		return writeStatus(options.Output, record, observed, reconciled)
+		if observed.Exists && observed.ObjectID != record.Backend.ObjectID {
+			reconciled = lifecycle.Reconciliation{Consistency: lifecycle.Drift, Diagnostic: "backend observation does not match the exact session object"}
+		}
+		reconciled, readiness := reconcileStatusSnapshot(ctx, loaded, selectedDomain, record, observed, reconciled, options.StatusSnapshotFactory)
+		return writeStatus(options.Output, record, observed, reconciled, readiness)
 	case commandGoldenRegister:
 		if options.Observer == nil {
 			return errors.New("backend observer is required")
@@ -229,6 +252,25 @@ func Run(ctx context.Context, args []string, options Options) error {
 			return fmt.Errorf("start session: %w", err)
 		}
 		return writeStartedSession(options.Output, record)
+	case commandSessionStop:
+		if _, err := session.ParseName(command.name); err != nil {
+			return err
+		}
+		stopper := options.SessionStopper
+		if options.SessionStopperFactory != nil {
+			stopper, err = options.SessionStopperFactory(loaded, selectedDomain, command.configPath)
+			if err != nil {
+				return fmt.Errorf("construct session stopper: %w", err)
+			}
+		}
+		if stopper == nil {
+			return errors.New("session stopper is required")
+		}
+		record, err := stopper.Stop(ctx, command.name)
+		if err != nil {
+			return fmt.Errorf("stop session: %w", err)
+		}
+		return writeStoppedSession(options.Output, record)
 	default:
 		return errors.New("unsupported command")
 	}
@@ -241,6 +283,7 @@ const (
 	commandGoldenRegister
 	commandSessionCreate
 	commandSessionStart
+	commandSessionStop
 	commandInit
 	commandDoctor
 	commandDomainInit
@@ -361,7 +404,12 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.name = remaining[2]
 		return base, nil
 	}
-	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] <session>, session start <session>, session status <session>, alpha recipe check --recipe PATH --iso PATH")
+	if len(remaining) == 3 && remaining[0] == "session" && remaining[1] == "stop" {
+		base.kind = commandSessionStop
+		base.name = remaining[2]
+		return base, nil
+	}
+	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] <session>, session start <session>, session stop <session>, session status <session>, alpha recipe check --recipe PATH --iso PATH")
 }
 
 func writeInit(output io.Writer, result hostx.InitResult) error {
@@ -430,7 +478,41 @@ func environmentValue(environment []string, key string) string {
 	return ""
 }
 
-func writeStatus(output io.Writer, record session.Record, observed backend.Observation, reconciled lifecycle.Reconciliation) error {
+const maxStatusSnapshotAge = 5 * time.Second
+
+func reconcileStatusSnapshot(ctx context.Context, loaded config.Config, selected config.Domain, record session.Record, observed backend.Observation, reconciled lifecycle.Reconciliation, factory StatusSnapshotFactory) (lifecycle.Reconciliation, session.ReadinessStatus) {
+	if record.IntendedState != session.StateRunning {
+		return reconciled, ""
+	}
+	if !observed.Exists || observed.ObjectID != record.Backend.ObjectID || observed.State != backend.ObjectRunning {
+		return reconciled, session.ReadinessDrift
+	}
+	if record.Readiness.Status != session.ReadinessReady {
+		return lifecycle.Reconciliation{Consistency: lifecycle.Drift, Diagnostic: "durable readiness requires explicit lifecycle reconciliation"}, session.ReadinessDrift
+	}
+	if factory == nil {
+		return lifecycle.Reconciliation{Consistency: lifecycle.Drift, Diagnostic: "exact live supervisor readiness is unavailable; backend is not adopted"}, session.ReadinessDrift
+	}
+	reader, err := factory(loaded, selected)
+	if err != nil || reader == nil {
+		return lifecycle.Reconciliation{Consistency: lifecycle.Drift, Diagnostic: "exact live supervisor readiness is unavailable; backend is not adopted"}, session.ReadinessDrift
+	}
+	binding := supervisor.Binding{Domain: string(record.Domain), SessionID: record.ID, BackendKind: record.Backend.Kind, BackendObject: record.Backend.ObjectID, Generation: record.StartGeneration}
+	snapshot, err := reader.Snapshot(ctx, binding)
+	if err != nil {
+		return lifecycle.Reconciliation{Consistency: lifecycle.Drift, Diagnostic: "exact live supervisor snapshot is unavailable; backend is not adopted"}, session.ReadinessDrift
+	}
+	now := time.Now()
+	if snapshot.Binding != binding || snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || now.Sub(snapshot.ObservedAt) > maxStatusSnapshotAge {
+		return lifecycle.Reconciliation{Consistency: lifecycle.Drift, Diagnostic: "exact live supervisor snapshot is stale or mismatched"}, session.ReadinessDrift
+	}
+	if !snapshot.BackendRunning || !snapshot.SerialHealthy || !snapshot.PinPresent || !snapshot.CertificateCurrent || !snapshot.ProbeOK || !snapshot.ZoneMatches {
+		return lifecycle.Reconciliation{Consistency: lifecycle.Drift, Diagnostic: "exact live supervisor readiness checks failed"}, session.ReadinessDrift
+	}
+	return lifecycle.Reconciliation{Consistency: lifecycle.Consistent}, session.ReadinessReady
+}
+
+func writeStatus(output io.Writer, record session.Record, observed backend.Observation, reconciled lifecycle.Reconciliation, readiness session.ReadinessStatus) error {
 	observedState := string(observed.State)
 	if !observed.Exists {
 		observedState = "missing"
@@ -441,6 +523,11 @@ func writeStatus(output io.Writer, record session.Record, observed backend.Obser
 	}
 	if _, err := fmt.Fprintf(output, "domain: %s\nsession: %s\nmode: %s\nintended: %s\nobserved: %s\ngolden: %s\nconsistency: %s\n", record.Domain, record.Name, record.Mode, record.IntendedState, observedState, golden, reconciled.Consistency); err != nil {
 		return fmt.Errorf("write status: %w", err)
+	}
+	if readiness != "" {
+		if _, err := fmt.Fprintf(output, "readiness: %s\n", readiness); err != nil {
+			return fmt.Errorf("write live readiness: %w", err)
+		}
 	}
 	if observed.Diagnostic != "" {
 		if _, err := fmt.Fprintf(output, "backend-diagnostic: %s\n", observed.Diagnostic); err != nil {
@@ -472,6 +559,13 @@ func writeCreatedSession(output io.Writer, record session.Record) error {
 func writeStartedSession(output io.Writer, record session.Record) error {
 	if _, err := fmt.Fprintf(output, "domain: %s\nsession: %s\nstate: %s\nreadiness: %s\n", record.Domain, record.Name, record.IntendedState, record.Readiness.Status); err != nil {
 		return fmt.Errorf("write started session: %w", err)
+	}
+	return nil
+}
+
+func writeStoppedSession(output io.Writer, record session.Record) error {
+	if _, err := fmt.Fprintf(output, "domain: %s\nsession: %s\nstate: %s\nreadiness: %s\n", record.Domain, record.Name, record.IntendedState, record.Readiness.Status); err != nil {
+		return fmt.Errorf("write stopped session: %w", err)
 	}
 	return nil
 }

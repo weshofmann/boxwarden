@@ -276,6 +276,9 @@ func (c cleanupRetryController) Snapshot(_ context.Context, binding Binding) (Sn
 func (cleanupRetryController) Bootstrap(_ context.Context, binding Binding) (Snapshot, error) {
 	return Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true}, nil
 }
+func (cleanupRetryController) Ready(_ context.Context, binding Binding) (Snapshot, error) {
+	return readyFixtureSnapshot(binding), nil
+}
 
 func (cleanupRetryController) Stop(context.Context, Binding) error { return nil }
 
@@ -392,6 +395,9 @@ func (c *liveCleanupTransitionController) Snapshot(_ context.Context, binding Bi
 
 func (c *liveCleanupTransitionController) Bootstrap(_ context.Context, binding Binding) (Snapshot, error) {
 	return Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true}, nil
+}
+func (c *liveCleanupTransitionController) Ready(_ context.Context, binding Binding) (Snapshot, error) {
+	return readyFixtureSnapshot(binding), nil
 }
 
 func (*liveCleanupTransitionController) Stop(context.Context, Binding) error { return nil }
@@ -516,6 +522,9 @@ func (f *postLaunchTransitionFixture) Snapshot(_ context.Context, binding Bindin
 
 func (f *postLaunchTransitionFixture) Bootstrap(_ context.Context, binding Binding) (Snapshot, error) {
 	return Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true}, nil
+}
+func (f *postLaunchTransitionFixture) Ready(_ context.Context, binding Binding) (Snapshot, error) {
+	return readyFixtureSnapshot(binding), nil
 }
 
 func (*postLaunchTransitionFixture) Stop(context.Context, Binding) error { return nil }
@@ -643,6 +652,13 @@ func (c *coexistingCleanupController) Snapshot(_ context.Context, binding Bindin
 
 func (c *coexistingCleanupController) Bootstrap(_ context.Context, binding Binding) (Snapshot, error) {
 	return Snapshot{}, fmt.Errorf("unexpected bootstrap after ambiguous transition")
+}
+func (c *coexistingCleanupController) Ready(_ context.Context, binding Binding) (Snapshot, error) {
+	return Snapshot{}, fmt.Errorf("unexpected ready after ambiguous transition")
+}
+
+func readyFixtureSnapshot(binding Binding) Snapshot {
+	return Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true}
 }
 
 func (*coexistingCleanupController) Stop(context.Context, Binding) error { return nil }

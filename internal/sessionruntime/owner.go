@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"path/filepath"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/sshx"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
+	"github.com/weshofmann/boxwarden/internal/timezonex"
 )
 
 type serialRuntime interface {
@@ -33,6 +35,15 @@ type pinStore interface {
 	Load(context.Context, sshx.Binding) (sshx.HostKeyPin, error)
 }
 
+type certificateIssuer interface {
+	Issue(context.Context, sshx.Binding, string, string) (sshx.Certificate, error)
+}
+
+type managementClient interface {
+	timezonex.ZoneClient
+	Probe(context.Context, sshx.Connection, sshx.ProbeRequest) (sshx.ProbeResult, error)
+}
+
 type dependencies struct {
 	host           session.RuntimeChecker
 	ca             session.CAValidator
@@ -40,33 +51,50 @@ type dependencies struct {
 	launcher       func(tart.LaunchConfig) backend.Starter
 	serial         func(context.Context, string) (serialRuntime, error)
 	pin            func(sshx.Domain) pinStore
+	address        func(string, string) backend.AddressResolver
+	key            func(context.Context, string) (string, error)
+	issuer         func(sshx.CAIdentity) certificateIssuer
+	client         managementClient
+	zone           func() (string, error)
+	now            func() time.Time
 	newNonce       func() (string, error)
 	pollInterval   time.Duration
 	startupTimeout time.Duration
+	renewInterval  time.Duration
 }
 
 // Owner is a single-use runtime owner. Only the exact returned backend handle
 // and the serialx runtime confer lifetime authority; neither is reconstructed.
 type Owner struct {
-	deps                dependencies
-	mu                  sync.Mutex
-	observationMu       sync.Mutex
-	bootstrapMu         sync.Mutex
-	attempted, active   bool
-	binding             supervisor.Binding
-	sshBinding          sshx.Binding
-	ca                  sshx.CAIdentity
-	observer            backend.Observer
-	handle              backend.Handle
-	serial              serialRuntime
-	pins                pinStore
-	bootstrapRequest    guestproto.SerialRequest
-	bootstrapResult     guestproto.SerialResult
-	bootstrapResolved   bool
-	expectedPin         sshx.HostKeyPin
-	bootstrapDiagnostic string
-	stopOnce, waitOnce  sync.Once
-	stopErr, waitErr    error
+	deps                            dependencies
+	mu                              sync.Mutex
+	observationMu                   sync.Mutex
+	bootstrapMu                     sync.Mutex
+	readyMu                         sync.Mutex
+	attempted, active               bool
+	binding                         supervisor.Binding
+	sshBinding                      sshx.Binding
+	ca                              sshx.CAIdentity
+	observer                        backend.Observer
+	handle                          backend.Handle
+	serial                          serialRuntime
+	pins                            pinStore
+	bootstrapRequest                guestproto.SerialRequest
+	bootstrapResult                 guestproto.SerialResult
+	bootstrapResolved               bool
+	expectedPin                     sshx.HostKeyPin
+	bootstrapDiagnostic             string
+	connection                      sshx.Connection
+	certificate                     sshx.Certificate
+	readyEstablished                bool
+	readyAttempted                  bool
+	maintenanceCancel               context.CancelFunc
+	maintenanceDone                 chan struct{}
+	runtimePath, tartPath, tartHome string
+	stopMu                          sync.Mutex
+	stopSent                        bool
+	waitOnce                        sync.Once
+	waitErr                         error
 }
 
 // NewOwner constructs the production detached-child composition. LaunchRequest
@@ -78,11 +106,23 @@ func NewOwner() *Owner {
 		observer: func(path, home string) backend.Observer {
 			return tart.NewQualifiedObserver(execx.OSRunner{MaxOutputBytes: 1 << 20}, path, home)
 		},
-		launcher:     func(c tart.LaunchConfig) backend.Starter { return tart.NewLauncher(c) },
-		serial:       func(ctx context.Context, dir string) (serialRuntime, error) { return serialx.CreateRuntime(ctx, dir) },
-		pin:          func(domain sshx.Domain) pinStore { return sshx.NewPinStore(domain) },
+		launcher: func(c tart.LaunchConfig) backend.Starter { return tart.NewLauncher(c) },
+		serial:   func(ctx context.Context, dir string) (serialRuntime, error) { return serialx.CreateRuntime(ctx, dir) },
+		pin:      func(domain sshx.Domain) pinStore { return sshx.NewPinStore(domain) },
+		address: func(path, home string) backend.AddressResolver {
+			return tart.NewAddressResolver(execx.OSRunner{MaxOutputBytes: 1 << 20}, path, home)
+		},
+		key: func(ctx context.Context, directory string) (string, error) {
+			return sshx.EnsureClientKey(ctx, sshx.NewExecRunner(), directory)
+		},
+		issuer: func(ca sshx.CAIdentity) certificateIssuer {
+			return sshx.NewCertificateIssuer(ca, sshx.NewExecRunner(), sshx.OSIdentity{}, time.Now)
+		},
+		client:       sshx.NewClient(sshx.NewExecRunner()),
+		zone:         timezonex.DetectHost,
+		now:          time.Now,
 		newNonce:     sshx.RandomUUID,
-		pollInterval: 100 * time.Millisecond, startupTimeout: 30 * time.Second,
+		pollInterval: 100 * time.Millisecond, startupTimeout: 30 * time.Second, renewInterval: time.Minute,
 	}}
 }
 
@@ -184,6 +224,7 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) err
 	sshBinding := sshx.Binding{Domain: record.Domain, SessionID: record.ID, BackendKind: record.Backend.Kind, BackendObject: record.Backend.ObjectID}
 	o.mu.Lock()
 	o.binding, o.sshBinding, o.ca, o.observer, o.handle, o.serial, o.pins = binding, sshBinding, ca, observer, handle, serial, pins
+	o.runtimePath, o.tartPath, o.tartHome = directory, admission.Host.TartExecutable, admission.Host.TartHome
 	o.mu.Unlock()
 	if err == nil {
 		err = o.awaitRunning(ctx)
@@ -257,6 +298,115 @@ func (o *Owner) setBootstrapDiagnostic(value string) {
 	o.mu.Unlock()
 }
 
+// Ready establishes only the current generation's management channel. Every
+// candidate fact is bound to the serial-observed durable pin and the retained
+// owner; a failed phase publishes no READY evidence.
+func (o *Owner) Ready(ctx context.Context) error {
+	o.readyMu.Lock()
+	defer o.readyMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if o.deps.address == nil || o.deps.key == nil || o.deps.issuer == nil || o.deps.client == nil || o.deps.zone == nil || o.deps.now == nil {
+		return fmt.Errorf("management readiness dependencies are required")
+	}
+	pre := o.Snapshot(ctx)
+	if !pre.BackendRunning || !pre.SerialHealthy || !pre.PinPresent {
+		return fmt.Errorf("exact bootstrapped runtime is required before management readiness")
+	}
+	o.mu.Lock()
+	o.readyAttempted = true
+	servo, ca, binding, pin, directory, tartPath, tartHome := o.binding, o.ca, o.sshBinding, o.expectedPin, o.runtimePath, o.tartPath, o.tartHome
+	o.mu.Unlock()
+	key, err := o.deps.key(ctx, directory)
+	if err != nil {
+		return fmt.Errorf("create exact generation client identity: %w", err)
+	}
+	knownHosts, err := sshx.WriteKnownHosts(directory, pin)
+	if err != nil {
+		return fmt.Errorf("materialize exact host-key pin: %w", err)
+	}
+	issuer := o.deps.issuer(ca)
+	if issuer == nil {
+		return fmt.Errorf("management certificate issuer is unavailable")
+	}
+	certificate, err := issuer.Issue(ctx, binding, directory, key)
+	if err != nil {
+		return fmt.Errorf("issue exact management certificate: %w", err)
+	}
+	if certificate.Path != key+"-cert.pub" || certificate.Identity != binding.CertificateIdentity() || certificate.Principal != binding.Principal() || sshx.RenewalRequired(certificate, o.deps.now()) {
+		return fmt.Errorf("management certificate is not current for exact binding")
+	}
+	addressResolver := o.deps.address(tartPath, tartHome)
+	if addressResolver == nil {
+		return fmt.Errorf("qualified address resolver is unavailable")
+	}
+	address, err := addressResolver.Resolve(ctx, servo.BackendObject)
+	if err != nil {
+		return fmt.Errorf("resolve exact management address: %w", err)
+	}
+	if _, err := netip.ParseAddr(address); err != nil {
+		return fmt.Errorf("management address is not a literal IP: %w", err)
+	}
+	connection := sshx.Connection{Address: address, Port: 22, Binding: binding, Pin: pin, RuntimeDirectory: directory, IdentityFile: key, CertificateFile: certificate.Path, KnownHostsFile: knownHosts}
+	probe, err := o.deps.client.Probe(ctx, connection, sshx.ProbeRequest{})
+	if err != nil || !probe.OK {
+		return fmt.Errorf("strict management SSH probe failed: %w", errOrProbe(err))
+	}
+	zone, err := o.deps.zone()
+	if err != nil {
+		return fmt.Errorf("detect trusted host time zone: %w", err)
+	}
+	if err := timezonex.Converge(ctx, o.deps.client, connection, zone); err != nil {
+		return fmt.Errorf("converge guest time zone: %w", err)
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if !o.active || o.binding != servo || o.expectedPin != pin {
+		return fmt.Errorf("exact runtime changed during readiness convergence")
+	}
+	o.connection, o.certificate, o.readyEstablished = connection, certificate, true
+	if o.maintenanceCancel == nil && o.deps.renewInterval > 0 {
+		maintenanceCtx, cancel := context.WithCancel(context.Background())
+		o.maintenanceCancel = cancel
+		o.maintenanceDone = make(chan struct{})
+		go o.maintainCertificate(maintenanceCtx, o.maintenanceDone)
+	}
+	return nil
+}
+
+func (o *Owner) maintainCertificate(ctx context.Context, done chan struct{}) {
+	defer close(done)
+	ticker := time.NewTicker(o.deps.renewInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		o.mu.Lock()
+		active, certificate := o.active, o.certificate
+		o.mu.Unlock()
+		if !active {
+			return
+		}
+		if !sshx.RenewalRequired(certificate, o.deps.now()) {
+			continue
+		}
+		attemptCtx, cancel := context.WithTimeout(ctx, 4*time.Minute)
+		_ = o.Ready(attemptCtx)
+		cancel()
+	}
+}
+
+func errOrProbe(err error) error {
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("guest rejected probe")
+}
+
 func observeExact(ctx context.Context, observer backend.Observer, object string) (backend.Observation, error) {
 	observation, err := observer.Observe(ctx, object)
 	if err != nil {
@@ -314,25 +464,26 @@ func (o *Owner) failedStart(cause error) error {
 	return errors.Join(cause, stopErr, waitErr, observeErr)
 }
 
-// Snapshot observes afresh within the control caller's bound and never promotes
-// backend/serial facts into future guest trust, SSH, time-zone or READY
-// predicates.
+// Snapshot observes every READY predicate within the caller's bound. It does
+// not renew credentials or change guest state; failed checks only demote this
+// one observation, leaving recovery to the explicit Ready operation.
 func (o *Owner) Snapshot(ctx context.Context) supervisor.Snapshot {
 	o.observationMu.Lock()
 	defer o.observationMu.Unlock()
 	o.mu.Lock()
 	snapshot := supervisor.Snapshot{Binding: o.binding, ObservedAt: time.Now()}
 	active, observer, serial, pins, binding, expectedPin, diagnostic := o.active, o.observer, o.serial, o.pins, o.sshBinding, o.expectedPin, o.bootstrapDiagnostic
+	connection, certificate, ready := o.connection, o.certificate, o.readyEstablished
 	o.mu.Unlock()
 	if !active {
 		return snapshot
 	}
 	observation, err := observeExact(ctx, observer, snapshot.Binding.BackendObject)
 	o.mu.Lock()
-	defer o.mu.Unlock()
 	snapshot.ObservedAt = time.Now()
 	snapshot.BackendRunning = o.active && err == nil && observation.State == backend.ObjectRunning
 	snapshot.SerialHealthy = o.active && serial.Err() == nil
+	o.mu.Unlock()
 	if snapshot.BackendRunning && snapshot.SerialHealthy && expectedPin.Version != 0 {
 		pin, pinErr := pins.Load(ctx, binding)
 		snapshot.PinPresent = pinErr == nil && pin == expectedPin
@@ -345,12 +496,42 @@ func (o *Owner) Snapshot(ctx context.Context) supervisor.Snapshot {
 	} else {
 		snapshot.Diagnostic = diagnostic
 	}
+	if snapshot.BackendRunning && snapshot.SerialHealthy && snapshot.PinPresent && ready {
+		now := o.deps.now()
+		snapshot.CertificateCurrent = certificate.Path == connection.CertificateFile && certificate.Identity == binding.CertificateIdentity() && certificate.Principal == binding.Principal() && !sshx.RenewalRequired(certificate, now)
+		if !snapshot.CertificateCurrent {
+			snapshot.Diagnostic = "management certificate requires renewal"
+		} else if connection.Binding != binding || connection.Pin != expectedPin || connection.RuntimeDirectory != o.runtimePath {
+			snapshot.Diagnostic = "management connection binding changed"
+		} else {
+			probe, probeErr := o.deps.client.Probe(ctx, connection, sshx.ProbeRequest{})
+			snapshot.ProbeOK = probeErr == nil && probe.OK
+			if !snapshot.ProbeOK {
+				snapshot.Diagnostic = "strict management SSH probe failed"
+			} else if zone, zoneErr := o.deps.zone(); zoneErr != nil {
+				snapshot.Diagnostic = "trusted host time zone detection failed"
+			} else if guestZone, readErr := o.deps.client.ReadZone(ctx, connection, sshx.ReadZoneRequest{}); readErr != nil || guestZone != zone || !timezonex.Valid(guestZone) {
+				snapshot.Diagnostic = "guest time zone verification failed"
+			} else {
+				snapshot.ZoneMatches = true
+			}
+		}
+	}
+	o.mu.Lock()
+	if !o.active || o.binding != snapshot.Binding || o.expectedPin != expectedPin {
+		snapshot.BackendRunning, snapshot.SerialHealthy, snapshot.PinPresent = false, false, false
+		snapshot.CertificateCurrent, snapshot.ProbeOK, snapshot.ZoneMatches = false, false, false
+		snapshot.Diagnostic = "exact runtime changed during observation"
+	}
+	o.mu.Unlock()
+	snapshot.ObservedAt = time.Now()
 	return snapshot
 }
 
 func (o *Owner) Stop(ctx context.Context) error {
 	o.mu.Lock()
 	handle := o.handle
+	cancelMaintenance := o.maintenanceCancel
 	o.mu.Unlock()
 	if handle == nil {
 		return fmt.Errorf("runtime handle is unavailable")
@@ -358,8 +539,22 @@ func (o *Owner) Stop(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	o.stopOnce.Do(func() { o.stopErr = handle.Stop(ctx) })
-	return o.stopErr
+	if cancelMaintenance != nil {
+		cancelMaintenance()
+	}
+	o.stopMu.Lock()
+	defer o.stopMu.Unlock()
+	if o.stopSent {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := handle.Stop(ctx); err != nil {
+		return err
+	}
+	o.stopSent = true
+	return nil
 }
 
 // Wait deliberately outlives ctx: returning authorizes outer namespace cleanup
@@ -373,10 +568,33 @@ func (o *Owner) Wait(context.Context) error {
 	}
 	o.waitOnce.Do(func() {
 		err := handle.Wait(context.Background())
+		if errors.Is(err, tart.ErrScratchCleanupUnproven) || errors.Is(err, tart.ErrReapUnproven) {
+			err = fmt.Errorf("%w: %w", supervisor.ErrRuntimeCleanupUnproven, err)
+		}
+		o.readyMu.Lock()
 		o.mu.Lock()
 		o.active = false
+		cancel, done := o.maintenanceCancel, o.maintenanceDone
 		o.mu.Unlock()
-		o.waitErr = errors.Join(err, serial.Close())
+		o.readyMu.Unlock()
+		if cancel != nil {
+			cancel()
+			<-done
+		}
+		o.readyMu.Lock()
+		o.mu.Lock()
+		directory := o.runtimePath
+		attempted := o.readyAttempted
+		o.mu.Unlock()
+		var credentialErr error
+		if attempted {
+			credentialErr = sshx.CleanupGenerationCredentials(directory)
+		}
+		o.readyMu.Unlock()
+		if credentialErr != nil {
+			credentialErr = fmt.Errorf("%w: clean exact generation credentials: %w", supervisor.ErrRuntimeCleanupUnproven, credentialErr)
+		}
+		o.waitErr = errors.Join(err, credentialErr, serial.Close())
 	})
 	return o.waitErr
 }

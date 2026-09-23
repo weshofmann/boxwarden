@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/weshofmann/boxwarden/internal/app"
 	"github.com/weshofmann/boxwarden/internal/backend/tart"
@@ -13,6 +14,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/sessionruntime"
 	"github.com/weshofmann/boxwarden/internal/sshx"
+	"github.com/weshofmann/boxwarden/internal/supervisor"
 )
 
 type rootInstaller func(context.Context, []byte) ([]byte, error)
@@ -57,6 +59,16 @@ func publicOptions(output io.Writer) app.Options {
 		CAInit:     caStore,
 		SessionStarterFactory: func(loaded config.Config, selected config.Domain, path string) (app.SessionStarter, error) {
 			return sessionruntime.NewStarter(loaded, selected, path)
+		},
+		SessionStopperFactory: func(loaded config.Config, selected config.Domain, path string) (app.SessionStopper, error) {
+			return sessionruntime.NewStarter(loaded, selected, path)
+		},
+		StatusSnapshotFactory: func(loaded config.Config, selected config.Domain) (app.StatusSnapshotReader, error) {
+			configured, err := loaded.Domain(string(selected.ID))
+			if err != nil || configured != selected {
+				return nil, fmt.Errorf("status requires exact configured domain")
+			}
+			return supervisor.NewExactSnapshotReader(filepath.Join(selected.StateRoot, "runtime"))
 		},
 		Output: output,
 	}

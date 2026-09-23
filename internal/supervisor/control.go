@@ -19,7 +19,11 @@ import (
 // I/O; the client sends its possibly earlier operation deadline on the wire.
 const controlIOTimeout = 2 * time.Second
 const lifecycleTimeout = 5 * time.Second
-const bootstrapTimeout = 32 * time.Second
+
+// Includes serialx's 3m login wait, 30s exchange, and one bounded backend
+// observation for the response snapshot.
+const bootstrapTimeout = 4 * time.Minute
+const readyTimeout = 5 * time.Minute
 
 type controlRequest struct {
 	Version   int       `json:"version"`
@@ -88,11 +92,13 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 	if err := decodeExact(data, &request); err != nil {
 		return
 	}
-	if request.Version != 1 || request.Binding != binding || (request.Action != "snapshot" && request.Action != "bootstrap" && request.Action != "stop") {
+	if request.Version != 1 || request.Binding != binding || (request.Action != "snapshot" && request.Action != "bootstrap" && request.Action != "ready" && request.Action != "stop") {
 		return
 	}
 	if request.Action == "bootstrap" {
 		serverDeadline = acceptedAt.Add(bootstrapTimeout)
+	} else if request.Action == "ready" {
+		serverDeadline = acceptedAt.Add(readyTimeout)
 	} else if request.Action == "stop" {
 		serverDeadline = acceptedAt.Add(lifecycleTimeout + controlIOTimeout)
 	}
@@ -115,6 +121,10 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 	defer cancelOperation()
 	if request.Action == "bootstrap" {
 		if err := owner.Bootstrap(operationCtx); err != nil {
+			response.Error = err.Error()
+		}
+	} else if request.Action == "ready" {
+		if err := owner.Ready(operationCtx); err != nil {
 			response.Error = err.Error()
 		}
 	} else if request.Action == "stop" {
@@ -229,6 +239,16 @@ func (c *Client) Bootstrap(ctx context.Context, binding Binding) (Snapshot, erro
 	}
 	return response.Snapshot, nil
 }
+func (c *Client) Ready(ctx context.Context, binding Binding) (Snapshot, error) {
+	response, err := c.call(ctx, binding, "ready")
+	if err != nil {
+		return response.Snapshot, err
+	}
+	if err := c.validateSnapshot(response.Snapshot); err != nil {
+		return Snapshot{}, err
+	}
+	return response.Snapshot, nil
+}
 func validateSnapshotFreshness(s Snapshot, now time.Time, maxAge time.Duration) error {
 	if s.ObservedAt.IsZero() || s.ObservedAt.After(now) || maxAge > 0 && now.Sub(s.ObservedAt) > maxAge {
 		return fmt.Errorf("supervisor snapshot is stale")
@@ -269,6 +289,8 @@ func (c *Client) call(ctx context.Context, binding Binding, action string) (cont
 	timeout := controlIOTimeout
 	if action == "bootstrap" {
 		timeout = bootstrapTimeout
+	} else if action == "ready" {
+		timeout = readyTimeout
 	} else if action == "stop" {
 		timeout += lifecycleTimeout
 	}

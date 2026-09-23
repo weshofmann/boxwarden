@@ -226,7 +226,7 @@ func decodeRecord(decoder *json.Decoder) (Record, error) {
 
 func validateStartGeneration(record Record) error {
 	switch record.IntendedState {
-	case StateStarting, StateRunning:
+	case StateStarting, StateRunning, StateStopping:
 		if !validUUID(record.StartGeneration) {
 			return fmt.Errorf("%s record requires a valid start generation", record.IntendedState)
 		}
@@ -279,7 +279,7 @@ func validateReadiness(record Record) error {
 	}
 	switch record.Readiness.Status {
 	case ReadinessNotReady:
-		if record.StartGeneration != "" {
+		if record.StartGeneration != "" && record.IntendedState != StateStopping {
 			return fmt.Errorf("not-ready record must not have a start generation")
 		}
 	case ReadinessStarting:

@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-23 14:58 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-23 17:24 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -11,15 +11,24 @@ resumable handoff if unfinished.
 | Baseline | verified | Clean `e16f23962b43337f02de1fbe2779df00a28f3f1a`; `weshofmann/feature/v02-alpha` isolated worktree |
 | Host admission | verified | Elevated read-only doctor: `status: healthy` on original and alpha-only configs |
 | Source baseline | verified | `GOTOOLCHAIN=local go mod verify`; elevated `GOTOOLCHAIN=local go test -count=1 ./...` passed |
-| VM inventory | verified | Admitted `TART_HOME` has only the protected stopped Phase 3 r1 candidate; alpha run owns no VM yet |
+| VM inventory | verified | Admitted `TART_HOME` has the protected stopped Phase 3 r1 object and three stopped alpha-owned objects: the prepared candidate and two failed qualification clones |
 | Alpha ownership | prepared | Private run ID `v02-alpha-20260923T1444Z`; exact paths and resource identities are in its private ownership manifest |
 | Installer input | verified | Ubuntu 24.04.4 ARM64 Desktop ISO: good Canonical detached signature and exact `c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe` SHA-256; private cache only |
 | Recipe schema | source implemented | Versioned strict JSON loader and exact ISO verification have focused passing tests; no public preparation command yet |
-| Inspector capability | pending | Pinned Tart CLI has `--disk <path>:ro`; offline network and bounded return transport require a synthetic VM probe |
-| Graphical sandbox | pending | No v0.2 recipe, automatic preparation, READY composition, or app launch yet |
-| Workspace lifecycle | pending | No independent volume implementation yet |
-| Controlled export | pending | No accepted inspector or host receiver yet |
+| Serial bootstrap and READY | source implemented | Ported bounded exchange, hvc0 autologin prompt gate, exact host-key pin, certificate, strict SSH probe, time-zone convergence, and live status; integrated Go suite, focused race tests, and vet passed. Real VM bootstrap has not completed |
+| Inspector capability | material gap | Pinned Tart supports `--disk <path>:ro`; source review shows no NIC-off mode and residual ARP/DHCP/inbound traffic under Softnet `/0` block. Export acceptance remains closed; receiver/locking work can continue |
+| Graphical sandbox | candidate finalized, qualification failed | First candidate finalized and stopped. Clone r1a booted with a regenerated hostname, but the temporary probe matched the build hostname and timed out. Fresh public session r1b started Tart but failed before bootstrap because Tart created `control.sock` in the supervisor generation root; its exact VM was stopped and evidence preserved. Source now gives Tart an exact private scratch subtree, and stop/reap owns its child through `os.StartProcess` and serialized `Wait4`; fresh clone r1c has not been attempted. GUI and app launch remain unproven |
+| Workspace lifecycle | foundation implemented | Volume-owned record, optional attachment, exact use release, locks, sparse raw format journal, ext4 header/UUID verifier, and host ACL admission have focused tests; managed disk admission stays closed until a real formatter, attachment, and recovery are integrated |
+| Controlled export | receiver implemented, acceptance closed | Host stream receiver has hostile fixtures and independent review; no inspector transport or offline guarantee under the admitted Tart/Softnet pair |
 | Hosted CI | unavailable | Local verification is required; do not report CI passed |
+
+Draft PR #12 tracks the published alpha branch. Full Go tests, vet, host and
+guest builds, guest definition scripts, and the real `alpha recipe check` passed
+locally at the first checkpoint. After the scratch, READY, stop, storage
+foundation, and ambiguous-reap corrections, the full Go suite, vet, and focused
+race tests passed again at 17:24 UTC. The current Boxwarden management guard still
+requires password, root-login, and forwarding restrictions even though owner
+public keys are now permitted; broader guest SSH policy coexistence is pending.
 
 The restricted Codex shell falsely fails Unix-socket tests and host doctor
 inspection with `operation not permitted`; the corresponding elevated checks
@@ -29,18 +38,27 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 
 ## Live resources
 
-- Alpha VMs: none.
+- Alpha VMs: one owned stopped installer candidate with a 40 GiB nominal disk
+  and 11 GiB allocated at the first post-finalization inventory; two separate
+  qualification clones are stopped and failed. No clone has been admitted as
+  a reusable base.
 - Alpha workspace volumes: none.
 - Input cache: verified official Ubuntu 24.04.4 ARM64 Desktop ISO in the private
-  alpha state tree. No test VM has consumed it yet.
-- Temporary services: none beyond the active download process.
+  alpha state tree; the first private candidate was installed from it.
+- Temporary services: the bounded installer and first-clone probe drivers
+  completed; the failed public session supervisor, Tart child, and Softnet
+  child exited after exact VM stop. Failed generations and logs remain private
+  evidence in the ownership manifest and alpha state.
 
 ## Next executable action
 
-Finish the early inspector capability design/probe and implement the first
-graphical recipe and management slice. Before any VM mutation, reread the private ownership
-manifest, inventory the admitted Tart namespace, rerun doctor, and check the
-disk/RAM floor.
+Publish the verified scratch/READY/stop correction and revalidate host
+preflight. Then qualify from a fresh clone, including the serial autologin timing risk, guest
+identity, management, and desktop behavior before cache admission. Serial text
+is evidence of the finalizer exchange, not an attestation. In parallel,
+implement the public automatic preparation path and the inspector transport.
+Before each further VM mutation, reread the private ownership manifest,
+inventory the admitted Tart namespace, rerun doctor, and check the disk/RAM floor.
 
 ## Human actions
 

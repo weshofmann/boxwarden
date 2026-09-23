@@ -37,7 +37,9 @@ type CAValidator interface {
 type SupervisorControl interface {
 	StartExact(context.Context, supervisor.LaunchRequest) (supervisor.Snapshot, error)
 	Snapshot(context.Context, supervisor.Binding) (supervisor.Snapshot, error)
+	Ready(context.Context, supervisor.Binding) (supervisor.Snapshot, error)
 	Stop(context.Context, supervisor.Binding) error
+	Quiesced(context.Context, supervisor.Binding) (bool, error)
 }
 
 type StartDependencies struct {
@@ -131,7 +133,14 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 				return Record{}, fmt.Errorf("supervisor did not provide a fresh exact running snapshot")
 			}
 			if snapshot.SerialHealthy && snapshot.PinPresent {
-				return record, nil
+				if snapshot.CertificateCurrent && snapshot.ProbeOK && snapshot.ZoneMatches {
+					return s.persistReady(record, snapshot)
+				}
+				ready, readyErr := s.start.Supervisor.Ready(ctx, startBinding(record))
+				if readyErr != nil {
+					return Record{}, fmt.Errorf("converge exact starting generation: %w", readyErr)
+				}
+				return s.acceptStarted(record, ready)
 			}
 			if !snapshot.SerialHealthy {
 				if stopErr := s.start.Supervisor.Stop(ctx, startBinding(record)); stopErr != nil {
@@ -192,6 +201,9 @@ func (s *Service) acceptStarted(record Record, snapshot supervisor.Snapshot) (Re
 	now := s.start.Now()
 	if snapshot.Binding != want || !snapshot.BackendRunning || !snapshot.SerialHealthy || !snapshot.PinPresent || snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || now.Sub(snapshot.ObservedAt) > maxReadySnapshotAge {
 		return Record{}, fmt.Errorf("supervisor did not provide a fresh exact bootstrapped snapshot")
+	}
+	if snapshot.CertificateCurrent && snapshot.ProbeOK && snapshot.ZoneMatches {
+		return s.persistReady(record, snapshot)
 	}
 	return record, nil
 }

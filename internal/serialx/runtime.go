@@ -27,10 +27,12 @@ type Runtime struct {
 	slave                           *os.File
 	directory, endpoint, generation string
 	attempted, resolved             bool
+	loginSeen                       bool
+	loginPrompt                     promptScanner
 	parser                          *bootstrapParser
 	result                          guestproto.SerialResult
 	err                             error
-	ready, pumpDone                 chan struct{}
+	ready, loginReady, pumpDone     chan struct{}
 	stopOnce, closeOnce             sync.Once
 	closeErr                        error
 }
@@ -86,7 +88,7 @@ func createRuntime(ctx context.Context, generationDirectory string, allocate fun
 }
 
 func newRuntime(stream io.ReadWriteCloser, generation string) *Runtime {
-	r := &Runtime{stream: stream, generation: generation, ready: make(chan struct{}), pumpDone: make(chan struct{})}
+	r := &Runtime{stream: stream, generation: generation, ready: make(chan struct{}), loginReady: make(chan struct{}), pumpDone: make(chan struct{})}
 	go r.pump()
 	return r
 }
@@ -118,6 +120,10 @@ func (r *Runtime) pump() {
 		n, readErr := r.stream.Read(chunk[:])
 		r.mu.Lock()
 		var parseErr error
+		if n > 0 && !r.loginSeen && r.loginPrompt.feed(chunk[:n]) {
+			r.loginSeen = true
+			close(r.loginReady)
+		}
 		if n > 0 && r.parser != nil {
 			result, complete, err := r.parser.feed(chunk[:n])
 			parseErr = err

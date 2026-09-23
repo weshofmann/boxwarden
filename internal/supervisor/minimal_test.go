@@ -207,6 +207,36 @@ func TestBootstrapControlRejectsWrongBindingAndReturnsPreciseFailure(t *testing.
 	}
 }
 
+func TestReadyControlIsExactBoundAndReturnsFreshSnapshot(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &runtimeFixture{done: make(chan struct{})}
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(context.Background(), path, owner) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, MaxSnapshotAge: time.Minute}
+	if _, err := awaitSnapshot(context.Background(), request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	wrong := request.Binding
+	wrong.Generation = "foreign"
+	if _, err := client.Ready(context.Background(), wrong); err == nil || owner.readies.Load() != 0 {
+		t.Fatalf("foreign ready reached owner: %v, calls=%d", err, owner.readies.Load())
+	}
+	snapshot, err := client.Ready(context.Background(), request.Binding)
+	if err != nil || !snapshotReady(snapshot) || snapshot.Binding != request.Binding || owner.readies.Load() != 1 {
+		t.Fatalf("ready snapshot/calls = %#v/%d, %v", snapshot, owner.readies.Load(), err)
+	}
+	if err := client.Stop(context.Background(), request.Binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTypedControlBounds(t *testing.T) {
 	for _, size := range []uint32{0, maxControlBytes + 1, ^uint32(0)} {
 		var wire bytes.Buffer
@@ -695,8 +725,9 @@ func (*startFailureRuntime) Snapshot(context.Context) Snapshot { return Snapshot
 func (*startFailureRuntime) Bootstrap(context.Context) error {
 	return errors.New("unexpected bootstrap")
 }
-func (*startFailureRuntime) Stop(context.Context) error { return errors.New("unexpected stop") }
-func (*startFailureRuntime) Wait(context.Context) error { return errors.New("unexpected wait") }
+func (*startFailureRuntime) Ready(context.Context) error { return errors.New("unexpected ready") }
+func (*startFailureRuntime) Stop(context.Context) error  { return errors.New("unexpected stop") }
+func (*startFailureRuntime) Wait(context.Context) error  { return errors.New("unexpected wait") }
 
 // Production break: retaining a failed generation after RuntimeOwner.Start has
 // completed its partial cleanup would make the same durable retry ambiguous.
@@ -749,6 +780,51 @@ func (o *slowStopRuntime) Stop(ctx context.Context) error {
 	return ctx.Err()
 }
 
+type retrySignalRuntime struct{ runtimeFixture }
+
+func (o *retrySignalRuntime) Stop(context.Context) error {
+	if o.stops.Add(1) == 1 {
+		return errors.New("transient signal failure")
+	}
+	o.once.Do(func() { close(o.done) })
+	return nil
+}
+
+func TestStopRetriesFailedSignalWhileExactOwnerRemainsLive(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &retrySignalRuntime{runtimeFixture: runtimeFixture{done: make(chan struct{})}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(ctx, path, owner) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory}
+	if _, err := awaitSnapshot(ctx, request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatalf("exact owner did not start: %v", err)
+	}
+	if err := client.Stop(context.Background(), request.Binding); err == nil || !strings.Contains(err.Error(), "transient signal failure") {
+		t.Fatalf("first Stop = %v", err)
+	}
+	if owner.stops.Load() != 1 {
+		t.Fatalf("failed signal attempts = %d", owner.stops.Load())
+	}
+	_ = client.Stop(context.Background(), request.Binding) // Reply can race owner reap.
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run after retried signal = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("exact owner did not reap after retry")
+	}
+	if owner.stops.Load() != 2 || owner.waits.Load() != 1 {
+		t.Fatalf("stop/wait = %d/%d, want 2/1", owner.stops.Load(), owner.waits.Load())
+	}
+}
+
 func TestStopSharesOneLifecycleDeadlineAndRetainsOwnershipUntilReap(t *testing.T) {
 	request := minimalRequest(t)
 	path, _, err := publishOrAdmitRequest(request)
@@ -792,6 +868,7 @@ type runtimeFixture struct {
 	starts, snapshots atomic.Int32
 	stops, waits      atomic.Int32
 	bootstraps        atomic.Int32
+	readies           atomic.Int32
 	pinPresent        *atomic.Bool
 	bootstrapErr      error
 }
@@ -816,6 +893,7 @@ func (o *runtimeFixture) Bootstrap(context.Context) error {
 	}
 	return o.bootstrapErr
 }
+func (o *runtimeFixture) Ready(context.Context) error { o.readies.Add(1); return nil }
 func (o *runtimeFixture) Stop(context.Context) error {
 	o.stops.Add(1)
 	o.once.Do(func() { close(o.done) })

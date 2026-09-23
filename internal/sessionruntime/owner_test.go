@@ -406,6 +406,36 @@ func TestWaitRetainsSerialUntilActualReapAndStopsOnlyExactHandle(t *testing.T) {
 	}
 }
 
+func TestTartScratchCleanupFailurePreservesGenerationAuthority(t *testing.T) {
+	f := newFixture(t)
+	f.handle.waitErr = tart.ErrScratchCleanupUnproven
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	err := f.owner.Wait(context.Background())
+	if !errors.Is(err, supervisor.ErrRuntimeCleanupUnproven) || !errors.Is(err, tart.ErrScratchCleanupUnproven) {
+		t.Fatalf("Wait() error = %v, want exact generation cleanup preservation", err)
+	}
+}
+
+func TestTartAmbiguousReapPreservesGenerationAuthority(t *testing.T) {
+	f := newFixture(t)
+	f.handle.waitErr = tart.ErrReapUnproven
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	err := f.owner.Wait(context.Background())
+	if !errors.Is(err, supervisor.ErrRuntimeCleanupUnproven) || !errors.Is(err, tart.ErrReapUnproven) {
+		t.Fatalf("Wait() error = %v, want unproven exact generation preserved", err)
+	}
+}
+
 func TestStartFailureCleansOnlyAcquiredRuntimeInOrder(t *testing.T) {
 	for _, phase := range []string{"serial", "launch", "poison", "observe", "wrong object", "never running"} {
 		t.Run(phase, func(t *testing.T) {
@@ -543,6 +573,35 @@ func TestPostHandleFailureJoinsCleanupErrorsAndRequiresStoppedProof(t *testing.T
 	}
 	if events := strings.Join(f.trace.all(), ","); !strings.HasSuffix(events, "stop,wait,reap,close,observe:boxwarden-work-dev") {
 		t.Fatalf("failed cleanup sequence: %s", events)
+	}
+}
+
+type retryStopHandle struct {
+	attempts int
+	want     error
+}
+
+func (h *retryStopHandle) Stop(context.Context) error {
+	h.attempts++
+	if h.attempts == 1 {
+		return h.want
+	}
+	return nil
+}
+func (*retryStopHandle) Wait(context.Context) error { return nil }
+
+func TestOwnerStopRetriesTransientHandleSignalError(t *testing.T) {
+	want := errors.New("transient exact signal failure")
+	handle := &retryStopHandle{want: want}
+	owner := &Owner{handle: handle}
+	if err := owner.Stop(context.Background()); !errors.Is(err, want) {
+		t.Fatalf("first Stop = %v", err)
+	}
+	if err := owner.Stop(context.Background()); err != nil {
+		t.Fatalf("retry Stop = %v", err)
+	}
+	if err := owner.Stop(context.Background()); err != nil || handle.attempts != 2 {
+		t.Fatalf("idempotent Stop = %v; attempts=%d", err, handle.attempts)
 	}
 }
 

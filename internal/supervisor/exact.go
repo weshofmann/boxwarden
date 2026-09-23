@@ -29,6 +29,28 @@ type ExactController struct {
 	policy      startupPolicy
 }
 
+// ExactSnapshotReader can only observe a configured generation. Construction
+// cannot launch, stop, publish, or clean a runtime namespace.
+type ExactSnapshotReader struct{ runtimeRoot string }
+
+func NewExactSnapshotReader(runtimeRoot string) (*ExactSnapshotReader, error) {
+	if !canonicalAbsolute(runtimeRoot) {
+		return nil, fmt.Errorf("exact snapshot runtime root is required")
+	}
+	return &ExactSnapshotReader{runtimeRoot: runtimeRoot}, nil
+}
+
+func (r *ExactSnapshotReader) Snapshot(ctx context.Context, binding Binding) (Snapshot, error) {
+	if r == nil {
+		return Snapshot{}, fmt.Errorf("exact snapshot reader is required")
+	}
+	directory, err := exactRuntimeDirectory(r.runtimeRoot, binding)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return (&Client{RuntimeDirectory: directory, MaxSnapshotAge: time.Minute}).Snapshot(ctx, binding)
+}
+
 func NewExactController(runtimeRoot string, launcher Launcher) (*ExactController, error) {
 	if !canonicalAbsolute(runtimeRoot) || launcher == nil {
 		return nil, fmt.Errorf("root supervisor dependencies are required")
@@ -56,6 +78,14 @@ func (c *ExactController) Snapshot(ctx context.Context, binding Binding) (Snapsh
 	return (&Client{RuntimeDirectory: directory, MaxSnapshotAge: time.Minute}).Snapshot(ctx, binding)
 }
 
+func (c *ExactController) Ready(ctx context.Context, binding Binding) (Snapshot, error) {
+	directory, err := c.runtimeDirectory(binding)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return (&Client{RuntimeDirectory: directory, MaxSnapshotAge: time.Minute}).Ready(ctx, binding)
+}
+
 func (c *ExactController) Stop(ctx context.Context, binding Binding) error {
 	directory, err := c.runtimeDirectory(binding)
 	if err != nil {
@@ -64,12 +94,47 @@ func (c *ExactController) Stop(ctx context.Context, binding Binding) error {
 	return (&Client{RuntimeDirectory: directory, MaxSnapshotAge: time.Minute}).Stop(ctx, binding)
 }
 
+// Quiesced is a read-only recovery proof for a stop whose control reply was
+// lost. A stopped backend observation is required separately. The canonical
+// generation and both exact cleanup residues must all be absent; this state is
+// reached only after the retained owner has reaped and cleaned its runtime.
+func (c *ExactController) Quiesced(ctx context.Context, binding Binding) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	directory, err := c.runtimeDirectory(binding)
+	if err != nil {
+		return false, err
+	}
+	parent := filepath.Dir(directory)
+	if err := validatePrivateRuntimeParents(parent); err != nil {
+		return false, fmt.Errorf("exact runtime parent is unsafe: %w", err)
+	}
+	for _, path := range []string{directory, filepath.Join(parent, "."+binding.Generation+".cleanup"), filepath.Join(parent, "."+binding.Generation+".cleanup.lock")} {
+		exists, err := pathExists(path)
+		if err != nil {
+			return false, err
+		}
+		if exists {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func (c *ExactController) runtimeDirectory(binding Binding) (string, error) {
-	if c == nil || !canonicalAbsolute(c.runtimeRoot) || c.launcher == nil || !binding.valid() {
+	if c == nil || c.launcher == nil {
 		return "", fmt.Errorf("root supervisor dependencies and binding are required")
 	}
-	directory := filepath.Join(c.runtimeRoot, binding.Domain, binding.SessionID, binding.Generation)
-	if !canonicalAbsolute(directory) || filepath.Dir(filepath.Dir(filepath.Dir(directory))) != c.runtimeRoot {
+	return exactRuntimeDirectory(c.runtimeRoot, binding)
+}
+
+func exactRuntimeDirectory(root string, binding Binding) (string, error) {
+	if !canonicalAbsolute(root) || !binding.valid() {
+		return "", fmt.Errorf("root supervisor dependencies and binding are required")
+	}
+	directory := filepath.Join(root, binding.Domain, binding.SessionID, binding.Generation)
+	if !canonicalAbsolute(directory) || filepath.Dir(filepath.Dir(filepath.Dir(directory))) != root {
 		return "", fmt.Errorf("invalid exact runtime directory")
 	}
 	return directory, nil
@@ -101,7 +166,10 @@ func (c *exactStartController) startExact(ctx context.Context, request LaunchReq
 			if err != nil {
 				return got, err
 			}
-			return c.bootstrapExact(ctx, request.Binding)
+			if _, err := c.bootstrapExact(ctx, request.Binding); err != nil {
+				return Snapshot{}, err
+			}
+			return c.readyExact(ctx, request.Binding)
 		}
 		if err := c.launcher.Launch(ctx, request); err == nil {
 			got, err := awaitLiveSnapshot(ctx, request, policy, c.controller.Snapshot)
@@ -111,7 +179,10 @@ func (c *exactStartController) startExact(ctx context.Context, request LaunchReq
 			if err != nil {
 				return got, err
 			}
-			return c.bootstrapExact(ctx, request.Binding)
+			if _, err := c.bootstrapExact(ctx, request.Binding); err != nil {
+				return Snapshot{}, err
+			}
+			return c.readyExact(ctx, request.Binding)
 		} else if errors.Is(err, errExactGenerationTransition) {
 			continue
 		} else if !errors.Is(err, errGenerationAlreadyOwned) {
@@ -137,6 +208,17 @@ func (c *exactStartController) bootstrapExact(ctx context.Context, binding Bindi
 	}
 	if snapshot.Binding != binding || !snapshotBootstrapped(snapshot) {
 		return Snapshot{}, fmt.Errorf("supervisor did not provide an exact bootstrapped snapshot")
+	}
+	return snapshot, nil
+}
+
+func (c *exactStartController) readyExact(ctx context.Context, binding Binding) (Snapshot, error) {
+	snapshot, err := c.controller.Ready(ctx, binding)
+	if err != nil {
+		return snapshot, err
+	}
+	if snapshot.Binding != binding || !snapshotReady(snapshot) {
+		return Snapshot{}, fmt.Errorf("supervisor did not provide an exact ready snapshot")
 	}
 	return snapshot, nil
 }

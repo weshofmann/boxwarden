@@ -4,15 +4,12 @@ package tart
 
 import (
 	"fmt"
-	"os/exec"
 	"syscall"
 )
 
-// configureOwnedProcessGroup separates Tart and its descendants from the
+// ownedProcessGroupAttributes separates Tart and its descendants from the
 // supervisor. The direct child PID is therefore the group ID it owns.
-func configureOwnedProcessGroup(command *exec.Cmd) {
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-}
+func ownedProcessGroupAttributes() *syscall.SysProcAttr { return &syscall.SysProcAttr{Setpgid: true} }
 
 func supportsOwnedProcessGroups() bool { return true }
 

@@ -39,6 +39,7 @@ type Snapshot struct {
 type Controller interface {
 	Snapshot(context.Context, Binding) (Snapshot, error)
 	Bootstrap(context.Context, Binding) (Snapshot, error)
+	Ready(context.Context, Binding) (Snapshot, error)
 	Stop(context.Context, Binding) error
 }
 

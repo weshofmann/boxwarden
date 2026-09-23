@@ -29,6 +29,9 @@ type RuntimeOwner interface {
 	// It is idempotent after an exact validated result and has no generic guest
 	// command authority.
 	Bootstrap(context.Context) error
+	// Ready converges the exact generation's host-owned SSH credential and
+	// guest time zone after bootstrap; it has no generic guest command surface.
+	Ready(context.Context) error
 	// Snapshot must observe within the bounded context supplied by control.
 	Snapshot(context.Context) Snapshot
 	Stop(context.Context) error
@@ -83,19 +86,35 @@ func Run(ctx context.Context, path string, owner RuntimeOwner) error {
 	reaped := make(chan struct{})
 	var waitErr error
 	go func() { waitErr = owner.Wait(context.Background()); close(reaped) }()
-	var stopOnce sync.Once
-	var stopErr error
+	var stopMu sync.Mutex
+	stopSent := false
+	var lastStopErr error
 	stop := func() error {
 		waitCtx, cancel := context.WithTimeout(context.Background(), lifecycleTimeout)
 		defer cancel()
-		stopOnce.Do(func() {
-			stopErr = owner.Stop(waitCtx)
-		})
+		stopMu.Lock()
 		select {
 		case <-reaped:
-			return errors.Join(stopErr, waitErr)
+			result := errors.Join(lastStopErr, waitErr)
+			stopMu.Unlock()
+			return result
+		default:
+		}
+		if !stopSent {
+			if err := owner.Stop(waitCtx); err != nil {
+				lastStopErr = err
+				stopMu.Unlock()
+				return err
+			}
+			stopSent = true
+			lastStopErr = nil
+		}
+		stopMu.Unlock()
+		select {
+		case <-reaped:
+			return waitErr
 		case <-waitCtx.Done():
-			return errors.Join(stopErr, waitCtx.Err())
+			return waitCtx.Err()
 		}
 	}
 	finish := func(cause error) error {
@@ -128,7 +147,7 @@ func Run(ctx context.Context, path string, owner RuntimeOwner) error {
 		cause = errors.Join(cause, <-serveDone)
 	}
 	result := finish(cause)
-	if closeErr != nil {
+	if closeErr != nil || errors.Is(result, ErrRuntimeCleanupUnproven) {
 		// An exact socket cleanup refusal cannot become generic namespace
 		// cleanup authority. Preserve request/lock for reconciliation.
 		return result

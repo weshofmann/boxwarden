@@ -4,10 +4,10 @@ package tart
 
 import (
 	"fmt"
-	"os/exec"
+	"syscall"
 )
 
-func configureOwnedProcessGroup(*exec.Cmd) {}
+func ownedProcessGroupAttributes() *syscall.SysProcAttr { return nil }
 
 func supportsOwnedProcessGroups() bool { return false }
 

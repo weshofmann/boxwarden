@@ -70,6 +70,27 @@ func TestStartPersistsGenerationBeforeSupervisorMutation(t *testing.T) {
 	}
 }
 
+func TestStartPersistsReadyOnlyAfterFreshExactManagementEvidence(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	if _, err := creator.Create(context.Background(), "dev", ModeClean); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	control := &startSupervisorFake{start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+		loaded, err := LoadRecord(domainConfig.StateRoot, "work", "dev")
+		if err != nil || loaded.IntendedState != StateStarting || loaded.Readiness.Status != ReadinessStarting {
+			t.Fatalf("READY before durable intent: %#v, %v", loaded, err)
+		}
+		return readySnapshot(request.Binding, now), nil
+	}}
+	service := newStartTestService(domainConfig, backendFake, control, func() time.Time { return now }, func() (string, error) { return testStartGeneration, nil })
+	record, err := service.Start(context.Background(), "dev")
+	if err != nil || record.IntendedState != StateRunning || record.Readiness.Status != ReadinessReady {
+		t.Fatalf("ready start = %#v, %v", record, err)
+	}
+	assertStoredRecord(t, domainConfig, record)
+}
+
 // Production break: a completed Slice C retry must reuse the exact live
 // generation without asking the supervisor to bootstrap again or minting G+1.
 func TestStartingRetryReusesGenerationAndClassifiesBackendBeforeMutation(t *testing.T) {
@@ -352,12 +373,16 @@ func TestRunningRecordStillRequiresFullFreshReadySnapshot(t *testing.T) {
 }
 
 type startSupervisorFake struct {
-	start         func(supervisor.LaunchRequest) (supervisor.Snapshot, error)
-	snapshot      func(supervisor.Binding) (supervisor.Snapshot, error)
-	stop          func(supervisor.Binding) error
-	startCalls    int
-	snapshotCalls int
-	stopCalls     int
+	start          func(supervisor.LaunchRequest) (supervisor.Snapshot, error)
+	snapshot       func(supervisor.Binding) (supervisor.Snapshot, error)
+	ready          func(supervisor.Binding) (supervisor.Snapshot, error)
+	stop           func(supervisor.Binding) error
+	quiesced       func(supervisor.Binding) (bool, error)
+	startCalls     int
+	snapshotCalls  int
+	stopCalls      int
+	readyCalls     int
+	lastSnapshotAt time.Time
 }
 
 func (f *startSupervisorFake) StartExact(_ context.Context, request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
@@ -372,7 +397,16 @@ func (f *startSupervisorFake) Snapshot(_ context.Context, binding supervisor.Bin
 	if f.snapshot == nil {
 		return supervisor.Snapshot{}, fmt.Errorf("unexpected Snapshot")
 	}
-	return f.snapshot(binding)
+	result, err := f.snapshot(binding)
+	f.lastSnapshotAt = result.ObservedAt
+	return result, err
+}
+func (f *startSupervisorFake) Ready(_ context.Context, binding supervisor.Binding) (supervisor.Snapshot, error) {
+	f.readyCalls++
+	if f.ready == nil {
+		return startedSnapshot(binding, f.lastSnapshotAt), nil
+	}
+	return f.ready(binding)
 }
 func (f *startSupervisorFake) Stop(_ context.Context, binding supervisor.Binding) error {
 	f.stopCalls++
@@ -380,6 +414,12 @@ func (f *startSupervisorFake) Stop(_ context.Context, binding supervisor.Binding
 		return fmt.Errorf("unexpected Stop")
 	}
 	return f.stop(binding)
+}
+func (f *startSupervisorFake) Quiesced(_ context.Context, binding supervisor.Binding) (bool, error) {
+	if f.quiesced == nil {
+		return false, nil
+	}
+	return f.quiesced(binding)
 }
 
 type startHostFake struct{}

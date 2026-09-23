@@ -15,6 +15,7 @@ const (
 	bootstrapCommand     = "/usr/bin/sudo -n -- /usr/local/libexec/boxwarden-guest-bootstrap serial-bootstrap\n"
 	MaxPhysicalLineBytes = 128 << 10
 	MaxExchangeBytes     = 256 << 10
+	LoginDeadline        = 3 * time.Minute
 	ExchangeDeadline     = 30 * time.Second
 )
 
@@ -40,6 +41,24 @@ func (r *Runtime) Bootstrap(ctx context.Context, request guestproto.SerialReques
 		return guestproto.SerialResult{}, fmt.Errorf("serial bootstrap is unavailable or already attempted")
 	}
 	r.attempted = true
+	r.mu.Unlock()
+
+	loginCtx, cancelLogin := context.WithTimeout(ctx, LoginDeadline)
+	defer cancelLogin()
+	select {
+	case <-r.loginReady:
+	case <-r.ready:
+		return guestproto.SerialResult{}, r.Err()
+	case <-loginCtx.Done():
+		r.fail(fmt.Errorf("await hvc0 autologin prompt: %w", loginCtx.Err()))
+		return guestproto.SerialResult{}, r.Err()
+	}
+	r.mu.Lock()
+	if r.err != nil {
+		err := r.err
+		r.mu.Unlock()
+		return guestproto.SerialResult{}, err
+	}
 	r.parser = &bootstrapParser{request: request}
 	r.mu.Unlock()
 

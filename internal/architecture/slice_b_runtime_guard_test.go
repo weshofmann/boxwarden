@@ -221,7 +221,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 				foundationImports[localName] = foundation
 			}
 		}
-		if composition && strings.HasSuffix(importPath, "/internal/timezonex") {
+		if composition && strings.HasSuffix(importPath, "/internal/timezonex") && path != "internal/sessionruntime/owner.go" {
 			p.add(path, "deferred Slice D import", importPath)
 		}
 		if composition && !serialFoundation && strings.HasSuffix(importPath, "/internal/guestproto") && path != "internal/sessionruntime/owner.go" {
@@ -262,7 +262,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 			if name == "FindProcess" {
 				p.add(path, "process reconstruction", "os.FindProcess or equivalent name")
 			}
-			if composition && isDeferredCall(name) && !allowedSliceCCall(path, name) {
+			if composition && isDeferredCall(name) && !allowedLifecycleCall(path, name) {
 				p.add(path, "unauthorized Slice C call", name)
 			}
 		case *ast.AssignStmt:
@@ -275,7 +275,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 					continue
 				}
 				if index >= len(value.Rhs) || !isFalseLiteral(value.Rhs[index]) {
-					if selector.Sel.Name == "PinPresent" && path == "internal/sessionruntime/owner.go" {
+					if path == "internal/sessionruntime/owner.go" {
 						continue
 					}
 					p.add(path, "deferred readiness publication", selector.Sel.Name)
@@ -283,7 +283,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 			}
 		case *ast.KeyValueExpr:
 			name := expressionName(value.Key)
-			if composition && isFutureReadinessField(name) && !isFalseLiteral(value.Value) && !(name == "PinPresent" && path == "internal/sessionruntime/owner.go") {
+			if composition && isFutureReadinessField(name) && !isFalseLiteral(value.Value) && path != "internal/sessionruntime/owner.go" {
 				p.add(path, "deferred readiness publication", name)
 			}
 			if isPersistedProcessName(name) || isOwnershipMetadataName(name) {
@@ -429,6 +429,20 @@ func allowedFoundationSelector(path, foundation, selector string) bool {
 		},
 		"timezonex": {},
 	}
+	if path == "internal/sessionruntime/owner.go" {
+		switch foundation {
+		case "sshx":
+			switch selector {
+			case "Certificate", "Connection", "ProbeRequest", "ProbeResult", "ReadZoneRequest", "EnsureClientKey", "NewCertificateIssuer", "NewClient", "WriteKnownHosts", "RenewalRequired", "CleanupGenerationCredentials":
+				return true
+			}
+		case "timezonex":
+			switch selector {
+			case "ZoneClient", "DetectHost", "Converge", "Valid":
+				return true
+			}
+		}
+	}
 	if path != "internal/sessionruntime/owner.go" {
 		if foundation == "guestproto" && (selector == "Association" || selector == "EncodeSerialFrame" || selector == "Version") {
 			return false
@@ -440,11 +454,13 @@ func allowedFoundationSelector(path, foundation, selector string) bool {
 	return allowed[foundation][selector]
 }
 
-func allowedSliceCCall(path, name string) bool {
+func allowedLifecycleCall(path, name string) bool {
 	switch name {
 	case "Bootstrap":
 		return path == "internal/sessionruntime/owner.go" || path == "internal/supervisor/control.go" || path == "internal/supervisor/exact.go"
 	case "Admit", "Load", "NewPinStore":
+		return path == "internal/sessionruntime/owner.go"
+	case "NewAddressResolver", "NewCertificateIssuer", "NewClient", "WriteKnownHosts", "Issue", "Resolve", "Probe", "Converge", "ReadZone":
 		return path == "internal/sessionruntime/owner.go"
 	default:
 		return false
