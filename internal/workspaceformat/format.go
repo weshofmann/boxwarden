@@ -58,6 +58,9 @@ type FormatRequest struct {
 	FilesystemUUID string
 	SizeBytes      int64
 	Identity       DiskIdentity
+	// Marker identifies the fresh disk inside the formatter guest before mkfs.
+	// It is random per attempt and has no meaning after formatting.
+	Marker string
 }
 
 // FormatEvidence is a trusted formatter result. Host superblock inspection
@@ -163,6 +166,13 @@ func Create(ctx context.Context, stateRoot string, request Request, formatter Fo
 	if err := file.Truncate(request.SizeBytes); err != nil {
 		return Qualification{}, fmt.Errorf("size raw file: %w", err)
 	}
+	var marker [32]byte
+	if _, err := rand.Read(marker[:]); err != nil {
+		return Qualification{}, fmt.Errorf("generate raw disk marker: %w", err)
+	}
+	if _, err := file.WriteAt(marker[:], 0); err != nil {
+		return Qualification{}, fmt.Errorf("write raw disk marker: %w", err)
+	}
 	if err := file.Sync(); err != nil {
 		return Qualification{}, fmt.Errorf("sync raw file: %w", err)
 	}
@@ -178,7 +188,7 @@ func Create(ctx context.Context, stateRoot string, request Request, formatter Fo
 	if err := replaceJournal(volumes, journal); err != nil {
 		return Qualification{}, fmt.Errorf("persist formatting intent: %w", err)
 	}
-	formatRequest := FormatRequest{DiskPath: filepath.Join(stateRoot, "volumes", name), Domain: request.Domain, VolumeID: request.VolumeID, FilesystemUUID: request.FilesystemUUID, SizeBytes: request.SizeBytes, Identity: identity}
+	formatRequest := FormatRequest{DiskPath: filepath.Join(stateRoot, "volumes", name), Domain: request.Domain, VolumeID: request.VolumeID, FilesystemUUID: request.FilesystemUUID, SizeBytes: request.SizeBytes, Identity: identity, Marker: hex.EncodeToString(marker[:])}
 	formatContext, cancelFormat := context.WithCancel(ctx)
 	monitorDone := make(chan error, 1)
 	go monitorHeadroom(formatContext, dir, cancelFormat, monitorDone)

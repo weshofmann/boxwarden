@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -91,6 +92,35 @@ func TestCreateQualifiesExactNewRawDiskAndAdmitRechecks(t *testing.T) {
 	}
 	if _, err := Create(context.Background(), root, testRequest(), successfulFormatter(t)); err == nil {
 		t.Fatal("repeated create must never reformat the volume")
+	}
+}
+
+func TestCreatePlacesFreshMarkerOnExactRawFileBeforeGuestFormat(t *testing.T) {
+	root := testRoot(t)
+	formatter := formatFunc(func(_ context.Context, request FormatRequest) (FormatEvidence, error) {
+		marker, err := hex.DecodeString(request.Marker)
+		if err != nil || len(marker) != 32 {
+			t.Fatalf("invalid guest recognition marker %q: %v", request.Marker, err)
+		}
+		file, err := os.Open(request.DiskPath)
+		if err != nil {
+			return FormatEvidence{}, err
+		}
+		defer file.Close()
+		observed := make([]byte, 32)
+		if _, err := file.ReadAt(observed, 0); err != nil {
+			return FormatEvidence{}, err
+		}
+		if !reflect.DeepEqual(observed, marker) {
+			t.Fatal("guest marker did not identify the newly created exact raw file")
+		}
+		if err := writeExt4Header(request.DiskPath, request.FilesystemUUID); err != nil {
+			return FormatEvidence{}, err
+		}
+		return FormatEvidence{ObservedUUID: request.FilesystemUUID, WholeDevice: true, FilesystemClean: true}, nil
+	})
+	if _, err := Create(t.Context(), root, testRequest(), formatter); err != nil {
+		t.Fatal(err)
 	}
 }
 
