@@ -1,9 +1,10 @@
 # Independent workspace disks: alpha contract
 
 Status: design reviewed on 2026-09-23. Volume records, a bounded strict
-attachment registry reader, formatter journal, and an unwired backend
-attachment lease exist; lifecycle integration and real VM proof remain
-pending. The existing v0.1 session record is not a workspace registry.
+attachment registry reader, a formatter journal-to-record promotion, and an
+unwired backend attachment lease exist; lifecycle integration and real VM
+proof remain pending. The existing v0.1 session record is not a workspace
+registry.
 
 ## Ownership model
 
@@ -23,6 +24,13 @@ so workspace association survives without a transfer between records.
 The Attach transition consults that same registry under its held session and
 storage locks, so a fifth or duplicate-filesystem attachment is refused before
 the new binding is persisted.
+
+The source-only `PromoteVerified` transition makes a creating record available
+only after a fresh `workspaceformat.Admit` proves the exact verified journal,
+ext4 header, raw-file inode, and capacity. If the atomic record rename succeeds
+but later sync reports an error, an exact retry re-admits that same file and
+fsyncs the record directory before returning success. The trusted Linux
+formatter VM adapter and real filesystem health proof are still pending.
 
 ## Locks and admission
 
@@ -80,12 +88,15 @@ The present `session.Service.Start` holds its session lock while it waits for
 session, then storage would deadlock against that parent lock. The handoff must
 be changed before connecting workspace leases:
 
-1. Under volume-use locks (UUID order), then the session lock, then storage,
-   validate the selected attachments and stopped backend. Persist the exact
-   `Use` reservations and session `starting` generation before launching the
-   supervisor. Release storage, session, and volume-use locks before waiting
-   for the child. The durable records, not the interval between lock owners,
-   carry authority across this handoff.
+1. Discover candidate attachments under storage, release it, acquire their
+   volume-use locks (UUID order), then the session lock, then storage. Re-scan
+   and reject any changed binding. Persist and sync every exact `Use`
+   reservation before the session `starting` generation, which is the batch
+   launch commit marker. No launch may precede that marker. A partial set of
+   Uses with a still-stopped session remains fail-closed until exact stopped
+   observation permits reconciliation. Release storage, session, and
+   volume-use locks before waiting for the child. The durable records, not the
+   interval between lock owners, carry authority across this handoff.
 2. The exact-generation supervisor child reacquires volume-use locks, then
    session and storage. It reloads both records, checks their exact session
    UUID/backend object/generation binding and the verified formatter journal,
@@ -96,9 +107,10 @@ be changed before connecting workspace leases:
 3. A concurrent stop first persists stopping intent without waiting for a
    volume-use lock while holding session/storage. It asks the exact supervisor
    owner to stop and waits for exact reap, which releases the leases. Only then
-   may use-release acquire volume-use, session, and storage locks in order,
-   freshly observe the exact backend stopped, and clear the matching durable
-   `Use`. A crashed owner leaves `Use` set until that same observation succeeds.
+   may batch use-release acquire volume-use, session, and storage locks in
+   order, freshly observe the exact backend stopped, and clear the matching
+   durable Uses. Persist session `stopped` last. A crashed owner leaves `Use`
+   set until that same observation and reap proof succeeds.
 
 Session start/stop now release their session lock before waiting for the
 supervisor, then reacquire it and recheck the exact durable generation. Their

@@ -28,6 +28,7 @@ const (
 	mutationDetach
 	mutationReserveUse
 	mutationReleaseUse
+	mutationPromoteVerified
 )
 
 const (
@@ -176,7 +177,7 @@ func checkBindings(workspaces *os.Root, expectedDomain domain.ID, next Record, m
 		}
 		if existing.VolumeID == next.VolumeID {
 			found = true
-			if existing.State == StateCreating && next.State == StateAvailable {
+			if existing.State == StateCreating && next.State == StateAvailable && mutation != mutationPromoteVerified {
 				return fmt.Errorf("available promotion requires qualified exclusive creation and ext4 verification")
 			}
 			if existing.State == StateFailed && next.State != StateFailed ||
@@ -193,6 +194,10 @@ func checkBindings(workspaces *os.Root, expectedDomain domain.ID, next Record, m
 				return fmt.Errorf("pending workspace operation requires explicit reconciliation")
 			}
 			switch mutation {
+			case mutationPromoteVerified:
+				if existing.State != StateCreating || next.State != StateAvailable || existing.Disk != nil || next.Disk == nil || existing.Pending != nil || next.Pending != nil || existing.Attachment != nil || next.Attachment != nil || existing.Use != nil || next.Use != nil {
+					return fmt.Errorf("invalid verified workspace promotion")
+				}
 			case mutationGeneric:
 				if !reflect.DeepEqual(existing.Attachment, next.Attachment) || !reflect.DeepEqual(existing.Use, next.Use) {
 					return fmt.Errorf("attachment or use requires a dedicated observed transition")
