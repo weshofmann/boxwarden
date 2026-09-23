@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-23 23:28 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-23 23:44 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -19,7 +19,7 @@ resumable handoff if unfinished.
 | Automatic base preparation | real guest preparation reached, qualification pending | The first attempt failed before VM creation on an unsupported OpenSSL mode. A fresh attempt with exact OpenSSL 3 passed installer and guest preparation, then reached finalization. A source audit found the finalizer rejected the public random run-ID format; the operator canceled through owned stop/wait cleanup. Its journal is failed, and no cache was admitted. The exact stopped candidate was privately archived and deleted after archive verification. The finalizer contract and regression fixture are published. A source-only reserve monitor now checks the state and Tart filesystems before mutation and through build/qualification |
 | Inspector capability | synthetic boot verified, ext4 runtime pending | Pinned Tart has no NIC-off mode. A signed Virtualization.framework guest booted with zero NICs, one read-only synthetic disk, and two serial channels; the guest reported loopback only and returned a typed report. A source-only 64 MiB ext4 fixture contract and guest read-only mount path have targeted tests, but no ext4 image or live mount proof exists. Real workspace export remains closed |
 | Graphical sandbox | same-clone GUI verified | Public qualr2c reached READY, GNOME Desktop and Firefox opened through Tart GUI, and Nautilus showed synthetic `bw-alpha-system-persist-r2c` in guest home after stop/restart. This is system-disk persistence only. No guest agent account sign-in or recipe-installed application has been observed |
-| Workspace lifecycle | source start/stop loop wired, real path pending | Volume-owned records, attachment/use transitions, private format journal, Linux ARM64 ext4 helper, and retained exact Tart disk/lock leases have targeted tests. Public start reserves exact Uses as a batch and persists Starting last; retries check them. The child rechecks Starting/Use/attachment/formatter evidence and passes retained leases to Tart. Stop now retains Stopping through exact owner stop and batch Use release, then persists Stopped; a stopped session can reconcile partial start reservations after fresh backend observation. Guest formatter VM adapter, public attach/rebuild/reattach, and real storage qualification remain |
+| Workspace lifecycle | source start/stop loop wired, real path pending | Volume-owned records, attachment/use transitions, private format journal, Linux ARM64 ext4 helper, and retained exact Tart disk/lock leases have targeted tests. Public start reserves exact Uses as a batch and persists Starting last; retries check them. The child rechecks Starting/Use/attachment/formatter evidence and passes retained leases to Tart. Stop retains Stopping through exact owner stop and batch Use release, then persists Stopped. The pinned Ubuntu initrd lacks e2fsck; source-only preparation now verifies Canonical's matching static ARM64 checker and appends it with a fixed formatter guest. Guest boot/request/report and packaging tests pass; VZ host adapter, public attach/rebuild/reattach, and real storage qualification remain |
 | Controlled export | receiver implemented, acceptance closed | Host stream receiver has hostile fixtures and independent review; zero-NIC synthetic boot/transport passed, but ext4 inspection, volume lock admission, hostile exits, and real export remain unproved, so public export remains disabled |
 | Hosted CI | unavailable | Local verification is required; do not report CI passed |
 
@@ -53,6 +53,11 @@ The current Boxwarden management guard still requires password, root-login, and 
 restrictions even though owner public keys are now permitted; broader guest
 SSH policy coexistence is pending.
 
+The formatter preparation check verified the pinned ISO, Canonical's
+`e2fsck-static` package SHA-256, the extracted static ARM64 checker, and the
+ARM64 guest build. The appended initrd preserves the source bytes. This is
+source preparation only; no formatter VM or ext4 volume has been run yet.
+
 The restricted Codex shell falsely fails Unix-socket tests and host doctor
 inspection with `operation not permitted`; the corresponding elevated checks
 pass. The current installed CLI configuration lists GPT-6 Sol at high effort.
@@ -80,7 +85,7 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 
 ## Next executable action
 
-Build the trusted formatter VM adapter and qualify one real ext4 raw volume,
+Build the no-NIC trusted VZ formatter host adapter, then qualify one real ext4 raw volume,
 then expose bounded public attachment and verify the source-wired start/stop
 loop against a disposable Tart clone. The parent writes Uses before Starting,
 the child checks exact formatter and disk evidence, and Stop clears Uses only

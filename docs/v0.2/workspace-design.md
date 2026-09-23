@@ -31,6 +31,14 @@ ext4 header, raw-file inode, and capacity. If the atomic record rename succeeds
 but later sync reports an error, an exact retry re-admits that same file and
 fsyncs the record directory before returning success. The trusted Linux
 formatter VM adapter and real filesystem health proof are still pending.
+The pinned Ubuntu 24.04.4 ARM64 Desktop initrd has `mkfs.ext4` and `blkid`
+but omits `e2fsck`. Formatter boot preparation verifies the exact ISO and
+Canonical's matching ARM64 `e2fsck-static` package before appending only the
+fixed guest helper and checker to the unmodified initrd. The checker is an
+external, digest-pinned private build input, not a repository binary. The
+guest's report must be accepted only after a no-NIC, single writable-file VM
+stops and its exact host process is reaped; source preparation alone is not
+format qualification.
 
 ## Locks and admission
 
