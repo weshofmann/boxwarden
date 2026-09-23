@@ -407,6 +407,41 @@ func TestSerialBootstrapPublishesOnlyDurableBinding(t *testing.T) {
 	}
 }
 
+// ssh-keygen -A writes a human comment after the ed25519 wire blob. The
+// helper must pin the cryptographic key while returning canonical two-field
+// material to the host's strict serial protocol.
+func TestSerialBootstrapCanonicalizesGeneratedHostKeyComment(t *testing.T) {
+	b, _ := testBootstrapper(t)
+	path := filepath.Join(b.Root, "etc/ssh/ssh_host_ed25519_key.pub")
+	if err := os.WriteFile(path, []byte(testKey+" root@boxwarden-123456789abc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := b.Serial(context.Background(), testRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.HostPublicKey != testKey {
+		t.Fatalf("host pin = %q, want canonical ed25519 key", result.HostPublicKey)
+	}
+}
+
+func TestCanonicalGuestHostKeyRejectsMalformedTrailingMaterial(t *testing.T) {
+	for name, input := range map[string]string{
+		"second line":   testKey + "\nother-key",
+		"two comments":  testKey + " root@host extra\n",
+		"tab":           testKey + "\troot@host\n",
+		"carriage":      testKey + " root@host\r\n",
+		"empty comment": testKey + " \n",
+		"bad key":       "ssh-ed25519 invalid root@host\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got, err := canonicalGuestHostKey([]byte(input)); err == nil {
+				t.Fatalf("admitted malformed host key %q", got)
+			}
+		})
+	}
+}
+
 // This fails if a compromised or incomplete active directory can add material
 // that bypasses the fixed binding layout.
 func TestSerialBootstrapRejectsUnexpectedActiveEntries(t *testing.T) {

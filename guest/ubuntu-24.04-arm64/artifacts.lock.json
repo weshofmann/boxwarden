@@ -2,7 +2,7 @@
   "version": 1,
   "artifacts": {
     "boxwarden-guest-bootstrap": {
-      "sha256": "3d22d6d1a65928306fb095c4e4870de72e82dc0d4db6ec978cd7723884914e16",
+      "sha256": "c6d605ab9c1525000191bdaf8d1f13e380f950568896936e051453f6c2ee4e69",
       "go_version": "go1.27.0",
       "build": "CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags=-buildid= -o guest/ubuntu-24.04-arm64/artifacts/boxwarden-guest-bootstrap ./cmd/boxwarden-guest-bootstrap",
       "elf": { "machine": "EM_AARCH64", "pt_interp": false, "dt_needed": false }

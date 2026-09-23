@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-23 17:24 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-23 17:45 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -17,7 +17,7 @@ resumable handoff if unfinished.
 | Recipe schema | source implemented | Versioned strict JSON loader and exact ISO verification have focused passing tests; no public preparation command yet |
 | Serial bootstrap and READY | source implemented | Ported bounded exchange, hvc0 autologin prompt gate, exact host-key pin, certificate, strict SSH probe, time-zone convergence, and live status; integrated Go suite, focused race tests, and vet passed. Real VM bootstrap has not completed |
 | Inspector capability | material gap | Pinned Tart supports `--disk <path>:ro`; source review shows no NIC-off mode and residual ARP/DHCP/inbound traffic under Softnet `/0` block. Export acceptance remains closed; receiver/locking work can continue |
-| Graphical sandbox | candidate finalized, qualification failed | First candidate finalized and stopped. Clone r1a booted with a regenerated hostname, but the temporary probe matched the build hostname and timed out. Fresh public session r1b started Tart but failed before bootstrap because Tart created `control.sock` in the supervisor generation root; its exact VM was stopped and evidence preserved. Source now gives Tart an exact private scratch subtree, and stop/reap owns its child through `os.StartProcess` and serialized `Wait4`; fresh clone r1c has not been attempted. GUI and app launch remain unproven |
+| Graphical sandbox | first candidate invalidated, qualification failed | Public fresh clone r1c passed Tart scratch and hvc0 prompt gates, then helper response timed out. Exact stop succeeded. Bounded investigation boots of this failed clone showed the helper rejected its three-field OpenSSH host public key (`root@...` comment); key shape was observed directly over hvc0. Source now canonicalizes that key while preserving strict wire validation, and the locked ARM64 helper was rebuilt. A fresh generic candidate and qualification clone are required; old candidate and clones remain unqualified. GUI and app launch remain unproven |
 | Workspace lifecycle | foundation implemented | Volume-owned record, optional attachment, exact use release, locks, sparse raw format journal, ext4 header/UUID verifier, and host ACL admission have focused tests; managed disk admission stays closed until a real formatter, attachment, and recovery are integrated |
 | Controlled export | receiver implemented, acceptance closed | Host stream receiver has hostile fixtures and independent review; no inspector transport or offline guarantee under the admitted Tart/Softnet pair |
 | Hosted CI | unavailable | Local verification is required; do not report CI passed |
@@ -26,7 +26,9 @@ Draft PR #12 tracks the published alpha branch. Full Go tests, vet, host and
 guest builds, guest definition scripts, and the real `alpha recipe check` passed
 locally at the first checkpoint. After the scratch, READY, stop, storage
 foundation, and ambiguous-reap corrections, the full Go suite, vet, and focused
-race tests passed again at 17:24 UTC. The current Boxwarden management guard still
+race tests passed at 17:24 UTC. After the host-key correction and locked helper
+rebuild, the full Go suite, vet, module verification, diff check, and all
+tracked guest script tests passed at 17:45 UTC. The current Boxwarden management guard still
 requires password, root-login, and forwarding restrictions even though owner
 public keys are now permitted; broader guest SSH policy coexistence is pending.
 
@@ -39,23 +41,25 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 ## Live resources
 
 - Alpha VMs: one owned stopped installer candidate with a 40 GiB nominal disk
-  and 11 GiB allocated at the first post-finalization inventory; two separate
-  qualification clones are stopped and failed. No clone has been admitted as
-  a reusable base.
+  and 11 GiB allocated at the first post-finalization inventory; three separate
+  qualification clones are stopped and failed. The candidate was built with
+  the older locked helper and is invalidated for promotion. No clone has been
+  admitted as a reusable base.
 - Alpha workspace volumes: none.
 - Input cache: verified official Ubuntu 24.04.4 ARM64 Desktop ISO in the private
   alpha state tree; the first private candidate was installed from it.
 - Temporary services: the bounded installer and first-clone probe drivers
-  completed; the failed public session supervisor, Tart child, and Softnet
-  child exited after exact VM stop. Failed generations and logs remain private
-  evidence in the ownership manifest and alpha state.
+  completed; both failed public session supervisors, Tart children, and Softnet
+  children exited after exact VM stops. Three investigation boots of the
+  already failed r1c clone captured private serial evidence; each VM was
+  stopped afterward. No alpha VM is running.
 
 ## Next executable action
 
-Publish the verified scratch/READY/stop correction and revalidate host
-preflight. Then qualify from a fresh clone, including the serial autologin timing risk, guest
-identity, management, and desktop behavior before cache admission. Serial text
-is evidence of the finalizer exchange, not an attestation. In parallel,
+Verify and publish the locked host-key helper correction, then rebuild the
+generic candidate from the corrected guest definition. Qualify from a fresh
+clone, including guest identity, management, and desktop behavior before cache
+admission. Serial text is evidence of the finalizer exchange, not an attestation. In parallel,
 implement the public automatic preparation path and the inspector transport.
 Before each further VM mutation, reread the private ownership manifest,
 inventory the admitted Tart namespace, rerun doctor, and check the disk/RAM floor.

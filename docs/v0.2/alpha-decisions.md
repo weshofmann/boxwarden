@@ -86,3 +86,23 @@ preserve scratch and generation, and return a typed cleanup failure. This
 retains failure evidence and stops a lost control reply from being mistaken
 for a stopped session. A real short Darwin child, ambiguous wait cases, and
 the cleanup propagation have focused tests; real Tart qualification is next.
+
+## Generated host-key comment, 2026-09-23
+
+Fresh public clone r1c passed Tart scratch and hvc0 prompt admission, but
+serial bootstrap timed out without a framed helper response. An investigation
+boot of that failed clone sent a canonical valid request and captured the
+helper's exact error: `host public key is not fresh ed25519 public material`.
+A separate read-only guest probe counted three fields in the generated
+`/etc/ssh/ssh_host_ed25519_key.pub`; the third was an OpenSSH human comment
+(`root@boxwarden-...`). The helper required exactly two fields. This was a
+guest parser mismatch, not a failed host-key regeneration or a missing hvc0
+login. All investigation boots ended stopped; r1c remains failed evidence.
+
+Normalize the guest file to exactly the validated ed25519 type and base64
+blob before returning it in the nonce-bound frame. Keep the host wire and CA
+validators strict, and reject multiline or malformed trailing material. The
+static Linux ARM64 helper digest changes, so the original generic candidate
+cannot be promoted: rebuild from corrected autoinstall input and freshly
+qualify a new clone. The serial error path still lacks structured guest
+diagnostics; failure evidence required a bounded private console capture.

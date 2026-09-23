@@ -117,10 +117,41 @@ func (b *Bootstrapper) Serial(ctx context.Context, request SerialRequest) (Seria
 	if err != nil {
 		return SerialResult{}, fmt.Errorf("host public key: %w", err)
 	}
-	if !validPublicKey(strings.TrimSpace(string(host))) {
-		return SerialResult{}, fmt.Errorf("host public key is not fresh ed25519 public material")
+	hostKey, err := canonicalGuestHostKey(host)
+	if err != nil {
+		return SerialResult{}, err
 	}
-	return b.result(request, active, sshd, strings.TrimSpace(string(host)))
+	return b.result(request, active, sshd, hostKey)
+}
+
+// OpenSSH's ssh-keygen -A adds a local human comment to generated public-key
+// files. The comment is not key identity; only the validated ed25519 blob is
+// sent to the host for exact-generation pinning. Refuse multiline or unusual
+// trailing material so a malformed file cannot be silently normalized.
+func canonicalGuestHostKey(raw []byte) (string, error) {
+	line := strings.TrimSuffix(string(raw), "\n")
+	if strings.ContainsAny(line, "\r\n\t") {
+		return "", fmt.Errorf("host public key is not fresh ed25519 public material")
+	}
+	fields := strings.Split(line, " ")
+	if len(fields) != 2 && len(fields) != 3 {
+		return "", fmt.Errorf("host public key is not fresh ed25519 public material")
+	}
+	if len(fields) == 3 {
+		if len(fields[2]) == 0 || len(fields[2]) > 256 {
+			return "", fmt.Errorf("host public key is not fresh ed25519 public material")
+		}
+		for _, b := range []byte(fields[2]) {
+			if b < 0x21 || b > 0x7e {
+				return "", fmt.Errorf("host public key is not fresh ed25519 public material")
+			}
+		}
+	}
+	canonical := fields[0] + " " + fields[1]
+	if !validPublicKey(canonical) {
+		return "", fmt.Errorf("host public key is not fresh ed25519 public material")
+	}
+	return canonical, nil
 }
 func (b *Bootstrapper) Management(ctx context.Context, request ManagementRequest) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
