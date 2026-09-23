@@ -42,6 +42,13 @@ type SupervisorControl interface {
 	Quiesced(context.Context, supervisor.Binding) (bool, error)
 }
 
+// WorkspaceStartCoordinator owns the volume-first batch transaction. Session
+// code cannot import the volume package because volume records bind sessions.
+type WorkspaceStartCoordinator interface {
+	PrepareStart(context.Context, string, domain.ID, Record, string, backend.Observer) (Record, error)
+	VerifyUses(context.Context, string, domain.ID, Record) error
+}
+
 type StartDependencies struct {
 	Observer          backend.Observer
 	Host              RuntimeChecker
@@ -49,6 +56,7 @@ type StartDependencies struct {
 	CA                CAValidator
 	ConfiguredDomains []sshx.Domain
 	Supervisor        SupervisorControl
+	Workspaces        WorkspaceStartCoordinator
 	RuntimeRoot       string
 	ConfigPath        string
 	NewGeneration     func() (string, error)
@@ -103,6 +111,11 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 	if record.Backend.Kind != "tart" || record.Backend.ObjectID == "" {
 		return Record{}, fmt.Errorf("session backend binding is unsupported")
 	}
+	if record.IntendedState == StateStarting || record.IntendedState == StateRunning {
+		if err := s.start.Workspaces.VerifyUses(ctx, s.domain.StateRoot, domainID, record); err != nil {
+			return Record{}, fmt.Errorf("verify exact workspace uses: %w", err)
+		}
+	}
 
 	switch record.IntendedState {
 	case StateStopped:
@@ -113,15 +126,34 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 		if !observation.Exists || observation.State != backend.ObjectStopped {
 			return Record{}, fmt.Errorf("stopped session does not match one stopped backend object")
 		}
+		if record.Version == recordVersionV1 {
+			legacy := record
+			if saveErr := SaveRecord(s.domain.StateRoot, domainID, record); saveErr != nil {
+				return Record{}, fmt.Errorf("upgrade stopped session before workspace reservation: %w", saveErr)
+			}
+			record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+			if err != nil || record.Version != recordVersion || record.IntendedState != StateStopped || !sameStoppedIdentity(legacy, record) {
+				return Record{}, fmt.Errorf("stopped session upgrade did not retain exact identity: %w", err)
+			}
+		}
 		generation, generationErr := s.start.NewGeneration()
 		if generationErr != nil || !validUUID(generation) {
 			return Record{}, fmt.Errorf("generate start generation: %w", generationErr)
 		}
-		record.IntendedState = StateStarting
-		record.StartGeneration = generation
-		record.Readiness = ReadinessRecord{Status: ReadinessStarting}
-		if saveErr := SaveRecord(s.domain.StateRoot, domainID, record); saveErr != nil {
-			return Record{}, fmt.Errorf("persist starting session: %w", saveErr)
+		if releaseErr := held.Release(); releaseErr != nil {
+			return Record{}, fmt.Errorf("release session lock before workspace reservation: %w", releaseErr)
+		}
+		started, prepareErr := s.start.Workspaces.PrepareStart(ctx, s.domain.StateRoot, domainID, record, generation, s.observer)
+		if prepareErr != nil {
+			return Record{}, fmt.Errorf("reserve workspaces and persist starting session: %w", prepareErr)
+		}
+		held, err = lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
+		if err != nil {
+			return Record{}, fmt.Errorf("reacquire session lock after workspace reservation: %w", err)
+		}
+		record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+		if err != nil || record != started || record.IntendedState != StateStarting {
+			return Record{}, fmt.Errorf("starting session changed after workspace reservation: %w", err)
 		}
 	case StateStarting:
 		observation, observeErr := s.observeExact(ctx, record.Backend.ObjectID)
@@ -276,7 +308,7 @@ func (s *Service) validStartDependencies() error {
 	if _, err := domain.Parse(string(s.domain.ID)); err != nil || strings.TrimSpace(s.domain.StateRoot) == "" {
 		return fmt.Errorf("invalid configured domain")
 	}
-	if s.observer == nil || s.start.Host == nil || s.start.CA == nil || s.start.Supervisor == nil || s.start.NewGeneration == nil || s.start.Now == nil || len(s.start.ConfiguredDomains) == 0 || !filepath.IsAbs(s.start.RuntimeRoot) || filepath.Clean(s.start.RuntimeRoot) != s.start.RuntimeRoot || !filepath.IsAbs(s.start.ConfigPath) || filepath.Clean(s.start.ConfigPath) != s.start.ConfigPath {
+	if s.observer == nil || s.start.Host == nil || s.start.CA == nil || s.start.Supervisor == nil || s.start.Workspaces == nil || s.start.NewGeneration == nil || s.start.Now == nil || len(s.start.ConfiguredDomains) == 0 || !filepath.IsAbs(s.start.RuntimeRoot) || filepath.Clean(s.start.RuntimeRoot) != s.start.RuntimeRoot || !filepath.IsAbs(s.start.ConfigPath) || filepath.Clean(s.start.ConfigPath) != s.start.ConfigPath {
 		return fmt.Errorf("session start dependencies are required")
 	}
 	return nil

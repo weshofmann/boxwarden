@@ -10,6 +10,7 @@ import (
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/config"
+	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/lock"
 	"github.com/weshofmann/boxwarden/internal/sshx"
@@ -17,6 +18,49 @@ import (
 )
 
 const testStartGeneration = "11111111-2222-4333-8444-555555555555"
+
+func TestStartDoesNotLaunchAfterWorkspaceReservationFailure(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	if _, err := creator.Create(context.Background(), "dev", ModeClean); err != nil {
+		t.Fatal(err)
+	}
+	service := newStartTestService(domainConfig, backendFake, &startSupervisorFake{start: func(supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+		t.Fatal("supervisor reached after workspace reservation failure")
+		return supervisor.Snapshot{}, nil
+	}}, time.Now, func() (string, error) { return testStartGeneration, nil })
+	called := false
+	service.start.Workspaces = startWorkspaceFake{prepare: func() error {
+		called = true
+		return errors.New("reservation failed before launch commit")
+	}}
+	if _, err := service.Start(context.Background(), "dev"); err == nil || !called {
+		t.Fatalf("Start() error = %v, reservation called = %v", err, called)
+	}
+	assertStoredState(t, domainConfig, "dev", StateStopped)
+}
+
+func TestStartUpgradesLegacyStoppedRecordBeforeWorkspaceReservation(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	created, err := creator.Create(context.Background(), "dev", ModeClean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeRecord(t, domainConfig.StateRoot, "dev", fmt.Sprintf(`{"version":1,"domain":"work","name":"dev","id":%q,"mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":%q},"golden_revision":%q}`, created.ID, created.Backend.ObjectID, created.GoldenRevision))
+	service := newStartTestService(domainConfig, backendFake, &startSupervisorFake{start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+		return startedSnapshot(request.Binding, time.Now()), nil
+	}}, time.Now, func() (string, error) { return testStartGeneration, nil })
+	service.start.Workspaces = startWorkspaceFake{prepare: func() error {
+		current, err := LoadRecord(domainConfig.StateRoot, "work", "dev")
+		if err != nil || current.Version != recordVersion || current.IntendedState != StateStopped {
+			return fmt.Errorf("legacy session not upgraded before reservation: %#v, %w", current, err)
+		}
+		return nil
+	}}
+	got, err := service.Start(context.Background(), "dev")
+	if err != nil || got.Version != recordVersion || got.IntendedState != StateStarting {
+		t.Fatalf("legacy start = %#v, %v", got, err)
+	}
+}
 
 func TestStartReleasesSessionLockDuringSupervisorLaunch(t *testing.T) {
 	domainConfig, backendFake, creator := createFixture(t)
@@ -129,6 +173,7 @@ func TestStartPersistsGenerationBeforeSupervisorMutation(t *testing.T) {
 	}}
 	service = NewStartService(domainConfig, StartDependencies{
 		Observer:          backendFake,
+		Workspaces:        startWorkspaceFake{},
 		Host:              startHostFake{},
 		CA:                startCAFake{identity: admittedCA},
 		Supervisor:        supervisorFake,
@@ -397,6 +442,7 @@ func TestStartRequiresConfiguredCACollectionToContainSelectedDomain(t *testing.T
 	}
 	service := NewStartService(domainConfig, StartDependencies{
 		Observer:          backendFake,
+		Workspaces:        startWorkspaceFake{},
 		Host:              startHostFake{},
 		CA:                startCAFake{},
 		ConfiguredDomains: []sshx.Domain{{ID: "personal", StateRoot: "/private/personal"}},
@@ -528,9 +574,34 @@ func (f startCAFake) Check(context.Context, sshx.Domain, []sshx.Domain) (sshx.CA
 	return f.identity, nil
 }
 
+type startWorkspaceFake struct {
+	prepare func() error
+	verify  func() error
+}
+
+func (f startWorkspaceFake) PrepareStart(_ context.Context, stateRoot string, domainID domain.ID, stopped Record, generation string, _ backend.Observer) (Record, error) {
+	if f.prepare != nil {
+		if err := f.prepare(); err != nil {
+			return Record{}, err
+		}
+	}
+	started := stopped
+	started.IntendedState = StateStarting
+	started.StartGeneration = generation
+	started.Readiness = ReadinessRecord{Status: ReadinessStarting}
+	return started, SaveRecord(stateRoot, domainID, started)
+}
+
+func (f startWorkspaceFake) VerifyUses(context.Context, string, domain.ID, Record) error {
+	if f.verify != nil {
+		return f.verify()
+	}
+	return nil
+}
+
 func newStartTestService(domainConfig config.Domain, observer backend.Observer, control SupervisorControl, now func() time.Time, newGeneration func() (string, error)) *Service {
 	return NewStartService(domainConfig, StartDependencies{
-		Observer: observer, Host: startHostFake{}, CA: startCAFake{},
+		Observer: observer, Host: startHostFake{}, CA: startCAFake{}, Workspaces: startWorkspaceFake{},
 		RuntimeRoot: filepath.Join(domainConfig.StateRoot, "runtime"), ConfigPath: "/private/boxwarden-config.json",
 		ConfiguredDomains: []sshx.Domain{{ID: domainConfig.ID, StateRoot: domainConfig.StateRoot}},
 		Supervisor:        control, NewGeneration: newGeneration, Now: now,

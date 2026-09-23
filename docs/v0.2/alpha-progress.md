@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-23 23:02 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-23 23:18 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -10,7 +10,7 @@ resumable handoff if unfinished.
 | --- | --- | --- |
 | Baseline | verified | Clean `e16f23962b43337f02de1fbe2779df00a28f3f1a`; `weshofmann/feature/v02-alpha` isolated worktree |
 | Host admission | verified | Elevated read-only doctor: `status: healthy` on original and alpha-only configs |
-| Source verification | verified with limits | Full local Go suite passed after child workspace lease admission. Targeted workspacex/backend/sessionruntime/architecture race tests, focused vet, and diff checks passed. Independent review confirmed the release-versus-launch race correction. These are source and synthetic checks; hosted CI and real workspace VM qualification remain unavailable |
+| Source verification | verified with limits | Full local Go suite, targeted session/sessionruntime/workspacex/architecture race tests, focused vet, and diff checks passed after parent reservation review. Review found a legacy v1 failure; the upgrade-before-Use correction and two-volume partial-write regression passed. These are source and synthetic checks; hosted CI and real workspace VM qualification remain unavailable |
 | VM inventory | verified | Admitted `TART_HOME` has eight stopped alpha-owned objects plus one protected stopped historical object. One additional failed alpha VM was archived byte-for-byte and deleted after archive verification; exact identities are in the private ownership manifest |
 | Alpha ownership | prepared | Exact resource paths and identities are retained only in the private ownership manifest |
 | Installer input | verified | Ubuntu 24.04.4 ARM64 Desktop ISO: good Canonical detached signature and exact `c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe` SHA-256; private cache only |
@@ -19,7 +19,7 @@ resumable handoff if unfinished.
 | Automatic base preparation | real guest preparation reached, qualification pending | The first attempt failed before VM creation on an unsupported OpenSSL mode. A fresh attempt with exact OpenSSL 3 passed installer and guest preparation, then reached finalization. A source audit found the finalizer rejected the public random run-ID format; the operator canceled through owned stop/wait cleanup. Its journal is failed, and no cache was admitted. The exact stopped candidate was privately archived and deleted after archive verification. The finalizer contract and regression fixture are published. A source-only reserve monitor now checks the state and Tart filesystems before mutation and through build/qualification |
 | Inspector capability | synthetic boot verified, ext4 runtime pending | Pinned Tart has no NIC-off mode. A signed Virtualization.framework guest booted with zero NICs, one read-only synthetic disk, and two serial channels; the guest reported loopback only and returned a typed report. A source-only 64 MiB ext4 fixture contract and guest read-only mount path have targeted tests, but no ext4 image or live mount proof exists. Real workspace export remains closed |
 | Graphical sandbox | same-clone GUI verified | Public qualr2c reached READY, GNOME Desktop and Firefox opened through Tart GUI, and Nautilus showed synthetic `bw-alpha-system-persist-r2c` in guest home after stop/restart. This is system-disk persistence only. No guest agent account sign-in or recipe-installed application has been observed |
-| Workspace lifecycle | child lease admission wired, parent reservation pending | Volume-owned records, attachment/use transitions, private format journal, Linux ARM64 ext4 helper, and retained exact Tart disk/lock leases have targeted tests. Public start/stop serialize through an outer transition lock and release the session lock during supervisor waits. The bounded registry resolves exact attachments; Attach refuses a fifth volume or duplicate filesystem UUID. Creating records promote only after verified formatter evidence. The supervisor child now rechecks exact Starting/Use/attachment/formatter evidence and passes retained leases to Tart; Use release cannot race a starting child. Public start still needs batch Use reservation, and stop needs batch release before Stopped. Guest formatter VM adapter, public attach/rebuild/reattach, and real storage qualification remain |
+| Workspace lifecycle | parent reservation wired, stop cleanup pending | Volume-owned records, attachment/use transitions, private format journal, Linux ARM64 ext4 helper, and retained exact Tart disk/lock leases have targeted tests. Public start/stop serialize through an outer transition lock and release the session lock during supervisor waits. The bounded registry resolves exact attachments; Attach refuses a fifth volume or duplicate filesystem UUID. Creating records promote only after verified formatter evidence. Public start now reserves exact Uses as a batch and persists Starting last; retries check those Uses. The child rechecks Starting/Use/attachment/formatter evidence and passes retained leases to Tart; Use release cannot race a starting child. Stop still needs batch Use release before Stopped. Guest formatter VM adapter, public attach/rebuild/reattach, and real storage qualification remain |
 | Controlled export | receiver implemented, acceptance closed | Host stream receiver has hostile fixtures and independent review; zero-NIC synthetic boot/transport passed, but ext4 inspection, volume lock admission, hostile exits, and real export remain unproved, so public export remains disabled |
 | Hosted CI | unavailable | Local verification is required; do not report CI passed |
 
@@ -80,11 +80,11 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 
 ## Next executable action
 
-Wire parent-side batch workspace Use reservation from the bounded registry
-before public attachment. Use the Starting session record as the batch commit
-marker after all Uses are durable; leave Stopping in place until exact reap and
-batch Use release. The child already rechecks exact durable bindings and
-formatter proof before Tart opens a disk.
+Wire stop-side batch Use release after exact reap and fresh stopped observation,
+then persist Stopped last. Handle partial Use writes left by an interrupted
+Stopped-to-Starting transaction only after exact backend stop is proved.
+The parent now writes Uses before the Starting batch commit marker, and the
+child rechecks exact durable bindings and formatter proof before Tart opens a disk.
 The next full prepared-base run needs more safe disk headroom. After that, record actual
 qualification run. Record actual
 package, identity, READY, and stopped-object evidence. Extend the zero-NIC inspector from

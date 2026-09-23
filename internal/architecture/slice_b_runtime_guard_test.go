@@ -30,6 +30,7 @@ func TestSliceCPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
 		{"moved bootstrap call", "internal/backend/start.go", `package backend; func f(r interface{ Bootstrap() }) { r.Bootstrap() }`, "unauthorized Slice C call"},
 		{"workspace promotion cannot admit SSH pin", "internal/workspacex/promotion.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
 		{"workspace launch cannot admit SSH pin", "internal/workspacex/launch_disks.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
+		{"workspace preparation cannot admit SSH pin", "internal/workspacex/prepare_start.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
 		{"composite readiness publication", "internal/app/start.go", `package app; type Snapshot struct{ PinPresent bool }; var _ = Snapshot{PinPresent: true}`, "deferred readiness publication"},
 		{"assigned readiness publication", "internal/lifecycle/start.go", `package lifecycle; type Snapshot struct{ ZoneMatches bool }; func f(s *Snapshot) { s.ZoneMatches = true }`, "deferred readiness publication"},
 		{"cgo libproc header", "internal/backend/proc.go", "package backend\n/* #include <libproc.h> */\nimport \"C\"", "discarded libproc"},
@@ -109,6 +110,7 @@ func f(request protocol.SerialRequest) protocol.SerialResult {
 		{"time-zone foundation", "internal/timezonex/guest.go", `package timezonex; func Converge() {}`},
 		{"workspace formatter admission", "internal/workspacex/promotion.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
 		{"workspace launch formatter admission", "internal/workspacex/launch_disks.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
+		{"workspace preparation formatter admission", "internal/workspacex/prepare_start.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
 		{"qualification libproc", "internal/qualification/adr024/proc.go", "package adr024\n/* #cgo LDFLAGS: -lproc\n#include <libproc.h> */\nimport \"C\""},
 	}
 	for _, test := range tests {
@@ -275,7 +277,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 			if name == "FindProcess" {
 				p.add(path, "process reconstruction", "os.FindProcess or equivalent name")
 			}
-			qualifiedWorkspaceAdmit := (path == "internal/workspacex/promotion.go" || path == "internal/workspacex/launch_disks.go") && name == "Admit" && workspaceFormatterAlias != "" && calledReceiver(value.Fun) == workspaceFormatterAlias
+			qualifiedWorkspaceAdmit := (path == "internal/workspacex/promotion.go" || path == "internal/workspacex/launch_disks.go" || path == "internal/workspacex/prepare_start.go") && name == "Admit" && workspaceFormatterAlias != "" && calledReceiver(value.Fun) == workspaceFormatterAlias
 			if composition && isDeferredCall(name) && !allowedLifecycleCall(path, name) && !qualifiedWorkspaceAdmit {
 				p.add(path, "unauthorized Slice C call", name)
 			}

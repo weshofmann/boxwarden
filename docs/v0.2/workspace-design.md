@@ -3,8 +3,8 @@
 Status: design reviewed on 2026-09-23. Volume records, a bounded strict
 attachment registry reader, a formatter journal-to-record promotion, and
 child-side exact-generation lease admission exist. Parent-side batch Use
-reservation/release and real VM proof remain pending. The existing v0.1 session record is not a workspace
-registry.
+reservation is wired; stop-side release and real VM proof remain pending. The
+existing v0.1 session record is not a workspace registry.
 
 ## Ownership model
 
@@ -72,7 +72,7 @@ Canceled or unverifiable waits retain them. The durable `Use` reservation still
 requires a later backend-stopped observation before it can be cleared.
 
 The supervisor child now supplies these leases when exact durable Uses exist.
-Common lifecycle code still must reserve Uses as a batch before public launch.
+Common lifecycle now reserves Uses as a batch before public launch.
 The child coordinates volume-use/session/storage locking, compares the exact
 `Use` reservation, attachment, disk identity, and verified formatter journal,
 then transfers the lease to the backend. The session record must already say
@@ -86,7 +86,7 @@ for exact stopped-state reconciliation.
 
 The session-lock handoff releases the session lock during
 `Supervisor.StartExact`, allowing child admission to acquire volume-use, then
-session, then storage. Parent batch reservation remains:
+session, then storage. The lifecycle transaction has these phases:
 
 1. Discover candidate attachments under storage, release it, acquire their
    volume-use locks (UUID order), then the session lock, then storage. Re-scan
@@ -115,11 +115,12 @@ session, then storage. Parent batch reservation remains:
 Session start/stop now release their session lock before waiting for the
 supervisor, then reacquire it and recheck the exact durable generation. Their
 outer transition lock serializes public starts and stops, including a
-poisoned-serial recovery stop, through the handoff. Child-side lease admission
-is wired; parent batch reservation and batch use release are not wired into
-these paths yet. A volume-enabled start must
-reserve `Use` while the session is still durably stopped, before persisting
-`Starting`; `ReserveUse` deliberately rejects an already starting session.
+poisoned-serial recovery stop, through the handoff. Parent batch reservation
+and child-side lease admission are wired; batch use release is not wired into
+Stop yet. `PrepareSessionStart` reserves `Use` while the session is still
+durably stopped, before persisting `Starting`. A failed intermediate write
+retains any partial Uses and blocks another start until exact stopped-state
+reconciliation. `ReserveUse` deliberately rejects an already starting session.
 The host file descriptor pins identity for admission, but Tart opens the path
 itself; trusted-host code must recheck immediately before launch. A malicious
 same-UID host process racing after the check is outside the guest-root boundary.
