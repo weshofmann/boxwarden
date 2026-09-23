@@ -70,7 +70,11 @@ launch mission sets the alpha scope and acceptance criteria.
   mutates alpha VMs or volumes, with at most two running VMs and 8 GiB combined
   assigned RAM initially, never above half of physical RAM. Preserve free disk
   space of at least the greater of 20 GiB or 10% of volume capacity, checked
-  before and during disk-expanding operations.
+  before and during disk-expanding operations. Automatic base preparation
+  samples both the selected state filesystem and admitted Tart filesystem
+  before reserving an attempt and through fresh-clone qualification, using
+  an additional 1 GiB cancellation margin. Sampling cannot forecast a whole
+  installer peak, so a read-only capacity estimate still precedes each real run.
 - Guest root is adversarial. No host tree, credential bridge, display server,
   Docker socket, clipboard/audio share, private network allowance, or guest
   filesystem mount in the macOS kernel is introduced.

@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-23 22:08 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-23 22:17 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -10,13 +10,13 @@ resumable handoff if unfinished.
 | --- | --- | --- |
 | Baseline | verified | Clean `e16f23962b43337f02de1fbe2779df00a28f3f1a`; `weshofmann/feature/v02-alpha` isolated worktree |
 | Host admission | verified | Elevated read-only doctor: `status: healthy` on original and alpha-only configs |
-| Source verification | verified with limits | Full local Go suite, targeted basebuild/alphaprep race tests, cgo-disabled fallback tests, and focused vet passed with the current ISO staging change. All guest shell fixtures and syntax checks passed for the published finalizer correction. Hosted CI is unavailable |
+| Source verification | verified with limits | Full local Go suite, targeted diskreserve/alphaprep race tests, and focused vet passed with the current reserve guard. APFS clone/fallback and cgo-disabled staging tests passed at the preceding checkpoint. All guest shell fixtures and syntax checks passed for the published finalizer correction. Hosted CI is unavailable |
 | VM inventory | verified | Admitted `TART_HOME` has eight stopped alpha-owned objects plus one protected stopped historical object. One additional failed alpha VM was archived byte-for-byte and deleted after archive verification; exact identities are in the private ownership manifest |
 | Alpha ownership | prepared | Exact resource paths and identities are retained only in the private ownership manifest |
 | Installer input | verified | Ubuntu 24.04.4 ARM64 Desktop ISO: good Canonical detached signature and exact `c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe` SHA-256; private cache only |
 | Recipe schema | real preparation exchange reached | Versioned strict JSON loader and exact ISO verification have passing tests. The fixed guest-only preparation helper validates package/argv payloads and executes exact argv with a closed environment in source tests. A real candidate reached the guest preparation completion marker before finalization, but no fresh-clone package inventory or cache admission followed |
 | Serial bootstrap and READY | real fresh clone verified | Corrected generic r2 candidate and public qualr2c clone completed serial bootstrap, host-key pin, certificate, strict SSH probe, time-zone convergence, READY, stop, restart to READY, and consistent stop. The management fixes are published |
-| Automatic base preparation | real guest preparation reached, qualification pending | The first attempt failed before VM creation on an unsupported OpenSSL mode. A fresh attempt with exact OpenSSL 3 passed installer and guest preparation, then reached finalization. A source audit found the finalizer rejected the public random run-ID format; the operator canceled through owned stop/wait cleanup. Its journal is failed, and no cache was admitted. The exact stopped candidate was privately archived and deleted after archive verification. The finalizer contract and regression fixture are published |
+| Automatic base preparation | real guest preparation reached, qualification pending | The first attempt failed before VM creation on an unsupported OpenSSL mode. A fresh attempt with exact OpenSSL 3 passed installer and guest preparation, then reached finalization. A source audit found the finalizer rejected the public random run-ID format; the operator canceled through owned stop/wait cleanup. Its journal is failed, and no cache was admitted. The exact stopped candidate was privately archived and deleted after archive verification. The finalizer contract and regression fixture are published. A source-only reserve monitor now checks the state and Tart filesystems before mutation and through build/qualification |
 | Inspector capability | synthetic boot verified, ext4 runtime pending | Pinned Tart has no NIC-off mode. A signed Virtualization.framework guest booted with zero NICs, one read-only synthetic disk, and two serial channels; the guest reported loopback only and returned a typed report. A source-only 64 MiB ext4 fixture contract and guest read-only mount path have targeted tests, but no ext4 image or live mount proof exists. Real workspace export remains closed |
 | Graphical sandbox | same-clone GUI verified | Public qualr2c reached READY, GNOME Desktop and Firefox opened through Tart GUI, and Nautilus showed synthetic `bw-alpha-system-persist-r2c` in guest home after stop/restart. This is system-disk persistence only. No guest agent account sign-in or recipe-installed application has been observed |
 | Workspace lifecycle | source foundation published, real path missing | Volume-owned record, attachment/use transitions, private format journal, Linux ARM64 ext4 helper, and retained exact Tart disk/lock leases have targeted tests. Guest formatter VM adapter, public attach/rebuild/reattach, and fresh synthetic qualification remain |
@@ -80,7 +80,7 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 
 ## Next executable action
 
-Review and publish the copy-on-write ISO staging checkpoint, then measure
+Review and publish the disk-reserve guard checkpoint, then measure
 headroom and reserve enough space for a fresh complete preparation and
 qualification run. Record actual
 package, identity, READY, and stopped-object evidence. Extend the zero-NIC inspector from

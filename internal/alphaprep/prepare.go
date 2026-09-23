@@ -12,6 +12,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/alphaqual"
 	"github.com/weshofmann/boxwarden/internal/basebuild"
 	"github.com/weshofmann/boxwarden/internal/config"
+	"github.com/weshofmann/boxwarden/internal/diskreserve"
 	"github.com/weshofmann/boxwarden/internal/privateacl"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
 )
@@ -53,10 +54,19 @@ func Prepare(ctx context.Context, loaded config.Config, selected config.Domain, 
 	if err != nil {
 		return basebuild.PreparedResult{}, err
 	}
-	if err := ensureAttemptRoot(selected.StateRoot); err != nil {
+	var result basebuild.PreparedResult
+	err = diskreserve.Run(ctx, []string{selected.StateRoot, runtime.Manifest.TartHome}, func(guarded context.Context) error {
+		if err := ensureAttemptRoot(selected.StateRoot); err != nil {
+			return err
+		}
+		var prepareErr error
+		result, prepareErr = basebuild.Prepare(guarded, request, basebuild.PrepareDependencies{Build: build, Qualifier: qualifier})
+		return prepareErr
+	})
+	if err != nil {
 		return basebuild.PreparedResult{}, err
 	}
-	return basebuild.Prepare(ctx, request, basebuild.PrepareDependencies{Build: build, Qualifier: qualifier})
+	return result, nil
 }
 
 func ensureAttemptRoot(stateRoot string) error {
