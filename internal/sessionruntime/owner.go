@@ -21,6 +21,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/sshx"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
 	"github.com/weshofmann/boxwarden/internal/timezonex"
+	"github.com/weshofmann/boxwarden/internal/workspacex"
 )
 
 type serialRuntime interface {
@@ -128,7 +129,7 @@ func NewOwner() *Owner {
 	}}
 }
 
-func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) error {
+func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) (result error) {
 	o.mu.Lock()
 	if o.attempted {
 		o.mu.Unlock()
@@ -197,6 +198,11 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) err
 	if observation.State != backend.ObjectStopped {
 		return fmt.Errorf("exact backend must be stopped before launch")
 	}
+	managedDisks, err := workspacex.AdmitLaunchDisks(ctx, selected.StateRoot, selected.ID, record, observer)
+	if err != nil {
+		return fmt.Errorf("admit exact workspace disks: %w", err)
+	}
+	defer func() { result = errors.Join(result, managedDisks.CloseUnclaimed()) }()
 	serial, err := o.deps.serial(ctx, directory)
 	if err != nil {
 		return fmt.Errorf("create serial runtime: %w", err)
@@ -216,7 +222,7 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) err
 	if launcher == nil {
 		return errors.Join(fmt.Errorf("Tart launcher is unavailable"), serial.Close())
 	}
-	handle, err := launcher.Start(ctx, backend.StartRequest{ObjectID: record.Backend.ObjectID, SerialDevice: serial.TartSlave(), GenerationDirectory: directory})
+	handle, err := launcher.Start(ctx, backend.StartRequest{ObjectID: record.Backend.ObjectID, SerialDevice: serial.TartSlave(), GenerationDirectory: directory, ManagedDisks: managedDisks})
 	if handle == nil {
 		if err == nil {
 			err = fmt.Errorf("Tart returned no retained handle")

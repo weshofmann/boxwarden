@@ -142,6 +142,8 @@ func ReserveUse(ctx context.Context, stateRoot string, domainID domain.ID, volum
 // ReleaseUseAfterObservedStop clears one exact reservation only after a fresh
 // stopped observation of its exact backend object. The caller must retain its
 // volume-use lock until the supervisor's stop/wait/reap path is complete.
+// This transition acquires that lock before session and storage, so it cannot
+// clear a child's reservation between disk admission and Tart spawn.
 func ReleaseUseAfterObservedStop(ctx context.Context, stateRoot string, domainID domain.ID, volumeID string, expected Use, observer backend.Observer) (Record, error) {
 	if !validUUID(volumeID) {
 		return Record{}, fmt.Errorf("invalid volume ID")
@@ -153,6 +155,11 @@ func ReleaseUseAfterObservedStop(ctx context.Context, stateRoot string, domainID
 	if initial.Attachment == nil {
 		return Record{}, fmt.Errorf("workspace is not attached")
 	}
+	volumeLock, err := AcquireVolumeUse(ctx, stateRoot, domainID, volumeID)
+	if err != nil {
+		return Record{}, err
+	}
+	defer volumeLock.Release()
 	sessionLock, err := lock.AcquireSession(ctx, stateRoot, string(domainID), initial.Attachment.SessionName)
 	if err != nil {
 		return Record{}, err
@@ -172,6 +179,15 @@ func ReleaseUseAfterObservedStop(ctx context.Context, stateRoot string, domainID
 	}
 	if expected.BackendKind != "tart" {
 		return Record{}, fmt.Errorf("unsupported backend use")
+	}
+	sessionRecord, err := session.LoadRecord(stateRoot, string(domainID), record.Attachment.SessionName)
+	if err != nil {
+		return Record{}, fmt.Errorf("reload workspace-owning session: %w", err)
+	}
+	if sessionRecord.ID != record.Attachment.SessionID || sessionRecord.Backend.Kind != expected.BackendKind || sessionRecord.Backend.ObjectID != expected.BackendObject ||
+		(sessionRecord.IntendedState != session.StateStopped && sessionRecord.IntendedState != session.StateStopping) ||
+		(sessionRecord.IntendedState == session.StateStopping && sessionRecord.StartGeneration != expected.Generation) {
+		return Record{}, fmt.Errorf("session is not stopping or stopped for exact workspace use")
 	}
 	if err := observedStopped(ctx, observer, expected.BackendObject); err != nil {
 		return Record{}, err

@@ -280,6 +280,22 @@ func NewManagedDiskSet(disks ...*ManagedDisk) (*ManagedDiskSet, error) {
 	return &ManagedDiskSet{disks: append([]*ManagedDisk(nil), disks...)}, nil
 }
 
+// CloseUnclaimed releases leases that were not transferred to a retained
+// backend handle. It is safe to call after Start: transferred leases remain
+// owned by that handle through exact process reap.
+func (set *ManagedDiskSet) CloseUnclaimed() error {
+	if set == nil {
+		return nil
+	}
+	var result error
+	for _, disk := range set.disks {
+		if err := disk.Close(); err != nil && !errors.Is(err, ErrManagedDiskTransferred) {
+			result = errors.Join(result, err)
+		}
+	}
+	return result
+}
+
 func (set *ManagedDiskSet) ValidateForStart(request StartRequest) error {
 	if set == nil || len(set.disks) == 0 || len(set.disks) > maxManagedDisks || set.disks[0] == nil {
 		return fmt.Errorf("invalid managed disk set")

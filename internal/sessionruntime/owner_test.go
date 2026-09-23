@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -16,12 +18,15 @@ import (
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/backend/tart"
+	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/guestproto"
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/serialx"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/sshx"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
+	"github.com/weshofmann/boxwarden/internal/workspaceformat"
+	"github.com/weshofmann/boxwarden/internal/workspacex"
 )
 
 const ownerTestPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -647,6 +652,134 @@ func TestOwnerCannotBeReusedToAcquireSecondRuntime(t *testing.T) {
 	}
 	_ = f.owner.Stop(context.Background())
 	_ = f.owner.Wait(context.Background())
+}
+
+func TestOwnerRejectsAttachedWorkspaceWithoutExactUseBeforeLaunch(t *testing.T) {
+	f := newFixture(t)
+	f.observe = func(_ context.Context, object string) (backend.Observation, error) {
+		return backend.Observation{ObjectID: object, Exists: true, State: backend.ObjectStopped}, nil
+	}
+	volume := workspacex.Record{
+		Version: 1, Domain: "work", VolumeID: "00112233-4455-4677-8899-aabbccddeeff",
+		SizeBytes: 4096, Format: workspacex.FormatRawExt4,
+		FilesystemUUID: "10213243-5465-4768-899a-bbccddeeff00", State: workspacex.StateAvailable,
+		Disk:       &workspacex.DiskIdentity{Device: 1, Inode: 2},
+		Attachment: &workspacex.Attachment{SessionID: f.record.ID, SessionName: "dev", MountPath: "/home/boxwarden/workspaces/project"},
+	}
+	directory := filepath.Join(f.root, "workspaces")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(volume)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, volume.VolumeID+".json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Start(context.Background(), f.request); err == nil || !strings.Contains(err.Error(), "lacks exact starting-generation use") {
+		t.Fatalf("attached volume without use was not refused: %v", err)
+	}
+	if events := strings.Join(f.trace.all(), ","); strings.Contains(events, "serial") || strings.Contains(events, "launch") {
+		t.Fatalf("owner crossed prelaunch boundary after workspace refusal: %s", events)
+	}
+}
+
+type ownerFormatFunc func(context.Context, workspaceformat.FormatRequest) (workspaceformat.FormatEvidence, error)
+
+func (f ownerFormatFunc) FormatAndVerify(ctx context.Context, request workspaceformat.FormatRequest) (workspaceformat.FormatEvidence, error) {
+	return f(ctx, request)
+}
+
+func TestOwnerPassesExactQualifiedWorkspaceLeaseToLauncher(t *testing.T) {
+	f := newFixture(t)
+	stopped := f.record
+	stopped.IntendedState = session.StateStopped
+	stopped.StartGeneration = ""
+	stopped.Readiness = session.ReadinessRecord{Status: session.ReadinessNotReady}
+	if err := session.SaveRecord(f.root, domain.ID("work"), stopped); err != nil {
+		t.Fatal(err)
+	}
+	volume := workspacex.Record{Version: 1, Domain: "work", VolumeID: "10213243-5465-4768-899a-bbccddeeff00", SizeBytes: 16 << 20, Format: workspacex.FormatRawExt4, FilesystemUUID: "20314253-6475-4869-9aab-ccddeeff0011", State: workspacex.StateCreating}
+	if err := workspacex.SaveRecord(f.root, domain.ID("work"), volume); err != nil {
+		t.Fatal(err)
+	}
+	request := workspaceformat.Request{Domain: volume.Domain, VolumeID: volume.VolumeID, FilesystemUUID: volume.FilesystemUUID, SizeBytes: volume.SizeBytes}
+	_, err := workspaceformat.Create(context.Background(), f.root, request, ownerFormatFunc(func(_ context.Context, request workspaceformat.FormatRequest) (workspaceformat.FormatEvidence, error) {
+		file, err := os.OpenFile(request.DiskPath, os.O_WRONLY, 0)
+		if err != nil {
+			return workspaceformat.FormatEvidence{}, err
+		}
+		defer file.Close()
+		if _, err := file.WriteAt([]byte{0x53, 0xef}, 1024+0x38); err != nil {
+			return workspaceformat.FormatEvidence{}, err
+		}
+		uuid, err := hex.DecodeString(strings.ReplaceAll(request.FilesystemUUID, "-", ""))
+		if err != nil {
+			return workspaceformat.FormatEvidence{}, err
+		}
+		if _, err := file.WriteAt(uuid, 1024+0x68); err != nil {
+			return workspaceformat.FormatEvidence{}, err
+		}
+		if err := file.Sync(); err != nil {
+			return workspaceformat.FormatEvidence{}, err
+		}
+		return workspaceformat.FormatEvidence{ObservedUUID: request.FilesystemUUID, WholeDevice: true, FilesystemClean: true}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workspacex.PromoteVerified(context.Background(), f.root, domain.ID("work"), volume.VolumeID); err != nil {
+		t.Fatal(err)
+	}
+	stoppedObserver := observerFunc(func(_ context.Context, object string) (backend.Observation, error) {
+		return backend.Observation{ObjectID: object, Exists: true, State: backend.ObjectStopped}, nil
+	})
+	if _, err := workspacex.Attach(context.Background(), f.root, domain.ID("work"), volume.VolumeID, "dev", "/home/boxwarden/workspaces/project", stoppedObserver); err != nil {
+		t.Fatal(err)
+	}
+	use := workspacex.Use{BackendKind: "tart", BackendObject: f.record.Backend.ObjectID, Generation: f.record.StartGeneration}
+	if _, err := workspacex.ReserveUse(context.Background(), f.root, domain.ID("work"), volume.VolumeID, use, stoppedObserver); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.SaveRecord(f.root, domain.ID("work"), f.record); err != nil {
+		t.Fatal(err)
+	}
+	f.observe = func(_ context.Context, object string) (backend.Observation, error) {
+		f.observations++
+		state := backend.ObjectStopped
+		if f.observations >= 3 {
+			state = backend.ObjectRunning
+		}
+		return backend.Observation{ObjectID: object, Exists: true, State: state}, nil
+	}
+	originalLauncher := f.owner.deps.launcher
+	validatedLease := false
+	f.owner.deps.launcher = func(config tart.LaunchConfig) backend.Starter {
+		starter := originalLauncher(config)
+		return starterFunc(func(ctx context.Context, request backend.StartRequest) (backend.Handle, error) {
+			if request.ManagedDisks == nil {
+				t.Fatal("workspace lease omitted from backend request")
+			}
+			if err := backend.ValidateStartRequest(request); err != nil {
+				t.Fatalf("workspace lease failed exact backend admission: %v", err)
+			}
+			validatedLease = true
+			return starter.Start(ctx, request)
+		})
+	}
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	if !validatedLease {
+		t.Fatal("launcher did not receive validated workspace lease")
+	}
+	if err := f.owner.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 type traceLog struct {

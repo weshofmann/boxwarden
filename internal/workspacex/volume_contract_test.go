@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/domain"
@@ -143,6 +144,47 @@ func TestReleaseUseRequiresExactObservedStoppedBackend(t *testing.T) {
 	}
 	if cleared.Use != nil || cleared.Attachment == nil {
 		t.Fatalf("release changed wrong fields: %#v", cleared)
+	}
+}
+
+func TestReleaseUseCannotRaceStartingChildLease(t *testing.T) {
+	root := privateRoot(t)
+	volume := fixtureRecord()
+	volume.State = StateAvailable
+	volume.Disk = &DiskIdentity{Device: 1, Inode: 2}
+	volume.Attachment = &Attachment{SessionID: testSessionID, SessionName: "dev", MountPath: "/home/boxwarden/workspaces/project"}
+	want := Use{BackendKind: "tart", BackendObject: "bw-work-dev", Generation: testGeneration}
+	volume.Use = &want
+	writeRawRecord(t, root, mustJSON(t, volume))
+	writeStoppedSession(t, root, "dev", testSessionID, "bw-work-dev")
+	current, err := session.LoadRecord(root, "work", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.IntendedState = session.StateStarting
+	current.StartGeneration = testGeneration
+	current.Readiness = session.ReadinessRecord{Status: session.ReadinessStarting}
+	if err := session.SaveRecord(root, domain.ID("work"), current); err != nil {
+		t.Fatal(err)
+	}
+	held, err := AcquireVolumeUse(context.Background(), root, domain.ID("work"), testVolumeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+	defer cancel()
+	if _, err := ReleaseUseAfterObservedStop(ctx, root, domain.ID("work"), testVolumeID, want, stoppedObserver{state: backend.ObjectStopped, object: want.BackendObject}); err == nil {
+		t.Fatal("release bypassed child volume-use lock")
+	}
+	if err := held.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReleaseUseAfterObservedStop(context.Background(), root, domain.ID("work"), testVolumeID, want, stoppedObserver{state: backend.ObjectStopped, object: want.BackendObject}); err == nil {
+		t.Fatal("starting session released exact workspace use")
+	}
+	retained, err := LoadRecord(root, domain.ID("work"), testVolumeID)
+	if err != nil || retained.Use == nil || *retained.Use != want {
+		t.Fatalf("starting use was not retained: %#v, %v", retained.Use, err)
 	}
 }
 

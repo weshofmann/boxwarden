@@ -1,9 +1,9 @@
 # Independent workspace disks: alpha contract
 
 Status: design reviewed on 2026-09-23. Volume records, a bounded strict
-attachment registry reader, a formatter journal-to-record promotion, and an
-unwired backend attachment lease exist; lifecycle integration and real VM
-proof remain pending. The existing v0.1 session record is not a workspace
+attachment registry reader, a formatter journal-to-record promotion, and
+child-side exact-generation lease admission exist. Parent-side batch Use
+reservation/release and real VM proof remain pending. The existing v0.1 session record is not a workspace
 registry.
 
 ## Ownership model
@@ -71,10 +71,11 @@ including failed launches that returned a handle. Spawn failure closes both.
 Canceled or unverifiable waits retain them. The durable `Use` reservation still
 requires a later backend-stopped observation before it can be cleared.
 
-No public session launch supplies these leases yet. Common lifecycle code must
-coordinate volume-use/session/storage locking, compare the exact `Use`
-reservation, attachment, disk identity, and verified formatter journal, then
-transfer the lease to the backend. The session record must already say
+The supervisor child now supplies these leases when exact durable Uses exist.
+Common lifecycle code still must reserve Uses as a batch before public launch.
+The child coordinates volume-use/session/storage locking, compares the exact
+`Use` reservation, attachment, disk identity, and verified formatter journal,
+then transfers the lease to the backend. The session record must already say
 `starting` with the same exact generation and backend object as the durable
 `Use`; the backend object must be freshly observed stopped before Tart starts.
 The formatter journal must be verified for the same domain, volume UUID,
@@ -83,10 +84,9 @@ derived path and open file before handing both it and the live volume-use lock
 to the backend. Failure releases the file and lock but leaves the durable `Use`
 for exact stopped-state reconciliation.
 
-The present `session.Service.Start` holds its session lock while it waits for
-`Supervisor.StartExact`. A child-side admission that acquires volume-use, then
-session, then storage would deadlock against that parent lock. The handoff must
-be changed before connecting workspace leases:
+The session-lock handoff releases the session lock during
+`Supervisor.StartExact`, allowing child admission to acquire volume-use, then
+session, then storage. Parent batch reservation remains:
 
 1. Discover candidate attachments under storage, release it, acquire their
    volume-use locks (UUID order), then the session lock, then storage. Re-scan
@@ -115,9 +115,9 @@ be changed before connecting workspace leases:
 Session start/stop now release their session lock before waiting for the
 supervisor, then reacquire it and recheck the exact durable generation. Their
 outer transition lock serializes public starts and stops, including a
-poisoned-serial recovery stop, through the handoff. This is a lifecycle
-foundation only: volume reservations, child-side lease admission, and use
-release are not wired into these paths yet. A future volume-enabled start must
+poisoned-serial recovery stop, through the handoff. Child-side lease admission
+is wired; parent batch reservation and batch use release are not wired into
+these paths yet. A volume-enabled start must
 reserve `Use` while the session is still durably stopped, before persisting
 `Starting`; `ReserveUse` deliberately rejects an already starting session.
 The host file descriptor pins identity for admission, but Tart opens the path
