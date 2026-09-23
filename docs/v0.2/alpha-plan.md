@@ -104,23 +104,29 @@ progress, rewrite published history, or integrate into `main`.
 ## Planned guest-only recipe execution contract
 
 The current management SSH path accepts only probe and time-zone operations.
-Recipe commands need a separate typed guest operation, carried over the same
-exact-generation pinned SSH transport after READY. The trusted host supplies
-bounded JSON argv and phase identity to a fixed guest helper path; the helper
-spawns argv elements directly inside the disposable guest with a closed
-environment, bounded output, and a deadline. No recipe bytes become a host
-shell command. The host checks the session lock, backend observation, live
-generation, pin, certificate, and operation result before recording progress.
+Reusable packages and `prepare` steps run in the disposable installer
+candidate's first boot, before generic finalization. The remastered installer
+ISO carries bounded recipe preparation JSON and a digest-bound fixed guest
+helper; autoinstall installs both into the candidate. The retained private
+serial channel sends only a fixed helper command, waits for its bounded
+completion marker, then sends the existing fixed finalizer and poweroff
+commands. The helper passes validated argv elements directly to guest
+processes with a closed environment and deadlines. Recipe bytes never become
+a host shell command. A finalized generic candidate cannot be booted again
+for preparation without consuming its clone-ready identity, and the
+domain-bound management SSH/READY path is unavailable before cloning.
 
-`prepare` mutations occur on a disposable candidate before fresh-clone cache
-qualification. A failed or indeterminate prepare attempt is retained and a
-fresh candidate is required. `once` steps record a digest-bound guest receipt
-after success; an interrupted step without a receipt is reported as
-indeterminate rather than silently replayed. `reconfigure` is explicit, and
-`startup` runs only after a successful start. A step's output is diagnostic
-evidence, not a claim that the guest or its package repository is trustworthy.
-This contract and its recovery tests must be implemented before accepting
-recipes that include packages or custom steps.
+A failed or indeterminate prepare attempt is retained and a fresh candidate
+is required. Fresh-clone qualification follows finalization and checks actual
+software and generic identity properties before cache admission. `once` steps
+run after clone READY over a separate exact-generation pinned SSH guest
+operation, record a digest-bound guest receipt after success, and report an
+interrupted step without a receipt as indeterminate rather than silently
+replaying it. `reconfigure` is explicit, and `startup` runs only after a
+successful start. A step's output is diagnostic evidence, not proof that the
+guest or its package repository is trustworthy. These contracts and their
+recovery tests must be implemented before accepting recipes with packages or
+custom steps.
 
 ## Current next action
 

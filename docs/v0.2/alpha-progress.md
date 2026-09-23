@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-23 19:17 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-23 19:23 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -14,7 +14,7 @@ resumable handoff if unfinished.
 | VM inventory | verified | Admitted `TART_HOME` has eight stopped alpha-owned objects plus one protected stopped historical object; exact names and states are in the private ownership manifest |
 | Alpha ownership | prepared | Exact resource paths and identities are retained only in the private ownership manifest |
 | Installer input | verified | Ubuntu 24.04.4 ARM64 Desktop ISO: good Canonical detached signature and exact `c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe` SHA-256; private cache only |
-| Recipe schema | source implemented | Versioned strict JSON loader and exact ISO verification have focused passing tests; no public preparation command yet |
+| Recipe schema | source implemented | Versioned strict JSON loader and exact ISO verification have focused passing tests. The fixed guest-only preparation helper validates package/argv payloads and executes exact argv with a closed environment in source tests; it is not yet installed into a candidate or invoked by the builder. No public preparation command yet |
 | Serial bootstrap and READY | real fresh clone verified | Corrected generic r2 candidate and public qualr2c clone completed serial bootstrap, host-key pin, certificate, strict SSH probe, time-zone convergence, READY, stop, restart to READY, and consistent stop. The management fixes are published |
 | Automatic base preparation | source verified, public path missing | Installer launcher, seed/remaster, journal, and admission source pass targeted tests. Cache reuse binds a stopped Tart bundle identity; build stages the exact verified ISO and guest definition; installer serial admission checks private ACLs. Fresh-clone qualifier source now requires exact READY, guest inspection, and stopped proof; its production guest inspector/lifecycle composition, recipe execution, and public CLI integration remain |
 | Inspector capability | synthetic boot verified, ext4 pending | Pinned Tart has no NIC-off mode. A signed Virtualization.framework guest booted with zero NICs, one read-only synthetic disk, and two serial channels; the guest reported loopback only and returned a typed report. Ext4 inspection and real workspace export remain closed |
@@ -59,8 +59,10 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 
 ## Next executable action
 
-Implement the trusted guest-inspection adapter and guest-only recipe software
-execution, then wire public automatic preparation. Extend the zero-NIC inspector from
+Install the guest preparation helper and exact recipe payload into the remastered
+ISO, then add the fixed serial prepare exchange before generic finalization.
+Implement the trusted guest-inspection adapter and wire public automatic
+preparation. Extend the zero-NIC inspector from
 synthetic block/serial proof to read-only ext4 inspection while advancing the
 formatter VM adapter and workspace lifecycle. The current r2 engineering candidate predates
 the builder's changed tracked definition and cannot qualify its cache key.
