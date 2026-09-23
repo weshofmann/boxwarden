@@ -58,8 +58,9 @@ type Check struct {
 }
 
 type InspectionRequest struct {
-	Session  session.Record
-	Snapshot supervisor.Snapshot
+	Session        session.Record
+	Snapshot       supervisor.Snapshot
+	PreparationKey string
 }
 
 // Inspection is a bounded guest acceptance result. The inspector must be a
@@ -239,7 +240,7 @@ func (q *Qualifier) Qualify(ctx context.Context, candidate basebuild.Result) (re
 	readyObserved := snapshot.ObservedAt.UTC()
 	ev.ReadyObserved = &readyObserved
 	stage = "guest-acceptance"
-	inspection, err := q.deps.Inspector.Inspect(ctx, InspectionRequest{Session: started, Snapshot: snapshot})
+	inspection, err := q.deps.Inspector.Inspect(ctx, InspectionRequest{Session: started, Snapshot: snapshot, PreparationKey: candidate.PreparationKey})
 	if err != nil {
 		return receipt, err
 	}

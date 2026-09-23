@@ -80,13 +80,15 @@ func (f fakeSnapshots) Snapshot(context.Context, supervisor.Binding) (supervisor
 }
 
 type fakeInspector struct {
-	report Inspection
-	err    error
-	calls  int
+	report  Inspection
+	err     error
+	calls   int
+	request InspectionRequest
 }
 
-func (f *fakeInspector) Inspect(_ context.Context, _ InspectionRequest) (Inspection, error) {
+func (f *fakeInspector) Inspect(_ context.Context, request InspectionRequest) (Inspection, error) {
 	f.calls++
+	f.request = request
 	return f.report, f.err
 }
 
@@ -136,6 +138,9 @@ func TestQualifyRequiresFreshCloneReadyInspectionAndStoppedProof(t *testing.T) {
 	}
 	if registrar.calls != 1 || lifecycle.createCalls != 1 || lifecycle.startCalls != 1 || lifecycle.stopCalls != 1 || inspector.calls != 1 {
 		t.Fatalf("call counts register=%d create=%d start=%d stop=%d inspect=%d", registrar.calls, lifecycle.createCalls, lifecycle.startCalls, lifecycle.stopCalls, inspector.calls)
+	}
+	if inspector.request.PreparationKey != candidate.PreparationKey {
+		t.Fatalf("inspector preparation key = %q", inspector.request.PreparationKey)
 	}
 	for name, digest := range map[string]string{"qualification-evidence.json": receipt.EvidenceSHA256, "qualification-bom.json": receipt.BOMSHA256} {
 		path := filepath.Join(candidate.AttemptDirectory, name)
