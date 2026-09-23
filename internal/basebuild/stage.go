@@ -45,12 +45,12 @@ func stageBuildInputs(ctx context.Context, in Inputs, attemptDir string) (Inputs
 		case "artifacts/boxwarden-guest-bootstrap", "finalize-golden.sh", "recipe-prepare.py", "remaster-golden-iso.sh", "render-golden-seed.sh":
 			mode = 0500
 		}
-		if err := stageSourceFile(ctx, filepath.Join(in.GuestDefinitionRoot, name), filepath.Join(guest, name), mode, 64<<20); err != nil {
+		if err := stageSourceFile(ctx, filepath.Join(in.GuestDefinitionRoot, name), filepath.Join(guest, name), mode, 64<<20, false); err != nil {
 			return Inputs{}, fmt.Errorf("stage guest definition %s: %w", name, err)
 		}
 	}
 	iso := filepath.Join(attemptDir, "source.iso")
-	if err := stageSourceFile(ctx, in.ISOPath, iso, 0400, 4<<30); err != nil {
+	if err := stageSourceFile(ctx, in.ISOPath, iso, 0400, 4<<30, true); err != nil {
 		return Inputs{}, fmt.Errorf("stage pinned installer: %w", err)
 	}
 	in.ISOPath = iso
@@ -58,7 +58,7 @@ func stageBuildInputs(ctx context.Context, in Inputs, attemptDir string) (Inputs
 	return in, nil
 }
 
-func stageSourceFile(ctx context.Context, source, target string, mode os.FileMode, maximum int64) error {
+func stageSourceFile(ctx context.Context, source, target string, mode os.FileMode, maximum int64, preferClone bool) error {
 	resolved, err := filepath.EvalSymlinks(source)
 	if err != nil || resolved != source {
 		return fmt.Errorf("source has a symlinked path: %v", err)
@@ -78,6 +78,25 @@ func stageSourceFile(ctx context.Context, source, target string, mode os.FileMod
 	opened, err := input.Stat()
 	if err != nil || !os.SameFile(entry, opened) {
 		return errors.New("source changed while opening")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if preferClone {
+		cloned, err := cloneStagedFile(input, target, mode)
+		if err != nil {
+			return err
+		}
+		if cloned {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			after, err := input.Stat()
+			if err != nil || !os.SameFile(entry, after) || after.Size() != entry.Size() || after.ModTime() != entry.ModTime() {
+				return errors.New("source changed while cloning")
+			}
+			return nil
+		}
 	}
 	output, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, mode)
 	if err != nil {
