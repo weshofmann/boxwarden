@@ -186,7 +186,7 @@ finalize_golden() {
   old_hostname="$(cat "$(path_in_root "$root" /etc/hostname)")"
   [[ -f "$(path_in_root "$root" /etc/boxwarden-task0-spike)" ]] || die 'build marker is missing'
   build_run_id="$(cat "$(path_in_root "$root" /etc/boxwarden-task0-spike)")"
-  [[ "$build_run_id" =~ ^run-[12]$ ]] || die 'unexpected build marker'
+  [[ "$build_run_id" =~ ^run-([12]|[0-9a-f]{12})$ ]] || die 'unexpected build marker'
   build_hostname="boxwarden-task0-${build_run_id}"
   [[ "$old_hostname" == "$build_hostname" || "$old_hostname" == boxwarden-golden ]] || die 'unexpected build hostname'
 

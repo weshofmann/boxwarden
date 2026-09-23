@@ -136,7 +136,7 @@ permittunnel no
 EOF
 
 make_fixture() {
-  local root="$1"
+  local root="$1" run_id="${2:-run-1}"
   mkdir -p "$root/etc/ssh/boxwarden" "$root/etc/ssh/sshd_config.d" \
     "$root/etc/systemd/system" "$root/etc/gdm3" "$root/etc/sudoers.d" \
     "$root/usr/local/libexec" "$root/var/lib/NetworkManager" \
@@ -147,9 +147,9 @@ make_fixture() {
   printf '%s\n' 'boxwarden:$6$fixture$BUILD_VERIFIER:20000:0:99999:7:::' >"$root/etc/shadow"
   cp "$root/etc/shadow" "$root/var/backups/shadow.bak"
   printf '%s\n' 'boxwarden:x:1000:1000:Boxwarden:/home/boxwarden:/bin/bash' >"$root/etc/passwd"
-  printf '%s\n' 'boxwarden-task0-run-1' >"$root/etc/hostname"
-  printf '%s\n' '127.0.0.1 localhost' '127.0.1.1 boxwarden-task0-run-1' >"$root/etc/hosts"
-  printf '%s\n' 'run-1' >"$root/etc/boxwarden-task0-spike"
+  printf '%s\n' "boxwarden-task0-${run_id}" >"$root/etc/hostname"
+  printf '%s\n' '127.0.0.1 localhost' "127.0.1.1 boxwarden-task0-${run_id}" >"$root/etc/hosts"
+  printf '%s\n' "$run_id" >"$root/etc/boxwarden-task0-spike"
   printf '%s\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' >"$root/etc/machine-id"
   printf '%s\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' >"$root/var/lib/dbus-machine-id-placeholder"
   mkdir -p "$root/var/lib/dbus"
@@ -188,6 +188,17 @@ run_firstboot() {
 good="$test_dir/good"
 make_fixture "$good"
 run_finalizer "$good" >"$test_dir/good.out" || fail 'finalizer rejected a valid candidate fixture'
+
+fresh_run="$test_dir/fresh-run"
+make_fixture "$fresh_run" run-0123456789ab
+run_finalizer "$fresh_run" >"$test_dir/fresh-run.out" || fail 'finalizer rejected a valid public preparation run ID'
+[[ -f "$fresh_run/var/lib/boxwarden/golden-clone-ready" && ! -e "$fresh_run/etc/boxwarden-task0-spike" ]] || fail 'public preparation run was not finalized'
+! grep -Fq boxwarden-task0-run-0123456789ab "$fresh_run/etc/hosts" || fail 'public preparation hostname survived finalization'
+
+invalid_run="$test_dir/invalid-run"
+make_fixture "$invalid_run" run-0123456789ABC
+if run_finalizer "$invalid_run" >"$test_dir/invalid-run.out" 2>&1; then fail 'malformed public preparation run ID was admitted'; fi
+[[ ! -e "$invalid_run/var/lib/boxwarden/golden-clone-ready" ]] || fail 'malformed run produced clone-ready marker'
 
 builder_ssh="$test_dir/builder-ssh"
 make_fixture "$builder_ssh"
