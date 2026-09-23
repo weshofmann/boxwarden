@@ -1,6 +1,6 @@
-// Package alphaqual qualifies a generic base on a newly created disposable
-// clone. It has no production composition until a trusted guest acceptance
-// inspector is available; all dependencies are explicit and injected.
+// Package alphaqual checks a generic prepared base on a newly created
+// disposable clone. A passing cache receipt records bounded preparation
+// evidence; it is not final desktop, workspace, or export acceptance.
 package alphaqual
 
 import (

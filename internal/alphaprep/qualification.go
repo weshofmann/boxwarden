@@ -49,8 +49,8 @@ func (l qualificationLifecycle) Stop(ctx context.Context, name string) (session.
 
 // NewProductionQualifier uses the public create-only, start, and stop paths on
 // one selected domain. The caller supplies a trusted host guest-inspection
-// implementation; this constructor never substitutes package inventory for
-// the broader alpha acceptance matrix.
+// implementation. A passing prepared-base cache receipt remains narrower
+// than final graphical, workspace, and export acceptance.
 func NewProductionQualifier(loaded config.Config, selected config.Domain, configPath string, vm qualificationBackend, inspector alphaqual.GuestInspector) (*alphaqual.Qualifier, error) {
 	admitted, err := loaded.Domain(string(selected.ID))
 	if err != nil || admitted != selected {

@@ -32,7 +32,8 @@ type PrepareRequest struct {
 // Qualifier must actually test a fresh clone of the stopped candidate. It
 // writes bounded, private, one-link regular files named qualification-evidence.json
 // and qualification-bom.json directly in Result.AttemptDirectory; the returned
-// hashes must match those bytes. This interface has no production adapter yet.
+// hashes must match those bytes. The production adapter uses public lifecycle
+// operations and exact-generation guest preparation checks.
 type Qualifier interface {
 	Qualify(context.Context, Result) (QualificationReceipt, error)
 }

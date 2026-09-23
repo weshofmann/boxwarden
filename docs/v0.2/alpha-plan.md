@@ -103,7 +103,9 @@ progress, rewrite published history, or integrate into `main`.
 
 ## Planned guest-only recipe execution contract
 
-The current management SSH path accepts only probe and time-zone operations.
+The management SSH path now accepts fixed probe, time-zone, package inventory,
+and guest-identity operations. Recipe execution remains a separate fixed
+guest-only installer operation.
 Reusable packages and `prepare` steps run in the disposable installer
 candidate's first boot, before generic finalization. The remastered installer
 ISO carries bounded recipe preparation JSON and a digest-bound fixed guest
@@ -134,10 +136,11 @@ The corrected generic r2 candidate and a fresh public clone reached READY,
 displayed GNOME and Firefox, and passed same-system stop/restart persistence.
 The source-only installer launcher, prepared-base cache identity, exact input
 staging, serial ACL admission, fixed guest preparation, fresh-clone qualifier,
-typed package inspection, host/CA preflight, builder composition, and production
-qualification lifecycle composition are published. The current r2 candidate
-predates the latest tracked guest definition. Complete guest acceptance checks
-and join the preparation pieces before exposing the public CLI. Prove
+typed package and identity inspection, host/CA preflight, builder composition,
+production qualification lifecycle, and ordered preparation composition are
+published. The current r2 candidate predates the latest tracked guest
+definition. Wire the public automatic preparation command and exercise a fresh
+candidate before treating a prepared cache entry as verified. Prove
 live zero-NIC ext4 inspection, wire the workspace formatter and lifecycle, and
 qualify rebuild/reattach and controlled export on fresh synthetic resources
 before claiming the alpha ready.
