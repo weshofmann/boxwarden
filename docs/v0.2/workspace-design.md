@@ -1,9 +1,9 @@
 # Independent workspace disks: alpha contract
 
-Status: design reviewed on 2026-09-23. Volume records, formatter journal, and
-an unwired backend attachment lease exist; lifecycle integration and real VM
-proof remain pending. The existing v0.1 session record is not a workspace
-registry.
+Status: design reviewed on 2026-09-23. Volume records, a bounded strict
+attachment registry reader, formatter journal, and an unwired backend
+attachment lease exist; lifecycle integration and real VM proof remain
+pending. The existing v0.1 session record is not a workspace registry.
 
 ## Ownership model
 
@@ -15,7 +15,9 @@ incomplete operation. The disk path is derived from its volume UUID inside the
 private domain state root. Guest output never supplies a host disk path.
 
 Session JSON does not duplicate the volume attachment list. A bounded registry
-scan under the storage lock resolves attachments for a session launch. A
+scan under the storage lock resolves attachments for a session launch. It
+rejects corrupt records, mismatched session name/UUID, duplicate filesystem
+UUIDs, overlapping mount paths, and more than four attachments. A
 rebuild preserves the session UUID while replacing its system backend object,
 so workspace association survives without a transfer between records.
 

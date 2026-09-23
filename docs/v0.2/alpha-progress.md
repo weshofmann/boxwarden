@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-23 22:38 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-23 22:34 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -10,7 +10,7 @@ resumable handoff if unfinished.
 | --- | --- | --- |
 | Baseline | verified | Clean `e16f23962b43337f02de1fbe2779df00a28f3f1a`; `weshofmann/feature/v02-alpha` isolated worktree |
 | Host admission | verified | Elevated read-only doctor: `status: healthy` on original and alpha-only configs |
-| Source verification | verified with limits | Full local Go suite, targeted session/supervisor/workspacex race tests, and focused vet passed with the current lock handoff. Diskreserve/alphaprep race and APFS clone/fallback checks passed at preceding checkpoints. All guest shell fixtures and syntax checks passed for the published finalizer correction. Hosted CI is unavailable |
+| Source verification | verified with limits | Full local Go suite, targeted session/supervisor/workspacex race tests, and focused vet passed at the lock-handoff checkpoint. The new registry reader passed targeted workspacex tests and vet; full-suite verification remains to be run for this checkpoint. Diskreserve/alphaprep race and APFS clone/fallback checks passed at preceding checkpoints. Hosted CI is unavailable |
 | VM inventory | verified | Admitted `TART_HOME` has eight stopped alpha-owned objects plus one protected stopped historical object. One additional failed alpha VM was archived byte-for-byte and deleted after archive verification; exact identities are in the private ownership manifest |
 | Alpha ownership | prepared | Exact resource paths and identities are retained only in the private ownership manifest |
 | Installer input | verified | Ubuntu 24.04.4 ARM64 Desktop ISO: good Canonical detached signature and exact `c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe` SHA-256; private cache only |
@@ -19,7 +19,7 @@ resumable handoff if unfinished.
 | Automatic base preparation | real guest preparation reached, qualification pending | The first attempt failed before VM creation on an unsupported OpenSSL mode. A fresh attempt with exact OpenSSL 3 passed installer and guest preparation, then reached finalization. A source audit found the finalizer rejected the public random run-ID format; the operator canceled through owned stop/wait cleanup. Its journal is failed, and no cache was admitted. The exact stopped candidate was privately archived and deleted after archive verification. The finalizer contract and regression fixture are published. A source-only reserve monitor now checks the state and Tart filesystems before mutation and through build/qualification |
 | Inspector capability | synthetic boot verified, ext4 runtime pending | Pinned Tart has no NIC-off mode. A signed Virtualization.framework guest booted with zero NICs, one read-only synthetic disk, and two serial channels; the guest reported loopback only and returned a typed report. A source-only 64 MiB ext4 fixture contract and guest read-only mount path have targeted tests, but no ext4 image or live mount proof exists. Real workspace export remains closed |
 | Graphical sandbox | same-clone GUI verified | Public qualr2c reached READY, GNOME Desktop and Firefox opened through Tart GUI, and Nautilus showed synthetic `bw-alpha-system-persist-r2c` in guest home after stop/restart. This is system-disk persistence only. No guest agent account sign-in or recipe-installed application has been observed |
-| Workspace lifecycle | source handoff reviewed, real path missing | Volume-owned record, attachment/use transitions, private format journal, Linux ARM64 ext4 helper, and retained exact Tart disk/lock leases have targeted tests. The current source change serializes public start/stop with an outer transition lock and releases the session lock during supervisor waits, with exact-generation rechecks. Separate review found and confirmed corrections for a start/stop race and poisoned-serial deadlock. Guest formatter VM adapter, use-reservation/child lease wiring, public attach/rebuild/reattach, and fresh synthetic qualification remain |
+| Workspace lifecycle | source registry and handoff, real path missing | Volume-owned record, attachment/use transitions, private format journal, Linux ARM64 ext4 helper, and retained exact Tart disk/lock leases have targeted tests. Public start/stop serialize through an outer transition lock and release the session lock during supervisor waits, with exact-generation rechecks and separate review. The new bounded registry reader resolves exact session attachments and rejects corrupt, duplicate, or over-limit bindings. Guest formatter VM adapter, use-reservation/child lease wiring, public attach/rebuild/reattach, and fresh synthetic qualification remain |
 | Controlled export | receiver implemented, acceptance closed | Host stream receiver has hostile fixtures and independent review; zero-NIC synthetic boot/transport passed, but ext4 inspection, volume lock admission, hostile exits, and real export remain unproved, so public export remains disabled |
 | Hosted CI | unavailable | Local verification is required; do not report CI passed |
 
@@ -80,8 +80,9 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 
 ## Next executable action
 
-Review and publish the session-lock handoff checkpoint, then wire exact
-workspace use reservations and child-side leases before public attachment.
+Wire exact workspace use reservations and child-side leases from the bounded
+registry before public attachment. Preserve the volume-use lock order and
+recheck exact durable bindings in the child before Tart opens a disk.
 The next full prepared-base run needs more safe disk headroom. After that, record actual
 qualification run. Record actual
 package, identity, READY, and stopped-object evidence. Extend the zero-NIC inspector from
