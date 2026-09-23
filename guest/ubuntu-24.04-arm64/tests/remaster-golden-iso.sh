@@ -44,24 +44,32 @@ chmod 0600 "${test_dir}/hash"
 BW_GOLDEN_RENDER_TEST_MODE=1 BW_GOLDEN_TEST_ZONEINFO_ROOT="$zoneinfo" BW_GOLDEN_TEST_LOCALTIME="${test_dir}/localtime" \
   bash "${guest_dir}/render-golden-seed.sh" run-1 "${test_dir}/hash" "${test_dir}/rendered" >"${test_dir}/render.out" || fail 'current renderer failed before fake remaster'
 rendered="${test_dir}/rendered/user-data"
+preparation="${test_dir}/recipe-prepare.json"
+printf '%s\n' '{"version":1,"preparation_key":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","apt_packages":[],"steps":[]}' >"$preparation"
+chmod 0600 "$preparation"
 
 if ! PATH="${stub_bin}:${PATH}" BW_TEST_XORRISO_LOG="$log" BW_TEST_MAPPED_USER_DATA="$mapped" \
-  bash "$remaster" "$source_iso" "$rendered" "$output_iso"; then
+  bash "$remaster" "$source_iso" "$rendered" "$preparation" "$output_iso"; then
   fail 'current remaster rejected the generated source fixture'
 fi
 helper="${guest_dir}/artifacts/boxwarden-guest-bootstrap"
 finalizer="${guest_dir}/finalize-golden.sh"
+recipe_helper="${guest_dir}/recipe-prepare.py"
 for required in "$helper" /boxwarden-artifacts/boxwarden-guest-bootstrap \
-  "$finalizer" /boxwarden-artifacts/finalize-golden.sh /autoinstall.yaml; do
+  "$finalizer" /boxwarden-artifacts/finalize-golden.sh \
+  "$recipe_helper" /boxwarden-artifacts/recipe-prepare.py \
+  "$preparation" /boxwarden-artifacts/recipe-prepare.json /autoinstall.yaml; do
   grep -Fxq -- "$required" "$log" || fail "ISO did not map ${required}"
 done
 expected_digest="$(shasum -a 256 "$finalizer" | awk '{print $1}')"
 grep -Fq "'${expected_digest}'" "$mapped" || fail 'mapped autoinstall is not bound to finalizer bytes'
+grep -Fq "'$(shasum -a 256 "$recipe_helper" | awk '{print $1}')'" "$mapped" || fail 'mapped autoinstall is not bound to recipe helper bytes'
+grep -Fq "'$(shasum -a 256 "$preparation" | awk '{print $1}')'" "$mapped" || fail 'mapped autoinstall is not bound to recipe payload bytes'
 ! grep -Fq __BOXWARDEN_ "$mapped" || fail 'mapped autoinstall retains a build placeholder'
 
 sed '/__BOXWARDEN_FINALIZER_SHA256__/d' "$rendered" >"${test_dir}/missing-finalizer-lock"
 if PATH="${stub_bin}:${PATH}" BW_TEST_XORRISO_LOG="$log" BW_TEST_MAPPED_USER_DATA="$mapped" \
-  bash "$remaster" "$source_iso" "${test_dir}/missing-finalizer-lock" "$output_iso" >"${test_dir}/bad.out" 2>&1; then
+  bash "$remaster" "$source_iso" "${test_dir}/missing-finalizer-lock" "$preparation" "$output_iso" >"${test_dir}/bad.out" 2>&1; then
   fail 'remaster accepted a user-data definition without finalizer binding'
 fi
 

@@ -128,6 +128,7 @@ type RemasterRequest struct {
 	GuestDefinitionRoot string
 	SourceISO           string
 	RenderedUserData    string
+	PreparationJSON     string
 	OutputISO           string
 }
 type CreateRequest struct {
@@ -213,6 +214,14 @@ func Build(ctx context.Context, in Inputs, deps Dependencies) (result Result, er
 	if staged.ISOPath == "" || staged.GuestDefinitionRoot == "" {
 		return Result{}, errors.New("staged build inputs are incomplete")
 	}
+	preparation, err := recipe.PreparationPayload(in.Recipe, key)
+	if err != nil {
+		return Result{}, fmt.Errorf("encode guest preparation: %w", err)
+	}
+	preparationPath := filepath.Join(attemptDir, "recipe-prepare.json")
+	if err := writePreparationPayload(attemptDir, preparation); err != nil {
+		return Result{}, fmt.Errorf("persist guest preparation: %w", err)
+	}
 
 	verifier, err := deps.Seed.BuilderVerifier(ctx, attemptDir)
 	if privateVerifierPath(attemptDir, verifier) {
@@ -237,7 +246,7 @@ func Build(ctx context.Context, in Inputs, deps Dependencies) (result Result, er
 		return Result{}, fmt.Errorf("render installer seed: %w", err)
 	}
 	installerISO := filepath.Join(attemptDir, "installer.iso")
-	if err := deps.Seed.Remaster(ctx, RemasterRequest{GuestDefinitionRoot: staged.GuestDefinitionRoot, SourceISO: staged.ISOPath, RenderedUserData: filepath.Join(seedDir, "user-data"), OutputISO: installerISO}); err != nil {
+	if err := deps.Seed.Remaster(ctx, RemasterRequest{GuestDefinitionRoot: staged.GuestDefinitionRoot, SourceISO: staged.ISOPath, RenderedUserData: filepath.Join(seedDir, "user-data"), PreparationJSON: preparationPath, OutputISO: installerISO}); err != nil {
 		return Result{}, fmt.Errorf("remaster installer: %w", err)
 	}
 	if err := setPhase(PhaseRendered); err != nil {

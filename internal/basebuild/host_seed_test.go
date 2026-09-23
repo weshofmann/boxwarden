@@ -105,7 +105,7 @@ func TestHostSeedBuilderUsesDirectPinnedCommandsAndPrivateVerifier(t *testing.T)
 	if err := builder.Render(context.Background(), RenderRequest{GuestDefinitionRoot: definition, RunID: "run-1", VerifierFile: verifier, OutputDirectory: filepath.Join(attempt, "seed")}); err != nil {
 		t.Fatal(err)
 	}
-	if err := builder.Remaster(context.Background(), RemasterRequest{GuestDefinitionRoot: definition, SourceISO: "/private/ubuntu.iso", RenderedUserData: filepath.Join(attempt, "seed", "user-data"), OutputISO: filepath.Join(attempt, "installer.iso")}); err != nil {
+	if err := builder.Remaster(context.Background(), RemasterRequest{GuestDefinitionRoot: definition, SourceISO: "/private/ubuntu.iso", RenderedUserData: filepath.Join(attempt, "seed", "user-data"), PreparationJSON: filepath.Join(attempt, "recipe-prepare.json"), OutputISO: filepath.Join(attempt, "installer.iso")}); err != nil {
 		t.Fatal(err)
 	}
 	if len(runner.commands) != 3 {
@@ -114,7 +114,7 @@ func TestHostSeedBuilderUsesDirectPinnedCommandsAndPrivateVerifier(t *testing.T)
 	if got := runner.commands[1]; got.Path != filepath.Join(definition, "render-golden-seed.sh") || strings.Join(got.Args, "|") != "run-1|"+verifier+"|"+filepath.Join(attempt, "seed") {
 		t.Fatalf("render command: %+v", got)
 	}
-	if got := runner.commands[2]; got.Path != filepath.Join(definition, "remaster-golden-iso.sh") || strings.Join(got.Args, "|") != "/private/ubuntu.iso|"+filepath.Join(attempt, "seed", "user-data")+"|"+filepath.Join(attempt, "installer.iso") || !strings.Contains(strings.Join(got.Env, "|"), "TMPDIR="+attempt) {
+	if got := runner.commands[2]; got.Path != filepath.Join(definition, "remaster-golden-iso.sh") || strings.Join(got.Args, "|") != "/private/ubuntu.iso|"+filepath.Join(attempt, "seed", "user-data")+"|"+filepath.Join(attempt, "recipe-prepare.json")+"|"+filepath.Join(attempt, "installer.iso") || !strings.Contains(strings.Join(got.Env, "|"), "TMPDIR="+attempt) {
 		t.Fatalf("remaster command: %+v", got)
 	}
 	if runner.remasterPATH != filepath.Join(attempt, "tool-bin")+":/usr/bin:/bin" || runner.xorrisoLinkTarget != xorriso {

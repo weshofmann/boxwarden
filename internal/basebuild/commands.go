@@ -38,8 +38,8 @@ func validRunID(value string) bool {
 }
 
 func RemasterCommand(request RemasterRequest) (Command, error) {
-	if !absoluteClean(request.GuestDefinitionRoot) || !absoluteClean(request.SourceISO) || !absoluteClean(request.RenderedUserData) || !absoluteClean(request.OutputISO) {
+	if !absoluteClean(request.GuestDefinitionRoot) || !absoluteClean(request.SourceISO) || !absoluteClean(request.RenderedUserData) || !absoluteClean(request.PreparationJSON) || !absoluteClean(request.OutputISO) {
 		return Command{}, errors.New("remaster paths must be canonical and absolute")
 	}
-	return Command{Path: filepath.Join(request.GuestDefinitionRoot, "remaster-golden-iso.sh"), Args: []string{request.SourceISO, request.RenderedUserData, request.OutputISO}}, nil
+	return Command{Path: filepath.Join(request.GuestDefinitionRoot, "remaster-golden-iso.sh"), Args: []string{request.SourceISO, request.RenderedUserData, request.PreparationJSON, request.OutputISO}}, nil
 }

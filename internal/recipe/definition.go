@@ -18,6 +18,7 @@ var guestDefinitionFiles = []string{
 	"autoinstall/meta-data",
 	"autoinstall/user-data",
 	"finalize-golden.sh",
+	"recipe-prepare.py",
 	"remaster-golden-iso.sh",
 	"render-golden-seed.sh",
 }

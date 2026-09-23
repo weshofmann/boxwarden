@@ -142,6 +142,35 @@ func TestBuildPassesStagedSourcesToSeedBuilder(t *testing.T) {
 	}
 }
 
+func TestBuildPassesPrivateGuestPreparationPayloadToRemaster(t *testing.T) {
+	in := exampleInputs(t)
+	in.Recipe.AptPackages = []string{"git"}
+	in.Recipe.Steps = []recipe.Step{{ID: "base-step", Phase: "prepare", Argv: []string{"/bin/echo", "literal arg"}}}
+	events := []string{}
+	var remaster RemasterRequest
+	seed := fakeSeed{events: &events, remasterReq: &remaster}
+	vm := &fakeVM{events: &events, run: &fakeRun{events: &events}}
+	if _, err := Build(context.Background(), in, Dependencies{Checks: &fakeChecks{}, Seed: seed, VM: vm}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(in.AttemptRoot, in.AttemptID, "recipe-prepare.json")
+	if remaster.PreparationJSON != path {
+		t.Fatalf("remaster preparation path = %q, want %q", remaster.PreparationJSON, path)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"version":1,"preparation_key":"` + strings.Repeat("a", 64) + `","apt_packages":["git"],"steps":[{"id":"base-step","argv":["/bin/echo","literal arg"]}]}`
+	if string(raw) != want {
+		t.Fatalf("guest preparation payload = %s", raw)
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 {
+		t.Fatalf("guest preparation payload is not private: %v, %v", info, err)
+	}
+}
+
 type fakeVM struct {
 	events   *[]string
 	state    backend.ObjectState
@@ -242,7 +271,7 @@ func exampleInputs(t *testing.T) Inputs {
 	if err := os.Chmod(root, 0700); err != nil {
 		t.Fatal(err)
 	}
-	return Inputs{AttemptRoot: root, AttemptID: "attempt-1", CandidateID: "bw-v02-a1444-build-r1", RunID: "run-1", ISOPath: "/private/ubuntu.iso", GuestDefinitionRoot: "/private/guest", Recipe: recipe.Recipe{Machine: recipe.Machine{CPUs: 4, MemoryMiB: 4096, SystemDiskGiB: 40}}}
+	return Inputs{AttemptRoot: root, AttemptID: "attempt-1", CandidateID: "bw-v02-a1444-build-r1", RunID: "run-1", ISOPath: "/private/ubuntu.iso", GuestDefinitionRoot: "/private/guest", Recipe: recipe.Recipe{Version: 1, Source: recipe.Source{Kind: "ubuntu-24.04.4-desktop-arm64", SHA256: "c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"}, Machine: recipe.Machine{CPUs: 4, MemoryMiB: 4096, SystemDiskGiB: 40}}}
 }
 
 func TestBuildPreservesStoppedCandidateWithoutClaimingQualification(t *testing.T) {
@@ -411,11 +440,11 @@ func TestBuilderCommandsKeepArgumentsSeparate(t *testing.T) {
 	if render.Path != "/trusted/guest/render-golden-seed.sh" || strings.Join(render.Args, "|") != "run-1|/private/attempt/hash|/private/attempt/seed" {
 		t.Fatalf("render command: %+v", render)
 	}
-	remaster, err := RemasterCommand(RemasterRequest{GuestDefinitionRoot: "/trusted/guest", SourceISO: "/private/ubuntu.iso", RenderedUserData: "/private/attempt/seed/user-data", OutputISO: "/private/attempt/installer.iso"})
+	remaster, err := RemasterCommand(RemasterRequest{GuestDefinitionRoot: "/trusted/guest", SourceISO: "/private/ubuntu.iso", RenderedUserData: "/private/attempt/seed/user-data", PreparationJSON: "/private/attempt/recipe-prepare.json", OutputISO: "/private/attempt/installer.iso"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if remaster.Path != "/trusted/guest/remaster-golden-iso.sh" || strings.Join(remaster.Args, "|") != "/private/ubuntu.iso|/private/attempt/seed/user-data|/private/attempt/installer.iso" {
+	if remaster.Path != "/trusted/guest/remaster-golden-iso.sh" || strings.Join(remaster.Args, "|") != "/private/ubuntu.iso|/private/attempt/seed/user-data|/private/attempt/recipe-prepare.json|/private/attempt/installer.iso" {
 		t.Fatalf("remaster command: %+v", remaster)
 	}
 	if _, err := RenderCommand(RenderRequest{GuestDefinitionRoot: "/trusted/guest", RunID: "run-3", VerifierFile: "/private/attempt/hash", OutputDirectory: "/private/attempt/seed"}); err == nil {
