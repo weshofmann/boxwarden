@@ -21,13 +21,18 @@ so workspace association survives without a transfer between records.
 
 ## Locks and admission
 
-Acquire session operation locks first, in stable name order, then the domain
-storage operation lock, then the golden lock if needed. Volume-only operations
-start with storage. Acquire volume-use locks in UUID order and hold them for the
-entire VM/inspector/formatter lifetime through exact stop, wait, reap, and
-backend observation. A released lock after a supervisor crash does not prove
-the old backend stopped: a durable use reservation and backend observation
-must agree before reassignment. Unknown or running state blocks reuse.
+Operations without a volume-use lock acquire session operation locks first, in
+stable name order, then the domain storage operation lock, then the golden lock
+if needed. Volume-only record operations start with storage. Any operation that
+needs a volume-use lock acquires those locks first, in volume UUID order, then
+session locks in stable name order, then storage. Never wait for a volume-use
+lock while holding a session or storage lock: the retained backend lease holds
+it while stop and use-release may need session and storage locks. Hold each
+volume-use lock for the entire VM/inspector/formatter lifetime through exact
+stop, wait, and reap. A released lock after a supervisor crash does not prove
+the old backend stopped: the durable use reservation and a fresh exact backend
+observation must agree before reassignment. Unknown or running state blocks
+reuse.
 
 Before launch, validate the exact configured domain, record and UUID bindings,
 private ancestry, opened regular one-link disk file, expected owner/mode,
@@ -52,10 +57,47 @@ Canceled or unverifiable waits retain them. The durable `Use` reservation still
 requires a later backend-stopped observation before it can be cleared.
 
 No public session launch supplies these leases yet. Common lifecycle code must
-coordinate session/storage/use locking, compare the exact `Use` reservation,
-attachment, disk identity, and verified formatter journal, then transfer the
-lease to the backend. Current volume transitions do not acquire volume-use
-locks, so this coordination needs an explicit lock-order design before wiring.
+coordinate volume-use/session/storage locking, compare the exact `Use`
+reservation, attachment, disk identity, and verified formatter journal, then
+transfer the lease to the backend. The session record must already say
+`starting` with the same exact generation and backend object as the durable
+`Use`; the backend object must be freshly observed stopped before Tart starts.
+The formatter journal must be verified for the same domain, volume UUID,
+filesystem UUID, size, and raw file device/inode. The host rechecks the private
+derived path and open file before handing both it and the live volume-use lock
+to the backend. Failure releases the file and lock but leaves the durable `Use`
+for exact stopped-state reconciliation.
+
+The present `session.Service.Start` holds its session lock while it waits for
+`Supervisor.StartExact`. A child-side admission that acquires volume-use, then
+session, then storage would deadlock against that parent lock. The handoff must
+be changed before connecting workspace leases:
+
+1. Under volume-use locks (UUID order), then the session lock, then storage,
+   validate the selected attachments and stopped backend. Persist the exact
+   `Use` reservations and session `starting` generation before launching the
+   supervisor. Release storage, session, and volume-use locks before waiting
+   for the child. The durable records, not the interval between lock owners,
+   carry authority across this handoff.
+2. The exact-generation supervisor child reacquires volume-use locks, then
+   session and storage. It reloads both records, checks their exact session
+   UUID/backend object/generation binding and the verified formatter journal,
+   and freshly observes the backend stopped. Any intervening stop, rebind,
+   failed journal, or changed file aborts launch. It releases session and
+   storage locks after validation, retaining volume-use/file leases through
+   backend start and exact process reap.
+3. A concurrent stop first persists stopping intent without waiting for a
+   volume-use lock while holding session/storage. It asks the exact supervisor
+   owner to stop and waits for exact reap, which releases the leases. Only then
+   may use-release acquire volume-use, session, and storage locks in order,
+   freshly observe the exact backend stopped, and clear the matching durable
+   `Use`. A crashed owner leaves `Use` set until that same observation succeeds.
+
+This sequence also requires the session start/stop paths to release their
+session lock before waiting for the supervisor and to recheck the exact durable
+generation after reacquisition. The exact-generation supervisor control must
+serialize duplicate starts and stop requests during the handoff. These session
+lifecycle changes are not implemented by the current workspace foundation.
 The host file descriptor pins identity for admission, but Tart opens the path
 itself; trusted-host code must recheck immediately before launch. A malicious
 same-UID host process racing after the check is outside the guest-root boundary.
