@@ -31,10 +31,20 @@ GOCACHE="$probe_dir/gocache" GOMODCACHE="$probe_dir/modcache" GOTOOLCHAIN=local 
   go build -o "$probe_dir/alpha-probe" "$repo_root/tools/alpha-inspector/guest"
 python3 "$script_dir/pack_initramfs.py" \
   "$probe_dir/casper/initrd" "$probe_dir/alpha-probe" "$probe_dir/inspector-initrd"
-python3 - "$probe_dir/synthetic.raw" "$probe_dir/transaction.txt" <<'PY'
+fixture_kind=zero
+if [[ -n "${BOXWARDEN_ALPHA_EXT4_FIXTURE_SOURCE:-}" || -n "${BOXWARDEN_ALPHA_EXT4_FIXTURE_SHA256:-}" ]]; then
+  if [[ -z "${BOXWARDEN_ALPHA_EXT4_FIXTURE_SOURCE:-}" || -z "${BOXWARDEN_ALPHA_EXT4_FIXTURE_SHA256:-}" ]]; then
+    echo 'both ext4 fixture source and SHA-256 are required' >&2
+    exit 2
+  fi
+  python3 "$script_dir/fixture_contract.py" \
+    "$BOXWARDEN_ALPHA_EXT4_FIXTURE_SOURCE" "$probe_dir/synthetic.raw" \
+    "$BOXWARDEN_ALPHA_EXT4_FIXTURE_SHA256"
+  fixture_kind=ext4
+else
+  python3 - "$probe_dir/synthetic.raw" <<'PY'
 import os
 from pathlib import Path
-import secrets
 import sys
 
 disk = Path(sys.argv[1])
@@ -44,7 +54,13 @@ try:
     os.fsync(fd)
 finally:
     os.close(fd)
-Path(sys.argv[2]).write_text(secrets.token_hex(16) + "\n", encoding="ascii")
+PY
+fi
+python3 - "$probe_dir/transaction.txt" <<'PY'
+from pathlib import Path
+import secrets
+import sys
+Path(sys.argv[1]).write_text(secrets.token_hex(16) + "\n", encoding="ascii")
 PY
 
 swiftc -module-cache-path "$probe_dir/swift-cache" \
@@ -54,19 +70,22 @@ codesign --force --sign - --entitlements "$script_dir/virtualization.entitlement
 codesign --verify --strict "$probe_dir/alpha-inspector"
 
 transaction_hex="$(cat "$probe_dir/transaction.txt")"
-"$probe_dir/alpha-inspector" preflight \
+preflight_command=preflight
+if [[ "$fixture_kind" == ext4 ]]; then preflight_command=preflight-ext4; fi
+"$probe_dir/alpha-inspector" "$preflight_command" \
   "$probe_dir/kernel-image" \
   "$probe_dir/inspector-initrd" \
   "$probe_dir/synthetic.raw" \
   "$transaction_hex" > "$probe_dir/preflight.json"
 
-python3 - "$probe_dir" <<'PY'
+python3 - "$probe_dir" "$fixture_kind" <<'PY'
 import hashlib
 import json
 from pathlib import Path
 import sys
 
 root = Path(sys.argv[1])
+fixture_kind = sys.argv[2]
 preflight = json.loads((root / "preflight.json").read_text(encoding="utf-8"))
 expected = {
     "validated": True,
@@ -98,6 +117,7 @@ manifest = {
     "disk_size": disk.st_size,
     "kernel_source": "casper/vmlinuz",
     "kernel_format": "arm64-linux-image",
+    "fixture_kind": fixture_kind,
     "digests": digests,
     "preflight": preflight,
     "vm_started": False,

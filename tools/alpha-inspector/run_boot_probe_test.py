@@ -4,6 +4,7 @@ import struct
 import unittest
 
 from run_boot_probe import parse_stream, check_kernel_provenance
+from fixture_contract import FIXTURE_UUID, FIXTURE_CONTENT
 
 
 class StreamTests(unittest.TestCase):
@@ -49,6 +50,32 @@ class StreamTests(unittest.TestCase):
             parse_stream(stream, "02" * 16)
         with self.assertRaises(ValueError):
             parse_stream(stream[:-1], transaction.hex())
+
+    def test_ext4_report_is_bound_to_allowlisted_file_and_mount(self):
+        transaction = bytes.fromhex("03" * 16)
+        report = {
+            "disk_prefix_sha256": "a" * 64,
+            "network_interfaces": ["lo"],
+            "read_only": True,
+            "fixture_uuid": FIXTURE_UUID,
+            "fixture_content": FIXTURE_CONTENT.decode(),
+            "mount_options": ["ro", "noload", "nodev", "nosuid", "noexec"],
+        }
+
+        def stream_for(body):
+            def frame(kind, path=b"", chunk=b"", declared=0, digest=bytes(32)):
+                return struct.pack(">BHIQ", kind, len(path), len(chunk), declared) + digest + path + chunk
+            return (b"BWEX\x00\x01" + transaction
+                    + frame(2, b"report.json", declared=len(body))
+                    + frame(3, chunk=body)
+                    + frame(4, digest=hashlib.sha256(body).digest())
+                    + frame(5, declared=len(body)))
+
+        body = json.dumps(report, separators=(",", ":")).encode()
+        self.assertEqual(parse_stream(stream_for(body), transaction.hex(), "ext4", "a" * 64), report)
+        report["fixture_content"] = "changed\n"
+        with self.assertRaises(ValueError):
+            parse_stream(stream_for(json.dumps(report).encode()), transaction.hex(), "ext4", "a" * 64)
 
 
 if __name__ == "__main__":

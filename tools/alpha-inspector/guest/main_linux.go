@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -18,6 +19,9 @@ type bootReport struct {
 	DiskPrefixSHA256  string   `json:"disk_prefix_sha256"`
 	NetworkInterfaces []string `json:"network_interfaces"`
 	ReadOnly          bool     `json:"read_only"`
+	FixtureUUID       string   `json:"fixture_uuid,omitempty"`
+	FixtureContent    string   `json:"fixture_content,omitempty"`
+	MountOptions      []string `json:"mount_options,omitempty"`
 }
 
 func main() {
@@ -56,6 +60,10 @@ func runProof() error {
 	if err != nil {
 		return err
 	}
+	mode, err := parseFixtureMode(string(commandLine))
+	if err != nil {
+		return err
+	}
 	deadline := time.Now().Add(20 * time.Second)
 	for _, name := range []string{"/dev/hvc1", "/dev/vda", "/sys/block/vda/ro"} {
 		for {
@@ -88,6 +96,9 @@ func runProof() error {
 	if closeErr != nil {
 		return closeErr
 	}
+	if mode == "zero" && prefix != [4096]byte{} {
+		return fmt.Errorf("synthetic zero disk changed")
+	}
 	interfaces, err := os.ReadDir("/sys/class/net")
 	if err != nil {
 		return err
@@ -96,11 +107,42 @@ func runProof() error {
 		return fmt.Errorf("unexpected network interface count or name")
 	}
 	prefixDigest := sha256.Sum256(prefix[:])
-	body, err := json.Marshal(bootReport{
+	report := bootReport{
 		DiskPrefixSHA256:  hex.EncodeToString(prefixDigest[:]),
 		NetworkInterfaces: []string{"lo"},
 		ReadOnly:          true,
-	})
+	}
+	if mode == "ext4" {
+		sectors, readErr := os.ReadFile("/sys/block/vda/size")
+		if readErr != nil {
+			return readErr
+		}
+		count, parseErr := strconv.ParseUint(strings.TrimSpace(string(sectors)), 10, 64)
+		if parseErr != nil || count != 64*1024*1024/512 {
+			return fmt.Errorf("synthetic ext4 disk size mismatch")
+		}
+		device, openErr := os.Open("/dev/vda")
+		if openErr != nil {
+			return openErr
+		}
+		var superblock [1024]byte
+		_, readErr = device.ReadAt(superblock[:], 1024)
+		closeErr = device.Close()
+		if readErr != nil || closeErr != nil {
+			return fmt.Errorf("read ext4 superblock: %v, close: %v", readErr, closeErr)
+		}
+		if err := validateExt4FixtureSuperblock(superblock[:]); err != nil {
+			return err
+		}
+		content, err := mountAndReadExt4Fixture()
+		if err != nil {
+			return err
+		}
+		report.FixtureUUID = fixtureUUID
+		report.FixtureContent = string(content)
+		report.MountOptions = []string{"ro", "noload", "nodev", "nosuid", "noexec"}
+	}
+	body, err := json.Marshal(report)
 	if err != nil {
 		return err
 	}
@@ -117,6 +159,32 @@ func runProof() error {
 	}
 	consoleLine("alpha inspector synthetic proof sent")
 	return nil
+}
+
+func mountAndReadExt4Fixture() (content []byte, err error) {
+	const target = "/mnt/alpha-fixture"
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		return nil, err
+	}
+	const flags = syscall.MS_RDONLY | syscall.MS_NODEV | syscall.MS_NOSUID | syscall.MS_NOEXEC
+	if err := syscall.Mount("/dev/vda", target, "ext4", flags, "noload"); err != nil {
+		return nil, fmt.Errorf("mount synthetic ext4 ro,noload: %w", err)
+	}
+	defer func() {
+		if unmountErr := syscall.Unmount(target, 0); unmountErr != nil && err == nil {
+			err = fmt.Errorf("unmount synthetic ext4: %w", unmountErr)
+		}
+	}()
+	var state syscall.Statfs_t
+	if err := syscall.Statfs(target, &state); err != nil {
+		return nil, err
+	}
+	// Linux statfs ST_RDONLY|ST_NOSUID|ST_NODEV|ST_NOEXEC. The noload
+	// guarantee comes from the exact mount data above and the RO block device.
+	if uint64(state.Flags)&0x0f != 0x0f {
+		return nil, fmt.Errorf("synthetic ext4 mount flags are not restrictive")
+	}
+	return readAllowedFixtureFile(target + "/proof.txt")
 }
 
 func consoleLine(message string) {
