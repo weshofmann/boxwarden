@@ -62,7 +62,8 @@ type ManagementRequest struct {
 	Version int    `json:"version"`
 	Kind    string `json:"kind"`
 	Association
-	Zone string `json:"zone,omitempty"`
+	Zone     string   `json:"zone,omitempty"`
+	Packages []string `json:"packages,omitempty"`
 }
 type SerialResult struct {
 	Version         int    `json:"version"`
@@ -119,7 +120,7 @@ func DecodeManagementRequest(reader io.Reader) (ManagementRequest, error) {
 	if err != nil {
 		return ManagementRequest{}, err
 	}
-	fields, err := exactObject(contents, "version", "kind", "domain", "session_id", "backend_kind", "backend_object", "zone")
+	fields, err := exactObject(contents, "version", "kind", "domain", "session_id", "backend_kind", "backend_object", "zone", "packages")
 	if err != nil {
 		return ManagementRequest{}, err
 	}
@@ -129,6 +130,10 @@ func DecodeManagementRequest(reader io.Reader) (ManagementRequest, error) {
 	}
 	if err := value.Validate(); err != nil {
 		return ManagementRequest{}, err
+	}
+	_, hasPackages := fields["packages"]
+	if hasPackages != (value.Kind == "inspect_packages") {
+		return ManagementRequest{}, fmt.Errorf("management request package field is out of kind")
 	}
 	return value, nil
 }
@@ -147,17 +152,39 @@ func (r ManagementRequest) Validate() error {
 	}
 	switch r.Kind {
 	case "probe", "read_zone":
-		if r.Zone != "" {
-			return fmt.Errorf("management request has unexpected zone")
+		if r.Zone != "" || len(r.Packages) != 0 {
+			return fmt.Errorf("management request has unexpected parameters")
 		}
 	case "apply_zone":
-		if !validZone(r.Zone) {
+		if !validZone(r.Zone) || len(r.Packages) != 0 {
 			return fmt.Errorf("invalid time zone")
+		}
+	case "inspect_packages":
+		if r.Zone != "" || len(r.Packages) == 0 || len(r.Packages) > 128 {
+			return fmt.Errorf("invalid package inspection request")
+		}
+		seen := make(map[string]bool, len(r.Packages))
+		for _, pkg := range r.Packages {
+			if !validPackageName(pkg) || seen[pkg] {
+				return fmt.Errorf("invalid or duplicate package inspection name")
+			}
+			seen[pkg] = true
 		}
 	default:
 		return fmt.Errorf("unsupported management request")
 	}
 	return nil
+}
+func validPackageName(value string) bool {
+	if len(value) == 0 || len(value) > 128 || value[0] < 'a' || value[0] > 'z' {
+		return false
+	}
+	for _, c := range value[1:] {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '+' || c == '.' || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 func (a Association) valid() bool {
 	return validToken(a.Domain, 1, 63) && validUUID(a.SessionID) && validToken(a.BackendKind, 1, 63) && validToken(a.BackendObject, 1, 255)

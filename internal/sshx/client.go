@@ -14,7 +14,7 @@ import (
 const (
 	sshPath                    = "/usr/bin/ssh"
 	guestManagementHelper      = "/usr/local/libexec/boxwarden-guest-bootstrap"
-	maxManagementRequestBytes  = 4 << 10
+	maxManagementRequestBytes  = 64 << 10
 	maxManagementResponseBytes = 64 << 10
 	managementWallTimeout      = 30 * time.Second
 )
@@ -40,16 +40,21 @@ type ProbeResult struct {
 }
 type ApplyZoneRequest struct{ Zone string }
 type ReadZoneRequest struct{}
+type PackageVersion struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
 
 // managementRequest is intentionally package-private: callers choose only a concrete typed method.
 type managementRequest struct {
-	Version       int    `json:"version"`
-	Kind          string `json:"kind"`
-	Domain        string `json:"domain"`
-	SessionID     string `json:"session_id"`
-	BackendKind   string `json:"backend_kind"`
-	BackendObject string `json:"backend_object"`
-	Zone          string `json:"zone,omitempty"`
+	Version       int      `json:"version"`
+	Kind          string   `json:"kind"`
+	Domain        string   `json:"domain"`
+	SessionID     string   `json:"session_id"`
+	BackendKind   string   `json:"backend_kind"`
+	BackendObject string   `json:"backend_object"`
+	Zone          string   `json:"zone,omitempty"`
+	Packages      []string `json:"packages,omitempty"`
 }
 
 func (c *Client) Probe(ctx context.Context, connection Connection, _ ProbeRequest) (ProbeResult, error) {
@@ -95,6 +100,85 @@ func (c *Client) ReadZone(ctx context.Context, connection Connection, _ ReadZone
 		return "", fmt.Errorf("received invalid time zone")
 	}
 	return zone, nil
+}
+
+// InspectPackages asks the pinned exact-generation management helper to query
+// only named Debian packages. The result is bounded guest software evidence.
+func (c *Client) InspectPackages(ctx context.Context, connection Connection, names []string) ([]PackageVersion, error) {
+	if len(names) == 0 || len(names) > 128 {
+		return nil, fmt.Errorf("package inspection count is invalid")
+	}
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		if !validPackageName(name) || seen[name] {
+			return nil, fmt.Errorf("invalid or duplicate package inspection name")
+		}
+		seen[name] = true
+	}
+	request := managementRequestFor(connection.Binding, "inspect_packages", "")
+	request.Packages = append([]string(nil), names...)
+	output, err := c.run(ctx, connection, request)
+	if err != nil {
+		return nil, err
+	}
+	fields, err := decodeExactObject(output, "version", "packages")
+	if err != nil {
+		return nil, fmt.Errorf("parse package inspection: %w", err)
+	}
+	var version int
+	var raw []json.RawMessage
+	if err := decodeField(fields, "version", &version); err != nil {
+		return nil, err
+	}
+	if err := decodeField(fields, "packages", &raw); err != nil {
+		return nil, err
+	}
+	if version != 1 || len(raw) != len(names) {
+		return nil, fmt.Errorf("package inspection version or count mismatch")
+	}
+	result := make([]PackageVersion, 0, len(raw))
+	for index, item := range raw {
+		entry, err := decodeExactObject(item, "name", "version")
+		if err != nil {
+			return nil, fmt.Errorf("package inspection entry: %w", err)
+		}
+		var pkg PackageVersion
+		if err := decodeField(entry, "name", &pkg.Name); err != nil {
+			return nil, err
+		}
+		if err := decodeField(entry, "version", &pkg.Version); err != nil {
+			return nil, err
+		}
+		if pkg.Name != names[index] || !validPackageVersion(pkg.Version) {
+			return nil, fmt.Errorf("package inspection does not match exact request")
+		}
+		result = append(result, pkg)
+	}
+	return result, nil
+}
+
+func validPackageName(value string) bool {
+	if len(value) == 0 || len(value) > 128 || value[0] < 'a' || value[0] > 'z' {
+		return false
+	}
+	for _, c := range value[1:] {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '+' || c == '.' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func validPackageVersion(value string) bool {
+	if len(value) == 0 || len(value) > 128 {
+		return false
+	}
+	for _, c := range value {
+		if c < 0x21 || c > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func decodeProbeResult(contents []byte) (ProbeResult, error) {

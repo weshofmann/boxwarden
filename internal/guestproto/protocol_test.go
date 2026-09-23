@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -539,6 +540,67 @@ func TestManagementAppliesAndReadsTypedZoneWithExactProgramBoundary(t *testing.T
 	}
 }
 
+func TestManagementInspectsExactInstalledPackagesWithoutShell(t *testing.T) {
+	b, _ := testBootstrapper(t)
+	if _, err := b.Serial(context.Background(), testRequest()); err != nil {
+		t.Fatal(err)
+	}
+	runner := b.Runner.(*fakeRunner)
+	runner.output = "install ok installed\t1:2.45.3-1ubuntu2\n"
+	result, err := b.Management(context.Background(), ManagementRequest{Version: Version, Kind: "inspect_packages", Association: testRequest().Association, Packages: []string{"git"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(result) != `{"version":1,"packages":[{"name":"git","version":"1:2.45.3-1ubuntu2"}]}` {
+		t.Fatalf("package inspection = %q", result)
+	}
+	if got := runner.calls[len(runner.calls)-1]; !slices.Equal(got, []string{"/usr/bin/dpkg-query", "-W", "-f=${Status}\t${Version}", "--", "git"}) {
+		t.Fatalf("dpkg argv = %#v", got)
+	}
+	for _, output := range []string{"deinstall ok config-files\t1.0\n", "install ok installed\t\n", "install ok installed\t1.0\nextra", "install ok installed\t" + strings.Repeat("a", 129)} {
+		runner.output = output
+		if _, err := b.Management(context.Background(), ManagementRequest{Version: Version, Kind: "inspect_packages", Association: testRequest().Association, Packages: []string{"git"}}); err == nil {
+			t.Fatalf("accepted invalid dpkg result %q", output)
+		}
+	}
+}
+
+func TestManagementRejectsInvalidPackageInspectionRequests(t *testing.T) {
+	base := ManagementRequest{Version: Version, Kind: "inspect_packages", Association: testRequest().Association}
+	for _, packages := range [][]string{nil, {}, {"git", "git"}, {"git;id"}, {""}, {strings.Repeat("a", 129)}} {
+		request := base
+		request.Packages = packages
+		if err := request.Validate(); err == nil {
+			t.Fatalf("accepted packages %#v", packages)
+		}
+	}
+	base.Packages = []string{"git"}
+	base.Zone = "UTC"
+	if err := base.Validate(); err == nil {
+		t.Fatal("accepted zone on package inspection")
+	}
+	base.Kind = "probe"
+	base.Zone = ""
+	if err := base.Validate(); err == nil {
+		t.Fatal("accepted package list on probe")
+	}
+	valid := `{"version":1,"kind":"inspect_packages","domain":"work","session_id":"` + testSession + `","backend_kind":"tart","backend_object":"workstation","packages":["git"]}`
+	decoded, err := DecodeManagementRequest(strings.NewReader(valid))
+	if err != nil || !slices.Equal(decoded.Packages, []string{"git"}) {
+		t.Fatalf("typed package request = %#v, %v", decoded, err)
+	}
+	for _, input := range []string{
+		strings.Replace(valid, `"packages":["git"]`, `"packages":["git"],"packages":["git"]`, 1),
+		strings.Replace(valid, `"packages":["git"]`, `"packages":["git"],"command":"id"`, 1),
+		strings.Replace(valid, `"kind":"inspect_packages"`, `"kind":"probe"`, 1),
+		strings.Replace(strings.Replace(valid, `"kind":"inspect_packages"`, `"kind":"probe"`, 1), `"packages":["git"]`, `"packages":[]`, 1),
+	} {
+		if _, err := DecodeManagementRequest(strings.NewReader(input)); err == nil {
+			t.Fatalf("accepted malformed package request %q", input)
+		}
+	}
+}
+
 // This fails if retry changes a durable trust binding instead of returning the
 // existing exact association, CA fingerprint, and derived principal.
 func TestSerialBootstrapIsIdempotentAndRejectsConflictingBinding(t *testing.T) {
@@ -559,7 +621,7 @@ func TestSerialBootstrapIsIdempotentAndRejectsConflictingBinding(t *testing.T) {
 }
 
 // This fails if management acquires a shell or untyped command surface rather
-// than accepting only the three declared request kinds.
+// than accepting only the declared typed request kinds.
 func TestManagementRejectsRemoteCommandSurface(t *testing.T) {
 	for _, input := range []string{`{"version":1,"kind":"exec","domain":"work","session_id":"123e4567-e89b-42d3-a456-426614174000","backend_kind":"tart","backend_object":"workstation","command":"id"}`, `{"version":1,"kind":"probe","domain":"work","session_id":"123e4567-e89b-42d3-a456-426614174000","backend_kind":"tart","backend_object":"workstation","zone":"UTC"}`} {
 		if _, err := DecodeManagementRequest(strings.NewReader(input)); err == nil {

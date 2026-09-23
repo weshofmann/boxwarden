@@ -188,8 +188,46 @@ func (b *Bootstrapper) Management(ctx context.Context, request ManagementRequest
 			return nil, fmt.Errorf("apply time zone: %w", err)
 		}
 		return []byte(`{"version":1,"ok":true}`), nil
+	case "inspect_packages":
+		return b.inspectPackages(ctx, request.Packages)
 	}
 	return nil, fmt.Errorf("unsupported management request")
+}
+
+type inspectedPackage struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// inspectPackages invokes dpkg with fixed flags and exact validated package
+// argv. The output is diagnostic guest evidence, not host isolation proof.
+func (b *Bootstrapper) inspectPackages(ctx context.Context, names []string) ([]byte, error) {
+	packages := make([]inspectedPackage, 0, len(names))
+	for _, name := range names {
+		output, err := b.Runner.Run(ctx, "/usr/bin/dpkg-query", "-W", "-f=${Status}\t${Version}", "--", name)
+		if err != nil {
+			return nil, fmt.Errorf("package %q query failed: %w", name, err)
+		}
+		line := strings.TrimSuffix(string(output), "\n")
+		status, version, ok := strings.Cut(line, "\t")
+		if !ok || status != "install ok installed" || len(version) == 0 || len(version) > 128 {
+			return nil, fmt.Errorf("package %q is not verifiably installed", name)
+		}
+		for _, c := range version {
+			if c < 0x21 || c > 0x7e {
+				return nil, fmt.Errorf("package %q version is invalid", name)
+			}
+		}
+		packages = append(packages, inspectedPackage{Name: name, Version: version})
+	}
+	response, err := json.Marshal(struct {
+		Version  int                `json:"version"`
+		Packages []inspectedPackage `json:"packages"`
+	}{Version: Version, Packages: packages})
+	if err != nil || len(response) > MaxResponseBytes {
+		return nil, fmt.Errorf("package inspection response exceeds bound")
+	}
+	return response, nil
 }
 func (b *Bootstrapper) path(relative string) (string, error) {
 	if relative == "" || filepath.IsAbs(relative) || filepath.Clean(relative) != relative || strings.HasPrefix(relative, "..") {

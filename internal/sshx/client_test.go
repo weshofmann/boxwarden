@@ -103,6 +103,36 @@ func TestClientOnlyAcceptsTypedBoundedRequests(t *testing.T) {
 	}
 }
 
+func TestClientInspectsOnlyExactRequestedPackages(t *testing.T) {
+	connection := testConnection(t)
+	runner := &fakeRunner{onRun: func(Command) Result {
+		return Result{Stdout: `{"version":1,"packages":[{"name":"git","version":"1:2.45.3-1ubuntu2"}]}`}
+	}}
+	result, err := NewClient(runner).InspectPackages(context.Background(), connection, []string{"git"})
+	if err != nil || len(result) != 1 || result[0].Name != "git" || result[0].Version != "1:2.45.3-1ubuntu2" {
+		t.Fatalf("InspectPackages() = %#v, %v", result, err)
+	}
+	var request managementRequest
+	if err := json.Unmarshal(runner.commands[0].Stdin, &request); err != nil || request.Kind != "inspect_packages" || !sameStrings(request.Packages, []string{"git"}) {
+		t.Fatalf("package request = %#v, %v", request, err)
+	}
+	for _, response := range []string{
+		`{"version":1,"packages":[{"name":"curl","version":"1"}]}`,
+		`{"version":1,"packages":[{"name":"git","version":"1","extra":true}]}`,
+		`{"version":1,"packages":[{"name":"git","version":""}]}`,
+		`{"version":1,"packages":[{"name":"git","version":"1"},{"name":"git","version":"1"}]}`,
+	} {
+		runner.onRun = func(Command) Result { return Result{Stdout: response} }
+		if _, err := NewClient(runner).InspectPackages(context.Background(), connection, []string{"git"}); err == nil {
+			t.Fatalf("accepted mismatched package report %q", response)
+		}
+	}
+	before := len(runner.commands)
+	if _, err := NewClient(runner).InspectPackages(context.Background(), connection, []string{"git;id"}); err == nil || len(runner.commands) != before {
+		t.Fatal("invalid package name reached SSH")
+	}
+}
+
 func testConnection(t *testing.T) Connection {
 	t.Helper()
 	root := privateRoot(t)
@@ -143,7 +173,7 @@ func TestOpenSSHParsesCredentialPathsContainingSpaces(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "Application Support")
 	connection := Connection{
 		Address: "192.0.2.8", Port: 22,
-		Binding: Binding{SessionID: testUUID},
+		Binding:      Binding{SessionID: testUUID},
 		IdentityFile: filepath.Join(root, "client"), CertificateFile: filepath.Join(root, "client-cert.pub"), KnownHostsFile: filepath.Join(root, "known_hosts"),
 	}
 	output, err := exec.Command(sshPath, append([]string{"-G"}, sshArguments(connection)...)...).CombinedOutput()
