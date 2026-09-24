@@ -98,6 +98,7 @@ type Options struct {
 	AlphaExport           AlphaExportFunc
 	AlphaExportResume     AlphaExportResumeFunc
 	AlphaImport           AlphaImportFunc
+	AlphaImportVerify     AlphaImportVerifyFunc
 	Output                io.Writer
 }
 
@@ -139,7 +140,7 @@ func Run(ctx context.Context, args []string, options Options) error {
 	if command.requiresBackend() {
 		if command.kind == commandGoldenRegister {
 			err = backend.ValidateObjectID(command.name)
-		} else if command.kind != commandWorkspaceExport {
+		} else if command.kind != commandWorkspaceExport && command.kind != commandWorkspaceImportVerify {
 			_, err = session.ParseName(command.name)
 		}
 		if err != nil {
@@ -434,6 +435,18 @@ func Run(ctx context.Context, args []string, options Options) error {
 			return fmt.Errorf("import workspace transaction %s: %w", input.TransactionID, err)
 		}
 		return writeAlphaImport(options.Output, selectedDomain, input, journal, receipt)
+	case commandWorkspaceImportVerify:
+		if selectedDomain.ID != "alpha" {
+			return errors.New("v0.2 workspace import verification is limited to the explicit alpha domain")
+		}
+		if options.Observer == nil || options.AlphaImportVerify == nil {
+			return errors.New("workspace import verification requires backend observation and alpha verifier")
+		}
+		journal, err := options.AlphaImportVerify(ctx, selectedDomain, command.alphaImportVerify, options.Observer)
+		if err != nil {
+			return fmt.Errorf("verify stopped workspace import: %w", err)
+		}
+		return writeAlphaImportVerified(options.Output, selectedDomain, command.alphaImportVerify, journal)
 	default:
 		return errors.New("unsupported command")
 	}
@@ -460,6 +473,7 @@ const (
 	commandWorkspaceExport
 	commandWorkspaceExportResume
 	commandWorkspaceImport
+	commandWorkspaceImportVerify
 )
 
 type parsedCommand struct {
@@ -474,6 +488,7 @@ type parsedCommand struct {
 	alphaExport          AlphaExportInput
 	alphaExportResume    AlphaExportResumeInput
 	alphaImport          AlphaImportInput
+	alphaImportVerify    AlphaImportVerifyInput
 	alphaWorkspaceCreate AlphaWorkspaceCreateInput
 	recipeCreate         bool
 	rebuildBase          string
@@ -486,7 +501,7 @@ func (c parsedCommand) requiresDomain() bool {
 }
 
 func (c parsedCommand) requiresBackend() bool {
-	return c.kind == commandGoldenRegister || c.kind == commandSessionCreate || c.kind == commandSessionStatus || c.kind == commandWorkspaceAttach || c.kind == commandWorkspaceDetach || c.kind == commandWorkspaceExport
+	return c.kind == commandGoldenRegister || c.kind == commandSessionCreate || c.kind == commandSessionStatus || c.kind == commandWorkspaceAttach || c.kind == commandWorkspaceDetach || c.kind == commandWorkspaceExport || c.kind == commandWorkspaceImportVerify
 }
 
 func parseCommand(args []string, options Options) (parsedCommand, error) {
@@ -688,6 +703,23 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.kind, base.volumeID, base.name = commandWorkspaceDetach, remaining[2], remaining[3]
 		return base, nil
 	}
+	if len(remaining) >= 4 && remaining[0] == "workspace" && remaining[1] == "import" && remaining[2] == "verify" {
+		verifySet := flag.NewFlagSet("workspace import verify", flag.ContinueOnError)
+		verifySet.SetOutput(io.Discard)
+		exportID := verifySet.String("export", "", "exact published stopped-volume export UUID")
+		if err := verifySet.Parse(remaining[3:]); err != nil {
+			return parsedCommand{}, fmt.Errorf("parse workspace import verify: %w", err)
+		}
+		if len(verifySet.Args()) != 1 {
+			return parsedCommand{}, errors.New("workspace import verify requires --export UUID <transaction-uuid>")
+		}
+		input := AlphaImportVerifyInput{TransactionID: verifySet.Args()[0], ExportID: *exportID}
+		if err := validAlphaImportVerifyInput(input); err != nil {
+			return parsedCommand{}, err
+		}
+		base.kind, base.alphaImportVerify = commandWorkspaceImportVerify, input
+		return base, nil
+	}
 	if len(remaining) >= 4 && remaining[0] == "workspace" && remaining[1] == "import" && remaining[2] == "resume" {
 		resumeSet := flag.NewFlagSet("workspace import resume", flag.ContinueOnError)
 		resumeSet.SetOutput(io.Discard)
@@ -766,7 +798,7 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.kind, base.alphaExport = commandWorkspaceExport, input
 		return base, nil
 	}
-	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] [--recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256] <session>, session start <session>, session stop <session>, session delete <stopped-session>, session rebuild [--base REVISION | recipe inputs] <session>, session status <session>, workspace create --bundle PATH --source-root PATH --filesystem-uuid UUID --size-mib N <new-volume-uuid>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, workspace import --source PATH <volume-uuid> <running-session>, workspace import resume --volume UUID --session NAME <transaction-uuid>, workspace export --destination PATH --select RELATIVE [--select RELATIVE...] --source-root PATH --iso PATH --go PATH <volume-uuid>, workspace export resume --source-root PATH --iso PATH --go PATH <transaction-uuid>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
+	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] [--recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256] <session>, session start <session>, session stop <session>, session delete <stopped-session>, session rebuild [--base REVISION | recipe inputs] <session>, session status <session>, workspace create --bundle PATH --source-root PATH --filesystem-uuid UUID --size-mib N <new-volume-uuid>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, workspace import --source PATH <volume-uuid> <running-session>, workspace import resume --volume UUID --session NAME <transaction-uuid>, workspace import verify --export UUID <transaction-uuid>, workspace export --destination PATH --select RELATIVE [--select RELATIVE...] --source-root PATH --iso PATH --go PATH <volume-uuid>, workspace export resume --source-root PATH --iso PATH --go PATH <transaction-uuid>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
 }
 
 func writeWorkspaceAttachment(output io.Writer, record workspacex.Record, state string) error {

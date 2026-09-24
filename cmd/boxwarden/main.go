@@ -153,6 +153,9 @@ func publicOptions(output io.Writer) app.Options {
 			journal, err = workspacex.LoadImportJournal(selected.StateRoot, selected.ID, input.TransactionID)
 			return journal, receipt, err
 		},
+		AlphaImportVerify: func(ctx context.Context, selected config.Domain, input app.AlphaImportVerifyInput, observer backend.Observer) (workspacex.ImportJournal, error) {
+			return workspacex.VerifyStoppedImport(ctx, selected.StateRoot, selected.ID, input.TransactionID, input.ExportID, observer)
+		},
 		Output: output,
 	}
 }

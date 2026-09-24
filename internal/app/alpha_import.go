@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
@@ -20,6 +21,17 @@ type AlphaImportInput struct {
 }
 
 type AlphaImportFunc func(context.Context, config.Domain, AlphaImportInput) (workspacex.ImportJournal, supervisor.ImportResult, error)
+
+type AlphaImportVerifyInput struct{ TransactionID, ExportID string }
+
+type AlphaImportVerifyFunc func(context.Context, config.Domain, AlphaImportVerifyInput, backend.Observer) (workspacex.ImportJournal, error)
+
+func validAlphaImportVerifyInput(input AlphaImportVerifyInput) error {
+	if !alphaCreateUUID(input.TransactionID) || !alphaCreateUUID(input.ExportID) || input.TransactionID == input.ExportID {
+		return errors.New("workspace import verify requires distinct canonical import and export UUIDs")
+	}
+	return nil
+}
 
 func validAlphaImportInput(input AlphaImportInput) error {
 	if !alphaCreateUUID(input.VolumeID) || input.SessionName == "" {
@@ -45,5 +57,14 @@ func writeAlphaImport(output io.Writer, selected config.Domain, input AlphaImpor
 		return errors.New("workspace import returned an invalid transfer receipt")
 	}
 	_, err := fmt.Fprintf(output, "domain: %s\nvolume: %s\nimport: readback-matched\njournal: transferring\nremote: %s\n", selected.ID, input.VolumeID, receipt.RemotePath)
+	return err
+}
+
+func writeAlphaImportVerified(output io.Writer, selected config.Domain, input AlphaImportVerifyInput, journal workspacex.ImportJournal) error {
+	if journal.ID != input.TransactionID || journal.Domain != selected.ID || journal.Phase != workspacex.ImportVerified ||
+		journal.ExportID != input.ExportID || !alphaCreateUUID(journal.VolumeID) {
+		return errors.New("workspace import returned invalid stopped-volume verification")
+	}
+	_, err := fmt.Fprintf(output, "domain: %s\ntransaction: %s\nvolume: %s\nimport: verified\nexport-transaction: %s\n", selected.ID, journal.ID, journal.VolumeID, journal.ExportID)
 	return err
 }

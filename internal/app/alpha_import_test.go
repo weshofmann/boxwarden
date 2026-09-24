@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/weshofmann/boxwarden/internal/backend"
+	"github.com/weshofmann/boxwarden/internal/backend/fake"
 	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
 	"github.com/weshofmann/boxwarden/internal/workspacex"
@@ -79,5 +81,50 @@ func TestWorkspaceImportResumeKeepsTransactionAndRejectsFalseReceipt(t *testing.
 		if err := Run(t.Context(), append([]string{"--config", configPath, "--domain", "alpha", "workspace", "import", "resume"}, suffix...), options); err == nil || called != 1 {
 			t.Fatalf("invalid resume reached callback: %v; calls=%d", suffix, called)
 		}
+	}
+}
+
+func TestWorkspaceImportVerifyRoutesExactPublishedExportAndRejectsFalseResult(t *testing.T) {
+	configPath, selected := writeV2DomainFixture(t, "alpha")
+	const transaction = "10213243-5465-4768-899a-bbccddeeff00"
+	const exportID = "21213243-5465-4768-899a-bbccddeeff00"
+	const volume = "00112233-4455-4677-8899-aabbccddeeff"
+	observer := fake.New(backend.Observation{ObjectID: "owned", Exists: true, State: backend.ObjectStopped})
+	called := 0
+	var output bytes.Buffer
+	options := Options{Output: &output, Observer: observer,
+		AlphaImportVerify: func(_ context.Context, actual config.Domain, input AlphaImportVerifyInput, actualObserver backend.Observer) (workspacex.ImportJournal, error) {
+			called++
+			if actual != selected || input.TransactionID != transaction || input.ExportID != exportID || actualObserver != observer {
+				t.Fatalf("verify lost exact domain, export, or backend observation: %+v %+v", actual, input)
+			}
+			return workspacex.ImportJournal{ID: transaction, Domain: selected.ID, VolumeID: volume,
+				Phase: workspacex.ImportVerified, ExportID: exportID}, nil
+		}}
+	args := []string{"--config", configPath, "--domain", "alpha", "workspace", "import", "verify", "--export", exportID, transaction}
+	if err := Run(t.Context(), args, options); err != nil || called != 1 ||
+		!strings.Contains(output.String(), "import: verified\nexport-transaction: "+exportID+"\n") {
+		t.Fatalf("public import verify = calls %d, output %q, error %v", called, output.String(), err)
+	}
+	for _, suffix := range [][]string{
+		{"--export", exportID, "invalid"},
+		{"--export", "invalid", transaction},
+		{"--export", transaction, transaction},
+	} {
+		if err := Run(t.Context(), append([]string{"--config", configPath, "--domain", "alpha", "workspace", "import", "verify"}, suffix...), options); err == nil || called != 1 {
+			t.Fatalf("invalid verification reached callback: %v; calls=%d", suffix, called)
+		}
+	}
+	workConfig, _ := writeV2DomainFixture(t, "work")
+	if err := Run(t.Context(), []string{"--config", workConfig, "--domain", "work", "workspace", "import", "verify", "--export", exportID, transaction}, options); err == nil || called != 1 {
+		t.Fatalf("foreign domain reached alpha verifier: %v; calls=%d", err, called)
+	}
+	options.AlphaImportVerify = func(context.Context, config.Domain, AlphaImportVerifyInput, backend.Observer) (workspacex.ImportJournal, error) {
+		return workspacex.ImportJournal{ID: transaction, Domain: selected.ID, VolumeID: volume,
+			Phase: workspacex.ImportTransferring}, nil
+	}
+	output.Reset()
+	if err := Run(t.Context(), args, options); err == nil || strings.Contains(output.String(), "import: verified") {
+		t.Fatalf("false verified result accepted: output %q error %v", output.String(), err)
 	}
 }

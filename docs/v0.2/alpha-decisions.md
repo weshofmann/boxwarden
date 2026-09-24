@@ -291,3 +291,7 @@ the distinct export UUID. A `verified` journal records persistence at that
 stop/export point; later guest writes can still change the workspace.
 The architecture guard adds only this gate's direct qualified-disk admission
 call to its existing per-file allowlist; the trust seam remains narrow.
+The public alpha-only verify command requires the exact import and published
+export UUIDs. It obtains the qualified backend observer from the selected
+domain and prints `verified` only after the stopped-volume gate returns a
+matching durable journal. A private readback receipt alone cannot drive it.

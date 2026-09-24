@@ -98,14 +98,16 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   the re-admitted export snapshot, and matching captured bytes before advancing
   the import journal to `verified` with the export transaction ID. Focused
   tests cover success, exact retry, changed bytes, wrong selection, running
-  backend, changed disk identity, and invalid phase skips. The public verify
-  command and real stopped-volume qualification remain pending. Focused gate
+  backend, changed disk identity, and invalid phase skips. The public alpha-only
+  `workspace import verify --export UUID <transaction>` command now routes the
+  exact selected domain and backend observer to this gate and rejects false
+  verified output. Real stopped-volume qualification remains pending. Focused gate
   and comparator tests, the architecture guard, targeted vet, formatting, and
   diff checks pass; the full local suite was not rerun at this checkpoint
   because the host is now below the production disk reserve used by unrelated
   capture fixtures.
-- Next: expose the exact stopped-volume verify command; obtain safe host
-  headroom for the independent readback, then run fresh source-tracked
+- Next: obtain safe host headroom for an independent whole-directory export,
+  run the public verify command on that result, then run fresh source-tracked
   acceptance.
 - Limits: retained import persistence, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh
