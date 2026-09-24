@@ -82,7 +82,9 @@ func (l Launcher) Start(ctx context.Context, request backend.StartRequest) (back
 	}
 	args := []string{"run", "--net-softnet", "--no-audio", "--no-clipboard", "--serial-path", request.SerialDevice}
 	for _, disk := range disks {
-		args = append(args, "--disk", disk.Operand())
+		// Tart defaults extra file disks to automatic caching, unlike its
+		// cached Linux root disk. Keep managed ext4 on the same cache mode.
+		args = append(args, "--disk", disk.Operand()+":caching=cached")
 	}
 	args = append(args, request.ObjectID)
 	spec := processSpec{

@@ -67,7 +67,7 @@ func TestLauncherPassesExactManagedRawPathAndRetainsLeaseUntilReap(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"run", "--net-softnet", "--no-audio", "--no-clipboard", "--serial-path", "/dev/ttys004", "--disk", path, "boxwarden-work-dev"}
+	want := []string{"run", "--net-softnet", "--no-audio", "--no-clipboard", "--serial-path", "/dev/ttys004", "--disk", path + ":caching=cached", "boxwarden-work-dev"}
 	if !sameLifecycleStrings(process.spec.args, want) {
 		t.Fatalf("child argv = %#v, want %#v", process.spec.args, want)
 	}
