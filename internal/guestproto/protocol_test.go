@@ -684,6 +684,66 @@ func TestManagementDecodesMinimalProbeWithoutOptionalFields(t *testing.T) {
 	}
 }
 
+func TestManagementWorkspaceRequestRequiresExactBoundedMounts(t *testing.T) {
+	first := WorkspaceMount{VolumeID: "00112233-4455-4677-8899-aabbccddeeff", FilesystemUUID: "10213243-5465-4768-899a-bbccddeeff00", MountPath: "/home/boxwarden/workspaces/project"}
+	base := ManagementRequest{Version: Version, Kind: "ensure_workspaces", Association: testRequest().Association, Workspaces: []WorkspaceMount{first}}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("exact workspace request rejected: %v", err)
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(*ManagementRequest)
+	}{
+		{"missing", func(r *ManagementRequest) { r.Workspaces = nil }},
+		{"duplicate-volume", func(r *ManagementRequest) { r.Workspaces = append(r.Workspaces, first) }},
+		{"too-many", func(r *ManagementRequest) { r.Workspaces = []WorkspaceMount{first, first, first, first, first} }},
+		{"duplicate-uuid", func(r *ManagementRequest) {
+			next := first
+			next.VolumeID = "20112233-4455-4677-8899-aabbccddeeff"
+			next.MountPath += "2"
+			r.Workspaces = append(r.Workspaces, next)
+		}},
+		{"duplicate-path", func(r *ManagementRequest) {
+			next := first
+			next.VolumeID = "20112233-4455-4677-8899-aabbccddeeff"
+			next.FilesystemUUID = "20213243-5465-4768-899a-bbccddeeff00"
+			r.Workspaces = append(r.Workspaces, next)
+		}},
+		{"wrong-path", func(r *ManagementRequest) { r.Workspaces[0].MountPath = "/tmp/project" }},
+		{"wrong-uuid", func(r *ManagementRequest) { r.Workspaces[0].FilesystemUUID = "bad" }},
+		{"with-zone", func(r *ManagementRequest) { r.Zone = "UTC" }},
+		{"with-packages", func(r *ManagementRequest) { r.Packages = []string{"git"} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := base
+			request.Workspaces = append([]WorkspaceMount(nil), base.Workspaces...)
+			tc.edit(&request)
+			if err := request.Validate(); err == nil {
+				t.Fatalf("invalid workspace request accepted: %+v", request)
+			}
+		})
+	}
+	base.Kind = "probe"
+	if err := base.Validate(); err != nil {
+		t.Fatalf("mount-bound probe rejected: %v", err)
+	}
+	valid := `{"version":1,"kind":"ensure_workspaces","domain":"work","session_id":"` + testSession + `","backend_kind":"tart","backend_object":"workstation","workspaces":[{"volume_id":"00112233-4455-4677-8899-aabbccddeeff","filesystem_uuid":"10213243-5465-4768-899a-bbccddeeff00","mount_path":"/home/boxwarden/workspaces/project"}]}`
+	decoded, err := DecodeManagementRequest(strings.NewReader(valid))
+	if err != nil || decoded.Kind != "ensure_workspaces" || !slices.Equal(decoded.Workspaces, []WorkspaceMount{first}) {
+		t.Fatalf("typed workspace request = %+v, %v", decoded, err)
+	}
+	for _, bad := range []string{
+		strings.Replace(valid, `"mount_path":"/home/boxwarden/workspaces/project"`, `"mount_path":"/home/boxwarden/workspaces/project","mount_path":"/home/boxwarden/workspaces/project"`, 1),
+		strings.Replace(valid, `"mount_path":"/home/boxwarden/workspaces/project"`, `"mount_path":"/tmp/project"`, 1),
+		strings.Replace(valid, `"workspaces":[`, `"workspaces":[],"workspaces":[`, 1),
+		strings.Replace(valid, `"mount_path":"/home/boxwarden/workspaces/project"`, `"mount_path":"/home/boxwarden/workspaces/project","extra":true`, 1),
+	} {
+		if _, err := DecodeManagementRequest(strings.NewReader(bad)); err == nil {
+			t.Fatalf("malformed workspace request accepted: %s", bad)
+		}
+	}
+}
+
 // This fails if retry changes a durable trust binding instead of returning the
 // existing exact association, CA fingerprint, and derived principal.
 func TestSerialBootstrapIsIdempotentAndRejectsConflictingBinding(t *testing.T) {

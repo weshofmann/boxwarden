@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-24 01:27 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-24 01:32 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -123,6 +123,13 @@ accepts a plain probe. The tracked static ARM64 guest helper, artifact lock,
 and installer digest pin were rebuilt coherently. Targeted guest-protocol and
 artifact tests plus vet passed. The older r2 engineering candidate predates
 this helper update; no new golden has been qualified from these bytes.
+The next source-only protocol checkpoint adds typed `ensure_workspaces` and
+mount-bound `probe` requests with at most four exact volume-ID, ext4 UUID, and
+guest-path bindings. The decoder rejects duplicate or unknown nested fields,
+malformed paths and UUIDs, and duplicate bindings. Guest mounting, host request
+wiring, and mount-backed READY are still in progress. The full guest-protocol
+package tests, focused vet, and diff checks passed; no real VM used this new
+request yet.
 
 Publish each meaningful verified implementation increment on the authorized
 alpha branch promptly, targeting a GitHub checkpoint every 30–60 minutes of
@@ -163,7 +170,7 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 
 ## Next executable action
 
-Implement exact UUID/path guest mounting through the pinned typed management
+Implement the typed guest mount operation through the pinned management
 channel, include fresh mount evidence in READY, and qualify it from an updated
 generic base without manual guest actions. Then test system rebuild and
 reattachment to another disposable sandbox with the same volume. The current
