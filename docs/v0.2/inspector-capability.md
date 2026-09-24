@@ -196,6 +196,18 @@ checks and is forbidden. The journal advances through inspection and
 publication, remains durable through cleanup, and never treats a staged
 receiver directory as a completed export.
 
+The host capture gate is implemented independently of the production helper.
+It runs an already-admitted executable with exact argv and a closed environment,
+spools at most 320 MiB of stdout into a private one-link file, bounds stderr
+at 16 KiB, and retains an 80-second process deadline. It samples the host disk
+reserve during capture and exposes the spool only after the helper has exited
+and been reaped, its host evidence strictly reports stopped VM, zero runtime
+NICs, and the exact captured byte count, and the spool and parent pass owner,
+mode, identity, and ACL checks. An inode-bound cleanup method removes the
+spool after receiver disposition. Focused tests use subprocess fixtures; this
+gate does not yet admit production helper artifacts or recheck the snapshot
+after VM stop, so it cannot currently authorize publication.
+
 Inside the isolated Linux guest, validate the expected whole-device ext4 UUID
 and mount with `ro,noload,nodev,nosuid,noexec`. Linux documents that plain
 `ro` can replay ext4's journal and write to the disk; `noload` prevents that

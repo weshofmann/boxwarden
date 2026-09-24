@@ -14,7 +14,7 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
 | Reusable preparation | Strict versioned recipe and ISO checks, candidate build, guest preparation, fresh-clone qualifier, private evidence, and cache admission are implemented. A fresh real build using the corrected finalizer completed installation, guest preparation, clone-ready shutdown, and qualification. Its fresh clone reached READY, passed package-inventory and identity checks, and stopped; the versioned prepared record was admitted. This is base qualification, not the full workspace/export acceptance path. |
 | Workspace volume | One alpha-owned 64 MiB ext4 volume was formatted in a zero-NIC VM and independently inspected. Its synthetic file retained its digest across an earlier stop/restart after manual remount. Public detach and attach moved this exact volume from a stopped original system clone to a separate replacement system clone without copying the disk. The replacement guest file manager opened the mounted 57-byte synthetic file and displayed its expected content; the known bytes match the previously recorded SHA-256. Public stops cleared exact generation Use while preserving the volume identity. Offline export qualification remains pending. |
 | Automatic mount and READY | The static generic guest helper resolves an exact FS UUID, mounts ext4 at a validated path, checks existing mounts and read-write state, and probes exact bindings. The host owner derives those bindings from admitted session/Use records, ensures them before READY, and repeats the bound probe for status. Full local Go tests, focused race tests, vet, and artifact checks passed at `5c84520`. The fresh original clone reached mount-bound READY in two generations; the separate replacement clone also reached mount-bound READY with the same reattached volume and later exposed the expected file in its GUI. Both are stopped now. |
-| Controlled export | Bounded host stream receiver and zero-NIC synthetic inspector boot/transport have tests. The inspector mounted a private 64 MiB ext4 copy read-only with journal replay disabled and reported the exact digest and size of one fixed file. After a rejected first run exposed TTY CRLF corruption, a fresh run passed strict 573-byte stream parsing, zero-NIC/stopped/helper checks, and unchanged disk identity and SHA-256. The standalone hardlink gate rejects a linked disk and admits a valid one-link control. A source-level stopped-volume snapshot transaction copies qualified bytes under locks and journals exact identity before clearing Pending. Targeted tests cover success, running-backend rejection, changed source, partial-copy cancellation, and exact crash recovery across cleanup and journal/marker transitions. Real managed-volume and public export remain pending. |
+| Controlled export | Bounded host stream receiver and zero-NIC synthetic inspector boot/transport have tests. The inspector mounted a private 64 MiB ext4 copy read-only with journal replay disabled and reported the exact digest and size of one fixed file. After a rejected first run exposed TTY CRLF corruption, a fresh run passed strict 573-byte stream parsing, zero-NIC/stopped/helper checks, and unchanged disk identity and SHA-256. The standalone hardlink gate rejects a linked disk and admits a valid one-link control. A source-level stopped-volume snapshot transaction copies qualified bytes under locks and journals exact identity before clearing Pending. Targeted tests cover copy failure and exact crash recovery. A separate host capture gate now spools bounded helper output privately and requires reaped, stopped, zero-NIC evidence before exposing the closed stream. Its focused tests use a subprocess fixture; real managed-volume and public export remain pending. |
 | Example | `examples/v0.2-alpha-base.json` passed public recipe/ISO validation. It requests the Desktop source, a small package set, and one named workspace intent. |
 | Recipe-bound create | `session create` accepts exact recipe/ISO/guest definition/tool inputs, prepares or reuses a qualified base, and calls `CreateFromRevision`. A focused fixture and the real public command both selected the newly prepared revision without changing the domain current golden. A later public `alpha prepare` reused the admitted cache after verified redundant installer staging was retired, without creating an attempt journal or new Tart object. |
 
@@ -50,15 +50,21 @@ backend and exact binding, removes only recognized partial state, and records
 an aborted phase before clearing Pending. A ready-journal retry rechecks the
 snapshot bytes before clearing Pending. Targeted source tests include the
 crash windows between cleanup, journal advancement, and marker clearance.
-Closed-stream inspection, public export, and real managed-volume qualification
-remain open. The earlier failed base attempt was corrected and a fresh base
-built and qualified; failed attempts remain outside the prepared cache.
+The host capture gate enforces an 80-second helper deadline, a 320 MiB stream
+cap, a 16 KiB diagnostic cap, disk-reserve sampling, private ACL admission,
+and exact stopped/zero-NIC/byte-count evidence before exposing a closed spool.
+Its tests use a synthetic subprocess. It is not yet connected to an admitted
+production inspector or the receiver, and no exported tree has been published.
+Real managed-volume qualification remains open. The earlier failed base
+attempt was corrected and a fresh base built and qualified; failed attempts
+remain outside the prepared cache.
 
 ## Next actions
 
-1. Connect the journaled snapshot to bounded closed-stream inspector capture
-   and host checks before receiver publication; then qualify the complete
-   path with the managed synthetic volume and hostile exits.
+1. Admit a production inspector helper, kernel, and initramfs; connect the
+   journaled snapshot to the capture gate, recheck its bytes after helper
+   reap, then invoke the receiver. Qualify the path with the managed synthetic
+   volume and hostile exits.
 2. Attach the retained volume to a second fresh sandbox after export, then
    verify its mount and content.
 3. Run the full integration checks and real acceptance matrix, and publish the
