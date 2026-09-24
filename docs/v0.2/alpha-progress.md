@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-24 01:01 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-24 01:06 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -97,6 +97,13 @@ raw identity and size, ext4 magic/UUID, verified journal, and Available record.
 All Tart objects remained stopped and disk reserve remained above its floor.
 Exact paths, IDs, and digests remain in the private ownership manifest. This
 does not yet prove Tart attachment, session restart, or rebuild durability.
+The public `workspace attach --mount PATH <volume> <session>` and
+`workspace detach <volume> <session>` commands now call the existing
+domain-scoped, stop-only transitions with the qualified backend observer.
+An integration fixture attaches and detaches a promoted synthetic volume while
+preserving disk identity. The full local Go suite, focused app/workspacex race
+tests, focused vet, and diff checks passed. Independent review found no
+actionable CLI finding. The real qualified volume has not yet been attached.
 
 Publish each meaningful verified implementation increment on the authorized
 alpha branch promptly, targeting a GitHub checkpoint every 30–60 minutes of

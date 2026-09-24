@@ -22,6 +22,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/sshx"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
+	"github.com/weshofmann/boxwarden/internal/workspacex"
 )
 
 type HostInitializer interface {
@@ -281,6 +282,24 @@ func Run(ctx context.Context, args []string, options Options) error {
 			return fmt.Errorf("stop session: %w", err)
 		}
 		return writeStoppedSession(options.Output, record)
+	case commandWorkspaceAttach:
+		if options.Observer == nil {
+			return errors.New("backend observer is required")
+		}
+		record, err := workspacex.Attach(ctx, selectedDomain.StateRoot, selectedDomain.ID, command.volumeID, command.name, command.mountPath, options.Observer)
+		if err != nil {
+			return fmt.Errorf("attach workspace: %w", err)
+		}
+		return writeWorkspaceAttachment(options.Output, record, "attached")
+	case commandWorkspaceDetach:
+		if options.Observer == nil {
+			return errors.New("backend observer is required")
+		}
+		record, err := workspacex.Detach(ctx, selectedDomain.StateRoot, selectedDomain.ID, command.volumeID, command.name, options.Observer)
+		if err != nil {
+			return fmt.Errorf("detach workspace: %w", err)
+		}
+		return writeWorkspaceAttachment(options.Output, record, "detached")
 	default:
 		return errors.New("unsupported command")
 	}
@@ -299,6 +318,8 @@ const (
 	commandDomainInit
 	commandAlphaRecipeCheck
 	commandAlphaPrepare
+	commandWorkspaceAttach
+	commandWorkspaceDetach
 )
 
 type parsedCommand struct {
@@ -310,6 +331,8 @@ type parsedCommand struct {
 	recipePath   string
 	isoPath      string
 	alphaPrepare AlphaPrepareInput
+	volumeID     string
+	mountPath    string
 }
 
 func (c parsedCommand) requiresDomain() bool {
@@ -317,7 +340,7 @@ func (c parsedCommand) requiresDomain() bool {
 }
 
 func (c parsedCommand) requiresBackend() bool {
-	return c.kind == commandGoldenRegister || c.kind == commandSessionCreate || c.kind == commandSessionStatus
+	return c.kind == commandGoldenRegister || c.kind == commandSessionCreate || c.kind == commandSessionStatus || c.kind == commandWorkspaceAttach || c.kind == commandWorkspaceDetach
 }
 
 func parseCommand(args []string, options Options) (parsedCommand, error) {
@@ -444,7 +467,31 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.name = remaining[2]
 		return base, nil
 	}
-	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] <session>, session start <session>, session stop <session>, session status <session>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
+	if len(remaining) >= 3 && remaining[0] == "workspace" && remaining[1] == "attach" {
+		attachSet := flag.NewFlagSet("workspace attach", flag.ContinueOnError)
+		attachSet.SetOutput(io.Discard)
+		mount := attachSet.String("mount", "", "fixed guest workspace mount path")
+		if err := attachSet.Parse(remaining[2:]); err != nil {
+			return parsedCommand{}, fmt.Errorf("parse workspace attach: %w", err)
+		}
+		if len(attachSet.Args()) != 2 || *mount == "" {
+			return parsedCommand{}, errors.New("workspace attach requires --mount PATH <volume-uuid> <stopped-session>")
+		}
+		base.kind, base.volumeID, base.name, base.mountPath = commandWorkspaceAttach, attachSet.Args()[0], attachSet.Args()[1], *mount
+		return base, nil
+	}
+	if len(remaining) == 4 && remaining[0] == "workspace" && remaining[1] == "detach" {
+		base.kind, base.volumeID, base.name = commandWorkspaceDetach, remaining[2], remaining[3]
+		return base, nil
+	}
+	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] <session>, session start <session>, session stop <session>, session status <session>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
+}
+
+func writeWorkspaceAttachment(output io.Writer, record workspacex.Record, state string) error {
+	if _, err := fmt.Fprintf(output, "domain: %s\nvolume: %s\nworkspace: %s\n", record.Domain, record.VolumeID, state); err != nil {
+		return fmt.Errorf("write workspace attachment result: %w", err)
+	}
+	return nil
 }
 
 func writeInit(output io.Writer, result hostx.InitResult) error {

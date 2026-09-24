@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -16,12 +17,95 @@ import (
 	"github.com/weshofmann/boxwarden/internal/backend/fake"
 	"github.com/weshofmann/boxwarden/internal/basebuild"
 	"github.com/weshofmann/boxwarden/internal/config"
+	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/golden"
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/sshx"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
+	"github.com/weshofmann/boxwarden/internal/workspaceformat"
+	"github.com/weshofmann/boxwarden/internal/workspacex"
 )
+
+type appFormatFunc func(context.Context, workspaceformat.FormatRequest) (workspaceformat.FormatEvidence, error)
+
+func (f appFormatFunc) FormatAndVerify(ctx context.Context, request workspaceformat.FormatRequest) (workspaceformat.FormatEvidence, error) {
+	return f(ctx, request)
+}
+
+func TestWorkspaceAttachAndDetachUseExactStoppedSessionAndQualifiedVolume(t *testing.T) {
+	configPath, selected := writeDomainFixture(t, "work")
+	observer := fake.New(backend.Observation{ObjectID: "golden-work-r1", Exists: true, State: backend.ObjectStopped})
+	options := Options{Observer: observer, Creator: observer, Output: &bytes.Buffer{}}
+	for _, suffix := range [][]string{{"golden", "register", "golden-work-r1"}, {"session", "create", "dev"}} {
+		if err := Run(t.Context(), append([]string{"--config", configPath, "--domain", "work"}, suffix...), options); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const volumeID = "00112233-4455-4677-8899-aabbccddeeff"
+	const fsUUID = "10213243-5465-4768-899a-bbccddeeff00"
+	held, err := workspacex.AcquireStorageOperation(t.Context(), selected.StateRoot, domain.ID("work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = workspacex.SaveRecord(selected.StateRoot, domain.ID("work"), workspacex.Record{Version: 1, Domain: "work", VolumeID: volumeID,
+		SizeBytes: 64 << 20, Format: workspacex.FormatRawExt4, FilesystemUUID: fsUUID, State: workspacex.StateCreating})
+	if releaseErr := held.Release(); err != nil || releaseErr != nil {
+		t.Fatalf("save creating record: %v; release: %v", err, releaseErr)
+	}
+	_, err = workspaceformat.Create(t.Context(), selected.StateRoot, workspaceformat.Request{Domain: "work", VolumeID: volumeID, FilesystemUUID: fsUUID, SizeBytes: 64 << 20},
+		appFormatFunc(func(_ context.Context, request workspaceformat.FormatRequest) (workspaceformat.FormatEvidence, error) {
+			raw, err := os.OpenFile(request.DiskPath, os.O_WRONLY, 0)
+			if err != nil {
+				return workspaceformat.FormatEvidence{}, err
+			}
+			defer raw.Close()
+			superblock := make([]byte, 1024)
+			superblock[0x38], superblock[0x39] = 0x53, 0xef
+			decoded, err := hex.DecodeString(strings.ReplaceAll(fsUUID, "-", ""))
+			if err != nil {
+				return workspaceformat.FormatEvidence{}, err
+			}
+			copy(superblock[0x68:], decoded)
+			if _, err := raw.WriteAt(superblock, 1024); err != nil {
+				return workspaceformat.FormatEvidence{}, err
+			}
+			return workspaceformat.FormatEvidence{ObservedUUID: fsUUID, WholeDevice: true, FilesystemClean: true}, nil
+		}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workspacex.PromoteVerified(t.Context(), selected.StateRoot, domain.ID("work"), volumeID); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	options.Output = &output
+	args := []string{"--config", configPath, "--domain", "work", "workspace", "attach", "--mount", "/home/boxwarden/workspaces/project", volumeID, "dev"}
+	if err := Run(t.Context(), args, options); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "workspace: attached") {
+		t.Fatalf("attach output: %q", output.String())
+	}
+	attached, err := workspacex.LoadRecord(selected.StateRoot, domain.ID("work"), volumeID)
+	if err != nil || attached.Attachment == nil || attached.Attachment.SessionName != "dev" {
+		t.Fatalf("attachment: %+v, %v", attached, err)
+	}
+	if err := Run(t.Context(), args, options); err == nil {
+		t.Fatal("already attached workspace accepted twice")
+	}
+	output.Reset()
+	if err := Run(t.Context(), []string{"--config", configPath, "--domain", "work", "workspace", "detach", volumeID, "dev"}, options); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "workspace: detached") {
+		t.Fatalf("detach output: %q", output.String())
+	}
+	detached, err := workspacex.LoadRecord(selected.StateRoot, domain.ID("work"), volumeID)
+	if err != nil || detached.Attachment != nil || detached.Disk == nil || *detached.Disk != *attached.Disk {
+		t.Fatalf("detached volume lost disk identity: %+v, %v", detached, err)
+	}
+}
 
 func TestBackendFactoryBindsRegisterCreateAndStatusToAdmittedConfigAndDomain(t *testing.T) {
 	path := writeV2DomainSetFixture(t)
