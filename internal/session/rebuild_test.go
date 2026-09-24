@@ -109,3 +109,63 @@ func TestPrepareRebuildCandidateRejectsRunningRecordedCandidate(t *testing.T) {
 		t.Fatalf("ambiguous candidate was mutated: clone/MAC %d/%d", len(backendFake.CloneCalls()), len(backendFake.RandomizeMACCalls()))
 	}
 }
+
+func TestRebuildCutoverPersistsJournalBeforeStableSessionSwitch(t *testing.T) {
+	service, _, old := rebuildPreparationFixture(t)
+	journal, err := service.PrepareCandidate(context.Background(), "dev", "golden-r2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	injected := errors.New("stop after durable cutover intent")
+	service.cutoverHook = func() error {
+		current, err := LoadRebuildJournal(service.domain.StateRoot, old.Domain, "dev")
+		if err != nil || current.Phase != RebuildCutover || current.CandidateBackend != journal.CandidateBackend {
+			t.Fatalf("cutover journal absent before session switch: %#v, %v", current, err)
+		}
+		stored, err := LoadRecord(service.domain.StateRoot, "work", "dev")
+		if err != nil || stored != old {
+			t.Fatalf("old session changed before cutover intent: %#v, %v", stored, err)
+		}
+		return injected
+	}
+	if _, err := service.Cutover(context.Background(), "dev"); !errors.Is(err, injected) {
+		t.Fatalf("injected cutover interruption = %v", err)
+	}
+	service.cutoverHook = nil
+	active, err := service.Cutover(context.Background(), "dev")
+	if err != nil || active.ID != old.ID || active.Name != old.Name || active.Backend.ObjectID != journal.CandidateBackend ||
+		active.GoldenRevision != "golden-r2" || active.IntendedState != StateStopped {
+		t.Fatalf("reconciled active candidate = %#v, %v", active, err)
+	}
+	if again, err := service.Cutover(context.Background(), "dev"); err != nil || again != active {
+		t.Fatalf("idempotent cutover = %#v, %v", again, err)
+	}
+}
+
+func TestRebuildCutoverRejectsRunningOldOrCandidate(t *testing.T) {
+	for _, running := range []string{"old", "candidate"} {
+		t.Run(running, func(t *testing.T) {
+			service, backendFake, old := rebuildPreparationFixture(t)
+			journal, err := service.PrepareCandidate(context.Background(), "dev", "golden-r2")
+			if err != nil {
+				t.Fatal(err)
+			}
+			object := old.Backend.ObjectID
+			if running == "candidate" {
+				object = journal.CandidateBackend
+			}
+			backendFake.SetObservation(backend.Observation{ObjectID: object, Exists: true, State: backend.ObjectRunning})
+			if _, err := service.Cutover(context.Background(), "dev"); err == nil {
+				t.Fatal("running system entered cutover")
+			}
+			current, err := LoadRecord(service.domain.StateRoot, "work", "dev")
+			if err != nil || current != old {
+				t.Fatalf("rejected cutover changed active system: %#v, %v", current, err)
+			}
+			currentJournal, err := LoadRebuildJournal(service.domain.StateRoot, old.Domain, "dev")
+			if err != nil || currentJournal.Phase != RebuildCloned {
+				t.Fatalf("rejected cutover changed journal: %#v, %v", currentJournal, err)
+			}
+		})
+	}
+}

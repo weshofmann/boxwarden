@@ -48,6 +48,14 @@ func TestPrepareCandidateThroughRealWorkspaceGateKeepsAttachmentIdle(t *testing.
 	if err != nil || volume.Attachment == nil || volume.Attachment.SessionID != stopped.ID || volume.Use != nil || volume.Pending != nil {
 		t.Fatalf("preparation changed volume authority: %#v, %v", volume, err)
 	}
+	cutover, err := service.Cutover(context.Background(), "dev")
+	if err != nil || cutover.ID != stopped.ID || cutover.Backend.ObjectID != journal.CandidateBackend || cutover.GoldenRevision != "golden-r2" {
+		t.Fatalf("candidate cutover = %#v, %v", cutover, err)
+	}
+	volume, err = LoadRecord(root, domain.ID("work"), testVolumeID)
+	if err != nil || volume.Attachment == nil || volume.Attachment.SessionID != stopped.ID || volume.Use != nil || volume.Pending != nil {
+		t.Fatalf("cutover changed stable workspace attachment: %#v, %v", volume, err)
+	}
 }
 
 func TestStoppedRebuildGateHoldsVolumeSessionAndStorageThroughReservation(t *testing.T) {

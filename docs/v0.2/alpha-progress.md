@@ -62,8 +62,16 @@ and rechecks the unchanged journal after serial bootstrap before rotating the
 pin. An owner fixture rotated an old pin to the exact candidate and rejected a
 changed journal without changing the old pin. Affected owner, pin, session,
 and supervisor tests, targeted vet, and focused owner race tests pass. The
-control plane does not yet persist cutover or offer a public rebuild command;
-these owner checks have source-only fixture evidence.
+These owner checks have source-only fixture evidence; there is no public
+rebuild command yet.
+
+The control plane now persists the `cutover` journal phase before switching
+the stable session record to the stopped candidate backend and base revision.
+An injected interruption between those writes left the old record intact and
+retried to the exact candidate; running old or candidate objects were refused.
+The workspace attachment retained its stable session UUID through a real
+record/gate integration fixture. The candidate is not yet startable while the
+journal exists, and no public or live VM rebuild has been qualified.
 
 The managed-volume shutdown correction at `7eeba47` now passes one real
 attached-volume public stop: the session and backend are consistently stopped,

@@ -35,9 +35,10 @@ type RebuildDependencies struct {
 }
 
 type RebuildService struct {
-	domain config.Domain
-	deps   RebuildDependencies
-	newID  func() (string, error)
+	domain      config.Domain
+	deps        RebuildDependencies
+	newID       func() (string, error)
+	cutoverHook func() error
 }
 
 func NewRebuildService(configured config.Domain, dependencies RebuildDependencies) *RebuildService {
@@ -241,4 +242,75 @@ func (s *RebuildService) observeExact(ctx context.Context, objectID string) (bac
 		return backend.Observation{}, fmt.Errorf("ambiguous rebuild backend observation for %q: %v", objectID, err)
 	}
 	return observation, nil
+}
+
+// Cutover switches only the system backend and base revision after the
+// never-booted candidate has reconciled to stopped. The journal advances
+// first, so a crash between the two atomic files is an explicit retry state.
+// No candidate launch is authorized until both journal and session record
+// identify the same candidate.
+func (s *RebuildService) Cutover(ctx context.Context, rawName string) (record Record, err error) {
+	if s == nil || s.deps.Observer == nil || s.deps.Pins == nil {
+		return Record{}, fmt.Errorf("rebuild cutover dependencies are required")
+	}
+	domainID, err := domain.Parse(string(s.domain.ID))
+	if err != nil || domainID != s.domain.ID || strings.TrimSpace(s.domain.StateRoot) == "" {
+		return Record{}, fmt.Errorf("invalid configured rebuild domain")
+	}
+	name, err := ParseName(rawName)
+	if err != nil {
+		return Record{}, err
+	}
+	transition, err := lock.Acquire(ctx, s.domain.StateRoot, "transition-"+string(domainID)+"-"+string(name))
+	if err != nil {
+		return Record{}, err
+	}
+	defer func() { err = errors.Join(err, transition.Release()) }()
+	held, err := lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
+	if err != nil {
+		return Record{}, err
+	}
+	defer func() { err = errors.Join(err, held.Release()) }()
+	journal, err := LoadRebuildJournal(s.domain.StateRoot, domainID, string(name))
+	if err != nil || (journal.Phase != RebuildCloned && journal.Phase != RebuildCutover) {
+		return Record{}, fmt.Errorf("candidate is not journaled as cloned or in cutover: %v", err)
+	}
+	record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+	if err != nil || record.ID != journal.SessionID || record.Backend.Kind != "tart" {
+		return Record{}, fmt.Errorf("session identity changed before rebuild cutover: %v", err)
+	}
+	if journal.Phase == RebuildCutover && record.Backend.ObjectID == journal.CandidateBackend && record.GoldenRevision == journal.CandidateRevision {
+		return record, nil
+	}
+	if record.IntendedState != StateStopped || record.Backend.ObjectID != journal.OldBackend || record.GoldenRevision != journal.OldRevision || record.StartGeneration != "" {
+		return Record{}, fmt.Errorf("old stopped system does not match rebuild cutover journal")
+	}
+	if err := s.verifyOldPin(ctx, journal); err != nil {
+		return Record{}, err
+	}
+	for _, objectID := range []string{journal.OldBackend, journal.CandidateBackend} {
+		observation, observeErr := s.observeExact(ctx, objectID)
+		if observeErr != nil || !observation.Exists || observation.State != backend.ObjectStopped {
+			return Record{}, fmt.Errorf("rebuild cutover requires exact stopped object %q: %v", objectID, observeErr)
+		}
+	}
+	if journal.Phase == RebuildCloned {
+		next := journal
+		next.Phase = RebuildCutover
+		if err := advanceRebuildJournal(s.domain.StateRoot, journal, next); err != nil {
+			return Record{}, fmt.Errorf("persist rebuild cutover intent: %w", err)
+		}
+		journal = next
+		if s.cutoverHook != nil {
+			if err := s.cutoverHook(); err != nil {
+				return Record{}, err
+			}
+		}
+	}
+	record.Backend.ObjectID = journal.CandidateBackend
+	record.GoldenRevision = journal.CandidateRevision
+	if err := SaveRecord(s.domain.StateRoot, domainID, record); err != nil {
+		return Record{}, fmt.Errorf("persist candidate as active system: %w", err)
+	}
+	return record, nil
 }
