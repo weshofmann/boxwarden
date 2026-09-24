@@ -40,6 +40,42 @@ func TestClientProbeUsesCompleteStrictSSHPolicyAndFixedRemoteCommand(t *testing.
 	}
 }
 
+func TestClientSendsOnlyTypedBoundedWorkspaceMountOperations(t *testing.T) {
+	connection := testConnection(t)
+	runner := &fakeRunner{onRun: func(Command) Result { return Result{Stdout: `{"version":1,"ok":true}`} }}
+	client := NewClient(runner)
+	mount := WorkspaceMount{VolumeID: "00112233-4455-4677-8899-aabbccddeeff", FilesystemUUID: "10213243-5465-4768-899a-bbccddeeff00", MountPath: "/home/boxwarden/workspaces/project"}
+	if err := client.EnsureWorkspaces(context.Background(), connection, []WorkspaceMount{mount}); err != nil {
+		t.Fatal(err)
+	}
+	probe, err := client.Probe(context.Background(), connection, ProbeRequest{Workspaces: []WorkspaceMount{mount}})
+	if err != nil || !probe.OK {
+		t.Fatalf("bound probe = %+v, %v", probe, err)
+	}
+	if len(runner.commands) != 2 {
+		t.Fatalf("SSH calls = %d", len(runner.commands))
+	}
+	for i, kind := range []string{"ensure_workspaces", "probe"} {
+		command := runner.commands[i]
+		if command.Path != sshPath || !sameStrings(command.Args, expectedSSHArgs(connection)) {
+			t.Fatalf("unfixed SSH boundary: %+v", command)
+		}
+		var request managementRequest
+		if err := json.Unmarshal(command.Stdin, &request); err != nil || request.Kind != kind || len(request.Workspaces) != 1 || request.Workspaces[0] != mount {
+			t.Fatalf("typed request = %+v, %v", request, err)
+		}
+	}
+	before := len(runner.commands)
+	for _, invalid := range [][]WorkspaceMount{nil, {{VolumeID: mount.VolumeID, FilesystemUUID: mount.FilesystemUUID, MountPath: "/tmp/unsafe"}}, {mount, mount}} {
+		if err := client.EnsureWorkspaces(context.Background(), connection, invalid); err == nil {
+			t.Fatalf("unsafe workspace request accepted: %+v", invalid)
+		}
+	}
+	if len(runner.commands) != before {
+		t.Fatal("invalid workspace request reached SSH")
+	}
+}
+
 func TestClientRejectsKnownHostsContentThatDiffersFromDurablePin(t *testing.T) {
 	runner := &fakeRunner{onRun: func(Command) Result { return Result{Stdout: `{"version":1,"ok":true}`} }}
 	client := NewClient(runner)

@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-24 01:41 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-24 01:51 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -10,7 +10,7 @@ resumable handoff if unfinished.
 | --- | --- | --- |
 | Baseline | verified | Clean `e16f23962b43337f02de1fbe2779df00a28f3f1a`; `weshofmann/feature/v02-alpha` isolated worktree |
 | Host admission | verified | Elevated read-only doctor: `status: healthy` on original and alpha-only configs |
-| Source verification | verified with limits | Full local Go suite and targeted session/sessionruntime/workspacex/architecture race tests passed after stop-side wiring; focused vet and diff checks passed. Independent review found no critical or important issue in the stop release, and an interrupted two-volume release/retry fixture passed. These are source and synthetic checks; hosted CI and real workspace VM qualification remain unavailable |
+| Source verification | verified with limits | Full local Go suite, focused guest/SSH/owner race tests, focused guest/helper/SSH/owner vet, and diff checks passed after mount-bound READY wiring. These are source and synthetic checks; hosted CI and real automatic workspace mount qualification remain unavailable |
 | VM inventory | verified | Admitted `TART_HOME` has eight stopped alpha-owned objects plus one protected stopped historical object. One additional failed alpha VM was archived byte-for-byte and deleted after archive verification; exact identities are in the private ownership manifest |
 | Alpha ownership | prepared | Exact resource paths and identities are retained only in the private ownership manifest |
 | Installer input | verified | Ubuntu 24.04.4 ARM64 Desktop ISO: good Canonical detached signature and exact `c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe` SHA-256; private cache only |
@@ -19,7 +19,7 @@ resumable handoff if unfinished.
 | Automatic base preparation | real guest preparation reached, qualification pending | The first attempt failed before VM creation on an unsupported OpenSSL mode. A fresh attempt with exact OpenSSL 3 passed installer and guest preparation, then reached finalization. A source audit found the finalizer rejected the public random run-ID format; the operator canceled through owned stop/wait cleanup. Its journal is failed, and no cache was admitted. The exact stopped candidate was privately archived and deleted after archive verification. The finalizer contract and regression fixture are published. A source-only reserve monitor now checks the state and Tart filesystems before mutation and through build/qualification |
 | Inspector capability | synthetic boot verified, ext4 runtime pending | Pinned Tart has no NIC-off mode. A signed Virtualization.framework guest booted with zero NICs, one read-only synthetic disk, and two serial channels; the guest reported loopback only and returned a typed report. The formatter now produced a synthetic ext4 image, but the inspector has not mounted or validated it. The guest read-only mount path has targeted source tests. Real workspace export remains closed |
 | Graphical sandbox | same-clone GUI verified | Public qualr2c reached READY, GNOME Desktop and Firefox opened through Tart GUI, and Nautilus showed synthetic `bw-alpha-system-persist-r2c` in guest home after stop/restart. This is system-disk persistence only. No guest agent account sign-in or recipe-installed application has been observed |
-| Workspace lifecycle | real Tart disk persistence verified; automatic guest mount pending | Volume-owned records, attachment/use transitions, private format journal, Linux ARM64 ext4 helper, and retained exact Tart disk/lock leases have targeted tests. Public start reserves exact Uses as a batch and persists Starting last; retries check them. The child rechecks Starting/Use/attachment/formatter evidence and passes retained leases to Tart. Stop retains Stopping through exact owner stop and batch Use release, then persists Stopped. A signed no-NIC VZ runner completed one synthetic and one managed fresh 64 MiB ext4 format/check; the managed volume has an Available record matching its verified journal and raw identity. Public attach to the stopped `qualr2c` session, start to READY, stop, and restart to READY passed with a distinct ext4 `vdb` of the expected UUID. One synthetic file survived stop/restart with the same digest after manual guest remount. Automatic guest mount, rebuild, reattach to a replacement system, and full workflow qualification remain |
+| Workspace lifecycle | real Tart disk persistence verified; automatic guest mount source-wired, real qualification pending | Volume-owned records, attachment/use transitions, private format journal, Linux ARM64 ext4 helper, and retained exact Tart disk/lock leases have targeted tests. Public start reserves exact Uses as a batch and persists Starting last; retries check them. The child rechecks Starting/Use/attachment/formatter evidence and passes retained leases to Tart. Stop retains Stopping through exact owner stop and batch Use release, then persists Stopped. A signed no-NIC VZ runner completed one synthetic and one managed fresh 64 MiB ext4 format/check; the managed volume has an Available record matching its verified journal and raw identity. Public attach to the stopped `qualr2c` session, start to READY, stop, and restart to READY passed with a distinct ext4 `vdb` of the expected UUID. One synthetic file survived stop/restart with the same digest after manual guest remount. Host client/owner now source-wire exact guest mounting and repeated mount-bound probes; updated generic base, rebuild, reattach, and full workflow qualification remain |
 | Controlled export | receiver implemented, acceptance closed | Host stream receiver has hostile fixtures and independent review; zero-NIC synthetic boot/transport passed, but ext4 inspection, volume lock admission, hostile exits, and real export remain unproved, so public export remains disabled |
 | Hosted CI | unavailable | Local verification is required; do not report CI passed |
 
@@ -138,7 +138,13 @@ roots gain workstation ownership only when no project data exists; retry
 does not repeat the mount. The static ARM64 helper, digest lock, and installer
 pin were rebuilt coherently. Guest package and artifact tests, focused vet,
 and diff checks passed. Independent interface review is in progress; no real
-VM has used this helper, and host READY wiring is still pending.
+VM has used this helper. The host client/owner now derive exact mount bindings
+from admitted Starting/Use records, ensure mounts before publishing READY, and
+repeat mount-bound probes on fresh status snapshots. Independent review found
+and we corrected read-only filesystem false READY, existing-mount symlink
+ancestry, and empty zone-field acceptance. The mount probe checks both VFS
+and filesystem read-only flags. Full local Go tests, focused vet, and diff
+checks and targeted guest/SSH/owner race tests passed. Real qualification remains.
 
 Publish each meaningful verified implementation increment on the authorized
 alpha branch promptly, targeting a GitHub checkpoint every 30–60 minutes of
@@ -179,9 +185,8 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 
 ## Next executable action
 
-Wire the typed guest mount operation through the pinned host management client,
-include fresh mount evidence in READY, and qualify it from an updated
-generic base without manual guest actions. Then test system rebuild and
+Qualify the revised guest helper and mount-bound READY from an updated generic
+base without manual guest actions. Then test system rebuild and
 reattachment to another disposable sandbox with the same volume. The current
 public lifecycle already passes exact disk lease and stop/restart checks.
 The next full prepared-base run needs more safe disk headroom. After that, record actual

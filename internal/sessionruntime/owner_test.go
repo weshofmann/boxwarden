@@ -774,6 +774,10 @@ func TestOwnerPassesExactQualifiedWorkspaceLeaseToLauncher(t *testing.T) {
 	if !validatedLease {
 		t.Fatal("launcher did not receive validated workspace lease")
 	}
+	wantMounts := []sshx.WorkspaceMount{{VolumeID: volume.VolumeID, FilesystemUUID: volume.FilesystemUUID, MountPath: "/home/boxwarden/workspaces/project"}}
+	if !reflect.DeepEqual(f.owner.workspaceMounts, wantMounts) {
+		t.Fatalf("owner did not retain exact admitted mount binding: %+v", f.owner.workspaceMounts)
+	}
 	if err := f.owner.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}

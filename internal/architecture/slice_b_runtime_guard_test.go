@@ -41,6 +41,7 @@ func TestSliceCPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
 		{"alternate PTY provider", "internal/backend/terminal.go", `package backend; import terminal "github.com/creack/pty"; func f() { _, _, _ = terminal.Open() }`, "alternate PTY provider"},
 		{"renamed SSH wrapper", "internal/backend/start.go", `package backend; import trust "github.com/weshofmann/boxwarden/internal/sshx"; func f() { trust.EstablishManagement() }`, "unapproved foundation selector"},
 		{"package report outside runtime owner", "internal/backend/start.go", `package backend; import trust "github.com/weshofmann/boxwarden/internal/sshx"; var _ trust.PackageVersion`, "unapproved foundation selector"},
+		{"workspace mount binding outside runtime owner", "internal/backend/start.go", `package backend; import trust "github.com/weshofmann/boxwarden/internal/sshx"; var _ trust.WorkspaceMount`, "unapproved foundation selector"},
 		{"renamed bootstrap wrapper", "internal/lifecycle/start.go", `package lifecycle; import serialtransport "github.com/weshofmann/boxwarden/internal/serialx"; func f() { serialtransport.RunBootstrap() }`, "unapproved foundation selector"},
 		{"installer serial outside builder", "internal/backend/start.go", `package backend; import serialtransport "github.com/weshofmann/boxwarden/internal/serialx"; func f() { serialtransport.CreateInstallerRuntime() }`, "unapproved foundation selector"},
 		{"blank foundation import", "internal/backend/start.go", `package backend; import _ "github.com/weshofmann/boxwarden/internal/sshx"`, "unsupported foundation import"},
@@ -452,7 +453,7 @@ func allowedFoundationSelector(path, foundation, selector string) bool {
 		switch foundation {
 		case "sshx":
 			switch selector {
-			case "Certificate", "Connection", "PackageVersion", "GuestIdentity", "ProbeRequest", "ProbeResult", "ReadZoneRequest", "EnsureClientKey", "NewCertificateIssuer", "NewClient", "WriteKnownHosts", "RenewalRequired", "CleanupGenerationCredentials":
+			case "Certificate", "Connection", "PackageVersion", "GuestIdentity", "WorkspaceMount", "ProbeRequest", "ProbeResult", "ReadZoneRequest", "EnsureClientKey", "NewCertificateIssuer", "NewClient", "WriteKnownHosts", "RenewalRequired", "CleanupGenerationCredentials":
 				return true
 			}
 		case "timezonex":

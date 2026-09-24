@@ -148,6 +148,10 @@ func DecodeManagementRequest(reader io.Reader) (ManagementRequest, error) {
 	if err := value.Validate(); err != nil {
 		return ManagementRequest{}, err
 	}
+	_, hasZone := fields["zone"]
+	if hasZone != (value.Kind == "apply_zone") {
+		return ManagementRequest{}, fmt.Errorf("management request zone field is out of kind")
+	}
 	_, hasPackages := fields["packages"]
 	if hasPackages != (value.Kind == "inspect_packages") {
 		return ManagementRequest{}, fmt.Errorf("management request package field is out of kind")

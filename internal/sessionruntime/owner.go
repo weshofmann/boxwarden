@@ -43,6 +43,7 @@ type certificateIssuer interface {
 type managementClient interface {
 	timezonex.ZoneClient
 	Probe(context.Context, sshx.Connection, sshx.ProbeRequest) (sshx.ProbeResult, error)
+	EnsureWorkspaces(context.Context, sshx.Connection, []sshx.WorkspaceMount) error
 	InspectPackages(context.Context, sshx.Connection, []string) ([]sshx.PackageVersion, error)
 	InspectIdentity(context.Context, sshx.Connection) (sshx.GuestIdentity, error)
 }
@@ -90,6 +91,7 @@ type Owner struct {
 	connection                      sshx.Connection
 	certificate                     sshx.Certificate
 	readyEstablished                bool
+	workspaceMounts                 []sshx.WorkspaceMount
 	readyAttempted                  bool
 	maintenanceCancel               context.CancelFunc
 	maintenanceDone                 chan struct{}
@@ -203,6 +205,21 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) (re
 		return fmt.Errorf("admit exact workspace disks: %w", err)
 	}
 	defer func() { result = errors.Join(result, managedDisks.CloseUnclaimed()) }()
+	attachments, err := workspacex.ListSessionAttachments(ctx, selected.StateRoot, selected.ID, record.ID, string(record.Name))
+	if err != nil {
+		return fmt.Errorf("capture exact workspace mount bindings: %w", err)
+	}
+	if (managedDisks == nil) != (len(attachments) == 0) {
+		return fmt.Errorf("workspace disk leases do not match attachments")
+	}
+	mounts := make([]sshx.WorkspaceMount, 0, len(attachments))
+	wantUse := workspacex.Use{BackendKind: record.Backend.Kind, BackendObject: record.Backend.ObjectID, Generation: record.StartGeneration}
+	for _, attached := range attachments {
+		if attached.Attachment == nil || attached.Use == nil || *attached.Use != wantUse || attached.State != workspacex.StateAvailable {
+			return fmt.Errorf("workspace attachment lacks exact launch use")
+		}
+		mounts = append(mounts, sshx.WorkspaceMount{VolumeID: attached.VolumeID, FilesystemUUID: attached.FilesystemUUID, MountPath: attached.Attachment.MountPath})
+	}
 	serial, err := o.deps.serial(ctx, directory)
 	if err != nil {
 		return fmt.Errorf("create serial runtime: %w", err)
@@ -232,6 +249,7 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) (re
 	sshBinding := sshx.Binding{Domain: record.Domain, SessionID: record.ID, BackendKind: record.Backend.Kind, BackendObject: record.Backend.ObjectID}
 	o.mu.Lock()
 	o.binding, o.sshBinding, o.ca, o.observer, o.handle, o.serial, o.pins = binding, sshBinding, ca, observer, handle, serial, pins
+	o.workspaceMounts = mounts
 	o.runtimePath, o.tartPath, o.tartHome = directory, admission.Host.TartExecutable, admission.Host.TartHome
 	o.mu.Unlock()
 	if err == nil {
@@ -325,6 +343,7 @@ func (o *Owner) Ready(ctx context.Context) error {
 	o.mu.Lock()
 	o.readyAttempted = true
 	servo, ca, binding, pin, directory, tartPath, tartHome := o.binding, o.ca, o.sshBinding, o.expectedPin, o.runtimePath, o.tartPath, o.tartHome
+	mounts := append([]sshx.WorkspaceMount(nil), o.workspaceMounts...)
 	o.mu.Unlock()
 	key, err := o.deps.key(ctx, directory)
 	if err != nil {
@@ -367,6 +386,15 @@ func (o *Owner) Ready(ctx context.Context) error {
 	}
 	if err := timezonex.Converge(ctx, o.deps.client, connection, zone); err != nil {
 		return fmt.Errorf("converge guest time zone: %w", err)
+	}
+	if len(mounts) > 0 {
+		if err := o.deps.client.EnsureWorkspaces(ctx, connection, mounts); err != nil {
+			return fmt.Errorf("mount exact guest workspaces: %w", err)
+		}
+		probe, err := o.deps.client.Probe(ctx, connection, sshx.ProbeRequest{Workspaces: mounts})
+		if err != nil || !probe.OK {
+			return fmt.Errorf("mount-bound management SSH probe failed: %w", errOrProbe(err))
+		}
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -544,6 +572,7 @@ func (o *Owner) Snapshot(ctx context.Context) supervisor.Snapshot {
 	snapshot := supervisor.Snapshot{Binding: o.binding, ObservedAt: time.Now()}
 	active, observer, serial, pins, binding, expectedPin, diagnostic := o.active, o.observer, o.serial, o.pins, o.sshBinding, o.expectedPin, o.bootstrapDiagnostic
 	connection, certificate, ready := o.connection, o.certificate, o.readyEstablished
+	mounts := append([]sshx.WorkspaceMount(nil), o.workspaceMounts...)
 	o.mu.Unlock()
 	if !active {
 		return snapshot
@@ -574,7 +603,7 @@ func (o *Owner) Snapshot(ctx context.Context) supervisor.Snapshot {
 		} else if connection.Binding != binding || connection.Pin != expectedPin || connection.RuntimeDirectory != o.runtimePath {
 			snapshot.Diagnostic = "management connection binding changed"
 		} else {
-			probe, probeErr := o.deps.client.Probe(ctx, connection, sshx.ProbeRequest{})
+			probe, probeErr := o.deps.client.Probe(ctx, connection, sshx.ProbeRequest{Workspaces: mounts})
 			snapshot.ProbeOK = probeErr == nil && probe.OK
 			if !snapshot.ProbeOK {
 				snapshot.Diagnostic = "strict management SSH probe failed"

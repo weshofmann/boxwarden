@@ -34,7 +34,12 @@ type Client struct{ runner Runner }
 
 func NewClient(runner Runner) *Client { return &Client{runner: runner} }
 
-type ProbeRequest struct{}
+type WorkspaceMount struct {
+	VolumeID       string `json:"volume_id"`
+	FilesystemUUID string `json:"filesystem_uuid"`
+	MountPath      string `json:"mount_path"`
+}
+type ProbeRequest struct{ Workspaces []WorkspaceMount }
 type ProbeResult struct {
 	OK bool `json:"ok"`
 }
@@ -51,18 +56,24 @@ type GuestIdentity struct {
 
 // managementRequest is intentionally package-private: callers choose only a concrete typed method.
 type managementRequest struct {
-	Version       int      `json:"version"`
-	Kind          string   `json:"kind"`
-	Domain        string   `json:"domain"`
-	SessionID     string   `json:"session_id"`
-	BackendKind   string   `json:"backend_kind"`
-	BackendObject string   `json:"backend_object"`
-	Zone          string   `json:"zone,omitempty"`
-	Packages      []string `json:"packages,omitempty"`
+	Version       int              `json:"version"`
+	Kind          string           `json:"kind"`
+	Domain        string           `json:"domain"`
+	SessionID     string           `json:"session_id"`
+	BackendKind   string           `json:"backend_kind"`
+	BackendObject string           `json:"backend_object"`
+	Zone          string           `json:"zone,omitempty"`
+	Packages      []string         `json:"packages,omitempty"`
+	Workspaces    []WorkspaceMount `json:"workspaces,omitempty"`
 }
 
-func (c *Client) Probe(ctx context.Context, connection Connection, _ ProbeRequest) (ProbeResult, error) {
-	output, err := c.run(ctx, connection, managementRequestFor(connection.Binding, "probe", ""))
+func (c *Client) Probe(ctx context.Context, connection Connection, probe ProbeRequest) (ProbeResult, error) {
+	if err := validateWorkspaceMounts(probe.Workspaces); err != nil {
+		return ProbeResult{}, err
+	}
+	request := managementRequestFor(connection.Binding, "probe", "")
+	request.Workspaces = append([]WorkspaceMount(nil), probe.Workspaces...)
+	output, err := c.run(ctx, connection, request)
 	if err != nil {
 		return ProbeResult{}, err
 	}
@@ -71,6 +82,62 @@ func (c *Client) Probe(ctx context.Context, connection Connection, _ ProbeReques
 		return ProbeResult{}, fmt.Errorf("parse probe response: %w", err)
 	}
 	return result, nil
+}
+
+// EnsureWorkspaces sends only exact UUID/path bindings to the fixed pinned
+// guest helper. The guest validates the same schema before mounting.
+func (c *Client) EnsureWorkspaces(ctx context.Context, connection Connection, mounts []WorkspaceMount) error {
+	if len(mounts) == 0 {
+		return fmt.Errorf("workspace mount request is empty")
+	}
+	if err := validateWorkspaceMounts(mounts); err != nil {
+		return err
+	}
+	request := managementRequestFor(connection.Binding, "ensure_workspaces", "")
+	request.Workspaces = append([]WorkspaceMount(nil), mounts...)
+	output, err := c.run(ctx, connection, request)
+	if err != nil {
+		return err
+	}
+	result, err := decodeProbeResult(output)
+	if err != nil {
+		return fmt.Errorf("parse workspace mount response: %w", err)
+	}
+	if !result.OK {
+		return fmt.Errorf("guest rejected exact workspace mount request")
+	}
+	return nil
+}
+
+func validateWorkspaceMounts(mounts []WorkspaceMount) error {
+	if len(mounts) > 4 {
+		return fmt.Errorf("workspace mount count exceeds four")
+	}
+	volumes, uuids, paths := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	for _, mount := range mounts {
+		if !validUUID(mount.VolumeID) || !validUUID(mount.FilesystemUUID) || !validWorkspaceMountPath(mount.MountPath) || volumes[mount.VolumeID] || uuids[mount.FilesystemUUID] || paths[mount.MountPath] {
+			return fmt.Errorf("invalid or duplicate workspace mount binding")
+		}
+		volumes[mount.VolumeID], uuids[mount.FilesystemUUID], paths[mount.MountPath] = true, true, true
+	}
+	return nil
+}
+
+func validWorkspaceMountPath(path string) bool {
+	const prefix = "/home/boxwarden/workspaces/"
+	if !strings.HasPrefix(path, prefix) {
+		return false
+	}
+	name := strings.TrimPrefix(path, prefix)
+	if len(name) == 0 || len(name) > 63 || name[0] < 'a' || name[0] > 'z' {
+		return false
+	}
+	for i := 1; i < len(name); i++ {
+		if !(name[i] >= 'a' && name[i] <= 'z' || name[i] >= '0' && name[i] <= '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Client) ApplyZone(ctx context.Context, connection Connection, request ApplyZoneRequest) error {

@@ -180,8 +180,10 @@ staging, serial ACL admission, fixed guest preparation, fresh-clone qualifier,
 typed package and identity inspection, host/CA preflight, builder composition,
 production qualification lifecycle, ordered preparation composition, and the
 public alpha preparation command are source-verified. The current r2 candidate
-predates the latest tracked guest definition. Implement the workspace mount
-completion gate above and exercise a fresh candidate through the public
+predates the latest tracked guest definition. The typed guest mount operation,
+host client, and mount-bound READY/status probes are source-wired and locally
+tested; an independent review's read-only and path-validation findings were
+corrected. Exercise a fresh candidate through the public
 preparation command before treating a prepared cache entry as verified. Prove
 live zero-NIC ext4 inspection, qualify automatic mount and rebuild/reattach,
 and complete controlled export on fresh synthetic resources before claiming

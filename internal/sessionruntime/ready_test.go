@@ -27,21 +27,34 @@ func (f readyIssuer) Issue(ctx context.Context, binding sshx.Binding, root, key 
 }
 
 type readyClient struct {
-	probe    func(sshx.Connection) error
-	zone     string
-	read     func(sshx.Connection) (string, error)
-	apply    func(sshx.Connection, string) error
-	inspect  func(sshx.Connection, []string) ([]sshx.PackageVersion, error)
-	identity func(sshx.Connection) (sshx.GuestIdentity, error)
+	probe        func(sshx.Connection) error
+	probeMounts  func(sshx.Connection, []sshx.WorkspaceMount) error
+	ensureMounts func(sshx.Connection, []sshx.WorkspaceMount) error
+	zone         string
+	read         func(sshx.Connection) (string, error)
+	apply        func(sshx.Connection, string) error
+	inspect      func(sshx.Connection, []string) ([]sshx.PackageVersion, error)
+	identity     func(sshx.Connection) (sshx.GuestIdentity, error)
 }
 
-func (c *readyClient) Probe(_ context.Context, connection sshx.Connection, _ sshx.ProbeRequest) (sshx.ProbeResult, error) {
+func (c *readyClient) Probe(_ context.Context, connection sshx.Connection, request sshx.ProbeRequest) (sshx.ProbeResult, error) {
 	if c.probe != nil {
 		if err := c.probe(connection); err != nil {
 			return sshx.ProbeResult{}, err
 		}
 	}
+	if c.probeMounts != nil {
+		if err := c.probeMounts(connection, request.Workspaces); err != nil {
+			return sshx.ProbeResult{}, err
+		}
+	}
 	return sshx.ProbeResult{OK: true}, nil
+}
+func (c *readyClient) EnsureWorkspaces(_ context.Context, connection sshx.Connection, mounts []sshx.WorkspaceMount) error {
+	if c.ensureMounts != nil {
+		return c.ensureMounts(connection, mounts)
+	}
+	return nil
 }
 func (c *readyClient) ApplyZone(_ context.Context, connection sshx.Connection, request sshx.ApplyZoneRequest) error {
 	if c.apply != nil {
@@ -127,6 +140,54 @@ func TestReadyConvergesCurrentGenerationAndSnapshotRechecksLiveEvidence(t *testi
 	client.probe = func(connection sshx.Connection) error { return errors.New("probe failed") }
 	if snapshot := f.owner.Snapshot(context.Background()); snapshot.ProbeOK || snapshot.ZoneMatches || !strings.Contains(snapshot.Diagnostic, "probe") {
 		t.Fatalf("snapshot reused old probe: %#v", snapshot)
+	}
+	_ = f.owner.Stop(context.Background())
+	_ = f.owner.Wait(context.Background())
+}
+
+func TestReadyRequiresWorkspaceMountAndFreshBoundProbe(t *testing.T) {
+	f, client := readyFixture(t)
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	mount := sshx.WorkspaceMount{VolumeID: "00112233-4455-4677-8899-aabbccddeeff", FilesystemUUID: "10213243-5465-4768-899a-bbccddeeff00", MountPath: "/home/boxwarden/workspaces/project"}
+	f.owner.mu.Lock()
+	f.owner.workspaceMounts = []sshx.WorkspaceMount{mount}
+	f.owner.mu.Unlock()
+	ensures, boundProbes := 0, 0
+	client.ensureMounts = func(_ sshx.Connection, mounts []sshx.WorkspaceMount) error {
+		ensures++
+		if len(mounts) != 1 || mounts[0] != mount {
+			t.Fatalf("ensure binding = %+v", mounts)
+		}
+		return nil
+	}
+	client.probeMounts = func(_ sshx.Connection, mounts []sshx.WorkspaceMount) error {
+		if len(mounts) > 0 {
+			boundProbes++
+			if len(mounts) != 1 || mounts[0] != mount {
+				t.Fatalf("probe binding = %+v", mounts)
+			}
+		}
+		return nil
+	}
+	if err := f.owner.Bootstrap(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := f.owner.Snapshot(context.Background()); !snapshot.ProbeOK || !snapshot.ZoneMatches || ensures != 1 || boundProbes < 2 {
+		t.Fatalf("mount-bound READY = %+v, ensures=%d probes=%d", snapshot, ensures, boundProbes)
+	}
+	client.probeMounts = func(_ sshx.Connection, mounts []sshx.WorkspaceMount) error {
+		if len(mounts) > 0 {
+			return errors.New("workspace unmounted")
+		}
+		return nil
+	}
+	if snapshot := f.owner.Snapshot(context.Background()); snapshot.ProbeOK || snapshot.ZoneMatches {
+		t.Fatalf("lost workspace mount still READY: %+v", snapshot)
 	}
 	_ = f.owner.Stop(context.Background())
 	_ = f.owner.Wait(context.Background())
