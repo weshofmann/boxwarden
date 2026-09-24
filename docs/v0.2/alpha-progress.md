@@ -13,9 +13,9 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
 | Public management | A fresh disposable clone reached exact-generation READY through serial bootstrap, host-key pinning, certificate, strict SSH, and time-zone checks; it stopped and restarted to READY. GNOME, Firefox, and a synthetic home file were observed after restart. |
 | Reusable preparation | Strict versioned recipe and ISO checks, candidate build, guest preparation, fresh-clone qualifier, private evidence, and cache admission are implemented. A fresh real build using the corrected finalizer completed installation, guest preparation, clone-ready shutdown, and qualification. Its fresh clone reached READY, passed package-inventory and identity checks, and stopped; the versioned prepared record was admitted. This is base qualification, not the full workspace/export acceptance path. |
 | Workspace volume | One alpha-owned 64 MiB ext4 volume was formatted in a zero-NIC VM and independently inspected. Its synthetic file retained its digest across an earlier stop/restart after manual remount. Public detach and attach moved this exact volume from a stopped original system clone to a separate replacement system clone without copying the disk. The replacement guest file manager opened the mounted 57-byte synthetic file and displayed its expected content. The corrected public stop released Use and left ext4 clean; source and export snapshot SHA-256 matched. |
-| Public volume creation | `workspace create` binds an exact private signed formatter bundle, clean source checkout, new volume/filesystem UUIDs, and capacity to the explicit alpha domain. Focused tests cover creation, idempotent unbound retry, verified-journal recovery after record-publication interruption, preflight refusal before disk reservation, and failed-format refusal without reformatting. A real public command formatted a fresh 64 MiB synthetic volume in a zero-NIC VM. Independent host checks found a verified journal, available unbound record, matching inode/UUID/size, clean ext4 state without `needs_recovery`, and a successful exact public retry without reformatting. A fresh prepared-base clone subsequently reached mount-bound READY and a guest user created a synthetic directory on the mounted volume. A separate fresh volume remained READY for about eleven minutes, retained a GUI-created directory across stop/restart, and stopped cleanly. Intermittent shutdown failure and retained rebuild remain unqualified. |
+| Public volume creation | `workspace create` binds an exact private signed formatter bundle, clean source checkout, new volume/filesystem UUIDs, and capacity to the explicit alpha domain. Focused tests cover creation, idempotent unbound retry, verified-journal recovery after record-publication interruption, preflight refusal before disk reservation, and failed-format refusal without reformatting. A real public command formatted a fresh 64 MiB synthetic volume in a zero-NIC VM. Independent host checks found a verified journal, available unbound record, matching inode/UUID/size, clean ext4 state without `needs_recovery`, and a successful exact public retry without reformatting. A fresh prepared-base clone subsequently reached mount-bound READY and a guest user created a synthetic directory on the mounted volume. A separate fresh volume remained READY for about eleven minutes, retained a GUI-created directory across stop/restart, and stopped cleanly. Intermittent shutdown failure remains unexplained; the retained-volume rebuild is qualified below. |
 | Automatic mount and READY | The static generic guest helper resolves an exact FS UUID, mounts ext4 at a validated path, checks existing mounts and read-write state, and probes exact bindings. The host owner derives those bindings from admitted session/Use records, ensures them before READY, and repeats the bound probe for status. Full local Go tests, focused race tests, vet, and artifact checks passed at `5c84520`. The fresh original clone reached mount-bound READY in two generations; the separate replacement clone also reached mount-bound READY with the same reattached volume and later exposed the expected file in its GUI. Both are stopped now. |
-| Controlled export | Bounded receiver, exact stopped-volume snapshot, private helper capture, and selected publication have targeted tests. After clean guest shutdown, a real public export published one selected 57-byte regular file into a new private directory. Its SHA-256 matched the known synthetic guest file; the durable journal read `published`, and the source and snapshot digests matched. A later public resume of an earlier clean `snapshot-ready` transaction published the same selected file and digest, with no leftover spool or running inspector. An earlier dirty-volume attempt remains private failed evidence. Inspected-phase hard-exit ambiguity remains open. |
+| Controlled export | Bounded receiver, exact stopped-volume snapshot, private helper capture, and selected publication have targeted tests. After clean guest shutdown, a real public export published one selected 57-byte regular file into a new private directory. Its SHA-256 matched the known synthetic guest file; the durable journal read `published`, and the source and snapshot digests matched. A later public resume of an earlier clean `snapshot-ready` transaction published the same selected file and digest, with no leftover spool or running inspector. An earlier dirty-volume attempt remains private failed evidence. A fresh synthetic `inspected` hard exit was reviewed privately and resumed through the public command: its 48 MiB selected file matched the guest SHA-256, the journal became `published`, and no inspector or spool remained. A post-rename hard exit with an existing final directory remains an explicit manual reconciliation case. |
 | Inspector bundle admission | A clean-source production bundle from the pinned ISO passed independent artifact checks and host admission with both synthetic and real journal-derived requests. Admission checks tracked source bytes, kernel/ISO pins, seven artifact digests and private metadata, deterministic appended guest/request initrd, and the signed helper's sole Virtualization entitlement. The first live export-mode VM rejected an unclean volume; a later fresh clean-volume run completed selected publication with zero-NIC inspector evidence. |
 | Example | `examples/v0.2-alpha-base.json` passed public recipe/ISO validation. It requests the Desktop source, a small package set, and one named workspace intent. |
 | Recipe-bound create | `session create` accepts exact recipe/ISO/guest definition/tool inputs, prepares or reuses a qualified base, and calls `CreateFromRevision`. A focused fixture and the real public command both selected the newly prepared revision without changing the domain current golden. A later public `alpha prepare` reused the admitted cache after verified redundant installer staging was retired, without creating an attempt journal or new Tart object. |
@@ -145,7 +145,8 @@ does not adopt either. Invoke as `--domain alpha workspace export resume
 --source-root PATH --iso PATH --go PATH <transaction-uuid>`; the journal
 supplies the original selection and destination. Full local
 `go test -count=1 ./...`, `go vet ./...`, CLI build, and diff checks passed.
-A real-host retry remains for the `inspected` phase.
+At that source-only checkpoint, a real-host retry remained for the
+`inspected` phase; the later real-host result is recorded below.
 
 The public resume was also exercised against the retained clean
 `snapshot-ready` transaction from an earlier host-headroom refusal. After
@@ -414,6 +415,26 @@ It does not qualify a software-changing upgrade or the intermittent dirty
 stop. These were real-host checks; no new source tests or full acceptance
 suite were run for this checkpoint.
 
+A fresh public export then qualified the `inspected` hard-exit retry on real
+synthetic data. The guest created and SHA-256-hashed a 48 MiB regular file on
+the retained volume. Public stop took 3.83 seconds, leaving exact stopped
+status and a clean ext4 superblock. The first export invocation refused before
+creating a transaction because free space was below its explicit floor plus
+3 GiB guard. Clearing only rebuildable Go compilation caches restored
+headroom. A bounded second invocation was intentionally terminated only after
+its durable journal reached `inspected`, the zero-NIC inspector had reaped,
+and the destination was empty. Public resume refused the resulting private
+spool. After verifying no running helper, open file handle, or Tart VM, the
+spool was moved into private evidence and the orphaned derived bundle was
+removed. Public resume of the same transaction published the selected file in
+16.09 seconds. Its 50,331,648-byte digest matched the guest; journal phase was
+`published`; source and snapshot digests matched; the source inode and FS UUID
+were unchanged; ext4 remained clean; and no spool, derived bundle, or running
+VM remained. This proves the inspected retry with manual reconciliation of a
+surviving spool. It does not qualify an ambiguous post-rename crash. These
+were real-host checks; no new source tests or full suite were run for this
+checkpoint.
+
 ## Next actions
 
 1. Diagnose the intermittent attached-volume readiness loss and 15-second
@@ -429,10 +450,10 @@ suite were run for this checkpoint.
    volume Use was released and the clean volume explicitly detached. Preserve
    the failed r2 VM and the earlier dirty volume as evidence. The separate
    guest SSH loss and false-stopped qualification remain open.
-2. Qualify public inspected-phase export retry and hostile-exit handling on
-   fresh synthetic inputs. Rebuild and export a fresh clean volume through
-   the public path, then reattach it to a fresh sandbox and verify its mount
-   and content.
+2. Reattach the clean publicly exported retained volume to a fresh sandbox
+   through the public stopped-only path and verify its mount and content.
+   The inspected-phase hard-exit retry passed; an ambiguous post-rename
+   export crash still requires explicit reconciliation and remains unqualified.
 3. Run the full integration checks and real acceptance matrix, and publish the
    runnable build, exact source SHA, quickstart, synthetic demo, and limits.
 
