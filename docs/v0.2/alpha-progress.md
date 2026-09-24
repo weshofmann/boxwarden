@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-24 00:51 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-24 00:56 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -84,6 +84,12 @@ requires an explicit clean checkout at the exact bundle revision and rejects
 a mismatch before any signed-runner command. Targeted formatter tests passed.
 The private bundle must be rebuilt from this new commit before real managed
 admission; the earlier read-only admission applied to the earlier revision.
+An alpha-only managed qualification driver now admits exactly one planned
+private ownership entry for a fresh 64 MiB volume, checks the source-bound
+bundle and host doctor, guards disk reserve, reserves a creating record, calls
+the trusted formatter, and promotes only matching verified evidence. Targeted
+driver, formatter, and workspace tests plus driver vet passed. This is source
+verification; the driver has not yet created a managed volume.
 
 Publish each meaningful verified implementation increment on the authorized
 alpha branch promptly, targeting a GitHub checkpoint every 30–60 minutes of
