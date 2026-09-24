@@ -25,6 +25,20 @@ func TestLoadRecordAcceptsVersion2StoppedRecordWithNonReadyAuditState(t *testing
 	}
 }
 
+func TestLoadRecordValidatesOptionalRecipeIntentDigest(t *testing.T) {
+	root := sessionRoot(t)
+	base := `{"version":2,"domain":"work","name":"dev","id":"13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0","mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-r1","readiness":{"status":"not_ready","diagnostic":""}}`
+	digest := strings.Repeat("a", 64)
+	writeRecord(t, root, "dev", strings.Replace(base, `,"readiness"`, `,"recipe_intent_digest":"`+digest+`","readiness"`, 1))
+	if record, err := LoadRecord(root, "work", "dev"); err != nil || record.RecipeIntentDigest != digest {
+		t.Fatalf("bound record = %#v, %v", record, err)
+	}
+	writeRecord(t, root, "dev", strings.Replace(base, `,"readiness"`, `,"recipe_intent_digest":"invalid","readiness"`, 1))
+	if _, err := LoadRecord(root, "work", "dev"); err == nil {
+		t.Fatal("invalid recipe digest accepted")
+	}
+}
+
 func TestLoadRecordAcceptsEachVersion2ReadinessStateWithItsAllowedGeneration(t *testing.T) {
 	root := sessionRoot(t)
 	for name, contents := range map[string]string{

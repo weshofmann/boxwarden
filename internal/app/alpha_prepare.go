@@ -22,7 +22,14 @@ type AlphaPrepareInput struct {
 	XorrisoPath, XorrisoSHA256               string
 }
 
-type AlphaPrepareFunc func(context.Context, config.Config, config.Domain, string, AlphaPrepareInput) (basebuild.PreparedResult, error)
+// AlphaPrepared carries the reusable base receipt and the complete captured
+// session intent from the same parsed recipe value.
+type AlphaPrepared struct {
+	Base         basebuild.PreparedResult
+	IntentDigest string
+}
+
+type AlphaPrepareFunc func(context.Context, config.Config, config.Domain, string, AlphaPrepareInput) (AlphaPrepared, error)
 
 func bindAlphaPrepareFlags(set *flag.FlagSet, input *AlphaPrepareInput) {
 	set.StringVar(&input.RecipePath, "recipe", "", "versioned recipe JSON")

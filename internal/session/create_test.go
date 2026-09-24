@@ -15,7 +15,88 @@ import (
 	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/golden"
 	"github.com/weshofmann/boxwarden/internal/lock"
+	"github.com/weshofmann/boxwarden/internal/recipe"
 )
+
+func TestCreateFromRevisionWithIntentBindsBeforeCloneAndRetriesExactly(t *testing.T) {
+	configured, backendFake, service := createFixture(t)
+	value := recipe.Recipe{Version: 1, Source: recipe.Source{Kind: "ubuntu-24.04.4-desktop-arm64", SHA256: "c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"}, Machine: recipe.Machine{CPUs: 4, MemoryMiB: 4096, SystemDiskGiB: 30}}
+	digest, err := PublishRecipeIntent(configured.StateRoot, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.hook = func(stage createStage, record Record) error {
+		if stage == createAfterIntent && record.RecipeIntentDigest != digest {
+			t.Fatalf("clone reservation lacks exact recipe binding: %#v", record)
+		}
+		return nil
+	}
+	created, err := service.CreateFromRevisionWithIntent(context.Background(), "dev", ModeClean, "golden-r1", digest)
+	if err != nil || created.RecipeIntentDigest != digest || created.IntendedState != StateStopped {
+		t.Fatalf("bound create = %#v, %v", created, err)
+	}
+	if again, err := service.CreateFromRevisionWithIntent(context.Background(), "dev", ModeClean, "golden-r1", digest); err != nil || again != created {
+		t.Fatalf("exact retry = %#v, %v", again, err)
+	}
+	if len(backendFake.CloneCalls()) != 1 {
+		t.Fatalf("clone calls = %d, want one", len(backendFake.CloneCalls()))
+	}
+	value.Workspaces = []recipe.Workspace{{Name: "data", Mount: "/home/boxwarden/workspaces/data"}}
+	other, err := PublishRecipeIntent(configured.StateRoot, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CreateFromRevisionWithIntent(context.Background(), "dev", ModeClean, "golden-r1", other); err == nil {
+		t.Fatal("changed intent reused existing session")
+	}
+	if len(backendFake.CloneCalls()) != 1 {
+		t.Fatal("mismatched retry mutated backend")
+	}
+}
+
+func TestCreateFromRevisionWithIntentRejectsMissingObjectBeforeReservation(t *testing.T) {
+	configured, backendFake, service := createFixture(t)
+	if _, err := service.CreateFromRevisionWithIntent(context.Background(), "dev", ModeClean, "golden-r1", strings.Repeat("a", 64)); err == nil {
+		t.Fatal("missing recipe object accepted")
+	}
+	if _, err := LoadRecord(configured.StateRoot, "work", "dev"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing object created session: %v", err)
+	}
+	if len(backendFake.CloneCalls()) != 0 {
+		t.Fatal("missing object cloned backend")
+	}
+}
+
+func TestCreateFromRevisionWithIntentRejectsCorruptBoundObjectOnRetry(t *testing.T) {
+	configured, backendFake, service := createFixture(t)
+	value := recipe.Recipe{Version: 1, Source: recipe.Source{Kind: "ubuntu-24.04.4-desktop-arm64", SHA256: "c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"}, Machine: recipe.Machine{CPUs: 4, MemoryMiB: 4096, SystemDiskGiB: 30}}
+	digest, err := PublishRecipeIntent(configured.StateRoot, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.hook = func(stage createStage, _ Record) error {
+		if stage == createAfterIntent {
+			return errors.New("crash after reservation")
+		}
+		return nil
+	}
+	if _, err := service.CreateFromRevisionWithIntent(context.Background(), "dev", ModeClean, "golden-r1", digest); err == nil {
+		t.Fatal("injected reservation interruption was ignored")
+	}
+	if record, err := LoadRecord(configured.StateRoot, "work", "dev"); err != nil || record.RecipeIntentDigest != digest || record.IntendedState != StateCreating {
+		t.Fatalf("creating intent = %#v, %v", record, err)
+	}
+	if err := os.WriteFile(filepath.Join(configured.StateRoot, "recipe-intents", digest+".json"), []byte("corrupt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service.hook = nil
+	if _, err := service.CreateFromRevisionWithIntent(context.Background(), "dev", ModeClean, "golden-r1", digest); err == nil {
+		t.Fatal("corrupt bound snapshot resumed clone")
+	}
+	if len(backendFake.CloneCalls()) != 0 {
+		t.Fatal("corrupt snapshot caused backend mutation")
+	}
+}
 
 const (
 	testSessionID = "00112233-4455-4677-8899-aabbccddeeff"

@@ -141,7 +141,12 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   change intent identity, source-file edits do not mutate a captured value,
   and missing, linked, or corrupt stored objects are rejected. Recipe and
   session package tests, targeted vet, formatting, and diff checks passed.
-  Create/rebuild records do not yet bind or execute this intent.
+  The public recipe-create route now carries that exact parsed-value digest
+  through preparation and persists it in the creating session record before
+  clone mutation. An exact retry succeeds; a changed or absent intent fails
+  closed. Legacy unbound sessions remain unbound. Session, app, and CLI package
+  tests plus targeted vet, formatting, and diff checks passed. Rebuild records
+  do not yet bind the candidate intent; action execution is still disabled.
 - Stopped import export: with host headroom restored, the public whole-directory
   export reached a durable `snapshot-ready` transaction but the zero-NIC
   inspector produced no export header. Read-only inspection of both the exact
@@ -154,9 +159,10 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   disk gets an explicit early refusal without another inspector attempt.
   Workspacex and inspector guest tests, targeted vet, formatting, and diff
   checks passed. This is source verification, not fresh real-host qualification.
-- Next: diagnose and correct the dirty-stop path, then qualify import
-  persistence from a fresh disposable baseline and run the public verification
-  command. Continue immutable recipe intent binding before session execution.
+- Next: bind old and candidate recipe digests through the rebuild journal and
+  cutover, then diagnose and correct the dirty-stop path, qualify import
+  persistence from a fresh disposable baseline, and run the public verification
+  command. Recipe action execution remains disabled until durable receipts exist.
 - Limits: retained import persistence, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh
   acceptance remain open. An external capacity option is being checked; the

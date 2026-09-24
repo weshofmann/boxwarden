@@ -164,7 +164,7 @@ func Run(ctx context.Context, args []string, options Options) error {
 		if err != nil {
 			return fmt.Errorf("prepare alpha base: %w", err)
 		}
-		return writeAlphaPrepared(options.Output, selectedDomain, result)
+		return writeAlphaPrepared(options.Output, selectedDomain, result.Base)
 	case commandAlphaRecipeCheck:
 		if _, err := recipe.LoadRunnable(command.recipePath); err != nil {
 			return fmt.Errorf("check alpha recipe: %w", err)
@@ -266,10 +266,10 @@ func Run(ctx context.Context, args []string, options Options) error {
 			if prepareErr != nil {
 				return fmt.Errorf("prepare session base: %w", prepareErr)
 			}
-			if err := validateAlphaPrepared(selectedDomain, prepared); err != nil {
+			if err := validateAlphaPrepared(selectedDomain, prepared.Base); err != nil {
 				return err
 			}
-			record, err = creator.CreateFromRevision(ctx, command.name, command.mode, prepared.Record.CandidateID)
+			record, err = creator.CreateFromRevisionWithIntent(ctx, command.name, command.mode, prepared.Base.Record.CandidateID, prepared.IntentDigest)
 		} else {
 			record, err = creator.Create(ctx, command.name, command.mode)
 		}
@@ -328,10 +328,10 @@ func Run(ctx context.Context, args []string, options Options) error {
 			if prepareErr != nil {
 				return fmt.Errorf("prepare rebuild base: %w", prepareErr)
 			}
-			if err := validateAlphaPrepared(selectedDomain, prepared); err != nil {
+			if err := validateAlphaPrepared(selectedDomain, prepared.Base); err != nil {
 				return err
 			}
-			revision = prepared.Record.CandidateID
+			revision = prepared.Base.Record.CandidateID
 		}
 		if options.AlphaRebuild == nil {
 			return errors.New("alpha rebuilder is required")

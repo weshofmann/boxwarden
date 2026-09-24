@@ -50,7 +50,7 @@ func NewService(configured config.Domain, observer backend.Observer, creator bac
 // lock is held across observation, state persistence, and backend mutation so
 // retries for the same name cannot race one another.
 func (s *Service) Create(ctx context.Context, rawName string, mode Mode) (record Record, err error) {
-	return s.create(ctx, rawName, mode, "", false)
+	return s.create(ctx, rawName, mode, "", "", false)
 }
 
 // CreateFromRevision binds a new session to one exact registered, stopped
@@ -61,7 +61,20 @@ func (s *Service) CreateFromRevision(ctx context.Context, rawName string, mode M
 	if err := backend.ValidateObjectID(revision); err != nil {
 		return Record{}, fmt.Errorf("invalid explicit base revision: %w", err)
 	}
-	return s.create(ctx, rawName, mode, revision, false)
+	return s.create(ctx, rawName, mode, revision, "", false)
+}
+
+// CreateFromRevisionWithIntent binds the complete private recipe snapshot to
+// the durable creating record before cloning. Retries must present the same
+// base and digest; an unbound legacy session is never implicitly adopted.
+func (s *Service) CreateFromRevisionWithIntent(ctx context.Context, rawName string, mode Mode, revision, digest string) (Record, error) {
+	if err := backend.ValidateObjectID(revision); err != nil {
+		return Record{}, fmt.Errorf("invalid explicit base revision: %w", err)
+	}
+	if !lowerSHA256(digest) {
+		return Record{}, fmt.Errorf("invalid recipe intent digest")
+	}
+	return s.create(ctx, rawName, mode, revision, digest, false)
 }
 
 // FreshCreation is returned only after this call reserved a previously absent
@@ -79,14 +92,14 @@ func (s *Service) CreateFreshFromRevision(ctx context.Context, rawName string, m
 	if err := backend.ValidateObjectID(revision); err != nil {
 		return FreshCreation{}, fmt.Errorf("invalid explicit base revision: %w", err)
 	}
-	record, err := s.create(ctx, rawName, mode, revision, true)
+	record, err := s.create(ctx, rawName, mode, revision, "", true)
 	if err != nil {
 		return FreshCreation{}, err
 	}
 	return FreshCreation{Record: record, Created: true}, nil
 }
 
-func (s *Service) create(ctx context.Context, rawName string, mode Mode, revision string, freshOnly bool) (record Record, err error) {
+func (s *Service) create(ctx context.Context, rawName string, mode Mode, revision, intentDigest string, freshOnly bool) (record Record, err error) {
 	if s == nil {
 		return Record{}, fmt.Errorf("session service is required")
 	}
@@ -114,6 +127,11 @@ func (s *Service) create(ctx context.Context, rawName string, mode Mode, revisio
 			err = fmt.Errorf("release session lock: %w", releaseErr)
 		}
 	}()
+	if intentDigest != "" {
+		if _, err := LoadRecipeIntent(s.domain.StateRoot, intentDigest); err != nil {
+			return Record{}, fmt.Errorf("load requested recipe intent: %w", err)
+		}
+	}
 	if err := RequireNoRebuild(s.domain.StateRoot, domainID, string(name)); err != nil {
 		return Record{}, err
 	}
@@ -123,7 +141,7 @@ func (s *Service) create(ctx context.Context, rawName string, mode Mode, revisio
 		if !errors.Is(err, os.ErrNotExist) {
 			return Record{}, fmt.Errorf("load existing session intent: %w", err)
 		}
-		record, err = s.reserveIntent(ctx, domainID, name, mode, revision)
+		record, err = s.reserveIntent(ctx, domainID, name, mode, revision, intentDigest)
 		if err != nil {
 			return Record{}, err
 		}
@@ -139,6 +157,9 @@ func (s *Service) create(ctx context.Context, rawName string, mode Mode, revisio
 		}
 		if revision != "" && record.GoldenRevision != revision {
 			return Record{}, fmt.Errorf("session %q is bound to base %q, not %q", name, record.GoldenRevision, revision)
+		}
+		if record.RecipeIntentDigest != intentDigest {
+			return Record{}, fmt.Errorf("session %q is bound to a different recipe intent", name)
 		}
 		switch record.IntendedState {
 		case StateStopped:
@@ -179,7 +200,7 @@ func (s *Service) create(ctx context.Context, rawName string, mode Mode, revisio
 	return s.reconcileCreating(ctx, record)
 }
 
-func (s *Service) reserveIntent(ctx context.Context, domainID domain.ID, name Name, mode Mode, revision string) (record Record, err error) {
+func (s *Service) reserveIntent(ctx context.Context, domainID domain.ID, name Name, mode Mode, revision, intentDigest string) (record Record, err error) {
 	held, err := golden.AcquireLock(ctx, s.domain)
 	if err != nil {
 		return Record{}, fmt.Errorf("acquire golden while reserving session: %w", err)
@@ -231,15 +252,16 @@ func (s *Service) reserveIntent(ctx context.Context, domainID domain.ID, name Na
 	}
 
 	record = Record{
-		Version:        recordVersion,
-		Domain:         domainID,
-		Name:           name,
-		ID:             id,
-		Mode:           mode,
-		IntendedState:  StateCreating,
-		Backend:        BackendRef{Kind: "tart", ObjectID: objectID},
-		GoldenRevision: selected.Revision,
-		Readiness:      ReadinessRecord{Status: ReadinessNotReady},
+		Version:            recordVersion,
+		Domain:             domainID,
+		Name:               name,
+		ID:                 id,
+		Mode:               mode,
+		IntendedState:      StateCreating,
+		Backend:            BackendRef{Kind: "tart", ObjectID: objectID},
+		GoldenRevision:     selected.Revision,
+		RecipeIntentDigest: intentDigest,
+		Readiness:          ReadinessRecord{Status: ReadinessNotReady},
 	}
 	if err := SaveRecord(s.domain.StateRoot, domainID, record); err != nil {
 		return Record{}, fmt.Errorf("persist creating intent: %w", err)
@@ -248,6 +270,11 @@ func (s *Service) reserveIntent(ctx context.Context, domainID domain.ID, name Na
 }
 
 func (s *Service) reconcileCreating(ctx context.Context, record Record) (Record, error) {
+	if record.RecipeIntentDigest != "" {
+		if _, err := LoadRecipeIntent(s.domain.StateRoot, record.RecipeIntentDigest); err != nil {
+			return Record{}, fmt.Errorf("load bound recipe intent before clone: %w", err)
+		}
+	}
 	observation, err := s.observeExact(ctx, record.Backend.ObjectID)
 	if err != nil {
 		return Record{}, err

@@ -19,6 +19,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/importx"
 	"github.com/weshofmann/boxwarden/internal/recipe"
+	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/sessionruntime"
 	"github.com/weshofmann/boxwarden/internal/sshx"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
@@ -89,31 +90,39 @@ func publicOptions(output io.Writer) app.Options {
 			}
 			return supervisor.NewExactSnapshotReader(filepath.Join(selected.StateRoot, "runtime"))
 		},
-		AlphaPrepare: func(ctx context.Context, loaded config.Config, selected config.Domain, configPath string, input app.AlphaPrepareInput) (basebuild.PreparedResult, error) {
+		AlphaPrepare: func(ctx context.Context, loaded config.Config, selected config.Domain, configPath string, input app.AlphaPrepareInput) (app.AlphaPrepared, error) {
 			admitted, err := loaded.Domain(string(selected.ID))
 			if err != nil || admitted != selected {
-				return basebuild.PreparedResult{}, fmt.Errorf("alpha preparation requires exact configured domain")
+				return app.AlphaPrepared{}, fmt.Errorf("alpha preparation requires exact configured domain")
 			}
 			value, err := recipe.LoadRunnable(input.RecipePath)
 			if err != nil {
-				return basebuild.PreparedResult{}, fmt.Errorf("load alpha recipe: %w", err)
+				return app.AlphaPrepared{}, fmt.Errorf("load alpha recipe: %w", err)
 			}
 			request, err := alphaprep.NewRequest(selected, value, input.ISOPath, input.GuestDefinitionRoot)
 			if err != nil {
-				return basebuild.PreparedResult{}, err
+				return app.AlphaPrepared{}, err
+			}
+			digest, err := session.PublishRecipeIntent(selected.StateRoot, value)
+			if err != nil {
+				return app.AlphaPrepared{}, fmt.Errorf("capture alpha recipe intent: %w", err)
 			}
 			if _, err := fmt.Fprintf(output, "preparation-attempt: %s\nplanned-candidate: %s\n", request.Inputs.AttemptID, request.Inputs.CandidateID); err != nil {
-				return basebuild.PreparedResult{}, fmt.Errorf("report alpha preparation plan: %w", err)
+				return app.AlphaPrepared{}, fmt.Errorf("report alpha preparation plan: %w", err)
 			}
 			host, err := loaded.Host()
 			if err != nil {
-				return basebuild.PreparedResult{}, err
+				return app.AlphaPrepared{}, err
 			}
 			runner := execx.OSRunner{MaxOutputBytes: 1 << 20}
 			observer := tart.NewQualifiedObserver(runner, host.TartExecutable, host.TartHome)
 			components := alphaprep.BuildComponents{Runner: runner, Observer: observer, ScriptRunner: basebuild.OSOwnedScriptRunner{}, Launcher: basebuild.OSInstallerLauncher{},
 				OpenSSLPath: input.OpenSSLPath, OpenSSLSHA256: input.OpenSSLSHA256, XorrisoPath: input.XorrisoPath, XorrisoSHA256: input.XorrisoSHA256}
-			return alphaprep.Prepare(ctx, loaded, selected, configPath, request, hostDoctor, caStore, components)
+			base, err := alphaprep.Prepare(ctx, loaded, selected, configPath, request, hostDoctor, caStore, components)
+			if err != nil {
+				return app.AlphaPrepared{}, err
+			}
+			return app.AlphaPrepared{Base: base, IntentDigest: digest}, nil
 		},
 		AlphaExport: func(ctx context.Context, selected config.Domain, input app.AlphaExportInput, observer backend.Observer) (workspacex.ExportJournal, string, error) {
 			return workspacex.ExportSelectedWorkspace(ctx, selected.StateRoot, selected.ID, input.VolumeID,
