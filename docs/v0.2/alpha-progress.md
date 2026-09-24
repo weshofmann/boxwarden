@@ -134,6 +134,18 @@ immediate VM stop. Normal supervised stop now asks the retained Tart child for
 guest OS shutdown, waits up to 15 seconds, and then uses the existing exact
 force-stop/reap path if necessary. This is a source-verified correction; a real
 managed-volume clean-shutdown result has not yet been observed.
+Three subsequent public starts of the attached synthetic-volume sandbox
+returned READY, but the next status reported Tart `stopped`. A bounded live
+diagnostic reproduced the contradiction: the exact supervisor and Tart child,
+the Virtualization process holding the managed disk, the graphical Tart window,
+the guest IP, and SSH port 22 were all present while Tart `list` reported
+`stopped`. This matches an earlier Tart 2.32.1 observation on this host. Each
+generation was reconciled with the public exact stop; the volume Use was
+released, but ext4 still reports `needs_recovery`. Neither durable READY nor
+clean guest shutdown is qualified by these runs. Tart's lock-derived state
+must be reconciled against exact retained live evidence before lifecycle and
+export acceptance can resume. Private process IDs, paths, and disk evidence
+remain outside this document.
 Focused export tests and vet pass. Repository-wide Go tests and vet previously
 passed with host Unix socket access at `06466ee`; the default sandbox run
 could not bind test sockets, and the architecture guard was narrowed for the
@@ -145,10 +157,12 @@ remain outside the prepared cache.
 
 ## Next actions
 
-1. Validate the new bounded guest shutdown on the attached synthetic volume,
-   confirm stopped ext4 is clean, then repeat public export with a fresh
-   transaction and destination and verify returned bytes and journal. Add
-   explicit inspected-phase recovery and hostile-exit checks.
+1. Correct the observed-state/READY contract for Tart's false `stopped`
+   report using exact live supervisor and guest evidence, then verify it on
+   the owned disposable sandbox. Determine why the bounded stop leaves the
+   managed ext4 volume recovery-required; verify a clean stopped volume
+   before repeating public export with a fresh transaction and destination.
+   Add explicit inspected-phase recovery and hostile-exit checks.
 2. Attach the retained volume to a second fresh sandbox after export, then
    verify its mount and content.
 3. Run the full integration checks and real acceptance matrix, and publish the
