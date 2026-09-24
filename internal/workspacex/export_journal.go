@@ -267,6 +267,20 @@ func advanceExportJournal(ctx context.Context, stateRoot string, expected, next 
 	if err := validateExportJournal(expected); err != nil {
 		return err
 	}
+	held, err := lock.Acquire(ctx, stateRoot, "export-"+string(expected.Domain)+"-"+expected.ID)
+	if err != nil {
+		return err
+	}
+	defer held.Release()
+	return advanceExportJournalLocked(stateRoot, expected, next)
+}
+
+// The caller holds the exact export transaction lock when a phase transition
+// must be ordered with receiver publication.
+func advanceExportJournalLocked(stateRoot string, expected, next ExportJournal) error {
+	if err := validateExportJournal(expected); err != nil {
+		return err
+	}
 	if err := validateExportJournal(next); err != nil {
 		return err
 	}
@@ -277,11 +291,6 @@ func advanceExportJournal(ctx context.Context, stateRoot string, expected, next 
 		!reflect.DeepEqual(next.Selected, expected.Selected) || !validExportPhaseAdvance(expected, next) {
 		return fmt.Errorf("invalid export journal transition")
 	}
-	held, err := lock.Acquire(ctx, stateRoot, "export-"+string(expected.Domain)+"-"+expected.ID)
-	if err != nil {
-		return err
-	}
-	defer held.Release()
 	root, err := openStateRoot(stateRoot)
 	if err != nil {
 		return err

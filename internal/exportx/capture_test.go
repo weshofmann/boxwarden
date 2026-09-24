@@ -63,6 +63,12 @@ func TestCaptureExportInspectorRequiresExportModeAndRemovesSyntheticSpool(t *tes
 			if result.Evidence.Mode != "export" || result.Stream == nil {
 				t.Fatalf("export evidence missing: %+v", result.Evidence)
 			}
+			if err := result.AdmitForPublication(parent); err != nil {
+				t.Fatalf("captured spool failed exact publication admission: %v", err)
+			}
+			if err := result.AdmitForPublication(t.TempDir()); err == nil {
+				t.Fatal("captured spool admitted under another parent")
+			}
 			if err := result.Remove(); err != nil {
 				t.Fatal(err)
 			}

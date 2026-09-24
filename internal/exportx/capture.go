@@ -43,6 +43,41 @@ type CapturedInspectorStream struct {
 	streamID os.FileInfo
 }
 
+// AdmitForPublication rechecks the exact private spool and its bound parent
+// immediately before a journal owner hands Stream to the receiver. The
+// receiver closes Stream, so call this before ReceiveSelectedExport.
+func (captured CapturedInspectorStream) AdmitForPublication(expectedParent string) error {
+	if captured.Stream == nil || captured.parentID == nil || captured.streamID == nil || expectedParent != captured.parent ||
+		captured.Evidence.Mode != "export" || captured.Evidence.VMState != "stopped" || captured.Evidence.RuntimeNetworkDevices != 0 {
+		return fmt.Errorf("captured export spool lacks exact publication binding")
+	}
+	parentFile, parentRoot, parentInfo, err := openPrivateParent(expectedParent)
+	if err != nil {
+		return err
+	}
+	defer parentFile.Close()
+	defer parentRoot.Close()
+	if !os.SameFile(parentInfo, captured.parentID) {
+		return fmt.Errorf("captured spool parent changed")
+	}
+	if err := privateacl.Check(expectedParent, parentInfo, captureACLInspector); err != nil {
+		return err
+	}
+	pathInfo, err := parentRoot.Lstat("stream.bin")
+	if err != nil || !os.SameFile(pathInfo, captured.streamID) || !privateCapturedFile(pathInfo) {
+		return fmt.Errorf("captured spool path changed: %v", err)
+	}
+	opened, err := captured.Stream.Stat()
+	if err != nil || !os.SameFile(opened, pathInfo) || !privateCapturedFile(opened) || opened.Size() != captured.Evidence.ExportBytes {
+		return fmt.Errorf("captured spool descriptor changed: %v", err)
+	}
+	if err := privateacl.Check(filepath.Join(expectedParent, "stream.bin"), pathInfo, captureACLInspector); err != nil {
+		return err
+	}
+	_, err = captured.Stream.Seek(0, io.SeekStart)
+	return err
+}
+
 var captureACLInspector privateacl.Inspector = privateacl.OSInspector{}
 
 // Remove closes the captured descriptor if it is still open and removes only
