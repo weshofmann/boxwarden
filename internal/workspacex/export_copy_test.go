@@ -11,6 +11,7 @@ import (
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/domain"
+	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/workspaceformat"
 )
 
@@ -56,6 +57,36 @@ func TestCreateExportSnapshotRejectsRunningBackendBeforeTransaction(t *testing.T
 	}
 	if _, err := os.Stat(filepath.Join(root, "exports")); !os.IsNotExist(err) {
 		t.Fatalf("failed admission created export state: %v", err)
+	}
+}
+
+func TestFalseStoppedListingCannotDetachExportOrReleaseLiveWorkspace(t *testing.T) {
+	root, running := launchFixture(t, true)
+	running.IntendedState = session.StateRunning
+	running.Readiness = session.ReadinessRecord{Status: session.ReadinessReady}
+	if err := session.SaveRecord(root, domain.ID("work"), running); err != nil {
+		t.Fatal(err)
+	}
+	listedStopped := stoppedObserver{state: backend.ObjectStopped, object: running.Backend.ObjectID}
+	if _, err := Detach(context.Background(), root, domain.ID("work"), testVolumeID, string(running.Name), listedStopped); err == nil {
+		t.Fatal("false-stopped listing detached a live workspace")
+	}
+	if _, err := CreateExportSnapshot(context.Background(), root, domain.ID("work"), testVolumeID, t.TempDir(), []string{"project/report.txt"}, listedStopped); err == nil {
+		t.Fatal("false-stopped listing admitted offline export of a live workspace")
+	}
+	volume, err := LoadRecord(root, domain.ID("work"), testVolumeID)
+	if err != nil || volume.Use == nil || volume.Attachment == nil {
+		t.Fatalf("live workspace binding changed: %#v, %v", volume, err)
+	}
+	if _, err := ReleaseUseAfterObservedStop(context.Background(), root, domain.ID("work"), testVolumeID, *volume.Use, listedStopped); err == nil {
+		t.Fatal("false-stopped listing released a running session's exact Use")
+	}
+	if _, err := os.Stat(filepath.Join(root, "exports")); !os.IsNotExist(err) {
+		t.Fatalf("rejected offline export created transaction state: %v", err)
+	}
+	persisted, err := LoadRecord(root, domain.ID("work"), testVolumeID)
+	if err != nil || persisted.Use == nil || *persisted.Use != *volume.Use || persisted.Attachment == nil || *persisted.Attachment != *volume.Attachment {
+		t.Fatalf("rejected storage actions changed live binding: %#v, %v", persisted, err)
 	}
 }
 

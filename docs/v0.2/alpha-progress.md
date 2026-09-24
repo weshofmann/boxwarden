@@ -60,6 +60,13 @@ the demotion. Focused supervisor/runtime/app tests and targeted vet pass. This
 corrects failure reporting; the guest SSH loss itself remains unexplained,
 and the real failed run is not requalified.
 
+A storage regression presents an exact but false `stopped` Tart listing while
+the session has durable running intent and an exact volume Use. Detach, offline
+export snapshot, and direct Use release all refuse, preserving the attachment
+and Use without creating an export transaction. This checks the stopped-only
+gate under the observed contradiction; it does not qualify Tart's behavior or
+explain the guest SSH failure.
+
 The admitted prepared base has been reused by public recipe-bound create.
 Public start, fresh mount-bound READY, and stop succeeded twice with separate
 Use generations. The independent ext4 volume was detached from the stopped
