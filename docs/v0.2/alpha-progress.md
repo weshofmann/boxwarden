@@ -106,17 +106,26 @@ identity. A focused fixture rejected a changed request, source input, and
 extra initrd bytes. The production bundle with a synthetic request passed
 read-only host admission from the clean integration checkout. A real
 journal-derived request and managed-volume export remain unqualified.
+The journal-bound capture entry point now holds the exact transaction lock
+through request derivation, production bundle admission, export-mode helper
+reap, and post-run snapshot rehash. A subprocess fixture proved bound launch
+arguments and rejected a changed snapshot without exposing a spool. The
+publication entry point re-admits the spool, snapshot, and destination parent;
+persists `inspected`; gives only the journal selection to the bounded receiver;
+and persists `published` after a complete receiver result. A fixture published
+the selected file to a new directory; an extra path and a changed snapshot
+left no published tree. These tests use a synthetic helper and stream. An
+ambiguous post-rename failure returns the exact final path and leaves the
+journal `inspected` for explicit reconciliation; that recovery path remains.
 Real managed-volume qualification remains open. The earlier failed base
 attempt was corrected and a fresh base built and qualified; failed attempts
 remain outside the prepared cache.
 
 ## Next actions
 
-1. Generate a private bundle from the real journal request and exact snapshot.
-   Connect admitted launch inputs to capture, require export-mode evidence,
-   recheck snapshot bytes after helper reap, then give the journal selection
-   and closed stream to the receiver. Qualify with the managed synthetic
-   volume and hostile exits.
+1. Generate a private bundle from the real journal request and exact snapshot,
+   then run the capture and publication path against the managed synthetic
+   volume. Add explicit inspected-phase recovery and hostile-exit checks.
 2. Attach the retained volume to a second fresh sandbox after export, then
    verify its mount and content.
 3. Run the full integration checks and real acceptance matrix, and publish the
