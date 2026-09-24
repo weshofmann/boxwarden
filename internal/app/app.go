@@ -54,6 +54,7 @@ type SessionStopper interface {
 type SessionStopperFactory func(config.Config, config.Domain, string) (SessionStopper, error)
 
 type AlphaRebuildFunc func(context.Context, config.Config, config.Domain, string, string, string) (session.Record, error)
+type AlphaDeleteFunc func(context.Context, config.Config, config.Domain, string) error
 
 // StatusSnapshotReader is read-only evidence from one exact live supervisor.
 // A backend process observation or persisted success cannot substitute for it.
@@ -92,6 +93,7 @@ type Options struct {
 	StatusSnapshotFactory StatusSnapshotFactory
 	AlphaPrepare          AlphaPrepareFunc
 	AlphaRebuild          AlphaRebuildFunc
+	AlphaDelete           AlphaDeleteFunc
 	AlphaWorkspaceCreate  AlphaWorkspaceCreateFunc
 	AlphaExport           AlphaExportFunc
 	AlphaExportResume     AlphaExportResumeFunc
@@ -338,6 +340,18 @@ func Run(ctx context.Context, args []string, options Options) error {
 		}
 		_, err = fmt.Fprintf(options.Output, "domain: %s\nsession: %s\nstate: %s\nbase: %s\n", rebuilt.Domain, rebuilt.Name, rebuilt.IntendedState, rebuilt.GoldenRevision)
 		return err
+	case commandSessionDelete:
+		if _, err := session.ParseName(command.name); err != nil {
+			return err
+		}
+		if options.AlphaDelete == nil {
+			return errors.New("alpha session deleter is required")
+		}
+		if err := options.AlphaDelete(ctx, loaded, selectedDomain, command.name); err != nil {
+			return fmt.Errorf("delete session: %w", err)
+		}
+		_, err = fmt.Fprintf(options.Output, "domain: %s\nsession: %s\nstate: deleted\nworkspaces: retained\n", selectedDomain.ID, command.name)
+		return err
 	case commandWorkspaceAttach:
 		if options.Observer == nil {
 			return errors.New("backend observer is required")
@@ -411,6 +425,7 @@ const (
 	commandSessionStart
 	commandSessionStop
 	commandSessionRebuild
+	commandSessionDelete
 	commandInit
 	commandDoctor
 	commandDomainInit
@@ -575,6 +590,11 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.name = remaining[2]
 		return base, nil
 	}
+	if len(remaining) == 3 && remaining[0] == "session" && remaining[1] == "delete" {
+		base.kind = commandSessionDelete
+		base.name = remaining[2]
+		return base, nil
+	}
 	if len(remaining) >= 3 && remaining[0] == "session" && remaining[1] == "rebuild" {
 		rebuildSet := flag.NewFlagSet("session rebuild", flag.ContinueOnError)
 		rebuildSet.SetOutput(io.Discard)
@@ -686,7 +706,7 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.kind, base.alphaExport = commandWorkspaceExport, input
 		return base, nil
 	}
-	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] [--recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256] <session>, session start <session>, session stop <session>, session rebuild [--base REVISION | recipe inputs] <session>, session status <session>, workspace create --bundle PATH --source-root PATH --filesystem-uuid UUID --size-mib N <new-volume-uuid>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, workspace export --destination PATH --select RELATIVE [--select RELATIVE...] --source-root PATH --iso PATH --go PATH <volume-uuid>, workspace export resume --source-root PATH --iso PATH --go PATH <transaction-uuid>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
+	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] [--recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256] <session>, session start <session>, session stop <session>, session delete <stopped-session>, session rebuild [--base REVISION | recipe inputs] <session>, session status <session>, workspace create --bundle PATH --source-root PATH --filesystem-uuid UUID --size-mib N <new-volume-uuid>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, workspace export --destination PATH --select RELATIVE [--select RELATIVE...] --source-root PATH --iso PATH --go PATH <volume-uuid>, workspace export resume --source-root PATH --iso PATH --go PATH <transaction-uuid>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
 }
 
 func writeWorkspaceAttachment(output io.Writer, record workspacex.Record, state string) error {

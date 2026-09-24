@@ -74,6 +74,7 @@ func publicOptions(output io.Writer) app.Options {
 			return sessionruntime.NewStarter(loaded, selected, path)
 		},
 		AlphaRebuild: sessionruntime.Rebuild,
+		AlphaDelete:  sessionruntime.Delete,
 		AlphaWorkspaceCreate: func(ctx context.Context, selected config.Domain, input app.AlphaWorkspaceCreateInput) (workspacex.Record, error) {
 			formatter := workspaceformat.VZFormatter{StateRoot: selected.StateRoot, Domain: selected.ID,
 				BundlePath: input.BundlePath, SourceRoot: input.SourceRoot}

@@ -5,6 +5,29 @@ Updated: 2026-09-24 UTC. Integration branch:
 The launch target is ten days from 2026-09-23 14:44 UTC. Stop starting new
 work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
 
+## Current snapshot
+
+- Complete: qualified recipe-bound base/create/start, retained ext4 workspace
+  across stop, reattach, and same-software rebuild, plus selected stopped
+  export and inspected-phase resume on synthetic data. The full local Go
+  suite, vet, and CLI build passed at the prior source checkpoint.
+- In progress: public stopped-only `session delete` now has source-level CLI,
+  Tart composition, durable deleting intent, exact backend retirement, and
+  volume retention. Regression tests cover disk bytes, post-effect retry,
+  partial two-volume detach, sync failure, missing disk, running backend,
+  and active Use. A separate reviewer found three Important issues; all were
+  corrected and the rereview found no remaining Important issue. Real-VM
+  deletion has not yet been exercised.
+- Verification: `GOTOOLCHAIN=local go test -count=1 ./...`, `go vet ./...`,
+  CLI build, and `git diff --check` pass for this source checkpoint. The
+  separate reviewer rechecked the corrected deletion path.
+- Next: qualify deletion of one exact alpha-owned stopped sandbox and verify
+  its retained volume. Implement explicit bounded synthetic project ingress
+  afterward.
+- Limits: hosted CI, software-changing rebuild, ambiguous export final-rename
+  recovery, intermittent dirty stop, GUI agent interface, and final fresh
+  acceptance remain open. No human action is currently needed.
+
 ## Verified checkpoints
 
 | Area | Evidence and limit |
@@ -477,10 +500,10 @@ acceptance run and GUI/provider sign-in checks.
    guest SSH loss and false-stopped qualification remain open.
 2. Qualify or explicitly defer ambiguous post-final-rename export recovery;
    an occupied final directory still requires manual reconciliation.
-3. Implement the missing public stopped-only sandbox delete-with-retain and
-   explicit synthetic host-project ingress surfaces under the closeout plan.
-   Neither command exists yet; prior reattachment used two retained sessions
-   and guest-created synthetic files.
+3. Qualify the new public stopped-only sandbox delete-with-retain on one
+   exact alpha-owned synthetic session and verify its workspace stays intact.
+   Then implement explicit bounded synthetic host-project ingress; prior
+   reattachment used guest-created synthetic files.
 4. Run the fresh real acceptance matrix and publish the runnable build, exact
    source SHA, quickstart, synthetic demo, and limits. The full local Go suite,
    vet, and CLI build have passed; hosted CI remains unavailable.

@@ -19,6 +19,8 @@ import (
 
 const maxRecordBytes = 1 << 20
 
+var syncWorkspaceRecordDirectory = syncDirectory
+
 type storeStage string
 type mutationKind uint8
 
@@ -149,7 +151,7 @@ func saveRecordTransitionExpectedPending(stateRoot string, expectedDomain domain
 			return err
 		}
 	}
-	if err := syncDirectory(workspaces); err != nil {
+	if err := syncWorkspaceRecordDirectory(workspaces); err != nil {
 		return err
 	}
 	return nil

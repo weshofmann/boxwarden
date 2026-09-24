@@ -475,6 +475,36 @@ func TestSessionRebuildRoutesExactBaseAndJournalResume(t *testing.T) {
 	}
 }
 
+func TestSessionDeleteRoutesOnlyExplicitDomainAndExactName(t *testing.T) {
+	configPath := writeStatusFixture(t, "work", "dev")
+	called := 0
+	var output bytes.Buffer
+	deleter := func(_ context.Context, loaded config.Config, selected config.Domain, name string) error {
+		called++
+		if selected.ID != "work" || selected.StateRoot != filepath.Dir(configPath) || name != "dev" {
+			t.Fatalf("deletion routed to foreign authority: %+v %q", selected, name)
+		}
+		if _, err := loaded.Domain("work"); err != nil {
+			t.Fatal(err)
+		}
+		return nil
+	}
+	args := []string{"--config", configPath, "--domain", "work", "session", "delete", "dev"}
+	if err := Run(context.Background(), args, Options{AlphaDelete: deleter, Output: &output}); err != nil || called != 1 ||
+		!strings.Contains(output.String(), "state: deleted\nworkspaces: retained\n") {
+		t.Fatalf("delete route = %q, %v, calls=%d", output.String(), err, called)
+	}
+	for _, invalid := range [][]string{
+		{"--config", configPath, "session", "delete", "dev"},
+		{"--config", configPath, "--domain", "work", "session", "delete", "../dev"},
+		{"--config", configPath, "--domain", "work", "session", "delete", "--all", "dev"},
+	} {
+		if err := Run(context.Background(), invalid, Options{AlphaDelete: deleter, Output: &bytes.Buffer{}}); err == nil || called != 1 {
+			t.Fatalf("invalid delete reached mutation: %v, calls=%d", err, called)
+		}
+	}
+}
+
 func TestSessionRebuildRecipeRequiresQualifiedPreparedReceipt(t *testing.T) {
 	configPath, selected := writeV2DomainFixture(t, "alpha")
 	root := t.TempDir()
