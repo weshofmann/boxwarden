@@ -14,7 +14,7 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
 | Reusable preparation | Strict versioned recipe and ISO checks, candidate build, guest preparation, fresh-clone qualifier, private evidence, and cache admission are implemented. A fresh real build using the corrected finalizer completed installation, guest preparation, clone-ready shutdown, and qualification. Its fresh clone reached READY, passed package-inventory and identity checks, and stopped; the versioned prepared record was admitted. This is base qualification, not the full workspace/export acceptance path. |
 | Workspace volume | One alpha-owned 64 MiB ext4 volume was formatted in a zero-NIC VM and independently inspected. Its synthetic file retained its digest across an earlier stop/restart after manual remount. Public detach and attach moved this exact volume from a stopped original system clone to a separate replacement system clone without copying the disk. The replacement guest file manager opened the mounted 57-byte synthetic file and displayed its expected content. The corrected public stop released Use and left ext4 clean; source and export snapshot SHA-256 matched. |
 | Automatic mount and READY | The static generic guest helper resolves an exact FS UUID, mounts ext4 at a validated path, checks existing mounts and read-write state, and probes exact bindings. The host owner derives those bindings from admitted session/Use records, ensures them before READY, and repeats the bound probe for status. Full local Go tests, focused race tests, vet, and artifact checks passed at `5c84520`. The fresh original clone reached mount-bound READY in two generations; the separate replacement clone also reached mount-bound READY with the same reattached volume and later exposed the expected file in its GUI. Both are stopped now. |
-| Controlled export | Bounded receiver, exact stopped-volume snapshot, private helper capture, and selected publication have targeted tests. After clean guest shutdown, a real public export published one selected 57-byte regular file into a new private directory. Its SHA-256 matched the known synthetic guest file; the durable journal read `published`, and the source and snapshot digests matched. Earlier dirty-volume and low-headroom attempts failed without publishing and remain private evidence. A source-tested public inspected-journal retry re-captures only from the exact snapshot and empty original destination; hard-exit ambiguity and a fresh real retry remain open. |
+| Controlled export | Bounded receiver, exact stopped-volume snapshot, private helper capture, and selected publication have targeted tests. After clean guest shutdown, a real public export published one selected 57-byte regular file into a new private directory. Its SHA-256 matched the known synthetic guest file; the durable journal read `published`, and the source and snapshot digests matched. A later public resume of an earlier clean `snapshot-ready` transaction published the same selected file and digest, with no leftover spool or running inspector. An earlier dirty-volume attempt remains private failed evidence. Inspected-phase hard-exit ambiguity remains open. |
 | Inspector bundle admission | A clean-source production bundle from the pinned ISO passed independent artifact checks and host admission with both synthetic and real journal-derived requests. Admission checks tracked source bytes, kernel/ISO pins, seven artifact digests and private metadata, deterministic appended guest/request initrd, and the signed helper's sole Virtualization entitlement. The first live export-mode VM rejected an unclean volume; a later fresh clean-volume run completed selected publication with zero-NIC inspector evidence. |
 | Example | `examples/v0.2-alpha-base.json` passed public recipe/ISO validation. It requests the Desktop source, a small package set, and one named workspace intent. |
 | Recipe-bound create | `session create` accepts exact recipe/ISO/guest definition/tool inputs, prepares or reuses a qualified base, and calls `CreateFromRevision`. A focused fixture and the real public command both selected the newly prepared revision without changing the domain current golden. A later public `alpha prepare` reused the admitted cache after verified redundant installer staging was retired, without creating an attempt journal or new Tart object. |
@@ -144,7 +144,18 @@ does not adopt either. Invoke as `--domain alpha workspace export resume
 --source-root PATH --iso PATH --go PATH <transaction-uuid>`; the journal
 supplies the original selection and destination. Full local
 `go test -count=1 ./...`, `go vet ./...`, CLI build, and diff checks passed.
-A real-host retry remains.
+A real-host retry remains for the `inspected` phase.
+
+The public resume was also exercised against the retained clean
+`snapshot-ready` transaction from an earlier host-headroom refusal. After
+healthy doctor, stopped Tart inventory, clean source and snapshot digest,
+empty destination, and disk-reserve preflight, a fresh zero-NIC inspector
+published exactly the selected 57-byte regular file. The output SHA-256
+matched the prior successful export, the journal advanced to `published`,
+the snapshot digest still matched, and no spool or running Tart object
+remained. The older `inspected` transaction's snapshot has ext4
+`needs_recovery`; rerunning it would predictably fail and would not qualify
+the retry path. It remains preserved as failed evidence.
 
 The managed-volume shutdown correction at `7eeba47` now passes one real
 attached-volume public stop: the session and backend are consistently stopped,
