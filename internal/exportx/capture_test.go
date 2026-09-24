@@ -18,8 +18,10 @@ func TestCaptureInspectorHelperProcess(t *testing.T) {
 		_, _ = io.WriteString(os.Stdout, "BWEX test bytes")
 		_, _ = io.WriteString(os.Stderr, "BOOT_EVIDENCE {\"console_bytes\":10,\"export_bytes\":15,\"runtime_network_devices\":0,\"vm_state\":\"stopped\"}\n")
 	case "export":
-		_, _ = io.WriteString(os.Stdout, "BWEX test bytes")
-		_, _ = io.WriteString(os.Stderr, "BOOT_EVIDENCE {\"console_bytes\":10,\"export_bytes\":15,\"runtime_network_devices\":0,\"vm_state\":\"stopped\",\"inspector_mode\":\"export\"}\n")
+		_, _ = io.WriteString(os.Stdout, "BWEX\x00\x010123456789abcdef")
+		_, _ = io.WriteString(os.Stderr, "BOOT_EVIDENCE {\"console_bytes\":10,\"export_bytes\":22,\"runtime_network_devices\":0,\"vm_state\":\"stopped\",\"inspector_mode\":\"export\"}\n")
+	case "empty-export":
+		_, _ = io.WriteString(os.Stderr, "BOOT_EVIDENCE {\"console_bytes\":10,\"export_bytes\":0,\"runtime_network_devices\":0,\"vm_state\":\"stopped\",\"inspector_mode\":\"export\"}\n")
 	case "overflow":
 		_, _ = io.WriteString(os.Stdout, strings.Repeat("x", 64))
 		_, _ = io.WriteString(os.Stderr, "BOOT_EVIDENCE {\"console_bytes\":0,\"export_bytes\":64,\"runtime_network_devices\":0,\"vm_state\":\"stopped\"}\n")
@@ -41,7 +43,7 @@ func TestCaptureExportInspectorRequiresExportModeAndRemovesSyntheticSpool(t *tes
 	for _, tc := range []struct {
 		mode string
 		pass bool
-	}{{"ok", false}, {"export", true}} {
+	}{{"ok", false}, {"export", true}, {"empty-export", false}} {
 		t.Run(tc.mode, func(t *testing.T) {
 			parent := t.TempDir()
 			if err := os.Chmod(parent, 0o700); err != nil {

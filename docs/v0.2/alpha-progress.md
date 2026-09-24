@@ -14,8 +14,8 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
 | Reusable preparation | Strict versioned recipe and ISO checks, candidate build, guest preparation, fresh-clone qualifier, private evidence, and cache admission are implemented. A fresh real build using the corrected finalizer completed installation, guest preparation, clone-ready shutdown, and qualification. Its fresh clone reached READY, passed package-inventory and identity checks, and stopped; the versioned prepared record was admitted. This is base qualification, not the full workspace/export acceptance path. |
 | Workspace volume | One alpha-owned 64 MiB ext4 volume was formatted in a zero-NIC VM and independently inspected. Its synthetic file retained its digest across an earlier stop/restart after manual remount. Public detach and attach moved this exact volume from a stopped original system clone to a separate replacement system clone without copying the disk. The replacement guest file manager opened the mounted 57-byte synthetic file and displayed its expected content; the known bytes match the previously recorded SHA-256. Public stops cleared exact generation Use while preserving the volume identity. Offline export qualification remains pending. |
 | Automatic mount and READY | The static generic guest helper resolves an exact FS UUID, mounts ext4 at a validated path, checks existing mounts and read-write state, and probes exact bindings. The host owner derives those bindings from admitted session/Use records, ensures them before READY, and repeats the bound probe for status. Full local Go tests, focused race tests, vet, and artifact checks passed at `5c84520`. The fresh original clone reached mount-bound READY in two generations; the separate replacement clone also reached mount-bound READY with the same reattached volume and later exposed the expected file in its GUI. Both are stopped now. |
-| Controlled export | Bounded host stream receiver and zero-NIC synthetic inspector boot/transport have tests. The inspector mounted a private 64 MiB ext4 copy read-only with journal replay disabled and reported the exact digest and size of one fixed file. After a rejected first run exposed TTY CRLF corruption, a fresh run passed strict 573-byte stream parsing, zero-NIC/stopped/helper checks, and unchanged disk identity and SHA-256. The standalone hardlink gate rejects a linked disk and admits a valid one-link control. A source-level stopped-volume snapshot transaction copies qualified bytes under locks and journals exact identity before clearing Pending. Targeted tests cover copy failure and exact crash recovery. A separate host capture gate now spools bounded helper output privately and requires reaped, stopped, zero-NIC evidence before exposing the closed stream. Its focused tests use a subprocess fixture; real managed-volume and public export remain pending. |
-| Inspector bundle admission | A clean-source production bundle from the pinned ISO and a synthetic private request passed independent artifact checks and host admission at `e1b060c`. Admission checks the exact tracked source inventory, kernel/ISO pins, seven artifact digests and private metadata, deterministic appended guest/request initrd, request bytes, and the signed helper's sole Virtualization entitlement. Focused tests, race detection, and vet passed. No real journal-derived bundle or live export-mode VM has run. |
+| Controlled export | Bounded receiver, exact stopped-volume snapshot, private helper capture, and selected publication have targeted tests. An isolated inspector previously returned a fixed file from a clean private ext4 copy with unchanged disk bytes. The first public managed-volume export reached a real zero-NIC inspector boot but failed safely: the current stopped volume has ext4 `needs_recovery`, so the guest emitted no stream and the receiver published no tree. A focused regression now rejects a stopped helper with fewer than 22 export bytes at capture. The failed transaction remains private for diagnosis; a successful public export is pending. |
+| Inspector bundle admission | A clean-source production bundle from the pinned ISO passed independent artifact checks and host admission with both synthetic and real journal-derived requests. Admission checks tracked source bytes, kernel/ISO pins, seven artifact digests and private metadata, deterministic appended guest/request initrd, and the signed helper's sole Virtualization entitlement. The first live export-mode VM stopped with zero NICs, but guest filesystem admission rejected the unclean volume. |
 | Example | `examples/v0.2-alpha-base.json` passed public recipe/ISO validation. It requests the Desktop source, a small package set, and one named workspace intent. |
 | Recipe-bound create | `session create` accepts exact recipe/ISO/guest definition/tool inputs, prepares or reuses a qualified base, and calls `CreateFromRevision`. A focused fixture and the real public command both selected the newly prepared revision without changing the domain current golden. A later public `alpha prepare` reused the admitted cache after verified redundant installer staging was retired, without creating an attempt journal or new Tart object. |
 
@@ -124,20 +124,26 @@ its synthetic-request output passed production admission. A rejected receiver
 stream can be recaptured and retried from `inspected` while the exact
 destination remains empty. `workspace export` composes snapshot, build,
 capture, selected publication, and a final published-journal read for the
-explicit `alpha` domain. Its CLI routing tests pass; the managed-volume public
-command has not yet run. Repository-wide Go tests and vet passed with host
-Unix socket access at `06466ee`; the default sandbox run could not bind test
-sockets, and the architecture guard was narrowed for the v0.2 export calls.
+explicit `alpha` domain. Its CLI routing tests pass. The first managed-volume
+public command preserved its snapshot and reached the inspector, but guest
+ext4 admission rejected a recovery-required filesystem. The host capture had
+accepted zero export bytes and the receiver rejected EOF before publication;
+the new capture regression rejects that false pass and removes its spool.
+Focused export tests and vet pass. Repository-wide Go tests and vet previously
+passed with host Unix socket access at `06466ee`; the default sandbox run
+could not bind test sockets, and the architecture guard was narrowed for the
+v0.2 export calls.
 Real managed-volume qualification remains open. The earlier failed base
 attempt was corrected and a fresh base built and qualified; failed attempts
 remain outside the prepared cache.
 
 ## Next actions
 
-1. Run the public `workspace export` path against the stopped managed synthetic
-   volume and verify the returned file and journal. Add explicit recovery for
-   interrupted inspected-phase capture and post-rename ambiguity, plus hostile
-   exits.
+1. Determine why normal session stop left the synthetic ext4 volume requiring
+   recovery. Restore a clean state through an isolated guest operation, then
+   repeat public export with a fresh transaction and destination and verify
+   returned bytes and journal. Add explicit inspected-phase recovery and
+   hostile-exit checks.
 2. Attach the retained volume to a second fresh sandbox after export, then
    verify its mount and content.
 3. Run the full integration checks and real acceptance matrix, and publish the

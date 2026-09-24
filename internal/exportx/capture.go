@@ -153,6 +153,11 @@ func CaptureExportInspector(ctx context.Context, executable string, args []strin
 			fmt.Errorf("inspector helper did not prove export mode"), captured.Remove(),
 		)
 	}
+	if captured.Evidence.ExportBytes < 22 {
+		return CapturedInspectorStream{}, errors.Join(
+			fmt.Errorf("inspector guest produced no complete export header"), captured.Remove(),
+		)
+	}
 	return captured, nil
 }
 

@@ -21,8 +21,8 @@ func TestBoundExportCaptureHelperProcess(t *testing.T) {
 	if len(os.Args) < 3 || os.Args[2] != "bound-export-helper" {
 		return
 	}
-	_, _ = os.Stdout.Write([]byte("BWEX"))
-	_, _ = fmt.Fprintln(os.Stderr, `BOOT_EVIDENCE {"console_bytes":0,"export_bytes":4,"runtime_network_devices":0,"vm_state":"stopped","inspector_mode":"export"}`)
+	_, _ = os.Stdout.Write([]byte("BWEX\x00\x010123456789abcdef"))
+	_, _ = fmt.Fprintln(os.Stderr, `BOOT_EVIDENCE {"console_bytes":0,"export_bytes":22,"runtime_network_devices":0,"vm_state":"stopped","inspector_mode":"export"}`)
 	os.Exit(0)
 }
 
