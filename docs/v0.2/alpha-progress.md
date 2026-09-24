@@ -15,6 +15,7 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
 | Workspace volume | One alpha-owned 64 MiB ext4 volume was formatted in a zero-NIC VM and independently inspected. Its synthetic file retained its digest across an earlier stop/restart after manual remount. Public detach and attach moved this exact volume from a stopped original system clone to a separate replacement system clone without copying the disk. The replacement guest file manager opened the mounted 57-byte synthetic file and displayed its expected content; the known bytes match the previously recorded SHA-256. Public stops cleared exact generation Use while preserving the volume identity. Offline export qualification remains pending. |
 | Automatic mount and READY | The static generic guest helper resolves an exact FS UUID, mounts ext4 at a validated path, checks existing mounts and read-write state, and probes exact bindings. The host owner derives those bindings from admitted session/Use records, ensures them before READY, and repeats the bound probe for status. Full local Go tests, focused race tests, vet, and artifact checks passed at `5c84520`. The fresh original clone reached mount-bound READY in two generations; the separate replacement clone also reached mount-bound READY with the same reattached volume and later exposed the expected file in its GUI. Both are stopped now. |
 | Controlled export | Bounded host stream receiver and zero-NIC synthetic inspector boot/transport have tests. The inspector mounted a private 64 MiB ext4 copy read-only with journal replay disabled and reported the exact digest and size of one fixed file. After a rejected first run exposed TTY CRLF corruption, a fresh run passed strict 573-byte stream parsing, zero-NIC/stopped/helper checks, and unchanged disk identity and SHA-256. The standalone hardlink gate rejects a linked disk and admits a valid one-link control. A source-level stopped-volume snapshot transaction copies qualified bytes under locks and journals exact identity before clearing Pending. Targeted tests cover copy failure and exact crash recovery. A separate host capture gate now spools bounded helper output privately and requires reaped, stopped, zero-NIC evidence before exposing the closed stream. Its focused tests use a subprocess fixture; real managed-volume and public export remain pending. |
+| Inspector bundle admission | A clean-source production bundle from the pinned ISO and a synthetic private request passed independent artifact checks and host admission at `e1b060c`. Admission checks the exact tracked source inventory, kernel/ISO pins, seven artifact digests and private metadata, deterministic appended guest/request initrd, request bytes, and the signed helper's sole Virtualization entitlement. Focused tests, race detection, and vet passed. No real journal-derived bundle or live export-mode VM has run. |
 | Example | `examples/v0.2-alpha-base.json` passed public recipe/ISO validation. It requests the Desktop source, a small package set, and one named workspace intent. |
 | Recipe-bound create | `session create` accepts exact recipe/ISO/guest definition/tool inputs, prepares or reuses a qualified base, and calls `CreateFromRevision`. A focused fixture and the real public command both selected the newly prepared revision without changing the domain current golden. A later public `alpha prepare` reused the admitted cache after verified redundant installer staging was retired, without creating an attempt journal or new Tart object. |
 
@@ -95,23 +96,27 @@ The ordinary builder refused the dirty checkout. A clean-source build then
 passed from published `b51d900`; its source and ISO pins, seven file
 digests, signed helper, ARM64 guest type, and appended guest/request members
 were independently checked. It used a synthetic private request.
-Control-plane artifact admission and live export boot remain pending.
+Live export boot remains pending.
 The builder now also records the exact inventory and digests of 16 tracked
-inspector build inputs. A test-only full build passed, and an independent
-check matched every recorded input to the current source. This allows a
-docs-only progress commit without invalidating executable artifact identity;
-clean-source bundle admission must enforce the complete input set.
+inspector build inputs. A test-only and a clean-source production full build
+passed, and independent checks matched every recorded input and artifact.
+The host admission gate now enforces this inventory rather than requiring the
+same commit SHA, so a docs-only commit does not invalidate executable artifact
+identity. A focused fixture rejected a changed request, source input, and
+extra initrd bytes. The production bundle with a synthetic request passed
+read-only host admission from the clean integration checkout. A real
+journal-derived request and managed-volume export remain unqualified.
 Real managed-volume qualification remains open. The earlier failed base
 attempt was corrected and a fresh base built and qualified; failed attempts
 remain outside the prepared cache.
 
 ## Next actions
 
-1. Admit the clean-source inspector bundle against the real journal request
-   and exact snapshot. Connect capture and require export-mode evidence,
+1. Generate a private bundle from the real journal request and exact snapshot.
+   Connect admitted launch inputs to capture, require export-mode evidence,
    recheck snapshot bytes after helper reap, then give the journal selection
-   and closed stream to the receiver. Qualify with the managed
-   synthetic volume and hostile exits.
+   and closed stream to the receiver. Qualify with the managed synthetic
+   volume and hostile exits.
 2. Attach the retained volume to a second fresh sandbox after export, then
    verify its mount and content.
 3. Run the full integration checks and real acceptance matrix, and publish the
