@@ -15,6 +15,14 @@ The public result contains fixed enums and a Boolean, not guest stderr or
 private host traces. This keeps the diagnostic bounded while making the
 intermittent shutdown branch observable on the next fresh trial.
 
+That trial reached mount-bound READY on a fresh empty ext4 workspace, then
+reported `request=tart_fallback forced=true` after 67.53 seconds. Public
+status retained the result and observed the backend stopped. The raw stopped
+volume had the expected UUID but `needs_recovery=true`. This identifies a
+failed or ambiguous pinned guest request followed by Tart fallback and force
+stop as one dirty branch. The request failure reason still needs private
+diagnosis; the result alone does not prove whether unmount was attempted.
+
 ## Exact workspace quiesce before poweroff, 2026-09-24
 
 A freshly rebuilt and qualified base carrying the fixed systemd shutdown
