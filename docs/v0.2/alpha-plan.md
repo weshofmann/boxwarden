@@ -105,6 +105,54 @@ Worker-owned incomplete files stay unstaged; a sanitized progress-only commit
 is appropriate when code is not yet safe. Never use an empty commit to imply
 progress, rewrite published history, or integrate into `main`.
 
+## Rebuild contract and implementation sequence
+
+The public rebuild keeps the sandbox name, session UUID, and workspace
+attachment IDs stable. It replaces only the system backend and selected base.
+The immutable SSH pin is currently keyed by session UUID and bound to the
+backend object, so a fresh clone needs one explicitly journal-authorized pin
+transition during serial bootstrap. Ordinary pin admission remains immutable.
+This design was challenged in a separate read-only lifecycle/storage review;
+its findings are incorporated below. It is a plan, not implemented behavior.
+
+1. Extend the strict session record with a bounded rebuild journal: operation
+   UUID, phase, exact old and candidate backend IDs and base revisions, and
+   exact old pin presence, binding, and digest. Reserve the candidate ID across
+   both active records and all rebuild journals. A journal blocks competing
+   start, attach, detach, export, and rebuild mutations, while status remains
+   read-only and exact safety stop of the active generation remains available.
+2. Require durable stopped old intent from clone creation or exact stop/reap,
+   no Use on any attachment, and a fresh exact backend observation before
+   recording the candidate identity. Clone only from the recorded admitted
+   stopped base,
+   then randomize the candidate MAC before any boot. A retry accepts only the
+   exact recorded stopped clone and may repeat randomization only while the
+   journal proves the candidate has never booted; ambiguous candidate state
+   blocks. Neither a false Tart `stopped` listing nor an advisory lock alone
+   proves release of a live Use.
+3. Persist the active-backend switch and journal phase before starting the
+   candidate. Reuse the normal new-generation supervisor, batch Use
+   reservation, serial bootstrap, mount-bound READY, and stop paths through
+   narrow internal rebuild continuation. During bootstrap, the trusted host
+   checks the exact journal witness and serial-observed candidate host key,
+   then atomically transitions the pin from the exact old bytes to the exact
+   new binding/key. An absent old pin is permitted only if the journal recorded
+   absence; retry accepts only exact old or exact new state. No old and new VM
+   may run concurrently. A failure after candidate launch retains both system
+   objects, the workspace record, and the journal; it never silently rolls
+   back a candidate that may have written the workspace.
+4. Only fresh mount-bound READY permits durable retirement intent for the old
+   system. Delete that exact old backend under the journal and reconcile an
+   absent old object only in the recorded delete phase. Clear the journal last.
+   A failed deletion leaves the new system and old object identified for retry.
+
+Implementation checkpoints are record/journal validation and operation gates;
+stopped candidate clone and crash retry; journal-bound pin transition and
+internal new-generation cutover; exact old retirement and recovery; then the
+public CLI, targeted failure matrix, independent review, and real synthetic
+rebuild with a retained workspace. Each checkpoint gets focused verification
+and a prompt push. Full integration and fresh real acceptance remain separate.
+
 ## Planned guest-only recipe execution contract
 
 The management SSH path now accepts fixed probe, time-zone, package inventory,

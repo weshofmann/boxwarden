@@ -217,13 +217,14 @@ remain outside the prepared cache.
 
 ## Next actions
 
-1. Diagnose the fresh guest SSH loss and exact supervisor snapshot timeout
-   before another VM qualification. Preserve the failed dirty-volume run and
-   requalify from a fresh baseline; test stopped-only gates for contradictory
-   Tart state. Add inspected-phase recovery and hostile-exit checks to the
-   now-successful public export path.
-2. Once a clean stopped synthetic volume is available again, complete export
-   recovery and reattach it to a fresh sandbox; verify its mount and content.
+1. Implement the reviewed rebuild contract in `alpha-plan.md`, starting with
+   durable journal validation and ordinary-operation gates, then exact
+   candidate preparation, pin transition, cutover, and retirement. Preserve
+   the stopped failed VM and dirty volume. The guest SSH loss remains open;
+   do not claim real false-stopped or rebuild qualification from that run.
+2. Add inspected-phase export reconciliation and hostile-exit checks. Rebuild
+   and export a fresh clean synthetic volume through the public path, then
+   reattach it to a fresh sandbox and verify its mount and content.
 3. Run the full integration checks and real acceptance matrix, and publish the
    runnable build, exact source SHA, quickstart, synthetic demo, and limits.
 
