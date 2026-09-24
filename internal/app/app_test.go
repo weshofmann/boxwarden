@@ -152,6 +152,44 @@ func TestWorkspaceExportRoutesExactDomainSelectionAndInputs(t *testing.T) {
 	}
 }
 
+func TestWorkspaceExportResumeRoutesExactJournalWithoutNewSelection(t *testing.T) {
+	configPath, selected := writeV2DomainFixture(t, "alpha")
+	const transaction = "10213243-5465-4768-899a-bbccddeeff00"
+	input := AlphaExportResumeInput{TransactionID: transaction, SourceRoot: "/private/clean-source",
+		ISOPath: "/private/ubuntu.iso", GoBinary: "/private/bin/go"}
+	destination := filepath.Join(t.TempDir(), "returned")
+	called := 0
+	var output bytes.Buffer
+	options := Options{Output: &output, AlphaExportResume: func(_ context.Context, actual config.Domain, received AlphaExportResumeInput) (workspacex.ExportJournal, string, error) {
+		called++
+		if actual != selected || received != input {
+			t.Fatalf("resume lost exact domain or transaction: %+v, %+v", actual, received)
+		}
+		return workspacex.ExportJournal{ID: transaction, Domain: actual.ID,
+				DestinationParent: destination, Phase: workspacex.ExportPublished},
+			filepath.Join(destination, strings.ReplaceAll(transaction, "-", "")), nil
+	}}
+	args := []string{"--config", configPath, "--domain", "alpha", "workspace", "export", "resume",
+		"--source-root", input.SourceRoot, "--iso", input.ISOPath, "--go", input.GoBinary, transaction}
+	if err := Run(t.Context(), args, options); err != nil || called != 1 || !strings.Contains(output.String(), "transaction: "+transaction+"\n") {
+		t.Fatalf("public export resume = calls %d, output %q, error %v", called, output.String(), err)
+	}
+	for _, invalid := range [][]string{
+		{"--source-root", input.SourceRoot, "--iso", input.ISOPath, "--go", input.GoBinary, "bad-transaction"},
+		{"--source-root", input.SourceRoot, "--iso", input.ISOPath, "--go", input.GoBinary, "--select", "other", transaction},
+		{"--source-root", "relative", "--iso", input.ISOPath, "--go", input.GoBinary, transaction},
+	} {
+		if err := Run(t.Context(), append([]string{"--config", configPath, "--domain", "alpha", "workspace", "export", "resume"}, invalid...), options); err == nil || called != 1 {
+			t.Fatalf("invalid export resume reached callback: %v, calls=%d", err, called)
+		}
+	}
+	workConfig, _ := writeV2DomainFixture(t, "work")
+	workArgs := append([]string{"--config", workConfig, "--domain", "work"}, args[4:]...)
+	if err := Run(t.Context(), workArgs, options); err == nil || called != 1 {
+		t.Fatalf("foreign domain used alpha export resume: %v, calls=%d", err, called)
+	}
+}
+
 func TestBackendFactoryBindsRegisterCreateAndStatusToAdmittedConfigAndDomain(t *testing.T) {
 	path := writeV2DomainSetFixture(t)
 	loaded, err := config.Load(path)

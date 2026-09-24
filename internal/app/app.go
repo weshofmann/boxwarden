@@ -93,6 +93,7 @@ type Options struct {
 	AlphaPrepare          AlphaPrepareFunc
 	AlphaRebuild          AlphaRebuildFunc
 	AlphaExport           AlphaExportFunc
+	AlphaExportResume     AlphaExportResumeFunc
 	Output                io.Writer
 }
 
@@ -366,6 +367,18 @@ func Run(ctx context.Context, args []string, options Options) error {
 			return fmt.Errorf("export workspace: %w", err)
 		}
 		return writeAlphaExport(options.Output, selectedDomain, journal, published)
+	case commandWorkspaceExportResume:
+		if options.AlphaExportResume == nil {
+			return errors.New("workspace export resume requires alpha recovery composition")
+		}
+		if selectedDomain.ID != "alpha" {
+			return errors.New("v0.2 workspace export resume is limited to the explicit alpha domain")
+		}
+		journal, published, err := options.AlphaExportResume(ctx, selectedDomain, command.alphaExportResume)
+		if err != nil {
+			return fmt.Errorf("resume workspace export: %w", err)
+		}
+		return writeAlphaExport(options.Output, selectedDomain, journal, published)
 	default:
 		return errors.New("unsupported command")
 	}
@@ -388,22 +401,24 @@ const (
 	commandWorkspaceAttach
 	commandWorkspaceDetach
 	commandWorkspaceExport
+	commandWorkspaceExportResume
 )
 
 type parsedCommand struct {
-	kind         commandKind
-	configPath   string
-	domain       string
-	name         string
-	mode         session.Mode
-	recipePath   string
-	isoPath      string
-	alphaPrepare AlphaPrepareInput
-	alphaExport  AlphaExportInput
-	recipeCreate bool
-	rebuildBase  string
-	volumeID     string
-	mountPath    string
+	kind              commandKind
+	configPath        string
+	domain            string
+	name              string
+	mode              session.Mode
+	recipePath        string
+	isoPath           string
+	alphaPrepare      AlphaPrepareInput
+	alphaExport       AlphaExportInput
+	alphaExportResume AlphaExportResumeInput
+	recipeCreate      bool
+	rebuildBase       string
+	volumeID          string
+	mountPath         string
 }
 
 func (c parsedCommand) requiresDomain() bool {
@@ -587,6 +602,26 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.kind, base.volumeID, base.name = commandWorkspaceDetach, remaining[2], remaining[3]
 		return base, nil
 	}
+	if len(remaining) >= 4 && remaining[0] == "workspace" && remaining[1] == "export" && remaining[2] == "resume" {
+		resumeSet := flag.NewFlagSet("workspace export resume", flag.ContinueOnError)
+		resumeSet.SetOutput(io.Discard)
+		input := AlphaExportResumeInput{}
+		resumeSet.StringVar(&input.SourceRoot, "source-root", "", "clean inspector source checkout")
+		resumeSet.StringVar(&input.ISOPath, "iso", "", "pinned Ubuntu ARM64 installer ISO")
+		resumeSet.StringVar(&input.GoBinary, "go", "", "absolute Go executable")
+		if err := resumeSet.Parse(remaining[3:]); err != nil {
+			return parsedCommand{}, fmt.Errorf("parse workspace export resume: %w", err)
+		}
+		if len(resumeSet.Args()) != 1 {
+			return parsedCommand{}, errors.New("workspace export resume requires one transaction UUID")
+		}
+		input.TransactionID = resumeSet.Args()[0]
+		if err := validAlphaExportResumeInput(input); err != nil {
+			return parsedCommand{}, err
+		}
+		base.kind, base.alphaExportResume = commandWorkspaceExportResume, input
+		return base, nil
+	}
 	if len(remaining) >= 3 && remaining[0] == "workspace" && remaining[1] == "export" {
 		exportSet := flag.NewFlagSet("workspace export", flag.ContinueOnError)
 		exportSet.SetOutput(io.Discard)
@@ -610,7 +645,7 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.kind, base.alphaExport = commandWorkspaceExport, input
 		return base, nil
 	}
-	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] [--recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256] <session>, session start <session>, session stop <session>, session status <session>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, workspace export --destination PATH --select RELATIVE [--select RELATIVE...] --source-root PATH --iso PATH --go PATH <volume-uuid>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
+	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] [--recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256] <session>, session start <session>, session stop <session>, session rebuild [--base REVISION | recipe inputs] <session>, session status <session>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, workspace export --destination PATH --select RELATIVE [--select RELATIVE...] --source-root PATH --iso PATH --go PATH <volume-uuid>, workspace export resume --source-root PATH --iso PATH --go PATH <transaction-uuid>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
 }
 
 func writeWorkspaceAttachment(output io.Writer, record workspacex.Record, state string) error {

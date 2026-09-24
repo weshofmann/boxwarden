@@ -207,3 +207,23 @@ selectors in other composition files. This narrow exception carries no pin
 write capability into the common service; its failure mode is refusal to
 reserve or resume a candidate when old pin bytes differ. The architecture
 guard's production-tree test must pass before publishing the public command.
+
+## Inspected export retry, 2026-09-24
+
+An `inspected` journal proves a stopped, zero-NIC inspector completed before
+the receiver began, but the journal does not persist a digest-bound receipt
+for the temporary stream or the receiver's final tree. A retry therefore
+re-admits the exact snapshot and original empty private destination, then
+captures a fresh stream under the same transaction ID and uses the ordinary
+selected-file receiver. The receiver still forbids overwriting its final
+transaction directory. If that directory exists, the result may represent a
+rename completed before a crash, so the public retry refuses to adopt or
+overwrite it and reports an ambiguous prior publication for review.
+
+A hard exit can also leave `stream.bin` in the private snapshot directory.
+Without a retained helper handle, that file is not proof that the helper has
+stopped or that its bytes passed capture checks. The exclusive-create capture
+gate refuses to replace it; automatic cleanup or adoption would make an
+unverified stream authoritative. This case requires an attended check of the
+helper/process state and exact private file before any manual cleanup. The
+public retry does not clear a workspace's snapshot-copy Pending marker.
