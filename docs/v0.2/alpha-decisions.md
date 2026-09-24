@@ -208,6 +208,22 @@ write capability into the common service; its failure mode is refusal to
 reserve or resume a candidate when old pin bytes differ. The architecture
 guard's production-tree test must pass before publishing the public command.
 
+## Public workspace creation admission, 2026-09-24
+
+The public alpha creator calls `workspaceformat.Admit` only to recognize a
+completed exact formatter journal and disk before record publication, or to
+resolve a concurrent create after an exclusive journal reservation lost the
+race. This is a read-only check of host-owned formatting evidence; it cannot
+format or accept a disk by guest assertion. The existing `PromoteVerified`
+path independently repeats admission before making the record available.
+The creator accepts only a pre-admitted, exact signed private formatter bundle
+for new formatting, and a failed/interrupted journal remains unqualified.
+
+Architecture guard review: add only `internal/workspacex/create_managed.go`
+to the formatter `Admit` call-site allowlist. Keep the selector prohibited in
+other composition paths; a positive guard fixture covers this exact file.
+This exception introduces no new SSH or host integration authority.
+
 ## Inspected export retry, 2026-09-24
 
 An `inspected` journal proves a stopped, zero-NIC inspector completed before

@@ -21,6 +21,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/sessionruntime"
 	"github.com/weshofmann/boxwarden/internal/sshx"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
+	"github.com/weshofmann/boxwarden/internal/workspaceformat"
 	"github.com/weshofmann/boxwarden/internal/workspacex"
 )
 
@@ -73,6 +74,12 @@ func publicOptions(output io.Writer) app.Options {
 			return sessionruntime.NewStarter(loaded, selected, path)
 		},
 		AlphaRebuild: sessionruntime.Rebuild,
+		AlphaWorkspaceCreate: func(ctx context.Context, selected config.Domain, input app.AlphaWorkspaceCreateInput) (workspacex.Record, error) {
+			formatter := workspaceformat.VZFormatter{StateRoot: selected.StateRoot, Domain: selected.ID,
+				BundlePath: input.BundlePath, SourceRoot: input.SourceRoot}
+			return workspacex.CreateManaged(ctx, selected.StateRoot, workspaceformat.Request{Domain: selected.ID,
+				VolumeID: input.VolumeID, FilesystemUUID: input.FilesystemUUID, SizeBytes: input.SizeBytes}, formatter)
+		},
 		StatusSnapshotFactory: func(loaded config.Config, selected config.Domain) (app.StatusSnapshotReader, error) {
 			configured, err := loaded.Domain(string(selected.ID))
 			if err != nil || configured != selected {

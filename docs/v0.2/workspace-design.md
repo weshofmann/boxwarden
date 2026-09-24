@@ -48,6 +48,20 @@ guest's report must be accepted only after a no-NIC, single writable-file VM
 stops and its exact host process is reaped; source preparation alone is not
 format qualification.
 
+The alpha public `workspace create` command takes new volume/filesystem UUIDs,
+an explicit MiB capacity, a clean source checkout, and an exact private signed
+formatter bundle. It accepts only the explicit `alpha` domain. The control
+plane checks an existing record under the domain storage lock, then admits a
+previously verified formatter journal if one exists. Otherwise it admits the
+bundle before calling the exclusive formatter creation path. A verified
+journal can be promoted after a crash between disk qualification and record
+publication. An incomplete or failed journal never authorizes another format
+under that UUID. Record publication and promotion recheck the exact domain,
+UUIDs, size, journal, and inode; a retry of an available unbound record only
+re-admits it. The private bundle is prepared from committed clean source
+using `tools/alpha-formatter/prepare_boot.sh`. The command has source tests;
+a fresh public VM format and retained-volume rebuild still need live proof.
+
 ## Locks and admission
 
 Public session start and stop hold an outer per-session transition lock across

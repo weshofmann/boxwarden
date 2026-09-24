@@ -33,6 +33,42 @@ func (f appFormatFunc) FormatAndVerify(ctx context.Context, request workspacefor
 	return f(ctx, request)
 }
 
+func TestWorkspaceCreateRoutesExactAlphaRequest(t *testing.T) {
+	configPath, selected := writeV2DomainFixture(t, "alpha")
+	input := AlphaWorkspaceCreateInput{VolumeID: "00112233-4455-4677-8899-aabbccddeeff",
+		FilesystemUUID: "10213243-5465-4768-899a-bbccddeeff00", SizeBytes: 64 << 20,
+		BundlePath: "/private/formatter.app", SourceRoot: "/private/clean-source"}
+	called := 0
+	var output bytes.Buffer
+	options := Options{Output: &output, AlphaWorkspaceCreate: func(_ context.Context, actual config.Domain, received AlphaWorkspaceCreateInput) (workspacex.Record, error) {
+		called++
+		if actual != selected || received != input {
+			t.Fatalf("create lost selected domain or request: %+v, %+v", actual, received)
+		}
+		return workspacex.Record{Domain: selected.ID, VolumeID: input.VolumeID, FilesystemUUID: input.FilesystemUUID,
+			SizeBytes: input.SizeBytes, State: workspacex.StateAvailable, Disk: &workspacex.DiskIdentity{Device: 1, Inode: 2}}, nil
+	}}
+	args := []string{"--config", configPath, "--domain", "alpha", "workspace", "create", "--bundle", input.BundlePath,
+		"--source-root", input.SourceRoot, "--filesystem-uuid", input.FilesystemUUID, "--size-mib", "64", input.VolumeID}
+	if err := Run(t.Context(), args, options); err != nil || called != 1 || !strings.Contains(output.String(), "workspace: available\n") {
+		t.Fatalf("public create = calls %d, output %q, error %v", called, output.String(), err)
+	}
+	for _, suffix := range [][]string{
+		{"--bundle", "relative", "--source-root", input.SourceRoot, "--filesystem-uuid", input.FilesystemUUID, "--size-mib", "64", input.VolumeID},
+		{"--bundle", input.BundlePath, "--source-root", input.SourceRoot, "--filesystem-uuid", input.FilesystemUUID, "--size-mib", "0", input.VolumeID},
+		{"--bundle", input.BundlePath, "--source-root", input.SourceRoot, "--filesystem-uuid", "invalid", "--size-mib", "64", input.VolumeID},
+	} {
+		if err := Run(t.Context(), append([]string{"--config", configPath, "--domain", "alpha", "workspace", "create"}, suffix...), options); err == nil || called != 1 {
+			t.Fatalf("invalid create reached formatter: %v; calls=%d", err, called)
+		}
+	}
+	workConfig, _ := writeV2DomainFixture(t, "work")
+	workArgs := append([]string{"--config", workConfig, "--domain", "work"}, args[4:]...)
+	if err := Run(t.Context(), workArgs, options); err == nil || called != 1 {
+		t.Fatalf("non-alpha domain used alpha formatter: %v; calls=%d", err, called)
+	}
+}
+
 func TestWorkspaceAttachAndDetachUseExactStoppedSessionAndQualifiedVolume(t *testing.T) {
 	configPath, selected := writeDomainFixture(t, "work")
 	observer := fake.New(backend.Observation{ObjectID: "golden-work-r1", Exists: true, State: backend.ObjectStopped})

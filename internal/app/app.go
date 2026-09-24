@@ -92,6 +92,7 @@ type Options struct {
 	StatusSnapshotFactory StatusSnapshotFactory
 	AlphaPrepare          AlphaPrepareFunc
 	AlphaRebuild          AlphaRebuildFunc
+	AlphaWorkspaceCreate  AlphaWorkspaceCreateFunc
 	AlphaExport           AlphaExportFunc
 	AlphaExportResume     AlphaExportResumeFunc
 	Output                io.Writer
@@ -346,6 +347,23 @@ func Run(ctx context.Context, args []string, options Options) error {
 			return fmt.Errorf("attach workspace: %w", err)
 		}
 		return writeWorkspaceAttachment(options.Output, record, "attached")
+	case commandWorkspaceCreate:
+		if selectedDomain.ID != "alpha" {
+			return errors.New("v0.2 workspace create is limited to the explicit alpha domain")
+		}
+		if options.AlphaWorkspaceCreate == nil {
+			return errors.New("alpha workspace creator is required")
+		}
+		record, err := options.AlphaWorkspaceCreate(ctx, selectedDomain, command.alphaWorkspaceCreate)
+		if err != nil {
+			return fmt.Errorf("create workspace: %w", err)
+		}
+		if record.Domain != selectedDomain.ID || record.VolumeID != command.alphaWorkspaceCreate.VolumeID ||
+			record.FilesystemUUID != command.alphaWorkspaceCreate.FilesystemUUID || record.SizeBytes != command.alphaWorkspaceCreate.SizeBytes ||
+			record.State != workspacex.StateAvailable || record.Disk == nil {
+			return errors.New("workspace creator returned an invalid qualification receipt")
+		}
+		return writeWorkspaceAttachment(options.Output, record, "available")
 	case commandWorkspaceDetach:
 		if options.Observer == nil {
 			return errors.New("backend observer is required")
@@ -398,6 +416,7 @@ const (
 	commandDomainInit
 	commandAlphaRecipeCheck
 	commandAlphaPrepare
+	commandWorkspaceCreate
 	commandWorkspaceAttach
 	commandWorkspaceDetach
 	commandWorkspaceExport
@@ -405,20 +424,21 @@ const (
 )
 
 type parsedCommand struct {
-	kind              commandKind
-	configPath        string
-	domain            string
-	name              string
-	mode              session.Mode
-	recipePath        string
-	isoPath           string
-	alphaPrepare      AlphaPrepareInput
-	alphaExport       AlphaExportInput
-	alphaExportResume AlphaExportResumeInput
-	recipeCreate      bool
-	rebuildBase       string
-	volumeID          string
-	mountPath         string
+	kind                 commandKind
+	configPath           string
+	domain               string
+	name                 string
+	mode                 session.Mode
+	recipePath           string
+	isoPath              string
+	alphaPrepare         AlphaPrepareInput
+	alphaExport          AlphaExportInput
+	alphaExportResume    AlphaExportResumeInput
+	alphaWorkspaceCreate AlphaWorkspaceCreateInput
+	recipeCreate         bool
+	rebuildBase          string
+	volumeID             string
+	mountPath            string
 }
 
 func (c parsedCommand) requiresDomain() bool {
@@ -585,6 +605,27 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.recipeCreate, base.alphaPrepare = hasRecipe, input
 		return base, nil
 	}
+	if len(remaining) >= 3 && remaining[0] == "workspace" && remaining[1] == "create" {
+		createSet := flag.NewFlagSet("workspace create", flag.ContinueOnError)
+		createSet.SetOutput(io.Discard)
+		input := AlphaWorkspaceCreateInput{}
+		createSet.StringVar(&input.BundlePath, "bundle", "", "exact private signed formatter bundle")
+		createSet.StringVar(&input.SourceRoot, "source-root", "", "clean formatter source checkout")
+		createSet.StringVar(&input.FilesystemUUID, "filesystem-uuid", "", "new ext4 filesystem UUID")
+		sizeMiB := createSet.Int64("size-mib", 0, "new sparse disk size in MiB")
+		if err := createSet.Parse(remaining[2:]); err != nil {
+			return parsedCommand{}, fmt.Errorf("parse workspace create: %w", err)
+		}
+		if len(createSet.Args()) != 1 || *sizeMiB < 16 || *sizeMiB > 8<<20 {
+			return parsedCommand{}, errors.New("workspace create requires --bundle PATH --source-root PATH --filesystem-uuid UUID --size-mib 16..8388608 <new-volume-uuid>")
+		}
+		input.VolumeID, input.SizeBytes = createSet.Args()[0], *sizeMiB<<20
+		if err := validAlphaWorkspaceCreateInput(input); err != nil {
+			return parsedCommand{}, err
+		}
+		base.kind, base.alphaWorkspaceCreate = commandWorkspaceCreate, input
+		return base, nil
+	}
 	if len(remaining) >= 3 && remaining[0] == "workspace" && remaining[1] == "attach" {
 		attachSet := flag.NewFlagSet("workspace attach", flag.ContinueOnError)
 		attachSet.SetOutput(io.Discard)
@@ -645,7 +686,7 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.kind, base.alphaExport = commandWorkspaceExport, input
 		return base, nil
 	}
-	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] [--recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256] <session>, session start <session>, session stop <session>, session rebuild [--base REVISION | recipe inputs] <session>, session status <session>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, workspace export --destination PATH --select RELATIVE [--select RELATIVE...] --source-root PATH --iso PATH --go PATH <volume-uuid>, workspace export resume --source-root PATH --iso PATH --go PATH <transaction-uuid>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
+	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] [--recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256] <session>, session start <session>, session stop <session>, session rebuild [--base REVISION | recipe inputs] <session>, session status <session>, workspace create --bundle PATH --source-root PATH --filesystem-uuid UUID --size-mib N <new-volume-uuid>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, workspace export --destination PATH --select RELATIVE [--select RELATIVE...] --source-root PATH --iso PATH --go PATH <volume-uuid>, workspace export resume --source-root PATH --iso PATH --go PATH <transaction-uuid>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
 }
 
 func writeWorkspaceAttachment(output io.Writer, record workspacex.Record, state string) error {
