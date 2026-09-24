@@ -120,6 +120,7 @@ func f(request protocol.SerialRequest) protocol.SerialResult {
 		{"export recovery formatter admission", "internal/workspacex/export_recover.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
 		{"managed create formatter admission", "internal/workspacex/create_managed.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
 		{"deleted workspace retention formatter admission", "internal/workspacex/delete.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
+		{"stopped import verification formatter admission", "internal/workspacex/import_verify.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
 		{"inspector artifact manifest", "internal/exportx/bundle.go", `package exportx; type inspectorBundleManifest struct{ Version int }`},
 		{"qualification libproc", "internal/qualification/adr024/proc.go", "package adr024\n/* #cgo LDFLAGS: -lproc\n#include <libproc.h> */\nimport \"C\""},
 	}
@@ -531,7 +532,7 @@ func manifestFoundationPath(path string) bool {
 func allowedWorkspaceFormatterAdmitPath(path string) bool {
 	switch path {
 	case "internal/workspacex/promotion.go", "internal/workspacex/launch_disks.go", "internal/workspacex/prepare_start.go",
-		"internal/workspacex/export_copy.go", "internal/workspacex/export_recover.go", "internal/workspacex/create_managed.go", "internal/workspacex/delete.go":
+		"internal/workspacex/export_copy.go", "internal/workspacex/export_recover.go", "internal/workspacex/create_managed.go", "internal/workspacex/delete.go", "internal/workspacex/import_verify.go":
 		return true
 	default:
 		return false

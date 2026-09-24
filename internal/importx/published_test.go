@@ -1,7 +1,9 @@
 package importx
 
 import (
-	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,8 +11,12 @@ import (
 
 func publishedImportFixture(t *testing.T) (string, string) {
 	t.Helper()
-	source, staging, published := privateDirectory(t), privateDirectory(t), privateDirectory(t)
-	for _, root := range []string{source, published} {
+	staging, published := privateDirectory(t), privateDirectory(t)
+	captured := filepath.Join(staging, testTransaction)
+	if err := os.Mkdir(captured, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range []string{captured, published} {
 		for _, name := range []string{"nested", "empty"} {
 			if err := os.Mkdir(filepath.Join(root, name), 0o700); err != nil {
 				t.Fatal(err)
@@ -22,7 +28,22 @@ func publishedImportFixture(t *testing.T) (string, string) {
 			}
 		}
 	}
-	if _, err := CaptureSource(context.Background(), source, staging, testTransaction); err != nil {
+	entries := []Entry{{Path: "empty", Kind: "directory"}, {Path: "nested", Kind: "directory"}}
+	for name, content := range map[string]string{"README.txt": "synthetic\n", "nested/data.json": "{}\n"} {
+		digest := sha256.Sum256([]byte(content))
+		entries = append(entries, Entry{Path: name, Kind: "file", Size: int64(len(content)), SHA256: hex.EncodeToString(digest[:])})
+	}
+	raw, err := json.Marshal(struct {
+		Version int     `json:"version"`
+		Entries []Entry `json:"entries"`
+	}{Version: 1, Entries: entries})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(captured, manifestName), append(raw, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectSnapshot(staging, testTransaction); err != nil {
 		t.Fatal(err)
 	}
 	return staging, published

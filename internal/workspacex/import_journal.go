@@ -27,6 +27,7 @@ type ImportPhase string
 const (
 	ImportCaptured     ImportPhase = "captured"
 	ImportTransferring ImportPhase = "transferring"
+	ImportVerified     ImportPhase = "verified"
 )
 
 // ImportJournal binds one bounded host snapshot to the exact live guest and
@@ -47,6 +48,7 @@ type ImportJournal struct {
 	FileCount      int         `json:"file_count"`
 	TotalBytes     int64       `json:"total_bytes"`
 	Phase          ImportPhase `json:"phase"`
+	ExportID       string      `json:"export_id,omitempty"`
 }
 
 func validateImportJournal(j ImportJournal) error {
@@ -60,8 +62,15 @@ func validateImportJournal(j ImportJournal) error {
 	if _, err := domain.Parse(string(j.Domain)); err != nil {
 		return err
 	}
-	if j.Phase != ImportCaptured && j.Phase != ImportTransferring {
+	if j.Phase != ImportCaptured && j.Phase != ImportTransferring && j.Phase != ImportVerified {
 		return fmt.Errorf("invalid import phase")
+	}
+	if j.Phase == ImportVerified {
+		if !validUUID(j.ExportID) || j.ExportID == j.ID {
+			return fmt.Errorf("verified import lacks distinct export evidence")
+		}
+	} else if j.ExportID != "" {
+		return fmt.Errorf("unverified import cannot bind export evidence")
 	}
 	return nil
 }
@@ -200,6 +209,7 @@ func decodeImportJournal(raw []byte) (ImportJournal, error) {
 		"file_count":      func(v json.RawMessage) error { return json.Unmarshal(v, &j.FileCount) },
 		"total_bytes":     func(v json.RawMessage) error { return json.Unmarshal(v, &j.TotalBytes) },
 		"phase":           func(v json.RawMessage) error { return json.Unmarshal(v, &j.Phase) },
+		"export_id":       func(v json.RawMessage) error { return json.Unmarshal(v, &j.ExportID) },
 	})
 	if err != nil {
 		return ImportJournal{}, err
@@ -227,9 +237,9 @@ func encodeImportJournal(j ImportJournal) ([]byte, error) {
 	return raw, nil
 }
 
-// advanceImportJournal persists only captured->transferring. The transfer
-// owner must recheck live bindings under the transition lock first; this
-// storage helper cannot assert a guest import or its completion.
+// advanceImportJournal persists exact phase transitions. Its caller must
+// establish the corresponding live transfer or stopped-volume export proof;
+// this storage helper cannot assert either observation itself.
 func advanceImportJournal(ctx context.Context, stateRoot string, expected, next ImportJournal) error {
 	if err := validateImportJournal(expected); err != nil {
 		return err
@@ -239,7 +249,10 @@ func advanceImportJournal(ctx context.Context, stateRoot string, expected, next 
 	}
 	oldBinding, newBinding := expected, next
 	oldBinding.Phase, newBinding.Phase = "", ""
-	if oldBinding != newBinding || expected.Phase != ImportCaptured || next.Phase != ImportTransferring {
+	oldBinding.ExportID, newBinding.ExportID = "", ""
+	if oldBinding != newBinding ||
+		!(expected.Phase == ImportCaptured && next.Phase == ImportTransferring ||
+			expected.Phase == ImportTransferring && next.Phase == ImportVerified && expected.ExportID == "") {
 		return fmt.Errorf("invalid import journal transition")
 	}
 	held, err := lock.Acquire(ctx, stateRoot, "import-"+string(expected.Domain)+"-"+expected.ID)

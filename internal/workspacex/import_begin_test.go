@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/weshofmann/boxwarden/internal/domain"
-	"github.com/weshofmann/boxwarden/internal/importx"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
 )
@@ -31,13 +30,7 @@ func readyImportFixture(t *testing.T) (string, importReadyReader) {
 	if err := os.Mkdir(filepath.Join(root, "imports"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	source := privateRoot(t)
-	if err := os.WriteFile(filepath.Join(source, "project.txt"), []byte("synthetic\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := importx.CaptureSource(context.Background(), source, filepath.Join(root, "imports"), testImportID); err != nil {
-		t.Fatal(err)
-	}
+	writeCapturedImportFixture(t, root, testImportID)
 	binding := supervisor.Binding{Domain: "work", SessionID: started.ID, BackendKind: "tart", BackendObject: started.Backend.ObjectID, Generation: started.StartGeneration}
 	return root, importReadyReader{snapshot: supervisor.Snapshot{Binding: binding, ObservedAt: time.Now(), BackendRunning: true,
 		SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true}}

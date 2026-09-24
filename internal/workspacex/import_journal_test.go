@@ -2,6 +2,9 @@ package workspacex
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -29,17 +32,7 @@ func importJournalFixture(t *testing.T) (string, ImportJournal) {
 	if err := root.Close(); err != nil {
 		t.Fatal(err)
 	}
-	source := t.TempDir()
-	if err := os.Chmod(source, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(source, "project.txt"), []byte("synthetic\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	snapshot, err := importx.CaptureSource(context.Background(), source, filepath.Join(stateRoot, "imports"), testImportID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	snapshot := writeCapturedImportFixture(t, stateRoot, testImportID)
 	journal := ImportJournal{Version: 1, ID: testImportID, Domain: domain.ID("alpha"),
 		SessionID: "69d67808-a93d-4dd5-a813-dfb1ff8e6de9", SessionName: "sandboxa",
 		BackendObject: "boxwarden-alpha-69d67808a93d4dd5a813dfb1ff8e6de9", Generation: "01d13d1e-51e1-4818-b8ef-62e2af16865e",
@@ -47,6 +40,37 @@ func importJournalFixture(t *testing.T) (string, ImportJournal) {
 		MountPath: "/home/boxwarden/workspaces/project", SourceDigest: snapshot.Digest, FileCount: snapshot.FileCount,
 		TotalBytes: snapshot.TotalBytes, Phase: ImportCaptured}
 	return stateRoot, journal
+}
+
+// Import journal and transfer tests admit captured bytes without exercising
+// the production disk reserve. CaptureSource has its own bounded tests.
+func writeCapturedImportFixture(t *testing.T, stateRoot, transactionID string) importx.Snapshot {
+	t.Helper()
+	parent := filepath.Join(stateRoot, "imports")
+	directory := filepath.Join(parent, transactionID)
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("synthetic\n")
+	if err := os.WriteFile(filepath.Join(directory, "project.txt"), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(content)
+	manifest, err := json.Marshal(struct {
+		Version int             `json:"version"`
+		Entries []importx.Entry `json:"entries"`
+	}{Version: 1, Entries: []importx.Entry{{Path: "project.txt", Kind: "file", Size: int64(len(content)), SHA256: hex.EncodeToString(digest[:])}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, ".boxwarden-import-manifest.json"), append(manifest, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := importx.InspectSnapshot(parent, transactionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
 }
 
 func TestImportJournalBindsCapturedBytesAndExactTransitions(t *testing.T) {
@@ -72,6 +96,31 @@ func TestImportJournalBindsCapturedBytesAndExactTransitions(t *testing.T) {
 	loaded, err = loadImportJournal(stateRoot, journal.Domain, journal.ID)
 	if err != nil || loaded != transferring {
 		t.Fatalf("load transferring import: %#v, %v", loaded, err)
+	}
+}
+
+func TestImportJournalRejectsVerifiedPhaseWithoutDistinctExport(t *testing.T) {
+	root, captured := importJournalFixture(t)
+	if err := createImportJournal(root, captured); err != nil {
+		t.Fatal(err)
+	}
+	verified := captured
+	verified.Phase = ImportVerified
+	if err := advanceImportJournal(t.Context(), root, captured, verified); err == nil {
+		t.Fatal("verified import accepted without a published export identity")
+	}
+	verified.ExportID = testImportExportID
+	if err := advanceImportJournal(t.Context(), root, captured, verified); err == nil {
+		t.Fatal("captured import skipped the transferring phase")
+	}
+	transferring := captured
+	transferring.Phase = ImportTransferring
+	if err := advanceImportJournal(t.Context(), root, captured, transferring); err != nil {
+		t.Fatal(err)
+	}
+	verified.ExportID = captured.ID
+	if err := advanceImportJournal(t.Context(), root, transferring, verified); err == nil {
+		t.Fatal("import adopted its own transaction as export evidence")
 	}
 }
 

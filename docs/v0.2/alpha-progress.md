@@ -89,13 +89,22 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   with no active Use or Pending marker; the import journal is `transferring`.
   Private evidence records the exact transaction and refusal. The guard was
   not bypassed, and no durable verified phase is claimed.
-- Persistence source foundation in progress: a bounded host comparator
+- Persistence source foundation: a bounded host comparator
   re-admits the captured source and requires an exact selected export tree,
   including empty directories, file digests, modes, ownership, and absence of
   extra entries or links. Targeted tests cover matching and altered trees.
-  It does not yet bind an export transaction or advance the import journal.
-- Next: bind the comparator to an exact published stopped-volume export and
-  a durable import phase transition; obtain safe host
+  A separate stopped-volume gate now binds a published whole-directory export,
+  exact session/backend/volume/disk identities, a fresh stopped observation,
+  the re-admitted export snapshot, and matching captured bytes before advancing
+  the import journal to `verified` with the export transaction ID. Focused
+  tests cover success, exact retry, changed bytes, wrong selection, running
+  backend, changed disk identity, and invalid phase skips. The public verify
+  command and real stopped-volume qualification remain pending. Focused gate
+  and comparator tests, the architecture guard, targeted vet, formatting, and
+  diff checks pass; the full local suite was not rerun at this checkpoint
+  because the host is now below the production disk reserve used by unrelated
+  capture fixtures.
+- Next: expose the exact stopped-volume verify command; obtain safe host
   headroom for the independent readback, then run fresh source-tracked
   acceptance.
 - Limits: retained import persistence, software-changing rebuild, ambiguous export final-rename

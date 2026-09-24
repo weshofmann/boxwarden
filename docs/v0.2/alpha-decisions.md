@@ -281,3 +281,13 @@ empty directories survived and that no extra guest files appeared. The host
 comparison re-admits the original captured manifest and checks the exported
 tree exactly; a later transaction gate must also bind the export journal to
 the stopped session, volume disk identity, and published destination.
+
+The source gate admits the qualified raw disk again under the volume, session,
+and storage locks, requires a fresh stopped backend observation, rehashes the
+private export snapshot, checks the published whole-directory selection and
+exact destination identity, and compares all exported entries against the
+captured source. Only then does it advance `transferring` to `verified` with
+the distinct export UUID. A `verified` journal records persistence at that
+stop/export point; later guest writes can still change the workspace.
+The architecture guard adds only this gate's direct qualified-disk admission
+call to its existing per-file allowlist; the trust seam remains narrow.
