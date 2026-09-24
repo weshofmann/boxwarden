@@ -756,20 +756,24 @@ func TestOwnerRequestsGuestShutdownBeforeBoundedForceStop(t *testing.T) {
 
 func TestOwnerRequestsPinnedGuestShutdownWithTartFallback(t *testing.T) {
 	binding := sshx.Binding{Domain: "alpha", SessionID: "123e4567-e89b-42d3-a456-426614174000", BackendKind: "tart", BackendObject: "workstation"}
+	mount := sshx.WorkspaceMount{VolumeID: "00112233-4455-4677-8899-aabbccddeeff", FilesystemUUID: "10213243-5465-4768-899a-bbccddeeff00", MountPath: "/home/boxwarden/workspaces/project"}
 	for _, failed := range []bool{false, true} {
 		handle := &guestStopHandle{}
 		calls := 0
-		client := &readyClient{shutdown: func(connection sshx.Connection) error {
+		client := &readyClient{shutdown: func(connection sshx.Connection, mounts []sshx.WorkspaceMount) error {
 			calls++
 			if connection.Binding != binding {
 				t.Errorf("shutdown binding = %+v", connection.Binding)
+			}
+			if len(mounts) != 1 || mounts[0] != mount {
+				t.Errorf("shutdown workspace binding = %+v", mounts)
 			}
 			if failed {
 				return errors.New("SSH failed after an ambiguous shutdown request")
 			}
 			return nil
 		}}
-		owner := &Owner{handle: handle, active: true, readyEstablished: true, sshBinding: binding, connection: sshx.Connection{Binding: binding}, deps: dependencies{client: client}}
+		owner := &Owner{handle: handle, active: true, readyEstablished: true, sshBinding: binding, connection: sshx.Connection{Binding: binding}, workspaceMounts: []sshx.WorkspaceMount{mount}, deps: dependencies{client: client}}
 		if err := owner.RequestStop(context.Background()); err != nil {
 			t.Fatal(err)
 		}

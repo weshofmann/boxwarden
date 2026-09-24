@@ -1,5 +1,31 @@
 # Boxwarden v0.2 alpha decisions
 
+## Exact workspace quiesce before poweroff, 2026-09-24
+
+A freshly rebuilt and qualified base carrying the fixed systemd shutdown
+helper still left ext4 needing recovery after an attached workspace stop. A
+control session without a workspace stopped in about six seconds; attaching
+an empty workspace to that same software drove stop to the 60-second grace
+limit. A separate 120-second grace experiment also reached its limit and left
+ext4 dirty. The attachment alone reproduces the failure; the import payload
+is not required. These observations supersede the effectiveness expectation
+in the previous shutdown decision without proving the exact guest hang cause.
+
+The exact-generation owner now passes its already admitted workspace
+UUID/path bindings in the typed `request_shutdown` operation. Before queuing
+the same fixed poweroff job, the guest helper verifies every bound mount's
+device, filesystem UUID, type, and writable state, unmounts each exact target
+with argv-only `umount`, and checks the kernel mount table for absence. It
+refuses an acknowledgment if any check or unmount fails. The host retains
+Tart's bounded fallback and force-stop path; a guest response still does not
+prove clean persistence. Offline ext4 inspection remains the independent
+admission gate for stopped export and import verification. This is guest
+cooperation for durability, not a new host trust boundary.
+
+The affected Go packages and guest-definition artifact checks passed locally;
+a fresh base build is required before any real-host effectiveness claim.
+Previous failed volumes and qualification attempts remain immutable evidence.
+
 ## Bound guest shutdown before Tart force stop, 2026-09-24
 
 A new recipe-bound sandbox with a newly formatted ext4 workspace reached

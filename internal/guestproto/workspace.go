@@ -109,6 +109,24 @@ func (b *Bootstrapper) probeWorkspaceMounts(ctx context.Context, mounts []Worksp
 	return nil
 }
 
+// Quiescing is guest cooperation for durability, never host proof of a clean
+// filesystem. The stopped-volume inspector independently checks ext4 state.
+func (b *Bootstrapper) quiesceWorkspaceMounts(ctx context.Context, mounts []WorkspaceMount) error {
+	if err := b.probeWorkspaceMounts(ctx, mounts); err != nil {
+		return fmt.Errorf("verify workspaces before shutdown: %w", err)
+	}
+	for i := len(mounts) - 1; i >= 0; i-- {
+		mount := mounts[i]
+		if _, err := b.Runner.Run(ctx, "/usr/bin/umount", "--", mount.MountPath); err != nil {
+			return fmt.Errorf("unmount workspace before shutdown: %w", err)
+		}
+		if err := b.workspaceMountAbsent(mount.MountPath); err != nil {
+			return fmt.Errorf("verify workspace unmounted before shutdown: %w", err)
+		}
+	}
+	return nil
+}
+
 func (b *Bootstrapper) workspaceDevice(ctx context.Context, uuid string) (string, error) {
 	output, err := b.Runner.Run(ctx, "/usr/sbin/blkid", "-t", "UUID="+uuid, "-o", "device")
 	if err != nil {

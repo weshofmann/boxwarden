@@ -35,7 +35,7 @@ type readyClient struct {
 	apply        func(sshx.Connection, string) error
 	inspect      func(sshx.Connection, []string) ([]sshx.PackageVersion, error)
 	identity     func(sshx.Connection) (sshx.GuestIdentity, error)
-	shutdown     func(sshx.Connection) error
+	shutdown     func(sshx.Connection, []sshx.WorkspaceMount) error
 }
 
 func (c *readyClient) Probe(_ context.Context, connection sshx.Connection, request sshx.ProbeRequest) (sshx.ProbeResult, error) {
@@ -57,11 +57,11 @@ func (c *readyClient) EnsureWorkspaces(_ context.Context, connection sshx.Connec
 	}
 	return nil
 }
-func (c *readyClient) RequestShutdown(_ context.Context, connection sshx.Connection) error {
+func (c *readyClient) RequestShutdown(_ context.Context, connection sshx.Connection, mounts []sshx.WorkspaceMount) error {
 	if c.shutdown == nil {
 		return errors.New("fixed guest shutdown was not configured")
 	}
-	return c.shutdown(connection)
+	return c.shutdown(connection, mounts)
 }
 func (c *readyClient) ApplyZone(_ context.Context, connection sshx.Connection, request sshx.ApplyZoneRequest) error {
 	if c.apply != nil {

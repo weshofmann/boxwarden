@@ -87,8 +87,13 @@ func (c *Client) Probe(ctx context.Context, connection Connection, probe ProbeRe
 // RequestShutdown asks the exact pinned guest helper to enqueue its fixed
 // poweroff operation. The reply is not proof that the guest has stopped or
 // that attached filesystems are clean; the retained VM handle proves exit.
-func (c *Client) RequestShutdown(ctx context.Context, connection Connection) error {
-	output, err := c.run(ctx, connection, managementRequestFor(connection.Binding, "request_shutdown", ""))
+func (c *Client) RequestShutdown(ctx context.Context, connection Connection, mounts []WorkspaceMount) error {
+	if err := validateWorkspaceMounts(mounts); err != nil {
+		return err
+	}
+	request := managementRequestFor(connection.Binding, "request_shutdown", "")
+	request.Workspaces = append([]WorkspaceMount(nil), mounts...)
+	output, err := c.run(ctx, connection, request)
 	if err != nil {
 		return err
 	}

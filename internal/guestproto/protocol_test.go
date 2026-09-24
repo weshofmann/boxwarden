@@ -75,7 +75,7 @@ func TestManagementIdentityInspectionAcceptsNoCallerParameters(t *testing.T) {
 	}
 }
 
-func TestManagementShutdownHasNoCallerParametersAndEnqueuesPoweroff(t *testing.T) {
+func TestManagementShutdownRejectsUnrelatedParametersAndEnqueuesPoweroff(t *testing.T) {
 	request := ManagementRequest{Version: Version, Kind: "request_shutdown", Association: testRequest().Association}
 	if err := request.Validate(); err != nil {
 		t.Fatalf("fixed shutdown rejected: %v", err)
@@ -83,9 +83,6 @@ func TestManagementShutdownHasNoCallerParametersAndEnqueuesPoweroff(t *testing.T
 	for _, mutate := range []func(*ManagementRequest){
 		func(r *ManagementRequest) { r.Zone = "America/Denver" },
 		func(r *ManagementRequest) { r.Packages = []string{"git"} },
-		func(r *ManagementRequest) {
-			r.Workspaces = []WorkspaceMount{{VolumeID: "00112233-4455-4677-8899-aabbccddeeff", FilesystemUUID: "10213243-5465-4768-899a-bbccddeeff00", MountPath: "/home/boxwarden/workspaces/project"}}
-		},
 	} {
 		changed := request
 		mutate(&changed)
@@ -796,6 +793,8 @@ type workspaceRunner struct {
 	uuid      string
 	options   string
 	fsOptions string
+	umountErr error
+	mountinfo string
 }
 
 func (r *workspaceRunner) Run(_ context.Context, path string, args ...string) ([]byte, error) {
@@ -819,8 +818,80 @@ func (r *workspaceRunner) Run(_ context.Context, path string, args ...string) ([
 	case "/usr/bin/mount":
 		r.mounted = true
 		return nil, nil
+	case "/usr/bin/umount":
+		if r.umountErr != nil {
+			return nil, r.umountErr
+		}
+		r.mounted = false
+		if r.mountinfo != "" {
+			if err := os.WriteFile(r.mountinfo, []byte("1 0 0:1 / / rw - ext4 /dev/vda rw\n"), 0o644); err != nil {
+				return nil, err
+			}
+		}
+		return nil, nil
+	case "/usr/bin/systemctl":
+		return nil, nil
 	default:
 		return nil, fmt.Errorf("unexpected command %q", path)
+	}
+}
+
+func TestManagementShutdownUnmountsExactWorkspaceBeforePoweroff(t *testing.T) {
+	b, _ := testBootstrapper(t)
+	if _, err := b.Serial(context.Background(), testRequest()); err != nil {
+		t.Fatal(err)
+	}
+	mount := WorkspaceMount{VolumeID: "00112233-4455-4677-8899-aabbccddeeff", FilesystemUUID: "10213243-5465-4768-899a-bbccddeeff00", MountPath: "/home/boxwarden/workspaces/project"}
+	if err := os.MkdirAll(filepath.Join(b.Root, "home/boxwarden/workspaces/project"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mountinfo := filepath.Join(b.Root, "proc/self/mountinfo")
+	if err := os.MkdirAll(filepath.Dir(mountinfo), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mountinfo, []byte("1 0 0:1 / "+mount.MountPath+" rw - ext4 /dev/vdb rw\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &workspaceRunner{mounted: true, source: "/dev/vdb", uuid: mount.FilesystemUUID, mountinfo: mountinfo}
+	b.Runner = runner
+	request := ManagementRequest{Version: Version, Kind: "request_shutdown", Association: testRequest().Association, Workspaces: []WorkspaceMount{mount}}
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded, err := DecodeManagementRequest(strings.NewReader(string(encoded))); err != nil || len(decoded.Workspaces) != 1 || decoded.Workspaces[0] != mount {
+		t.Fatalf("decoded bound shutdown = %+v, %v", decoded, err)
+	}
+	result, err := b.Management(context.Background(), request)
+	if err != nil || string(result) != `{"version":1,"ok":true}` {
+		t.Fatalf("shutdown result = %s, %v", result, err)
+	}
+	want := [][]string{
+		{"/usr/sbin/blkid", "-t", "UUID=" + mount.FilesystemUUID, "-o", "device"},
+		{"/usr/bin/findmnt", "-n", "-o", "SOURCE,FSTYPE,UUID,VFS-OPTIONS,FS-OPTIONS", "--mountpoint", mount.MountPath},
+		{"/usr/bin/umount", "--", mount.MountPath},
+		{"/usr/bin/systemctl", "--no-block", "--no-wall", "--ignore-inhibitors", "poweroff"},
+	}
+	if !slices.EqualFunc(runner.calls, want, slices.Equal[[]string]) || runner.mounted {
+		t.Fatalf("shutdown calls = %#v; mounted=%t", runner.calls, runner.mounted)
+	}
+	for _, failure := range []string{"mismatched mount", "busy mount"} {
+		runner.calls = nil
+		runner.mounted = true
+		if failure == "mismatched mount" {
+			runner.source = "/dev/vdc"
+		} else {
+			runner.source = "/dev/vdb"
+			runner.umountErr = fmt.Errorf("busy")
+		}
+		if _, err := b.Management(context.Background(), request); err == nil {
+			t.Fatalf("%s was acknowledged", failure)
+		}
+		for _, call := range runner.calls {
+			if call[0] == "/usr/bin/systemctl" || failure == "mismatched mount" && call[0] == "/usr/bin/umount" {
+				t.Fatalf("%s reached mutation: %#v", failure, runner.calls)
+			}
+		}
 	}
 }
 
