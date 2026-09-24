@@ -102,7 +102,9 @@ unchanged disk digest and identity, stopped VM evidence, and a reaped helper.
 The standalone `preflight-copy` and `boot-copy` commands also require an exact
 private `/private/tmp/boxwarden-inspector-boot.*` directory and an
 operator-owned, private, one-link `synthetic.raw`. This rejects a hardlink to
-a managed workspace inode. `run_boot_probe.py` is the sole supported launcher:
+a managed workspace inode. The path check uses the supplied lexical path
+because Foundation can alias `/private/tmp` to `/tmp` during normalization.
+`run_boot_probe.py` is the sole supported launcher:
 it binds the whole-disk digest, ext4 UUID, fixed-file expectation, and post-run
 disk identity. The source and focused tests are verified; a live `boot-copy`
 run is pending. This synthetic probe cannot name a managed workspace path or

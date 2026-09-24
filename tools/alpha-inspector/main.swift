@@ -47,22 +47,21 @@ private enum ProbeFailure: Error, CustomStringConvertible {
 }
 
 private func requireSyntheticDisk(_ url: URL, copyFixture: Bool) throws {
-    let normalized = url.standardizedFileURL
-    let parent = normalized.deletingLastPathComponent()
-    let tempRoot = parent.deletingLastPathComponent().path
     if copyFixture {
-        guard normalized.lastPathComponent == "synthetic.raw",
-              tempRoot == "/private/tmp",
-              parent.lastPathComponent.range(
-                of: #"^boxwarden-inspector-boot\.[A-Za-z0-9]{6}$"#,
-                options: .regularExpression
-              ) != nil else {
+        // standardizedFileURL rewrites /private/tmp to its /tmp symlink alias.
+        // Check the supplied lexical path, then lstat those exact components.
+        let path = url.path
+        guard path.range(
+            of: #"^/private/tmp/boxwarden-inspector-boot\.[A-Za-z0-9]{6}/synthetic\.raw$"#,
+            options: .regularExpression
+        ) != nil else {
             throw ProbeFailure.unsafeDisk
         }
+        let parent = String(path.dropLast("/synthetic.raw".count))
         var directory = stat()
         var disk = stat()
-        guard lstat(parent.path, &directory) == 0,
-              lstat(normalized.path, &disk) == 0,
+        guard lstat(parent, &directory) == 0,
+              lstat(path, &disk) == 0,
               directory.st_mode & S_IFMT == S_IFDIR,
               disk.st_mode & S_IFMT == S_IFREG,
               directory.st_uid == getuid(), disk.st_uid == getuid(),
@@ -73,6 +72,9 @@ private func requireSyntheticDisk(_ url: URL, copyFixture: Bool) throws {
         }
         return
     }
+    let normalized = url.standardizedFileURL
+    let parent = normalized.deletingLastPathComponent()
+    let tempRoot = parent.deletingLastPathComponent().path
     guard normalized.lastPathComponent == "synthetic.raw",
           (parent.lastPathComponent.hasPrefix("boxwarden-inspector-probe.") ||
            parent.lastPathComponent.hasPrefix("boxwarden-inspector-boot.")),

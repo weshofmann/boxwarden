@@ -32,4 +32,16 @@ if ! grep -Fq 'probe accepts only' "$fixture_dir/stderr"; then
   exit 1
 fi
 
-echo 'hardlinked synthetic copy rejected before VZ configuration'
+rm "$boot_dir/synthetic.raw"
+cp "$fixture_dir/source.raw" "$boot_dir/synthetic.raw"
+chmod 600 "$boot_dir/synthetic.raw"
+"$fixture_dir/alpha-inspector" preflight-copy \
+  "$fixture_dir/missing-kernel" "$fixture_dir/missing-initrd" \
+  "$boot_dir/synthetic.raw" 0123456789abcdef0123456789abcdef \
+  > "$fixture_dir/control-stdout" 2> "$fixture_dir/control-stderr" || true
+if grep -Fq 'probe accepts only' "$fixture_dir/control-stderr"; then
+  echo 'private one-link disk was incorrectly rejected at copy admission' >&2
+  exit 1
+fi
+
+echo 'hardlinked copy rejected; private one-link control passed disk admission'
