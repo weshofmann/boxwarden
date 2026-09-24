@@ -31,6 +31,9 @@ func TestSliceCPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
 		{"workspace promotion cannot admit SSH pin", "internal/workspacex/promotion.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
 		{"workspace launch cannot admit SSH pin", "internal/workspacex/launch_disks.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
 		{"workspace preparation cannot admit SSH pin", "internal/workspacex/prepare_start.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
+		{"export snapshot cannot admit SSH pin", "internal/workspacex/export_copy.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
+		{"export recovery cannot admit SSH pin", "internal/workspacex/export_recover.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
+		{"export cannot persist owner manifest", "internal/exportx/other.go", `package exportx; type OwnerManifest struct{ Token string }`, "ownership record"},
 		{"composite readiness publication", "internal/app/start.go", `package app; type Snapshot struct{ PinPresent bool }; var _ = Snapshot{PinPresent: true}`, "deferred readiness publication"},
 		{"assigned readiness publication", "internal/lifecycle/start.go", `package lifecycle; type Snapshot struct{ ZoneMatches bool }; func f(s *Snapshot) { s.ZoneMatches = true }`, "deferred readiness publication"},
 		{"cgo libproc header", "internal/backend/proc.go", "package backend\n/* #include <libproc.h> */\nimport \"C\"", "discarded libproc"},
@@ -112,6 +115,9 @@ func f(request protocol.SerialRequest) protocol.SerialResult {
 		{"workspace formatter admission", "internal/workspacex/promotion.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
 		{"workspace launch formatter admission", "internal/workspacex/launch_disks.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
 		{"workspace preparation formatter admission", "internal/workspacex/prepare_start.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
+		{"export snapshot formatter admission", "internal/workspacex/export_copy.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
+		{"export recovery formatter admission", "internal/workspacex/export_recover.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
+		{"inspector artifact manifest", "internal/exportx/bundle.go", `package exportx; type inspectorBundleManifest struct{ Version int }`},
 		{"qualification libproc", "internal/qualification/adr024/proc.go", "package adr024\n/* #cgo LDFLAGS: -lproc\n#include <libproc.h> */\nimport \"C\""},
 	}
 	for _, test := range tests {
@@ -278,7 +284,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 			if name == "FindProcess" {
 				p.add(path, "process reconstruction", "os.FindProcess or equivalent name")
 			}
-			qualifiedWorkspaceAdmit := (path == "internal/workspacex/promotion.go" || path == "internal/workspacex/launch_disks.go" || path == "internal/workspacex/prepare_start.go") && name == "Admit" && workspaceFormatterAlias != "" && calledReceiver(value.Fun) == workspaceFormatterAlias
+			qualifiedWorkspaceAdmit := allowedWorkspaceFormatterAdmitPath(path) && name == "Admit" && workspaceFormatterAlias != "" && calledReceiver(value.Fun) == workspaceFormatterAlias
 			if composition && isDeferredCall(name) && !allowedLifecycleCall(path, name) && !qualifiedWorkspaceAdmit {
 				p.add(path, "unauthorized Slice C call", name)
 			}
@@ -326,7 +332,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 			if isOwnershipRecordName(name) {
 				p.add(path, "ownership record", value.Name.Name)
 			}
-			if strings.Contains(name, "manifest") && !manifestFoundationPath(path) {
+			if strings.Contains(name, "manifest") && !manifestFoundationPath(path) && !(path == "internal/exportx/bundle.go" && value.Name.Name == "inspectorBundleManifest") {
 				p.add(path, "ownership record", value.Name.Name)
 			}
 		case *ast.BasicLit:
@@ -503,6 +509,16 @@ func isAlternatePTYImport(importPath string) bool {
 
 func manifestFoundationPath(path string) bool {
 	return strings.HasPrefix(path, "internal/hostx/") || strings.HasPrefix(path, "internal/guestproto/")
+}
+
+func allowedWorkspaceFormatterAdmitPath(path string) bool {
+	switch path {
+	case "internal/workspacex/promotion.go", "internal/workspacex/launch_disks.go", "internal/workspacex/prepare_start.go",
+		"internal/workspacex/export_copy.go", "internal/workspacex/export_recover.go":
+		return true
+	default:
+		return false
+	}
 }
 
 func calledName(expression ast.Expr) string {

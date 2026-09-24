@@ -11,6 +11,7 @@ import (
 
 	"github.com/weshofmann/boxwarden/internal/alphaprep"
 	"github.com/weshofmann/boxwarden/internal/app"
+	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/backend/tart"
 	"github.com/weshofmann/boxwarden/internal/basebuild"
 	"github.com/weshofmann/boxwarden/internal/config"
@@ -20,6 +21,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/sessionruntime"
 	"github.com/weshofmann/boxwarden/internal/sshx"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
+	"github.com/weshofmann/boxwarden/internal/workspacex"
 )
 
 type rootInstaller func(context.Context, []byte) ([]byte, error)
@@ -102,6 +104,10 @@ func publicOptions(output io.Writer) app.Options {
 			components := alphaprep.BuildComponents{Runner: runner, Observer: observer, ScriptRunner: basebuild.OSOwnedScriptRunner{}, Launcher: basebuild.OSInstallerLauncher{},
 				OpenSSLPath: input.OpenSSLPath, OpenSSLSHA256: input.OpenSSLSHA256, XorrisoPath: input.XorrisoPath, XorrisoSHA256: input.XorrisoSHA256}
 			return alphaprep.Prepare(ctx, loaded, selected, configPath, request, hostDoctor, caStore, components)
+		},
+		AlphaExport: func(ctx context.Context, selected config.Domain, input app.AlphaExportInput, observer backend.Observer) (workspacex.ExportJournal, string, error) {
+			return workspacex.ExportSelectedWorkspace(ctx, selected.StateRoot, selected.ID, input.VolumeID,
+				input.DestinationParent, input.Selected, observer, input.SourceRoot, input.ISOPath, input.GoBinary)
 		},
 		Output: output,
 	}

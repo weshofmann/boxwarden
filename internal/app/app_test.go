@@ -107,6 +107,51 @@ func TestWorkspaceAttachAndDetachUseExactStoppedSessionAndQualifiedVolume(t *tes
 	}
 }
 
+func TestWorkspaceExportRoutesExactDomainSelectionAndInputs(t *testing.T) {
+	configPath, selected := writeV2DomainFixture(t, "alpha")
+	observer := fake.New()
+	const volumeID = "00112233-4455-4677-8899-aabbccddeeff"
+	const transaction = "10213243-5465-4768-899a-bbccddeeff00"
+	destination := filepath.Join(t.TempDir(), "returned")
+	input := AlphaExportInput{VolumeID: volumeID, DestinationParent: destination,
+		Selected: []string{"project/report.txt", "notes"}, SourceRoot: "/private/clean-source",
+		ISOPath: "/private/ubuntu.iso", GoBinary: "/private/bin/go"}
+	called := 0
+	var output bytes.Buffer
+	options := Options{Observer: observer, Output: &output,
+		AlphaExport: func(_ context.Context, actual config.Domain, received AlphaExportInput, actualObserver backend.Observer) (workspacex.ExportJournal, string, error) {
+			called++
+			if actual != selected || actualObserver != observer || !reflect.DeepEqual(received, input) {
+				return workspacex.ExportJournal{}, "", fmt.Errorf("export lost selected domain or inputs")
+			}
+			return workspacex.ExportJournal{ID: transaction, Domain: actual.ID,
+					DestinationParent: destination, Phase: workspacex.ExportPublished},
+				filepath.Join(destination, strings.ReplaceAll(transaction, "-", "")), nil
+		}}
+	args := []string{"--config", configPath, "--domain", "alpha", "workspace", "export",
+		"--destination", destination, "--select", "project/report.txt", "--select", "notes",
+		"--source-root", input.SourceRoot, "--iso", input.ISOPath, "--go", input.GoBinary, volumeID}
+	if err := Run(t.Context(), args, options); err != nil || called != 1 || !strings.Contains(output.String(), "transaction: "+transaction+"\n") {
+		t.Fatalf("public export routing = called %d, output %q, error %v", called, output.String(), err)
+	}
+	for _, invalid := range [][]string{
+		{"--destination", destination, "--source-root", input.SourceRoot, "--iso", input.ISOPath, "--go", input.GoBinary, volumeID},
+		{"--destination", "relative", "--select", "project/report.txt", "--source-root", input.SourceRoot, "--iso", input.ISOPath, "--go", input.GoBinary, volumeID},
+	} {
+		if err := Run(t.Context(), append([]string{"--config", configPath, "--domain", "alpha", "workspace", "export"}, invalid...), options); err == nil {
+			t.Fatalf("invalid public export input accepted: %v", invalid)
+		}
+	}
+	if called != 1 {
+		t.Fatalf("invalid input invoked exporter %d times", called)
+	}
+	workConfig, _ := writeV2DomainFixture(t, "work")
+	workArgs := append([]string{"--config", workConfig, "--domain", "work", "workspace", "export"}, args[6:]...)
+	if err := Run(t.Context(), workArgs, options); err == nil || called != 1 {
+		t.Fatalf("non-alpha domain used v0.2 exporter: called %d, error %v", called, err)
+	}
+}
+
 func TestBackendFactoryBindsRegisterCreateAndStatusToAdmittedConfigAndDomain(t *testing.T) {
 	path := writeV2DomainSetFixture(t)
 	loaded, err := config.Load(path)

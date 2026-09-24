@@ -89,6 +89,7 @@ type Options struct {
 	SessionStopperFactory SessionStopperFactory
 	StatusSnapshotFactory StatusSnapshotFactory
 	AlphaPrepare          AlphaPrepareFunc
+	AlphaExport           AlphaExportFunc
 	Output                io.Writer
 }
 
@@ -130,7 +131,7 @@ func Run(ctx context.Context, args []string, options Options) error {
 	if command.requiresBackend() {
 		if command.kind == commandGoldenRegister {
 			err = backend.ValidateObjectID(command.name)
-		} else {
+		} else if command.kind != commandWorkspaceExport {
 			_, err = session.ParseName(command.name)
 		}
 		if err != nil {
@@ -316,6 +317,18 @@ func Run(ctx context.Context, args []string, options Options) error {
 			return fmt.Errorf("detach workspace: %w", err)
 		}
 		return writeWorkspaceAttachment(options.Output, record, "detached")
+	case commandWorkspaceExport:
+		if options.Observer == nil || options.AlphaExport == nil {
+			return errors.New("workspace export requires backend observation and alpha exporter")
+		}
+		if selectedDomain.ID != "alpha" {
+			return errors.New("v0.2 workspace export is limited to the explicit alpha domain")
+		}
+		journal, published, err := options.AlphaExport(ctx, selectedDomain, command.alphaExport, options.Observer)
+		if err != nil {
+			return fmt.Errorf("export workspace: %w", err)
+		}
+		return writeAlphaExport(options.Output, selectedDomain, journal, published)
 	default:
 		return errors.New("unsupported command")
 	}
@@ -336,6 +349,7 @@ const (
 	commandAlphaPrepare
 	commandWorkspaceAttach
 	commandWorkspaceDetach
+	commandWorkspaceExport
 )
 
 type parsedCommand struct {
@@ -347,6 +361,7 @@ type parsedCommand struct {
 	recipePath   string
 	isoPath      string
 	alphaPrepare AlphaPrepareInput
+	alphaExport  AlphaExportInput
 	recipeCreate bool
 	volumeID     string
 	mountPath    string
@@ -357,7 +372,7 @@ func (c parsedCommand) requiresDomain() bool {
 }
 
 func (c parsedCommand) requiresBackend() bool {
-	return c.kind == commandGoldenRegister || c.kind == commandSessionCreate || c.kind == commandSessionStatus || c.kind == commandWorkspaceAttach || c.kind == commandWorkspaceDetach
+	return c.kind == commandGoldenRegister || c.kind == commandSessionCreate || c.kind == commandSessionStatus || c.kind == commandWorkspaceAttach || c.kind == commandWorkspaceDetach || c.kind == commandWorkspaceExport
 }
 
 func parseCommand(args []string, options Options) (parsedCommand, error) {
@@ -503,7 +518,30 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.kind, base.volumeID, base.name = commandWorkspaceDetach, remaining[2], remaining[3]
 		return base, nil
 	}
-	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] [--recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256] <session>, session start <session>, session stop <session>, session status <session>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
+	if len(remaining) >= 3 && remaining[0] == "workspace" && remaining[1] == "export" {
+		exportSet := flag.NewFlagSet("workspace export", flag.ContinueOnError)
+		exportSet.SetOutput(io.Discard)
+		input := AlphaExportInput{}
+		exportSet.StringVar(&input.DestinationParent, "destination", "", "existing empty private destination directory")
+		exportSet.StringVar(&input.SourceRoot, "source-root", "", "clean inspector source checkout")
+		exportSet.StringVar(&input.ISOPath, "iso", "", "pinned Ubuntu ARM64 installer ISO")
+		exportSet.StringVar(&input.GoBinary, "go", "", "absolute Go executable")
+		selected := exportSelections{}
+		exportSet.Var(&selected, "select", "relative workspace file or directory; repeatable")
+		if err := exportSet.Parse(remaining[2:]); err != nil {
+			return parsedCommand{}, fmt.Errorf("parse workspace export: %w", err)
+		}
+		if len(exportSet.Args()) != 1 {
+			return parsedCommand{}, errors.New("workspace export requires one volume UUID")
+		}
+		input.VolumeID, input.Selected = exportSet.Args()[0], append([]string(nil), selected...)
+		if err := validAlphaExportInput(input); err != nil {
+			return parsedCommand{}, err
+		}
+		base.kind, base.alphaExport = commandWorkspaceExport, input
+		return base, nil
+	}
+	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] [--recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256] <session>, session start <session>, session stop <session>, session status <session>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, workspace export --destination PATH --select RELATIVE [--select RELATIVE...] --source-root PATH --iso PATH --go PATH <volume-uuid>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
 }
 
 func writeWorkspaceAttachment(output io.Writer, record workspacex.Record, state string) error {
