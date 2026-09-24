@@ -13,7 +13,7 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
 | Public management | A fresh disposable clone reached exact-generation READY through serial bootstrap, host-key pinning, certificate, strict SSH, and time-zone checks; it stopped and restarted to READY. GNOME, Firefox, and a synthetic home file were observed after restart. |
 | Reusable preparation | Strict versioned recipe and ISO checks, candidate build, guest preparation, fresh-clone qualifier, private evidence, and cache admission are implemented. A fresh real build using the corrected finalizer completed installation, guest preparation, clone-ready shutdown, and qualification. Its fresh clone reached READY, passed package-inventory and identity checks, and stopped; the versioned prepared record was admitted. This is base qualification, not the full workspace/export acceptance path. |
 | Workspace volume | One alpha-owned 64 MiB ext4 volume was formatted in a zero-NIC VM and independently inspected. Its synthetic file retained its digest across an earlier stop/restart after manual remount. Public detach and attach moved this exact volume from a stopped original system clone to a separate replacement system clone without copying the disk. The replacement guest file manager opened the mounted 57-byte synthetic file and displayed its expected content. The corrected public stop released Use and left ext4 clean; source and export snapshot SHA-256 matched. |
-| Public volume creation | `workspace create` binds an exact private signed formatter bundle, clean source checkout, new volume/filesystem UUIDs, and capacity to the explicit alpha domain. Focused tests cover creation, idempotent unbound retry, verified-journal recovery after record-publication interruption, preflight refusal before disk reservation, and failed-format refusal without reformatting. App tests cover command routing and invalid input. This is source verification; the public command has not yet formatted a real new volume. |
+| Public volume creation | `workspace create` binds an exact private signed formatter bundle, clean source checkout, new volume/filesystem UUIDs, and capacity to the explicit alpha domain. Focused tests cover creation, idempotent unbound retry, verified-journal recovery after record-publication interruption, preflight refusal before disk reservation, and failed-format refusal without reformatting. A real public command formatted a fresh 64 MiB synthetic volume in a zero-NIC VM. Independent host checks found a verified journal, available unbound record, matching inode/UUID/size, clean ext4 state without `needs_recovery`, and a successful exact public retry without reformatting. Mount-bound start and retained rebuild are separate pending checks. |
 | Automatic mount and READY | The static generic guest helper resolves an exact FS UUID, mounts ext4 at a validated path, checks existing mounts and read-write state, and probes exact bindings. The host owner derives those bindings from admitted session/Use records, ensures them before READY, and repeats the bound probe for status. Full local Go tests, focused race tests, vet, and artifact checks passed at `5c84520`. The fresh original clone reached mount-bound READY in two generations; the separate replacement clone also reached mount-bound READY with the same reattached volume and later exposed the expected file in its GUI. Both are stopped now. |
 | Controlled export | Bounded receiver, exact stopped-volume snapshot, private helper capture, and selected publication have targeted tests. After clean guest shutdown, a real public export published one selected 57-byte regular file into a new private directory. Its SHA-256 matched the known synthetic guest file; the durable journal read `published`, and the source and snapshot digests matched. A later public resume of an earlier clean `snapshot-ready` transaction published the same selected file and digest, with no leftover spool or running inspector. An earlier dirty-volume attempt remains private failed evidence. Inspected-phase hard-exit ambiguity remains open. |
 | Inspector bundle admission | A clean-source production bundle from the pinned ISO passed independent artifact checks and host admission with both synthetic and real journal-derived requests. Admission checks tracked source bytes, kernel/ISO pins, seven artifact digests and private metadata, deterministic appended guest/request initrd, and the signed helper's sole Virtualization entitlement. The first live export-mode VM rejected an unclean volume; a later fresh clean-volume run completed selected publication with zero-NIC inspector evidence. |
@@ -350,11 +350,19 @@ remain outside the prepared cache.
 
 ## Next actions
 
-1. Build the public creator's exact private formatter bundle from the clean
-   published source, create a fresh synthetic volume, and qualify the rebuild
-   with that volume retained. Preserve the stopped failed VM and dirty volume.
-   The guest SSH loss remains open; do not infer its resolution or a real
-   false-stopped qualification from the no-volume rebuild.
+1. Create a fresh disposable sandbox from the qualified mount-capable prepared
+   base, attach the newly qualified clean synthetic volume, and verify its
+   mount-bound READY and synthetic content across stop/restart. Prepare a
+   distinct mount-capable target base before qualifying rebuild with the
+   volume retained; the current same-base command intentionally no-ops. A
+   start on the older generic r2 clone failed at the guest workspace-mount SSH
+   request after the base probe and
+   time-zone steps succeeded. The r2 helper digest differs from the prepared
+   mount-qualified helper, consistent with the tracked plan's warning that r2
+   predates this guest definition. That failed run was controlled-stopped; its
+   volume Use was released and the clean volume explicitly detached. Preserve
+   the failed r2 VM and the earlier dirty volume as evidence. The separate
+   guest SSH loss and false-stopped qualification remain open.
 2. Qualify public inspected-phase export retry and hostile-exit handling on
    fresh synthetic inputs. Rebuild and export a fresh clean volume through
    the public path, then reattach it to a fresh sandbox and verify its mount
