@@ -176,10 +176,21 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   disk gets an explicit early refusal without another inspector attempt.
   Workspacex and inspector guest tests, targeted vet, formatting, and diff
   checks passed. This is source verification, not fresh real-host qualification.
-- Next: add durable per-action attempts and receipts before enabling recipe
-  execution; diagnose and correct the dirty-stop path, then qualify import
-  persistence from a fresh disposable baseline and run the public verification
-  command. Recipe execution remains disabled until those receipts exist.
+- Fresh persistence diagnostic: a new recipe-bound sandbox reused the admitted
+  prepared base; a new host-qualified 64 MiB ext4 workspace started clean and
+  reached mount-bound READY. Public import of the tracked three-file synthetic
+  project returned matching readback and left its journal `transferring`. A
+  later status read reported an expired READY snapshot. Public controlled stop
+  completed in about 18 seconds, but read-only inspection of the exact stopped
+  volume found ext4 `needs_recovery`. The failed VM and volume are preserved;
+  no export was attempted and no durable import verification is claimed. This
+  reproduces dirty shutdown from a fresh baseline and makes guest shutdown
+  behavior the immediate qualification blocker.
+- Next: determine why an exact controlled stop fails to leave the attached
+  ext4 volume clean, correct that path, then repeat import, export, and public
+  verification from another fresh disposable baseline. Add durable per-action
+  attempts and receipts before enabling recipe execution. Recipe execution
+  remains disabled until those receipts exist.
 - Limits: retained import persistence, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh
   acceptance remain open. External capacity is available; a fresh disposable
