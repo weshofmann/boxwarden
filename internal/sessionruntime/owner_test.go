@@ -208,6 +208,127 @@ func TestBootstrapUsesReloadedAuthorityPersistsExactPinWithoutReady(t *testing.T
 	}
 }
 
+func rebuildOwnerFixture(t *testing.T) (*fixture, session.RebuildJournal, sshx.Binding) {
+	t.Helper()
+	f := newFixture(t)
+	oldBackend := f.record.Backend.ObjectID
+	oldBinding := sshx.Binding{Domain: f.record.Domain, SessionID: f.record.ID, BackendKind: "tart", BackendObject: oldBackend}
+	oldPin, err := sshx.NewPinStore(sshx.Domain{ID: "work", StateRoot: f.root}).Admit(context.Background(), oldBinding, sshx.ObservedHostKey{Algorithm: "ssh-ed25519", PublicKey: ownerTestPublicKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawPin, err := json.Marshal(oldPin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(rawPin)
+	journal := session.RebuildJournal{Version: 1, Domain: "work", SessionName: "dev", SessionID: f.record.ID,
+		OperationID: "00112233-4455-4677-8899-aabbccddeeff", Phase: session.RebuildCutover,
+		OldBackend: oldBackend, OldRevision: f.record.GoldenRevision,
+		CandidateBackend: "boxwarden-work-00112233445546778899aabbccddeeff", CandidateRevision: "golden-r2",
+		OldPinPresent: true, OldPinDigest: hex.EncodeToString(digest[:])}
+	f.record.Backend.ObjectID = journal.CandidateBackend
+	f.record.GoldenRevision = journal.CandidateRevision
+	if err := session.SaveRecord(f.root, "work", f.record); err != nil {
+		t.Fatal(err)
+	}
+	f.request.Binding.BackendObject = journal.CandidateBackend
+	if err := os.Mkdir(filepath.Join(f.root, "rebuilds"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeOwnerRebuildJournal(t, f.root, journal)
+	f.observe = func(_ context.Context, object string) (backend.Observation, error) {
+		state := backend.ObjectStopped
+		if object == journal.CandidateBackend && f.startRequest.ObjectID != "" {
+			state = backend.ObjectRunning
+		}
+		return backend.Observation{ObjectID: object, Exists: true, State: state}, nil
+	}
+	return f, journal, oldBinding
+}
+
+func writeOwnerRebuildJournal(t *testing.T, root string, journal session.RebuildJournal) {
+	t.Helper()
+	raw, err := json.Marshal(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "rebuilds", journal.SessionName+".json"), append(raw, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRebuildBootstrapRotatesOnlyJournalBoundPin(t *testing.T) {
+	f, journal, oldBinding := rebuildOwnerFixture(t)
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Bootstrap(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	store := sshx.NewPinStore(sshx.Domain{ID: "work", StateRoot: f.root})
+	candidateBinding := oldBinding
+	candidateBinding.BackendObject = journal.CandidateBackend
+	if pin, err := store.Load(context.Background(), candidateBinding); err != nil || pin.BackendObject != journal.CandidateBackend {
+		t.Fatalf("candidate pin = %#v, %v", pin, err)
+	}
+	if _, err := store.Load(context.Background(), oldBinding); err == nil {
+		t.Fatal("old pin binding remained after rebuild bootstrap")
+	}
+	_ = f.owner.Stop(context.Background())
+	_ = f.owner.Wait(context.Background())
+}
+
+func TestRebuildBootstrapRejectsChangedJournalBeforePinRotation(t *testing.T) {
+	f, journal, oldBinding := rebuildOwnerFixture(t)
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	journal.OldPinDigest = strings.Repeat("0", 64)
+	writeOwnerRebuildJournal(t, f.root, journal)
+	if err := f.owner.Bootstrap(context.Background()); err == nil {
+		t.Fatal("changed rebuild journal authorized pin rotation")
+	}
+	if pin, err := sshx.NewPinStore(sshx.Domain{ID: "work", StateRoot: f.root}).Load(context.Background(), oldBinding); err != nil || pin.BackendObject != oldBinding.BackendObject {
+		t.Fatalf("rejected bootstrap changed old pin: %#v, %v", pin, err)
+	}
+	_ = f.owner.Stop(context.Background())
+	_ = f.owner.Wait(context.Background())
+}
+
+func TestRebuildOwnerRejectsWrongPhaseAndRunningOldSystemBeforeLaunch(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*fixture, *session.RebuildJournal)
+	}{
+		{name: "wrong phase", mutate: func(_ *fixture, j *session.RebuildJournal) { j.Phase = session.RebuildCloned }},
+		{name: "pin transition unavailable", mutate: func(f *fixture, _ *session.RebuildJournal) { f.pin = &flakyPinStore{} }},
+		{name: "old still running", mutate: func(f *fixture, j *session.RebuildJournal) {
+			candidate := j.CandidateBackend
+			old := j.OldBackend
+			f.observe = func(_ context.Context, object string) (backend.Observation, error) {
+				state := backend.ObjectStopped
+				if object == old {
+					state = backend.ObjectRunning
+				}
+				if object != old && object != candidate {
+					t.Fatalf("unexpected observed object %q", object)
+				}
+				return backend.Observation{ObjectID: object, Exists: true, State: state}, nil
+			}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f, journal, _ := rebuildOwnerFixture(t)
+			test.mutate(f, &journal)
+			writeOwnerRebuildJournal(t, f.root, journal)
+			if err := f.owner.Start(context.Background(), f.request); err == nil || f.startRequest.ObjectID != "" {
+				t.Fatalf("unsafe rebuild owner reached launch: request=%#v, error=%v", f.startRequest, err)
+			}
+		})
+	}
+}
+
 func TestBootstrapRetriesPinFromValidatedResultWithoutSecondSerialCommand(t *testing.T) {
 	f := newFixture(t)
 	pins := &flakyPinStore{failures: 1}

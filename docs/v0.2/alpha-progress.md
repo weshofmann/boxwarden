@@ -47,8 +47,8 @@ clones the recorded candidate, randomizes its MAC while stopped, and advances
 the journal to `cloned`. A clone error after backend mutation was retried
 without a second clone. Targeted session/workspace/app tests and vet pass;
 this remains a source-only checkpoint without public rebuild or live VM proof.
-The next implementation step is the journal-authorized pin transition and
-internal new-generation cutover, followed by exact old-system retirement.
+The next implementation step is internal new-generation cutover, followed by
+exact old-system retirement.
 
 The host-key store now has a narrow rebuild-only transition primitive. It
 requires the old pin's exact binding and full-record digest, the candidate
@@ -56,8 +56,14 @@ binding, operation UUID, and serial-observed Ed25519 key. A private sibling
 staging file supports atomic replacement and exact retry after an interrupted
 rename; conflicting old, candidate, or staged bytes fail closed. Pin-store,
 runtime, and session package tests, targeted vet, and focused pin race tests
-pass. The detached owner does not call this primitive yet, so no rebuild pin
-has been rotated by the public path.
+pass. The detached owner now loads an exact `cutover` journal before candidate
+launch, refuses a running old backend or unavailable transition capability,
+and rechecks the unchanged journal after serial bootstrap before rotating the
+pin. An owner fixture rotated an old pin to the exact candidate and rejected a
+changed journal without changing the old pin. Affected owner, pin, session,
+and supervisor tests, targeted vet, and focused owner race tests pass. The
+control plane does not yet persist cutover or offer a public rebuild command;
+these owner checks have source-only fixture evidence.
 
 The managed-volume shutdown correction at `7eeba47` now passes one real
 attached-volume public stop: the session and backend are consistently stopped,

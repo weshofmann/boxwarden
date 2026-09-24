@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -34,6 +35,10 @@ type serialRuntime interface {
 type pinStore interface {
 	Admit(context.Context, sshx.Binding, sshx.ObservedHostKey) (sshx.HostKeyPin, error)
 	Load(context.Context, sshx.Binding) (sshx.HostKeyPin, error)
+}
+
+type rebuildPinStore interface {
+	TransitionRebuild(context.Context, string, sshx.Binding, sshx.Binding, bool, string, sshx.ObservedHostKey) (sshx.HostKeyPin, error)
 }
 
 type certificateIssuer interface {
@@ -83,6 +88,8 @@ type Owner struct {
 	handle                          backend.Handle
 	serial                          serialRuntime
 	pins                            pinStore
+	rebuildJournal                  *session.RebuildJournal
+	rebuildRoot                     string
 	bootstrapRequest                guestproto.SerialRequest
 	bootstrapResult                 guestproto.SerialResult
 	bootstrapResolved               bool
@@ -164,6 +171,17 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) (re
 	if record.IntendedState != session.StateStarting || record.StartGeneration == "" || record.Backend.Kind != "tart" || binding != request.Binding {
 		return fmt.Errorf("durable starting session does not match exact launch binding")
 	}
+	var rebuild *session.RebuildJournal
+	journal, journalErr := session.LoadRebuildJournal(selected.StateRoot, selected.ID, string(record.Name))
+	if journalErr == nil {
+		if journal.Phase != session.RebuildCutover || journal.SessionID != record.ID || journal.CandidateBackend != record.Backend.ObjectID ||
+			journal.CandidateRevision != record.GoldenRevision || journal.Domain != record.Domain {
+			return fmt.Errorf("starting session does not match exact rebuild cutover journal")
+		}
+		rebuild = &journal
+	} else if !errors.Is(journalErr, os.ErrNotExist) {
+		return fmt.Errorf("inspect exact rebuild journal before launch: %w", journalErr)
+	}
 	directory := filepath.Join(selected.StateRoot, "runtime", binding.Domain, binding.SessionID, binding.Generation)
 	if request.RuntimeDirectory != directory {
 		return fmt.Errorf("runtime directory does not match configured exact generation")
@@ -189,9 +207,20 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) (re
 	if pins == nil {
 		return fmt.Errorf("host-key pin store is required")
 	}
+	if rebuild != nil {
+		if _, ok := pins.(rebuildPinStore); !ok {
+			return fmt.Errorf("rebuild pin transition is unavailable before candidate launch")
+		}
+	}
 	observer := o.deps.observer(admission.Host.TartExecutable, admission.Host.TartHome)
 	if observer == nil {
 		return fmt.Errorf("qualified backend observer is required")
+	}
+	if rebuild != nil {
+		oldObservation, oldErr := observeExact(ctx, observer, rebuild.OldBackend)
+		if oldErr != nil || !oldObservation.Exists || oldObservation.State != backend.ObjectStopped {
+			return fmt.Errorf("old rebuild system must remain exactly stopped before candidate launch: %v", oldErr)
+		}
 	}
 	observation, err := observeExact(ctx, observer, binding.BackendObject)
 	if err != nil {
@@ -249,6 +278,7 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) (re
 	sshBinding := sshx.Binding{Domain: record.Domain, SessionID: record.ID, BackendKind: record.Backend.Kind, BackendObject: record.Backend.ObjectID}
 	o.mu.Lock()
 	o.binding, o.sshBinding, o.ca, o.observer, o.handle, o.serial, o.pins = binding, sshBinding, ca, observer, handle, serial, pins
+	o.rebuildJournal, o.rebuildRoot = rebuild, selected.StateRoot
 	o.workspaceMounts = mounts
 	o.runtimePath, o.tartPath, o.tartHome = directory, admission.Host.TartExecutable, admission.Host.TartHome
 	o.mu.Unlock()
@@ -275,6 +305,7 @@ func (o *Owner) Bootstrap(ctx context.Context) error {
 	}
 	o.mu.Lock()
 	active, binding, sshBinding, ca, serial, pins := o.active, o.binding, o.sshBinding, o.ca, o.serial, o.pins
+	rebuild, rebuildRoot := o.rebuildJournal, o.rebuildRoot
 	resolved, request, result := o.bootstrapResolved, o.bootstrapRequest, o.bootstrapResult
 	o.mu.Unlock()
 	if !active || serial == nil || pins == nil {
@@ -306,7 +337,23 @@ func (o *Owner) Bootstrap(ctx context.Context) error {
 		o.bootstrapRequest, o.bootstrapResult, o.bootstrapResolved = request, result, true
 		o.mu.Unlock()
 	}
-	pin, err := pins.Admit(ctx, sshBinding, sshx.ObservedHostKey{Algorithm: "ssh-ed25519", PublicKey: result.HostPublicKey})
+	observedKey := sshx.ObservedHostKey{Algorithm: "ssh-ed25519", PublicKey: result.HostPublicKey}
+	var pin sshx.HostKeyPin
+	var err error
+	if rebuild == nil {
+		pin, err = pins.Admit(ctx, sshBinding, observedKey)
+	} else {
+		current, loadErr := session.LoadRebuildJournal(rebuildRoot, rebuild.Domain, rebuild.SessionName)
+		if loadErr != nil || current != *rebuild || current.Phase != session.RebuildCutover {
+			return fmt.Errorf("exact rebuild journal changed before host-key transition: %v", loadErr)
+		}
+		transition, ok := pins.(rebuildPinStore)
+		if !ok {
+			return fmt.Errorf("rebuild pin transition is unavailable")
+		}
+		oldBinding := sshx.Binding{Domain: rebuild.Domain, SessionID: rebuild.SessionID, BackendKind: "tart", BackendObject: rebuild.OldBackend}
+		pin, err = transition.TransitionRebuild(ctx, rebuild.OperationID, oldBinding, sshBinding, rebuild.OldPinPresent, rebuild.OldPinDigest, observedKey)
+	}
 	if err != nil {
 		o.setBootstrapDiagnostic("host-key pin admission failed")
 		return fmt.Errorf("admit exact serial-observed host-key pin: %w", err)
