@@ -234,6 +234,18 @@ tests verify that missing-terminal stream is rejected; the Linux ARM64 guest
 cross-build passes. A live export-mode boot and production host bundle
 generation/admission remain pending.
 
+The Swift inspector helper now has distinct `preflight-export` and
+`boot-export` commands. Both require a private `exports/<transaction>/snapshot.raw`
+path whose directory matches the transaction, with exact device, inode, and
+bounded size supplied by the host journal. The boot path rechecks the path
+after the VM stops. `boot-export` fixes the
+kernel selector to `alpha_fixture=export`, retains the no-NIC, one-read-only-disk
+configuration, permits the bounded export serial size, and marks its stopped
+host evidence as export mode. The capture parser accepts this marker so the
+future control-plane caller can require it. A local admission test rejects
+identity, transaction, hardlink, and parent-mode drift. No production caller
+invokes these commands yet, and this source test is not a live export-mode boot.
+
 Inside the isolated Linux guest, validate the expected whole-device ext4 UUID
 and mount with `ro,noload,nodev,nosuid,noexec`. Linux documents that plain
 `ro` can replay ext4's journal and write to the disk; `noload` prevents that

@@ -67,16 +67,24 @@ states, unmounts, and only then emits the terminal record. Targeted
 tests and a Linux ARM64 cross-build pass; this branch has not yet had a live
 export-mode inspector boot, and the host control plane does not generate the
 request bundle yet.
+The Swift helper now provides distinct export preflight and boot commands
+that check the journal's transaction-bound snapshot path, device, inode, and
+size, retain the zero-NIC/read-only VM configuration, and report export-mode
+host evidence.
+The host capture parser accepts the marker; the production caller must still
+require it. Local disk-admission tests reject identity, transaction, hardlink,
+and private parent-mode drift. No live export-mode VM has run.
 Real managed-volume qualification remains open. The earlier failed base
 attempt was corrected and a fresh base built and qualified; failed attempts
 remain outside the prepared cache.
 
 ## Next actions
 
-1. Admit a production Swift helper path for the exact private snapshot and
-   generate a pinned request/kernel/initramfs bundle. Connect the journaled
-   snapshot to capture, recheck its bytes after helper reap, then invoke the
-   receiver. Qualify with the managed synthetic volume and hostile exits.
+1. Generate and admit a pinned request/kernel/initramfs bundle for the private
+   snapshot. Connect the journaled snapshot to capture, require export-mode
+   evidence, compare received paths to the journal, recheck snapshot bytes
+   after helper reap, then invoke the receiver. Qualify with the managed
+   synthetic volume and hostile exits.
 2. Attach the retained volume to a second fresh sandbox after export, then
    verify its mount and content.
 3. Run the full integration checks and real acceptance matrix, and publish the

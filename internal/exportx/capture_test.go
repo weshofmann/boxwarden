@@ -74,10 +74,16 @@ func TestCaptureInspectorRequiresStoppedZeroNICReapedHelperBeforeStream(t *testi
 }
 
 func TestParseInspectorEvidenceRequiresExactFields(t *testing.T) {
+	exportEvidence := []byte(`BOOT_EVIDENCE {"vm_state":"stopped","runtime_network_devices":0,"export_bytes":3,"console_bytes":0,"inspector_mode":"export"}` + "\n")
+	parsed, err := parseInspectorEvidence(exportEvidence, 3)
+	if err != nil || parsed.Mode != "export" {
+		t.Fatalf("valid export evidence = %+v, %v", parsed, err)
+	}
 	for _, tc := range []struct{ raw string }{
 		{`BOOT_EVIDENCE {"vm_state":"stopped","runtime_network_devices":1,"export_bytes":3,"console_bytes":0}` + "\n"},
 		{`BOOT_EVIDENCE {"vm_state":"stopped","runtime_network_devices":0,"export_bytes":2,"console_bytes":0}` + "\n"},
 		{`BOOT_EVIDENCE {"vm_state":"stopped","runtime_network_devices":0,"export_bytes":3,"console_bytes":0,"unknown":1}` + "\n"},
+		{`BOOT_EVIDENCE {"vm_state":"stopped","runtime_network_devices":0,"export_bytes":3,"console_bytes":0,"inspector_mode":"synthetic"}` + "\n"},
 		{`BOOT_EVIDENCE {"vm_state":"stopped","runtime_network_devices":null,"export_bytes":3,"console_bytes":0}` + "\n"},
 		{`BOOT_EVIDENCE {"vm_state":"stopped","runtime_network_devices":0,"export_bytes":3,"console_bytes":0}` + "\n" + `BOOT_EVIDENCE {}` + "\n"},
 	} {

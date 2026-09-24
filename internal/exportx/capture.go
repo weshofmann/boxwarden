@@ -30,6 +30,7 @@ type InspectorEvidence struct {
 	RuntimeNetworkDevices int64
 	ConsoleBytes          int64
 	ExportBytes           int64
+	Mode                  string
 }
 
 // CapturedInspectorStream is a complete private spool. The caller owns Stream
@@ -241,7 +242,7 @@ func parseInspectorEvidence(log []byte, streamSize int64) (InspectorEvidence, er
 	if err != nil || token != json.Delim('{') {
 		return InspectorEvidence{}, fmt.Errorf("invalid inspector host evidence: %v", err)
 	}
-	fields := make(map[string]json.RawMessage, 4)
+	fields := make(map[string]json.RawMessage, 5)
 	for decoder.More() {
 		keyToken, err := decoder.Token()
 		key, ok := keyToken.(string)
@@ -263,10 +264,15 @@ func parseInspectorEvidence(log []byte, streamSize int64) (InspectorEvidence, er
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return InspectorEvidence{}, fmt.Errorf("trailing inspector evidence")
 	}
-	if len(fields) != 4 {
+	if len(fields) != 4 && len(fields) != 5 {
 		return InspectorEvidence{}, fmt.Errorf("incomplete inspector host evidence")
 	}
 	var result InspectorEvidence
+	if len(fields) == 5 {
+		if err := json.Unmarshal(fields["inspector_mode"], &result.Mode); err != nil || result.Mode != "export" {
+			return InspectorEvidence{}, fmt.Errorf("inspector did not report export mode")
+		}
+	}
 	if err := json.Unmarshal(fields["vm_state"], &result.VMState); err != nil || result.VMState != "stopped" {
 		return InspectorEvidence{}, fmt.Errorf("inspector VM did not stop")
 	}

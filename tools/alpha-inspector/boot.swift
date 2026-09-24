@@ -100,6 +100,9 @@ private func requestAndForceStop(_ vm: VZVirtualMachine, queue: DispatchQueue, o
 // stderr receives bounded machine-readable host observations. A process exit
 // is not treated as success unless the VM is stopped and both pipes reach EOF.
 func bootProof(_ prepared: PreparedConfiguration) throws {
+    if let expected = prepared.exportDisk {
+        try requireExportSnapshotDisk(prepared.diskURL, expected: expected)
+    }
     let queue = DispatchQueue(label: "boxwarden.alpha.inspector.vm")
     let vm = VZVirtualMachine(configuration: prepared.configuration, queue: queue)
     let observer = StopObserver()
@@ -109,7 +112,8 @@ func bootProof(_ prepared: PreparedConfiguration) throws {
     }
 
     let consolePump = SerialPump(input: prepared.consoleOutput.fileHandleForReading, output: nil, maximum: 256 * 1024)
-    let exportPump = SerialPump(input: prepared.exportOutput.fileHandleForReading, output: .standardOutput, maximum: 64 * 1024)
+    let exportPump = SerialPump(input: prepared.exportOutput.fileHandleForReading, output: .standardOutput,
+                                maximum: prepared.exportDisk == nil ? 64 * 1024 : 320 * 1024 * 1024)
     consolePump.start()
     exportPump.start()
     defer {
@@ -135,7 +139,8 @@ func bootProof(_ prepared: PreparedConfiguration) throws {
     }
     if let startError { throw startError }
 
-    if observer.stopped.wait(timeout: .now() + .seconds(30)) == .timedOut {
+    let guestDeadline = prepared.exportDisk == nil ? 30 : 50
+    if observer.stopped.wait(timeout: .now() + .seconds(guestDeadline)) == .timedOut {
         try requestAndForceStop(vm, queue: queue, observer: observer)
         throw BootFailure.stopTimeout
     }
@@ -152,13 +157,17 @@ func bootProof(_ prepared: PreparedConfiguration) throws {
     }
     if let error = consolePump.error ?? exportPump.error { throw error }
     if consolePump.overflow || exportPump.overflow { throw BootFailure.streamOverflow }
+    if let expected = prepared.exportDisk {
+        try requireExportSnapshotDisk(prepared.diskURL, expected: expected)
+    }
 
-    let evidence: [String: Any] = [
+    var evidence: [String: Any] = [
         "vm_state": "stopped",
         "runtime_network_devices": vm.networkDevices.count,
         "console_bytes": consolePump.count,
         "export_bytes": exportPump.count,
     ]
+    if prepared.exportDisk != nil { evidence["inspector_mode"] = "export" }
     let encoded = try JSONSerialization.data(withJSONObject: evidence, options: [.sortedKeys])
     FileHandle.standardError.write(Data("BOOT_EVIDENCE ".utf8))
     FileHandle.standardError.write(encoded)
