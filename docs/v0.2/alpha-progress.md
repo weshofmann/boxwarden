@@ -74,15 +74,20 @@ host evidence.
 The host capture parser accepts the marker; the production caller must still
 require it. Local disk-admission tests reject identity, transaction, hardlink,
 and private parent-mode drift. No live export-mode VM has run.
+The host can now derive the guest's transaction request only from a
+snapshot-ready durable journal after re-admitting and hashing the private
+snapshot. Tests reject a copying journal, another domain, a missing or short
+snapshot, and changed snapshot bytes. This preparation does not create an
+initramfs bundle or authorize publication.
 Real managed-volume qualification remains open. The earlier failed base
 attempt was corrected and a fresh base built and qualified; failed attempts
 remain outside the prepared cache.
 
 ## Next actions
 
-1. Generate and admit a pinned request/kernel/initramfs bundle for the private
-   snapshot. Connect the journaled snapshot to capture, require export-mode
-   evidence, compare received paths to the journal, recheck snapshot bytes
+1. Place the prepared request in a private pinned kernel/initramfs bundle for
+   the exact snapshot. Connect the journaled snapshot to capture, require
+   export-mode evidence, compare received paths to the journal, recheck snapshot bytes
    after helper reap, then invoke the receiver. Qualify with the managed
    synthetic volume and hostile exits.
 2. Attach the retained volume to a second fresh sandbox after export, then

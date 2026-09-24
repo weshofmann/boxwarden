@@ -246,6 +246,13 @@ future control-plane caller can require it. A local admission test rejects
 identity, transaction, hardlink, and parent-mode drift. No production caller
 invokes these commands yet, and this source test is not a live export-mode boot.
 
+The host preparation API now loads a snapshot-ready journal under its export
+lock, re-admits the exact private snapshot and SHA-256, then derives the guest
+request bytes from the journal's transaction, ext4 UUID, disk size, and
+selection. It rejects missing or changed bytes before any bundle is built.
+Bundle creation, helper capture, and receiver publication are separate
+remaining gates.
+
 Inside the isolated Linux guest, validate the expected whole-device ext4 UUID
 and mount with `ro,noload,nodev,nosuid,noexec`. Linux documents that plain
 `ro` can replay ext4's journal and write to the disk; `noload` prevents that
