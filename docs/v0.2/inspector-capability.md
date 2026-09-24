@@ -129,14 +129,60 @@ The strict host parser remains unchanged.
 
 ## Inspector contract before export can open
 
-Use a separately admitted signed helper and digest-pinned ARM64 kernel and
-purpose-built initramfs. Admit only an exact stopped workspace volume under
-an exclusive host volume lock. Persist an export-pending transaction before
-launch, retain the admitted disk file descriptor and lock through VM stop and
-helper process reap, and leave pending state blocking writers if cleanup is
-ambiguous. The current workspace record validator does not yet admit an
-`export` pending kind; that needs a reviewed transition and start gate. A
-Tart stop observation alone does not prove a separate inspector has exited.
+The controlled export will give the inspector a stable private disk copy,
+not the managed volume inode. Alpha admission caps the source volume at 1 GiB,
+returned file content at 256 MiB, and the captured typed stream at 320 MiB;
+it requires at least 3 GiB free above the normal host reserve before copying
+and samples the reserve throughout. The copy has a five-minute deadline. The
+inspector retains its 80-second outer deadline. An over-limit request fails
+before reserving the volume. These limits keep a full-size copy plus stream
+spool and receiver staging within a bounded host footprint; they are alpha
+policy, not workspace-format limits.
+
+The host first acquires the exact volume-use lock, then the attached session
+and domain storage locks in that order. It requires Stopped intent and a fresh
+stopped observation of the exact backend, no Use or other Pending marker, and
+the qualified volume identity and ext4 header. It opens the exact source with
+`workspaceformat.Admit` and retains that descriptor. Before copying, it
+durably creates a private export transaction journal keyed by a fresh UUID and
+persists the same ID as an `export-snapshot` Pending marker on the volume.
+The journal binds domain, volume, attached session and backend, selected paths,
+the intended destination parent identity and final name, private snapshot
+path, and phase. The host copies through the pinned descriptor while holding
+the volume lock, checks deadline and reserve during the copy, then verifies
+source identity/content and a distinct one-link snapshot inode, exact length,
+and SHA-256. It fsyncs snapshot bytes and its directory before atomically
+publishing the snapshot identity/digest and `snapshot-ready` phase in the
+journal. Only after that durable journal update may it clear the exact Pending
+marker and release the volume lease. The journal remains live after Pending
+clears, so the original volume may safely restart while inspection continues.
+
+A crash during copying leaves Pending and an untrusted partial copy. Recovery
+must reacquire the exact volume lock and recheck the session/volume binding,
+stopped backend, source identity, and transaction journal before removing only
+its owned partial copy and clearing that exact Pending marker. Copying is
+in-process under the volume lock; an absent PID or lockfile alone proves
+nothing. Ambiguous ownership or backend state keeps Pending and requires
+explicit reconciliation. The inspector is never launched before Pending
+clears. After that transition, recovery uses the journal: it may remove a
+snapshot only after proving any inspector stopped and reaped, and never removes
+a possibly published destination. A crash around receiver rename is resolved
+by inspecting the exact final name and parent identity; ambiguity is reported,
+not overwritten or silently called success.
+
+A separately admitted signed helper and digest-pinned ARM64 kernel and
+purpose-built initramfs then read only the private snapshot. The host rechecks
+its one-link inode, size, and digest immediately before VM launch and after VM
+stop/helper reap; `0400` mode alone does not make same-UID bytes immutable.
+The helper cannot name a managed workspace path. The bounded typed serial
+stream is captured privately first. The host proves zero runtime NICs, VM
+stop, helper reap, and unchanged snapshot identity/content before giving that
+closed stream to `exportx.Receive`. The receiver can then validate terminal
+and EOF and publish into the pinned empty destination parent. Streaming the
+live inspector directly into the receiver would publish before those host
+checks and is forbidden. The journal advances through inspection and
+publication, remains durable through cleanup, and never treats a staged
+receiver directory as a completed export.
 
 Inside the isolated Linux guest, validate the expected whole-device ext4 UUID
 and mount with `ro,noload,nodev,nosuid,noexec`. Linux documents that plain
@@ -149,8 +195,8 @@ host does not mount the guest filesystem or expose a host tree to the guest.
 
 The synthetic ext4 copy passed a normal bounded boot and remained
 byte-identical. The next qualification must exercise hostile exits, receiver
-limits, and the managed-volume lock, pending state, and crash recovery. Only
-then may the export acceptance gate be reconsidered.
+limits, snapshot publication, managed-volume lock and Pending transitions,
+and crash recovery. Only then may the export acceptance gate be reconsidered.
 
 ## Synthetic boot operator gate
 

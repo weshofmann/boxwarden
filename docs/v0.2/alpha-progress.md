@@ -64,6 +64,15 @@ disk SHA-256. The observed UUID, mount flags, 57-byte file size, and file
 digest match the expected synthetic volume. This qualifies the private copy
 probe, not controlled export of the managed volume.
 
+The export transaction design received a separate read-only review that found
+required changes: persist its journal after clearing the volume Pending
+marker, cap the snapshot and returned data, and publish receiver output only
+after VM stop,
+helper reap, zero-NIC proof, and an unchanged snapshot. The first source
+increment admits an `export-snapshot` Pending marker; a focused interrupted
+copy regression verifies that it blocks session start and detach. Snapshot
+creation, recovery, and public export are still in progress.
+
 The previous public recipe-bound attempt reached the generic base installer
 and guest preparation. Finalization then timed out after ten minutes waiting
 for the clone-ready marker. Its attempt journal records failure, and no session
@@ -108,9 +117,9 @@ current golden.
 
 ## Next actions
 
-1. Qualify the new bounded zero-NIC ext4 inspection on a synthetic copy, then complete
-   controlled stopped-volume export with exact ownership, locking, output
-   limits, and recovery checks.
+1. Implement the journaled stopped-volume snapshot transaction, exact
+   lock-held recovery, and host checks before receiver publication; then
+   qualify it with the synthetic volume and hostile exits.
 2. Attach the retained volume to a second fresh sandbox after export, then
    verify its mount and content.
 3. Run the full integration checks and real acceptance matrix, and publish the

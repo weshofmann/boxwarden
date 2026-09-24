@@ -150,7 +150,7 @@ func validMountPath(mount string) bool {
 
 func validPendingKind(kind string) bool {
 	switch kind {
-	case "create", "format", "import", "attach", "detach":
+	case "create", "format", "import", "attach", "detach", "export-snapshot":
 		return true
 	default:
 		return false
