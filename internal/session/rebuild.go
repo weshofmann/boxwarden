@@ -39,6 +39,7 @@ type RebuildService struct {
 	deps        RebuildDependencies
 	newID       func() (string, error)
 	cutoverHook func() error
+	readyHook   func() error
 }
 
 func NewRebuildService(configured config.Domain, dependencies RebuildDependencies) *RebuildService {
@@ -311,6 +312,67 @@ func (s *RebuildService) Cutover(ctx context.Context, rawName string) (record Re
 	record.GoldenRevision = journal.CandidateRevision
 	if err := SaveRecord(s.domain.StateRoot, domainID, record); err != nil {
 		return Record{}, fmt.Errorf("persist candidate as active system: %w", err)
+	}
+	return record, nil
+}
+
+// ConfirmReady advances the rebuild only after a fresh exact-generation owner
+// snapshot and durable workspace Use verification. It does not infer READY
+// from the stored readiness bit or backend listing alone.
+func (s *RebuildService) ConfirmReady(ctx context.Context, rawName string, starter *Service) (record Record, err error) {
+	if s == nil || starter == nil || starter.start == nil || starter.domain != s.domain {
+		return Record{}, fmt.Errorf("exact rebuild starter is required")
+	}
+	if err := starter.validStartDependencies(); err != nil {
+		return Record{}, err
+	}
+	domainID, err := domain.Parse(string(s.domain.ID))
+	if err != nil || domainID != s.domain.ID {
+		return Record{}, fmt.Errorf("invalid rebuild domain")
+	}
+	name, err := ParseName(rawName)
+	if err != nil {
+		return Record{}, err
+	}
+	transition, err := lock.Acquire(ctx, s.domain.StateRoot, "transition-"+string(domainID)+"-"+string(name))
+	if err != nil {
+		return Record{}, err
+	}
+	defer func() { err = errors.Join(err, transition.Release()) }()
+	held, err := lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
+	if err != nil {
+		return Record{}, err
+	}
+	defer func() { err = errors.Join(err, held.Release()) }()
+	journal, err := LoadRebuildJournal(s.domain.StateRoot, domainID, string(name))
+	if err != nil || (journal.Phase != RebuildCutover && journal.Phase != RebuildReady) {
+		return Record{}, fmt.Errorf("rebuild is not in candidate readiness phase: %v", err)
+	}
+	record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+	if err != nil || record.ID != journal.SessionID || record.Backend.Kind != "tart" ||
+		record.Backend.ObjectID != journal.CandidateBackend || record.GoldenRevision != journal.CandidateRevision ||
+		record.IntendedState != StateRunning || record.Readiness.Status != ReadinessReady {
+		return Record{}, fmt.Errorf("candidate session is not durably ready: %v", err)
+	}
+	if err := starter.start.Workspaces.VerifyUses(ctx, s.domain.StateRoot, domainID, record); err != nil {
+		return Record{}, fmt.Errorf("verify candidate workspace uses before rebuild ready: %w", err)
+	}
+	record, err = starter.reconcileReady(ctx, record)
+	if err != nil {
+		return Record{}, fmt.Errorf("verify fresh exact candidate readiness: %w", err)
+	}
+	if journal.Phase == RebuildReady {
+		return record, nil
+	}
+	if s.readyHook != nil {
+		if err := s.readyHook(); err != nil {
+			return Record{}, err
+		}
+	}
+	next := journal
+	next.Phase = RebuildReady
+	if err := advanceRebuildJournal(s.domain.StateRoot, journal, next); err != nil {
+		return Record{}, fmt.Errorf("persist rebuild ready phase: %w", err)
 	}
 	return record, nil
 }

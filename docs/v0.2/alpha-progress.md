@@ -77,7 +77,13 @@ lock order before reserving exact candidate Uses and publishing `Starting`;
 the existing supervisor path then requires fresh exact readiness. Ordinary
 start remains blocked. Targeted session/workspace/runtime/app/supervisor tests
 and vet plus focused start race tests pass. The journal has not yet advanced
-to `ready`, and no public or live VM rebuild has been qualified.
+to `ready` through the start path alone. A separate confirmation now requires
+fresh exact-generation supervisor evidence and durable candidate workspace
+Uses before advancing `cutover` to `ready`. A missing zone proof and an
+interruption before journal advancement both left the journal at `cutover`;
+an exact retry reached `ready`. Targeted session/workspace/runtime/app tests
+and vet plus focused race tests pass. No public or live VM rebuild has been
+qualified; old-system retirement is next.
 
 The managed-volume shutdown correction at `7eeba47` now passes one real
 attached-volume public stop: the session and backend are consistently stopped,

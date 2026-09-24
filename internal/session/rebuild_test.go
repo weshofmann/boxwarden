@@ -214,4 +214,39 @@ func TestStartRebuildCandidateUsesExactJournalAndOrdinaryStartStaysBlocked(t *te
 		started.ID != active.ID || started.StartGeneration != testStartGeneration || preparedWorkspaces != 1 || control.startCalls != 1 {
 		t.Fatalf("journaled candidate start = %#v, %v; workspaces=%d launch=%d", started, err, preparedWorkspaces, control.startCalls)
 	}
+	control.snapshot = func(binding supervisor.Binding) (supervisor.Snapshot, error) {
+		incomplete := readySnapshot(binding, time.Now())
+		incomplete.ZoneMatches = false
+		return incomplete, nil
+	}
+	if _, err := rebuilder.ConfirmReady(context.Background(), "dev", starter); err == nil {
+		t.Fatal("incomplete fresh owner evidence advanced rebuild ready")
+	}
+	currentJournal, err := LoadRebuildJournal(rebuilder.domain.StateRoot, old.Domain, "dev")
+	if err != nil || currentJournal.Phase != RebuildCutover {
+		t.Fatalf("incomplete readiness changed journal: %#v, %v", currentJournal, err)
+	}
+	control.snapshot = func(binding supervisor.Binding) (supervisor.Snapshot, error) {
+		return readySnapshot(binding, time.Now()), nil
+	}
+	rebuilder.readyHook = func() error { return errors.New("interrupt after fresh ready evidence") }
+	if _, err := rebuilder.ConfirmReady(context.Background(), "dev", starter); err == nil {
+		t.Fatal("expected readiness journal interruption")
+	}
+	currentJournal, err = LoadRebuildJournal(rebuilder.domain.StateRoot, old.Domain, "dev")
+	if err != nil || currentJournal.Phase != RebuildCutover {
+		t.Fatalf("interrupted ready advancement changed journal: %#v, %v", currentJournal, err)
+	}
+	rebuilder.readyHook = nil
+	confirmed, err := rebuilder.ConfirmReady(context.Background(), "dev", starter)
+	if err != nil || confirmed.IntendedState != StateRunning || confirmed.Readiness.Status != ReadinessReady {
+		t.Fatalf("fresh candidate READY confirmation = %#v, %v", confirmed, err)
+	}
+	currentJournal, err = LoadRebuildJournal(rebuilder.domain.StateRoot, old.Domain, "dev")
+	if err != nil || currentJournal.Phase != RebuildReady {
+		t.Fatalf("candidate ready phase = %#v, %v", currentJournal, err)
+	}
+	if retried, err := rebuilder.ConfirmReady(context.Background(), "dev", starter); err != nil || retried != confirmed {
+		t.Fatalf("ready retry = %#v, %v", retried, err)
+	}
 }
