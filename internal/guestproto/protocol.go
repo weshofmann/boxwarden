@@ -317,7 +317,7 @@ func exactObject(data []byte, allowed ...string) (map[string]json.RawMessage, er
 		return nil, fmt.Errorf("trailing JSON")
 	}
 	for _, key := range allowed {
-		if fields[key] == nil && key != "zone" {
+		if fields[key] == nil && key != "zone" && key != "packages" {
 			return nil, fmt.Errorf("missing field %q", key)
 		}
 	}

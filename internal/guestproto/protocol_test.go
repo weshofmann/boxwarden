@@ -676,6 +676,14 @@ func TestManagementRejectsInvalidPackageInspectionRequests(t *testing.T) {
 	}
 }
 
+func TestManagementDecodesMinimalProbeWithoutOptionalFields(t *testing.T) {
+	input := `{"version":1,"kind":"probe","domain":"work","session_id":"` + testSession + `","backend_kind":"tart","backend_object":"workstation"}`
+	decoded, err := DecodeManagementRequest(strings.NewReader(input))
+	if err != nil || decoded.Kind != "probe" || decoded.Zone != "" || decoded.Packages != nil {
+		t.Fatalf("minimal management probe rejected: %+v, %v", decoded, err)
+	}
+}
+
 // This fails if retry changes a durable trust binding instead of returning the
 // existing exact association, CA fingerprint, and derived principal.
 func TestSerialBootstrapIsIdempotentAndRejectsConflictingBinding(t *testing.T) {

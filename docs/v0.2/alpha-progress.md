@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-24 01:18 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-24 01:27 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -116,6 +116,13 @@ Ubuntu image, so the diagnostic used strict pinned management SSH. Guest
 output is diagnostic, while host record, inode, and stopped-backend checks
 remain independent. Automatic mounting at the recorded guest path does not
 exist yet; this is not a complete hands-free workspace workflow.
+Before extending the guest mount protocol, a direct regression found that the
+current source decoder incorrectly required `packages` on a minimal management
+probe. It now admits that optional field only for package inspection and
+accepts a plain probe. The tracked static ARM64 guest helper, artifact lock,
+and installer digest pin were rebuilt coherently. Targeted guest-protocol and
+artifact tests plus vet passed. The older r2 engineering candidate predates
+this helper update; no new golden has been qualified from these bytes.
 
 Publish each meaningful verified implementation increment on the authorized
 alpha branch promptly, targeting a GitHub checkpoint every 30–60 minutes of
