@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -85,6 +86,9 @@ func createExportSnapshot(ctx context.Context, stateRoot string, domainID domain
 	if qualified.Identity.Device != record.Disk.Device || qualified.Identity.Inode != record.Disk.Inode {
 		return ExportJournal{}, fmt.Errorf("workspace source identity differs from qualified record")
 	}
+	if err := requireCleanExportSuperblock(source); err != nil {
+		return ExportJournal{}, fmt.Errorf("offline export source: %w", err)
+	}
 	parent, parentIdentity, err := admitExportParent(destinationParent)
 	if err != nil {
 		return ExportJournal{}, err
@@ -161,6 +165,31 @@ func createExportSnapshot(ctx context.Context, stateRoot string, domainID domain
 		return ExportJournal{}, fmt.Errorf("clear exact export Pending after snapshot: %w", err)
 	}
 	return ready, nil
+}
+
+// This host preflight mirrors the inspector's ext4 header refusal before an
+// expensive snapshot transaction. The zero-NIC guest remains authoritative
+// for the read-only mount and selected file traversal.
+func requireCleanExportSuperblock(source *os.File) error {
+	var superblock [1024]byte
+	if _, err := source.ReadAt(superblock[:], 1024); err != nil {
+		return fmt.Errorf("read ext4 superblock: %w", err)
+	}
+	if binary.LittleEndian.Uint16(superblock[0x38:0x3a]) != 0xef53 {
+		return fmt.Errorf("ext4 superblock magic is absent")
+	}
+	if binary.LittleEndian.Uint16(superblock[0x3a:0x3c]) != 1 {
+		return fmt.Errorf("ext4 filesystem is not clean")
+	}
+	if binary.LittleEndian.Uint32(superblock[0x5c:0x60])&0x04 == 0 ||
+		binary.LittleEndian.Uint32(superblock[0x60:0x64])&0x40 == 0 {
+		return fmt.Errorf("ext4 filesystem lacks journal or extents")
+	}
+	if binary.LittleEndian.Uint32(superblock[0x60:0x64])&0x04 != 0 ||
+		binary.LittleEndian.Uint32(superblock[0x64:0x68])&0x10000 != 0 {
+		return fmt.Errorf("ext4 filesystem requires recovery")
+	}
+	return nil
 }
 
 func finishExportSnapshotPending(stateRoot string, domainID domain.ID, ready ExportJournal) error {

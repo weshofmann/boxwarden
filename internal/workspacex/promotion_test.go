@@ -20,8 +20,8 @@ func (f formatFixture) FormatAndVerify(ctx context.Context, request workspacefor
 	return f(ctx, request)
 }
 
-// The fixture fills only host-readable ext4 header fields. Real formatter
-// qualification still requires a fresh Linux guest and independent e2fsck.
+// The fixture fills only the host-readable fields of a clean ext4 header.
+// Real formatter qualification still requires a fresh Linux guest and e2fsck.
 func writeFixtureExt4Header(path, uuid string) error {
 	file, err := os.OpenFile(path, os.O_WRONLY, 0)
 	if err != nil {
@@ -29,6 +29,15 @@ func writeFixtureExt4Header(path, uuid string) error {
 	}
 	defer file.Close()
 	if _, err := file.WriteAt([]byte{0x53, 0xef}, 1024+0x38); err != nil {
+		return err
+	}
+	if _, err := file.WriteAt([]byte{0x01, 0x00}, 1024+0x3a); err != nil {
+		return err
+	}
+	if _, err := file.WriteAt([]byte{0x04, 0x00, 0x00, 0x00}, 1024+0x5c); err != nil {
+		return err
+	}
+	if _, err := file.WriteAt([]byte{0x40, 0x00, 0x00, 0x00}, 1024+0x60); err != nil {
 		return err
 	}
 	raw, err := hex.DecodeString(strings.ReplaceAll(uuid, "-", ""))

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
@@ -79,6 +80,41 @@ func TestCreateExportSnapshotRejectsHeadroomBeforeTransaction(t *testing.T) {
 	volume, err := LoadRecord(root, domain.ID("work"), testVolumeID)
 	if err != nil || volume.Pending != nil || volume.Use != nil {
 		t.Fatalf("headroom refusal reserved workspace: %#v, %v", volume, err)
+	}
+}
+
+func TestCreateExportSnapshotRejectsRecoveryRequiredExt4BeforeTransaction(t *testing.T) {
+	root, stopped := stoppedLaunchFixture(t)
+	path := filepath.Join(root, "volumes", testVolumeID+".raw")
+	disk, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := disk.WriteAt([]byte{0x44, 0x00, 0x00, 0x00}, 1024+0x60); err != nil {
+		t.Fatal(err)
+	}
+	if err := disk.Close(); err != nil {
+		t.Fatal(err)
+	}
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err = createExportSnapshot(context.Background(), root, domain.ID("work"), testVolumeID, parent, []string{"project/report.txt"},
+		stoppedObserver{state: backend.ObjectStopped, object: stopped.Backend.ObjectID},
+		func(context.Context, string, workspaceformat.Request, *os.File, *os.Root, ExportJournal) (ExportSnapshot, error) {
+			t.Fatal("dirty filesystem reached snapshot copy")
+			return ExportSnapshot{}, nil
+		}, allowSyntheticExportHeadroom)
+	if err == nil || !strings.Contains(err.Error(), "recovery") {
+		t.Fatalf("recovery-required ext4 refusal = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "exports")); !os.IsNotExist(err) {
+		t.Fatalf("dirty filesystem created export state: %v", err)
+	}
+	volume, err := LoadRecord(root, domain.ID("work"), testVolumeID)
+	if err != nil || volume.Pending != nil || volume.Use != nil {
+		t.Fatalf("dirty filesystem reserved workspace: %#v, %v", volume, err)
 	}
 }
 

@@ -95,8 +95,13 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   record are absent; the prepared base and qualification files remain. No
   immediate increase in available capacity was measurable. Other large VM
   objects still carry active base, workspace, or failed-run evidence, so the
-  export guard remains the real-host gate. Exact inventory and measurements
-  are private.
+  export guard remained the real-host gate. The operator then supplied external
+  capacity. Four cold historical VM archives were copied into an encrypted
+  private vault, checked against SHA-256 before and after remount, and their
+  original copies were retired. The private ownership record tracks the vault
+  and its host-only key location. This restored actual host headroom without
+  changing active Tart objects, workspace disks, or import state. Exact
+  inventory and measurements are private.
 - A tracked, credential-free synthetic Node project and a draft operator
   [quickstart](alpha-quickstart.md) now describe exact build identity, private
   staging, public import, whole-directory export, and verification commands.
@@ -128,10 +133,21 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   app package run stopped in an unrelated workspace fixture at the host disk
   reserve; no full-suite result is claimed for this checkpoint. Session intent
   binding and phase execution are the current source work.
-- Next: obtain safe host headroom for an independent whole-directory export,
-  run the public verify command on that result, and implement immutable recipe
-  intent binding before session phase execution. Then run fresh source-tracked
-  acceptance.
+- Stopped import export: with host headroom restored, the public whole-directory
+  export reached a durable `snapshot-ready` transaction but the zero-NIC
+  inspector produced no export header. Read-only inspection of both the exact
+  retained source disk and its snapshot found ext4 `needs_recovery`; the guest
+  inspector rejects this before streaming. No export was published and the
+  import journal remains `transferring`. The session is stopped and consistent;
+  the failed transaction, disk, and snapshot are preserved as private evidence.
+  The prior guest shutdown's dirty result remains unexplained. A source fix now
+  checks the same ext4 header conditions before export reservation so a dirty
+  disk gets an explicit early refusal without another inspector attempt.
+  Workspacex and inspector guest tests, targeted vet, formatting, and diff
+  checks passed. This is source verification, not fresh real-host qualification.
+- Next: diagnose and correct the dirty-stop path, then qualify import
+  persistence from a fresh disposable baseline and run the public verification
+  command. Continue immutable recipe intent binding before session execution.
 - Limits: retained import persistence, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh
   acceptance remain open. An external capacity option is being checked; the
@@ -609,10 +625,12 @@ acceptance run and GUI/provider sign-in checks.
    guest SSH loss and false-stopped qualification remain open.
 2. Qualify or explicitly defer ambiguous post-final-rename export recovery;
    an occupied final directory still requires manual reconciliation.
-3. Qualify the implemented synthetic host-project ingress through a stopped
-   whole-directory export and the public verification command once the host
-   capacity guard permits it. The live transfer/readback path has already
-   passed targeted real-host checks; retained disk persistence has not.
+3. Diagnose the recovery-required filesystem after the public import stop.
+   The first whole-directory export failure is immutable evidence. After the
+   shutdown cause is understood and corrected, qualify synthetic host-project
+   ingress again from a fresh disposable VM and workspace through a clean
+   stopped export and the public verification command. The live transfer and
+   host readback passed; retained disk persistence has not.
 4. Run the fresh real acceptance matrix and publish the runnable build, exact
    source SHA, and limits. The quickstart and synthetic demo are tracked;
    their fresh guest run is pending. Hosted CI passed through `08cc42a`.
@@ -629,6 +647,6 @@ evidence out of Git and the PR. Never push or merge into `main`, force-update
 published history, or bypass checks.
 
 Before further VM mutation, verify owned resources, host doctor, RAM, and
-the free-space floor. Safe host capacity for the independent export remains
-the current operator dependency; later account sign-in and subjective GUI
-acceptance belong to Wes.
+the free-space floor. The external archive move restored headroom; the dirty
+guest shutdown now blocks retained import qualification. Later account sign-in
+and subjective GUI acceptance belong to Wes.
