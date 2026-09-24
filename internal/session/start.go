@@ -118,6 +118,11 @@ func (s *Service) startSession(ctx context.Context, rawName string, rebuild *Reb
 	if err != nil {
 		return Record{}, fmt.Errorf("load session record: %w", err)
 	}
+	if record.RecipeIntentDigest != "" {
+		if _, err := LoadRecipeIntent(s.domain.StateRoot, record.RecipeIntentDigest); err != nil {
+			return Record{}, fmt.Errorf("load bound recipe intent before start: %w", err)
+		}
+	}
 	if rebuild == nil {
 		if err := RequireNoRebuild(s.domain.StateRoot, domainID, string(name)); err != nil {
 			return Record{}, err
@@ -125,7 +130,7 @@ func (s *Service) startSession(ctx context.Context, rawName string, rebuild *Reb
 	} else {
 		current, loadErr := LoadRebuildJournal(s.domain.StateRoot, domainID, string(name))
 		if loadErr != nil || current != *rebuild || current.Phase != RebuildCutover || current.SessionID != record.ID ||
-			current.CandidateBackend != record.Backend.ObjectID || current.CandidateRevision != record.GoldenRevision {
+			current.CandidateBackend != record.Backend.ObjectID || current.CandidateRevision != record.GoldenRevision || current.CandidateIntentDigest != record.RecipeIntentDigest {
 			return Record{}, fmt.Errorf("starting session lacks exact candidate cutover journal: %v", loadErr)
 		}
 	}

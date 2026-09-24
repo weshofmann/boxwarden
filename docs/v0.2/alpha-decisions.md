@@ -1,5 +1,33 @@
 # Boxwarden v0.2 alpha decisions
 
+## Immutable recipe intent at session and rebuild boundaries, 2026-09-24
+
+The reusable base preparation key intentionally omits session-only actions and
+workspace intent. A recipe session therefore stores a separate SHA-256 digest
+of the complete canonical recipe in its creating record before cloning. The
+private content-addressed object is published from the same parsed value used
+for base preparation. Retry requires the same base and digest; existing
+unbound sessions remain unbound rather than acquiring a new recipe implicitly.
+Start rechecks a bound object before any guest launch.
+
+A rebuild journal records both the old and candidate intent digests alongside
+the exact backend and base revisions. Candidate reservation checks the stored
+objects, and cutover changes backend, base, and recipe digest in one session
+record write. Journal-only resume takes the candidate digest from that journal;
+an explicit retry with a different digest fails. A rebuild selected by base
+revision without recipe input leaves the replacement session unbound because
+that base has no newly supplied full recipe. A same-base recipe request with
+different intent refuses until a distinct reset/reconfigure operation has a
+durable completion identity; silently treating it as a no-op would discard
+requested session behavior. Guest `once`, `reconfigure`, `startup`, and launch
+actions remain rejected until phase execution and receipts are implemented.
+
+Review boundary: the digest is a private-state reference, not a credential or
+proof of guest execution. Missing, linked, corrupt, or mismatched objects fail
+closed. Existing version 2 records and version 1 rebuild journals without
+these optional fields retain their prior unbound meaning. No recipe bytes enter
+host shell commands, backend arguments, or the public progress record.
+
 ## Tart false-stopped observation and retained ownership, 2026-09-24
 
 A real attached-volume sandbox returned READY, but Tart 2.32.1 subsequently

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +19,26 @@ import (
 )
 
 const testStartGeneration = "11111111-2222-4333-8444-555555555555"
+
+func TestStartRejectsMissingBoundRecipeIntentBeforeLaunch(t *testing.T) {
+	configured, backendFake, creator := createFixture(t)
+	record, err := creator.Create(t.Context(), "dev", ModeClean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.RecipeIntentDigest = strings.Repeat("a", 64)
+	if err := SaveRecord(configured.StateRoot, record.Domain, record); err != nil {
+		t.Fatal(err)
+	}
+	starter := newStartTestService(configured, backendFake, &startSupervisorFake{start: func(supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+		t.Fatal("missing recipe intent reached supervisor")
+		return supervisor.Snapshot{}, nil
+	}}, time.Now, func() (string, error) { return testStartGeneration, nil })
+	if _, err := starter.Start(t.Context(), "dev"); err == nil {
+		t.Fatal("missing bound recipe intent started session")
+	}
+	assertStoredState(t, configured, "dev", StateStopped)
+}
 
 func TestStartDoesNotLaunchAfterWorkspaceReservationFailure(t *testing.T) {
 	domainConfig, backendFake, creator := createFixture(t)

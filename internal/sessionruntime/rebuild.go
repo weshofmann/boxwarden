@@ -16,7 +16,7 @@ import (
 // Rebuild composes the public alpha's exact domain-scoped Tart mechanics with
 // the common durable rebuild driver. The host toolchain is re-admitted before
 // clone or deletion; the detached child independently re-admits it at launch.
-func Rebuild(ctx context.Context, loaded config.Config, selected config.Domain, configPath, name, revision string) (session.Record, error) {
+func Rebuild(ctx context.Context, loaded config.Config, selected config.Domain, configPath, name, revision, intentDigest string) (session.Record, error) {
 	admittedDomain, err := loaded.Domain(string(selected.ID))
 	if err != nil || admittedDomain != selected {
 		return session.Record{}, fmt.Errorf("rebuild requires exact configured domain")
@@ -42,5 +42,8 @@ func Rebuild(ctx context.Context, loaded config.Config, selected config.Domain, 
 		Gate:    workspacex.WithStoppedRebuildGate,
 		Pins:    sshx.NewPinStore(sshx.Domain{ID: selected.ID, StateRoot: selected.StateRoot}),
 	})
+	if intentDigest != "" {
+		return rebuilder.ExecuteWithIntent(ctx, name, revision, intentDigest, starter)
+	}
 	return rebuilder.Execute(ctx, name, revision, starter)
 }

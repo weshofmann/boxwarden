@@ -10,6 +10,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/backend/fake"
 	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/golden"
+	"github.com/weshofmann/boxwarden/internal/recipe"
 	"github.com/weshofmann/boxwarden/internal/sshx"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
 	"time"
@@ -43,6 +44,44 @@ func rebuildPreparationFixture(t *testing.T) (*RebuildService, *fake.Backend, Re
 	})
 	service.newID = func() (string, error) { return "7fb25db7-3cc1-4d92-a04c-b60fd05fa421", nil }
 	return service, backendFake, old
+}
+
+func TestRecipeRebuildJournalBindsOldAndCandidateIntentThroughCutover(t *testing.T) {
+	service, backendFake, old := rebuildPreparationFixture(t)
+	value := recipe.Recipe{Version: 1, Source: recipe.Source{Kind: "ubuntu-24.04.4-desktop-arm64", SHA256: "c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"}, Machine: recipe.Machine{CPUs: 4, MemoryMiB: 4096, SystemDiskGiB: 30}}
+	oldDigest, err := PublishRecipeIntent(service.domain.StateRoot, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.RecipeIntentDigest = oldDigest
+	if err := SaveRecord(service.domain.StateRoot, old.Domain, old); err != nil {
+		t.Fatal(err)
+	}
+	service.deps.Gate = func(_ context.Context, _ string, _ domain.ID, expected Record, _ backend.Observer, reserve func() error) error {
+		if expected != old {
+			t.Fatalf("rebuild gate received changed old intent: %#v", expected)
+		}
+		return reserve()
+	}
+	value.Workspaces = []recipe.Workspace{{Name: "data", Mount: "/home/boxwarden/workspaces/data"}}
+	candidateDigest, err := PublishRecipeIntent(service.domain.StateRoot, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal, err := service.PrepareCandidateWithIntent(t.Context(), "dev", "golden-r2", candidateDigest)
+	if err != nil || journal.OldIntentDigest != oldDigest || journal.CandidateIntentDigest != candidateDigest {
+		t.Fatalf("bound journal = %#v, %v", journal, err)
+	}
+	if _, err := service.PrepareCandidateWithIntent(t.Context(), "dev", "golden-r2", oldDigest); err == nil {
+		t.Fatal("different candidate intent reused pending rebuild")
+	}
+	if len(backendFake.CloneCalls()) != 2 {
+		t.Fatal("mismatched retry cloned another candidate")
+	}
+	cutover, err := service.Cutover(t.Context(), "dev")
+	if err != nil || cutover.RecipeIntentDigest != candidateDigest || cutover.GoldenRevision != "golden-r2" {
+		t.Fatalf("bound cutover = %#v, %v", cutover, err)
+	}
 }
 
 func TestPrepareRebuildCandidatePersistsIntentBeforeCloneAndKeepsOldSystem(t *testing.T) {
@@ -342,5 +381,57 @@ func TestExecuteRebuildRunsAllPhasesAndRepeatedBaseDoesNotReclone(t *testing.T) 
 	if again, err := rebuilder.Execute(context.Background(), "dev", "golden-r2", starter); err != nil || again != result ||
 		len(backendFake.CloneCalls()) != 2 || len(backendFake.DeleteCalls()) != 1 || control.startCalls != 1 {
 		t.Fatalf("repeated completed rebuild = %#v, %v; clone=%d delete=%d start=%d", again, err, len(backendFake.CloneCalls()), len(backendFake.DeleteCalls()), control.startCalls)
+	}
+}
+
+func TestRecipeRebuildRefusesSameBaseChangedIntentWithoutResetReceipt(t *testing.T) {
+	rebuilder, backendFake, old := rebuildPreparationFixture(t)
+	value := recipe.Recipe{Version: 1, Source: recipe.Source{Kind: "ubuntu-24.04.4-desktop-arm64", SHA256: "c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"}, Machine: recipe.Machine{CPUs: 4, MemoryMiB: 4096, SystemDiskGiB: 30}}
+	digest, err := PublishRecipeIntent(rebuilder.domain.StateRoot, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	starter := newStartTestService(rebuilder.domain, backendFake, &startSupervisorFake{}, time.Now, func() (string, error) { return testStartGeneration, nil })
+	if _, err := rebuilder.ExecuteWithIntent(t.Context(), "dev", old.GoldenRevision, digest, starter); err == nil {
+		t.Fatal("same-base changed recipe silently no-oped")
+	}
+	if len(backendFake.CloneCalls()) != 1 {
+		t.Fatal("same-base refusal cloned candidate")
+	}
+	if _, err := LoadRebuildJournal(rebuilder.domain.StateRoot, old.Domain, "dev"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("same-base refusal journal = %v", err)
+	}
+}
+
+func TestRecipeRebuildResumeRetainsJournaledCandidateIntent(t *testing.T) {
+	rebuilder, backendFake, old := rebuildPreparationFixture(t)
+	value := recipe.Recipe{Version: 1, Source: recipe.Source{Kind: "ubuntu-24.04.4-desktop-arm64", SHA256: "c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"}, Machine: recipe.Machine{CPUs: 4, MemoryMiB: 4096, SystemDiskGiB: 30}}
+	digest, err := PublishRecipeIntent(rebuilder.domain.StateRoot, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := &startSupervisorFake{
+		start: func(r supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+			return readySnapshot(r.Binding, time.Now()), nil
+		},
+		snapshot: func(b supervisor.Binding) (supervisor.Snapshot, error) { return readySnapshot(b, time.Now()), nil },
+	}
+	starter := newStartTestService(rebuilder.domain, backendFake, control, time.Now, func() (string, error) { return testStartGeneration, nil })
+	injected := errors.New("stop after journaled cutover")
+	rebuilder.cutoverHook = func() error { return injected }
+	if _, err := rebuilder.ExecuteWithIntent(t.Context(), "dev", "golden-r2", digest, starter); !errors.Is(err, injected) {
+		t.Fatalf("injected cutover failure = %v", err)
+	}
+	journal, err := LoadRebuildJournal(rebuilder.domain.StateRoot, old.Domain, "dev")
+	if err != nil || journal.Phase != RebuildCutover || journal.CandidateIntentDigest != digest {
+		t.Fatalf("pending recipe rebuild = %#v, %v", journal, err)
+	}
+	rebuilder.cutoverHook = nil
+	finished, err := rebuilder.Execute(t.Context(), "dev", "", starter)
+	if err != nil || finished.RecipeIntentDigest != digest || finished.GoldenRevision != "golden-r2" || finished.IntendedState != StateRunning {
+		t.Fatalf("resumed recipe rebuild = %#v, %v", finished, err)
+	}
+	if _, err := LoadRebuildJournal(rebuilder.domain.StateRoot, old.Domain, "dev"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("resumed rebuild retained journal: %v", err)
 	}
 }

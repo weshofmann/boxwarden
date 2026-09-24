@@ -145,8 +145,17 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   through preparation and persists it in the creating session record before
   clone mutation. An exact retry succeeds; a changed or absent intent fails
   closed. Legacy unbound sessions remain unbound. Session, app, and CLI package
-  tests plus targeted vet, formatting, and diff checks passed. Rebuild records
-  do not yet bind the candidate intent; action execution is still disabled.
+  tests plus targeted vet, formatting, and diff checks passed. Rebuild now
+  records old and candidate digests in its durable journal, rejects a changed
+  explicit retry, and switches backend/base/intent together at cutover. A
+  journal-only resume retains the candidate digest; start refuses a missing
+  bound object. Same-base recipe intent changes currently fail explicitly
+  until a distinct reset receipt exists. Session, app, runtime, CLI, and
+  architecture package checks plus targeted vet passed. Runtime process tests
+  needed host execution because the restricted sandbox could not admit their
+  Unix sockets; the full runtime package passed there. Guest action execution
+  remains disabled, and this rebuild path has not received fresh real-host VM
+  qualification.
 - Stopped import export: with host headroom restored, the public whole-directory
   export reached a durable `snapshot-ready` transaction but the zero-NIC
   inspector produced no export header. Read-only inspection of both the exact
@@ -159,10 +168,10 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   disk gets an explicit early refusal without another inspector attempt.
   Workspacex and inspector guest tests, targeted vet, formatting, and diff
   checks passed. This is source verification, not fresh real-host qualification.
-- Next: bind old and candidate recipe digests through the rebuild journal and
-  cutover, then diagnose and correct the dirty-stop path, qualify import
-  persistence from a fresh disposable baseline, and run the public verification
-  command. Recipe action execution remains disabled until durable receipts exist.
+- Next: add durable per-action attempts and receipts before enabling recipe
+  execution; diagnose and correct the dirty-stop path, then qualify import
+  persistence from a fresh disposable baseline and run the public verification
+  command. Recipe execution remains disabled until those receipts exist.
 - Limits: retained import persistence, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh
   acceptance remain open. An external capacity option is being checked; the
@@ -181,7 +190,7 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
 | Controlled export | Bounded receiver, exact stopped-volume snapshot, private helper capture, and selected publication have targeted tests. After clean guest shutdown, a real public export published one selected 57-byte regular file into a new private directory. Its SHA-256 matched the known synthetic guest file; the durable journal read `published`, and the source and snapshot digests matched. A later public resume of an earlier clean `snapshot-ready` transaction published the same selected file and digest, with no leftover spool or running inspector. An earlier dirty-volume attempt remains private failed evidence. A fresh synthetic `inspected` hard exit was reviewed privately and resumed through the public command: its 48 MiB selected file matched the guest SHA-256, the journal became `published`, and no inspector or spool remained. A post-rename hard exit with an existing final directory remains an explicit manual reconciliation case. |
 | Inspector bundle admission | A clean-source production bundle from the pinned ISO passed independent artifact checks and host admission with both synthetic and real journal-derived requests. Admission checks tracked source bytes, kernel/ISO pins, seven artifact digests and private metadata, deterministic appended guest/request initrd, and the signed helper's sole Virtualization entitlement. The first live export-mode VM rejected an unclean volume; a later fresh clean-volume run completed selected publication with zero-NIC inspector evidence. |
 | Example | `examples/v0.2-alpha-base.json` passed public recipe/ISO validation. It requests the Desktop source, a small package set, and one named workspace intent. |
-| Recipe-bound create | `session create` accepts exact recipe/ISO/guest definition/tool inputs, prepares or reuses a qualified base, and calls `CreateFromRevision`. A focused fixture and the real public command both selected the newly prepared revision without changing the domain current golden. A later public `alpha prepare` reused the admitted cache after verified redundant installer staging was retired, without creating an attempt journal or new Tart object. |
+| Recipe-bound create | `session create` accepts exact recipe/ISO/guest definition/tool inputs, prepares or reuses a qualified base, and binds the complete immutable recipe digest with the selected revision before clone. A focused fixture and an earlier real public command selected a prepared revision without changing the domain current golden; the new digest binding has source tests but no fresh real-host create run. A public `alpha prepare` reused the admitted cache after verified redundant installer staging was retired, without creating an attempt journal or new Tart object. |
 | System rebuild | The public `session rebuild` command accepts an exact admitted `--base` revision, complete recipe preparation inputs, or no new input to resume a pending journal. A full fake-backend transaction kept the session UUID and workspace attachment identity, reached fresh candidate READY, deleted only the journaled old system, and then no-oped for the selected base. Full local Go tests, vet, CLI build, and diff checks passed. One public no-volume Tart rebuild preserved the session UUID, transitioned the exact pin, reached repeated READY, retired the old object, cleared the journal, and stopped consistently. A later public rebuild with an attached ext4 volume preserved its identity and content, reached mount-bound READY, retired the old system, and stopped cleanly. That target was a distinct qualified Tart object with the same generic software image; a software-changing upgrade and failure recovery remain open. |
 
 Hosted `macos-26` CI passed at `df0da1c` and `4d2a6eb`. Local checks above

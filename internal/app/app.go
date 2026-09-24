@@ -53,7 +53,7 @@ type SessionStopper interface {
 
 type SessionStopperFactory func(config.Config, config.Domain, string) (SessionStopper, error)
 
-type AlphaRebuildFunc func(context.Context, config.Config, config.Domain, string, string, string) (session.Record, error)
+type AlphaRebuildFunc func(context.Context, config.Config, config.Domain, string, string, string, string) (session.Record, error)
 type AlphaDeleteFunc func(context.Context, config.Config, config.Domain, string) error
 
 // StatusSnapshotReader is read-only evidence from one exact live supervisor.
@@ -269,6 +269,9 @@ func Run(ctx context.Context, args []string, options Options) error {
 			if err := validateAlphaPrepared(selectedDomain, prepared.Base); err != nil {
 				return err
 			}
+			if !lowerSHA(prepared.IntentDigest) {
+				return errors.New("alpha preparation returned an invalid recipe intent digest")
+			}
 			record, err = creator.CreateFromRevisionWithIntent(ctx, command.name, command.mode, prepared.Base.Record.CandidateID, prepared.IntentDigest)
 		} else {
 			record, err = creator.Create(ctx, command.name, command.mode)
@@ -320,6 +323,7 @@ func Run(ctx context.Context, args []string, options Options) error {
 			return err
 		}
 		revision := command.rebuildBase
+		intentDigest := ""
 		if command.recipeCreate {
 			if options.AlphaPrepare == nil {
 				return errors.New("alpha base preparer is required for recipe rebuild")
@@ -331,12 +335,16 @@ func Run(ctx context.Context, args []string, options Options) error {
 			if err := validateAlphaPrepared(selectedDomain, prepared.Base); err != nil {
 				return err
 			}
+			if !lowerSHA(prepared.IntentDigest) {
+				return errors.New("alpha preparation returned an invalid recipe intent digest")
+			}
 			revision = prepared.Base.Record.CandidateID
+			intentDigest = prepared.IntentDigest
 		}
 		if options.AlphaRebuild == nil {
 			return errors.New("alpha rebuilder is required")
 		}
-		rebuilt, err := options.AlphaRebuild(ctx, loaded, selectedDomain, command.configPath, command.name, revision)
+		rebuilt, err := options.AlphaRebuild(ctx, loaded, selectedDomain, command.configPath, command.name, revision, intentDigest)
 		if err != nil {
 			return fmt.Errorf("rebuild session: %w", err)
 		}

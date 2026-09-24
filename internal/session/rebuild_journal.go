@@ -32,17 +32,19 @@ const (
 // separate from the session record so ordinary lifecycle record writes cannot
 // silently erase an unfinished rebuild. Its fields contain no private key.
 type RebuildJournal struct {
-	Version           int          `json:"version"`
-	Domain            domain.ID    `json:"domain"`
-	SessionName       string       `json:"session_name"`
-	SessionID         string       `json:"session_id"`
-	OperationID       string       `json:"operation_id"`
-	Phase             RebuildPhase `json:"phase"`
-	OldBackend        string       `json:"old_backend"`
-	OldRevision       string       `json:"old_revision"`
-	CandidateBackend  string       `json:"candidate_backend"`
-	CandidateRevision string       `json:"candidate_revision"`
-	OldPinPresent     bool         `json:"old_pin_present"`
+	Version               int          `json:"version"`
+	Domain                domain.ID    `json:"domain"`
+	SessionName           string       `json:"session_name"`
+	SessionID             string       `json:"session_id"`
+	OperationID           string       `json:"operation_id"`
+	Phase                 RebuildPhase `json:"phase"`
+	OldBackend            string       `json:"old_backend"`
+	OldRevision           string       `json:"old_revision"`
+	OldIntentDigest       string       `json:"old_intent_digest,omitempty"`
+	CandidateBackend      string       `json:"candidate_backend"`
+	CandidateRevision     string       `json:"candidate_revision"`
+	CandidateIntentDigest string       `json:"candidate_intent_digest,omitempty"`
+	OldPinPresent         bool         `json:"old_pin_present"`
 	// OldPinDigest is SHA-256 of json.Marshal of the fully validated old
 	// sshx.HostKeyPin loaded under the exact derived old binding.
 	OldPinDigest string `json:"old_pin_digest"`
@@ -88,6 +90,9 @@ func validateRebuildJournal(j RebuildJournal) error {
 	}
 	if !j.OldPinPresent && j.OldPinDigest != "" || j.OldPinPresent && !lowerSHA256(j.OldPinDigest) {
 		return fmt.Errorf("invalid old host-key pin witness")
+	}
+	if j.OldIntentDigest != "" && !lowerSHA256(j.OldIntentDigest) || j.CandidateIntentDigest != "" && !lowerSHA256(j.CandidateIntentDigest) {
+		return fmt.Errorf("invalid rebuild recipe intent digest")
 	}
 	return nil
 }
@@ -398,10 +403,14 @@ func decodeRebuildJournal(raw []byte) (RebuildJournal, error) {
 			err = decoder.Decode(&j.OldBackend)
 		case "old_revision":
 			err = decoder.Decode(&j.OldRevision)
+		case "old_intent_digest":
+			err = decoder.Decode(&j.OldIntentDigest)
 		case "candidate_backend":
 			err = decoder.Decode(&j.CandidateBackend)
 		case "candidate_revision":
 			err = decoder.Decode(&j.CandidateRevision)
+		case "candidate_intent_digest":
+			err = decoder.Decode(&j.CandidateIntentDigest)
 		case "old_pin_present":
 			err = decoder.Decode(&j.OldPinPresent)
 		case "old_pin_digest":

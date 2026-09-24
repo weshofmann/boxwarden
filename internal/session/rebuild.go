@@ -51,6 +51,18 @@ func NewRebuildService(configured config.Domain, dependencies RebuildDependencie
 // retry may finish a stopped, never-booted candidate from the same journal;
 // it never adopts an unrecorded or running backend object.
 func (s *RebuildService) PrepareCandidate(ctx context.Context, rawName, revision string) (journal RebuildJournal, err error) {
+	return s.prepareCandidate(ctx, rawName, revision, "")
+}
+
+// PrepareCandidateWithIntent binds the complete candidate recipe before clone.
+func (s *RebuildService) PrepareCandidateWithIntent(ctx context.Context, rawName, revision, digest string) (RebuildJournal, error) {
+	if !lowerSHA256(digest) {
+		return RebuildJournal{}, fmt.Errorf("invalid candidate recipe intent digest")
+	}
+	return s.prepareCandidate(ctx, rawName, revision, digest)
+}
+
+func (s *RebuildService) prepareCandidate(ctx context.Context, rawName, revision, candidateDigest string) (journal RebuildJournal, err error) {
 	if s == nil || s.deps.Observer == nil || s.deps.Creator == nil || s.deps.Gate == nil || s.deps.Pins == nil || s.newID == nil {
 		return RebuildJournal{}, fmt.Errorf("rebuild preparation dependencies are required")
 	}
@@ -65,6 +77,11 @@ func (s *RebuildService) PrepareCandidate(ctx context.Context, rawName, revision
 	if err := backend.ValidateObjectID(revision); err != nil {
 		return RebuildJournal{}, fmt.Errorf("invalid replacement base revision: %w", err)
 	}
+	if candidateDigest != "" {
+		if _, err := LoadRecipeIntent(s.domain.StateRoot, candidateDigest); err != nil {
+			return RebuildJournal{}, fmt.Errorf("load candidate recipe intent: %w", err)
+		}
+	}
 	transition, err := lock.Acquire(ctx, s.domain.StateRoot, "transition-"+string(domainID)+"-"+string(name))
 	if err != nil {
 		return RebuildJournal{}, err
@@ -74,11 +91,16 @@ func (s *RebuildService) PrepareCandidate(ctx context.Context, rawName, revision
 	if err != nil {
 		return RebuildJournal{}, err
 	}
+	if record.RecipeIntentDigest != "" {
+		if _, err := LoadRecipeIntent(s.domain.StateRoot, record.RecipeIntentDigest); err != nil {
+			return RebuildJournal{}, fmt.Errorf("load old recipe intent: %w", err)
+		}
+	}
 	journal, err = LoadRebuildJournal(s.domain.StateRoot, domainID, string(name))
 	if errors.Is(err, os.ErrNotExist) {
 		err = s.deps.Gate(ctx, s.domain.StateRoot, domainID, record, s.deps.Observer, func() error {
 			var reserveErr error
-			journal, reserveErr = s.reserveCandidate(ctx, record, revision)
+			journal, reserveErr = s.reserveCandidate(ctx, record, revision, candidateDigest)
 			return reserveErr
 		})
 		if err != nil {
@@ -88,6 +110,7 @@ func (s *RebuildService) PrepareCandidate(ctx context.Context, rawName, revision
 		return RebuildJournal{}, err
 	}
 	if journal.SessionID != record.ID || journal.OldBackend != record.Backend.ObjectID || journal.OldRevision != record.GoldenRevision ||
+		journal.OldIntentDigest != record.RecipeIntentDigest || journal.CandidateIntentDigest != candidateDigest ||
 		journal.CandidateRevision != revision || (journal.Phase != RebuildReserved && journal.Phase != RebuildCloned) {
 		return RebuildJournal{}, fmt.Errorf("rebuild journal does not match stopped old system and requested base")
 	}
@@ -154,7 +177,7 @@ func (s *RebuildService) PrepareCandidate(ctx context.Context, rawName, revision
 	return next, nil
 }
 
-func (s *RebuildService) reserveCandidate(ctx context.Context, old Record, revision string) (journal RebuildJournal, err error) {
+func (s *RebuildService) reserveCandidate(ctx context.Context, old Record, revision, candidateDigest string) (journal RebuildJournal, err error) {
 	held, err := golden.AcquireLock(ctx, s.domain)
 	if err != nil {
 		return RebuildJournal{}, err
@@ -173,7 +196,8 @@ func (s *RebuildService) reserveCandidate(ctx context.Context, old Record, revis
 	}
 	journal = RebuildJournal{Version: 1, Domain: old.Domain, SessionName: string(old.Name), SessionID: old.ID,
 		OperationID: operationID, Phase: RebuildReserved, OldBackend: old.Backend.ObjectID, OldRevision: old.GoldenRevision,
-		CandidateBackend: objectIDFor(old.Domain, operationID), CandidateRevision: selected.Revision}
+		OldIntentDigest: old.RecipeIntentDigest, CandidateBackend: objectIDFor(old.Domain, operationID), CandidateRevision: selected.Revision,
+		CandidateIntentDigest: candidateDigest}
 	if err := backend.ValidateObjectID(journal.CandidateBackend); err != nil {
 		return RebuildJournal{}, err
 	}
@@ -281,10 +305,15 @@ func (s *RebuildService) Cutover(ctx context.Context, rawName string) (record Re
 	if err != nil || record.ID != journal.SessionID || record.Backend.Kind != "tart" {
 		return Record{}, fmt.Errorf("session identity changed before rebuild cutover: %v", err)
 	}
-	if journal.Phase == RebuildCutover && record.Backend.ObjectID == journal.CandidateBackend && record.GoldenRevision == journal.CandidateRevision {
+	if journal.CandidateIntentDigest != "" {
+		if _, err := LoadRecipeIntent(s.domain.StateRoot, journal.CandidateIntentDigest); err != nil {
+			return Record{}, fmt.Errorf("load candidate recipe intent before cutover: %w", err)
+		}
+	}
+	if journal.Phase == RebuildCutover && record.Backend.ObjectID == journal.CandidateBackend && record.GoldenRevision == journal.CandidateRevision && record.RecipeIntentDigest == journal.CandidateIntentDigest {
 		return record, nil
 	}
-	if record.IntendedState != StateStopped || record.Backend.ObjectID != journal.OldBackend || record.GoldenRevision != journal.OldRevision || record.StartGeneration != "" {
+	if record.IntendedState != StateStopped || record.Backend.ObjectID != journal.OldBackend || record.GoldenRevision != journal.OldRevision || record.RecipeIntentDigest != journal.OldIntentDigest || record.StartGeneration != "" {
 		return Record{}, fmt.Errorf("old stopped system does not match rebuild cutover journal")
 	}
 	if err := s.verifyOldPin(ctx, journal); err != nil {
@@ -311,6 +340,7 @@ func (s *RebuildService) Cutover(ctx context.Context, rawName string) (record Re
 	}
 	record.Backend.ObjectID = journal.CandidateBackend
 	record.GoldenRevision = journal.CandidateRevision
+	record.RecipeIntentDigest = journal.CandidateIntentDigest
 	if err := SaveRecord(s.domain.StateRoot, domainID, record); err != nil {
 		return Record{}, fmt.Errorf("persist candidate as active system: %w", err)
 	}
@@ -351,7 +381,7 @@ func (s *RebuildService) ConfirmReady(ctx context.Context, rawName string, start
 	}
 	record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
 	if err != nil || record.ID != journal.SessionID || record.Backend.Kind != "tart" ||
-		record.Backend.ObjectID != journal.CandidateBackend || record.GoldenRevision != journal.CandidateRevision ||
+		record.Backend.ObjectID != journal.CandidateBackend || record.GoldenRevision != journal.CandidateRevision || record.RecipeIntentDigest != journal.CandidateIntentDigest ||
 		record.IntendedState != StateRunning || record.Readiness.Status != ReadinessReady {
 		return Record{}, fmt.Errorf("candidate session is not durably ready: %v", err)
 	}
@@ -416,7 +446,7 @@ func (s *RebuildService) RetireOld(ctx context.Context, rawName string, starter 
 	}
 	record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
 	if err != nil || record.ID != journal.SessionID || record.Backend.Kind != "tart" ||
-		record.Backend.ObjectID != journal.CandidateBackend || record.GoldenRevision != journal.CandidateRevision ||
+		record.Backend.ObjectID != journal.CandidateBackend || record.GoldenRevision != journal.CandidateRevision || record.RecipeIntentDigest != journal.CandidateIntentDigest ||
 		record.IntendedState != StateRunning || record.Readiness.Status != ReadinessReady {
 		return Record{}, fmt.Errorf("active candidate changed before retirement: %v", err)
 	}
@@ -474,6 +504,26 @@ func (s *RebuildService) RetireOld(ctx context.Context, rawName string, starter 
 // later invocation. An already selected base with no journal is a no-op, so
 // retrying a completed command does not create another disposable system.
 func (s *RebuildService) Execute(ctx context.Context, rawName, revision string, starter *Service) (Record, error) {
+	return s.execute(ctx, rawName, revision, "", starter)
+}
+
+// ExecuteWithIntent runs a recipe rebuild using one already-published exact
+// intent snapshot. Same-base intent changes are refused until an explicit
+// reset/reconfigure operation has a durable completion identity.
+func (s *RebuildService) ExecuteWithIntent(ctx context.Context, rawName, revision, digest string, starter *Service) (Record, error) {
+	if !lowerSHA256(digest) {
+		return Record{}, fmt.Errorf("invalid candidate recipe intent digest")
+	}
+	if s == nil {
+		return Record{}, fmt.Errorf("rebuild service is required")
+	}
+	if _, err := LoadRecipeIntent(s.domain.StateRoot, digest); err != nil {
+		return Record{}, fmt.Errorf("load candidate recipe intent: %w", err)
+	}
+	return s.execute(ctx, rawName, revision, digest, starter)
+}
+
+func (s *RebuildService) execute(ctx context.Context, rawName, revision, candidateDigest string, starter *Service) (Record, error) {
 	if s == nil || starter == nil || starter.domain != s.domain {
 		return Record{}, fmt.Errorf("matching rebuild starter is required")
 	}
@@ -491,6 +541,9 @@ func (s *RebuildService) Execute(ctx context.Context, rawName, revision string, 
 			return Record{}, fmt.Errorf("new rebuild requires an exact prepared base revision")
 		}
 		if current.GoldenRevision == revision {
+			if candidateDigest != "" && current.RecipeIntentDigest != candidateDigest {
+				return Record{}, fmt.Errorf("same-base recipe intent change requires an explicit reset operation")
+			}
 			if err := syncRebuildJournalRegistry(s.domain.StateRoot); err != nil {
 				return Record{}, fmt.Errorf("settle completed rebuild journal directory: %w", err)
 			}
@@ -511,16 +564,22 @@ func (s *RebuildService) Execute(ctx context.Context, rawName, revision string, 
 	} else {
 		if revision == "" {
 			revision = j.CandidateRevision
+			candidateDigest = j.CandidateIntentDigest
 		}
-		if revision != j.CandidateRevision {
-			return Record{}, fmt.Errorf("pending rebuild is bound to base %q", j.CandidateRevision)
+		if revision != j.CandidateRevision || candidateDigest != j.CandidateIntentDigest {
+			return Record{}, fmt.Errorf("pending rebuild is bound to a different base or recipe intent")
+		}
+	}
+	if candidateDigest != "" {
+		if _, err := LoadRecipeIntent(s.domain.StateRoot, candidateDigest); err != nil {
+			return Record{}, fmt.Errorf("load pending candidate recipe intent: %w", err)
 		}
 	}
 	if err := backend.ValidateObjectID(revision); err != nil {
 		return Record{}, err
 	}
 	if errors.Is(err, os.ErrNotExist) || j.Phase == RebuildReserved || j.Phase == RebuildCloned {
-		j, err = s.PrepareCandidate(ctx, string(name), revision)
+		j, err = s.prepareCandidate(ctx, string(name), revision, candidateDigest)
 		if err != nil {
 			return Record{}, err
 		}
