@@ -744,6 +744,133 @@ func TestManagementWorkspaceRequestRequiresExactBoundedMounts(t *testing.T) {
 	}
 }
 
+type workspaceRunner struct {
+	calls   [][]string
+	mounted bool
+	source  string
+	uuid    string
+}
+
+func (r *workspaceRunner) Run(_ context.Context, path string, args ...string) ([]byte, error) {
+	r.calls = append(r.calls, append([]string{path}, args...))
+	switch path {
+	case "/usr/sbin/blkid":
+		return []byte("/dev/vdb\n"), nil
+	case "/usr/bin/findmnt":
+		if !r.mounted {
+			return nil, fmt.Errorf("no mount")
+		}
+		return []byte(fmt.Sprintf("%s ext4 %s\n", r.source, r.uuid)), nil
+	case "/usr/bin/mount":
+		r.mounted = true
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unexpected command %q", path)
+	}
+}
+
+func TestManagementEnsuresAndProbesExactWorkspaceWithoutShell(t *testing.T) {
+	b, _ := testBootstrapper(t)
+	if err := os.MkdirAll(filepath.Join(b.Root, "home/boxwarden"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(b.Root, "proc/self"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(b.Root, "proc/self/mountinfo"), []byte("1 0 0:1 / / rw - ext4 /dev/vda rw\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Serial(context.Background(), testRequest()); err != nil {
+		t.Fatal(err)
+	}
+	owner := os.Getuid()
+	group := os.Getgid()
+	b.workspaceOwner = func() (int, int, error) { return owner, group, nil }
+	mount := WorkspaceMount{VolumeID: "00112233-4455-4677-8899-aabbccddeeff", FilesystemUUID: "10213243-5465-4768-899a-bbccddeeff00", MountPath: "/home/boxwarden/workspaces/project"}
+	runner := &workspaceRunner{source: "/dev/vdb", uuid: mount.FilesystemUUID}
+	b.Runner = runner
+	request := ManagementRequest{Version: Version, Kind: "ensure_workspaces", Association: testRequest().Association, Workspaces: []WorkspaceMount{mount}}
+	for i := 0; i < 2; i++ {
+		result, err := b.Management(context.Background(), request)
+		if err != nil || string(result) != `{"version":1,"ok":true}` {
+			t.Fatalf("ensure attempt %d = %s, %v", i, result, err)
+		}
+	}
+	request.Kind = "probe"
+	result, err := b.Management(context.Background(), request)
+	if err != nil || string(result) != `{"version":1,"ok":true}` {
+		t.Fatalf("mount-bound probe = %s, %v", result, err)
+	}
+	want := [][]string{
+		{"/usr/sbin/blkid", "-t", "UUID=" + mount.FilesystemUUID, "-o", "device"},
+		{"/usr/bin/findmnt", "-n", "-o", "SOURCE,FSTYPE,UUID", "--mountpoint", mount.MountPath},
+		{"/usr/bin/mount", "-t", "ext4", "-o", "nodev,nosuid", "/dev/vdb", mount.MountPath},
+		{"/usr/bin/findmnt", "-n", "-o", "SOURCE,FSTYPE,UUID", "--mountpoint", mount.MountPath},
+	}
+	if len(runner.calls) < len(want) || !slices.EqualFunc(runner.calls[:len(want)], want, slices.Equal[[]string]) {
+		t.Fatalf("first mount argv = %#v", runner.calls)
+	}
+	mounts := 0
+	for _, call := range runner.calls {
+		if call[0] == "/usr/bin/mount" {
+			mounts++
+		}
+	}
+	if mounts != 1 {
+		t.Fatalf("idempotent ensure repeated mount: %#v", runner.calls)
+	}
+	runner.source = "/dev/vdc"
+	if _, err := b.Management(context.Background(), request); err == nil {
+		t.Fatal("wrong mounted device passed probe")
+	}
+	request.Kind = "ensure_workspaces"
+	if _, err := b.Management(context.Background(), request); err == nil {
+		t.Fatal("wrong existing mount accepted or replaced")
+	}
+	if got := len(runner.calls); got == 0 || runner.calls[got-1][0] == "/usr/bin/mount" {
+		t.Fatal("wrong existing mount was replaced")
+	}
+	request.Kind = "probe"
+	runner.source = "/dev/vdb"
+	runner.uuid = "20213243-5465-4768-899a-bbccddeeff00"
+	if _, err := b.Management(context.Background(), request); err == nil {
+		t.Fatal("wrong mounted filesystem UUID passed probe")
+	}
+}
+
+func TestWorkspaceMountRejectsUnsafePathComponentsAndAmbiguousDevices(t *testing.T) {
+	b := NewBootstrapper(t.TempDir(), &workspaceRunner{})
+	if err := os.MkdirAll(filepath.Join(b.Root, "home/boxwarden"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), filepath.Join(b.Root, "home/boxwarden/workspaces")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ensureWorkspaceDirectory("/home/boxwarden/workspaces/project"); err == nil {
+		t.Fatal("symlinked mount parent accepted")
+	}
+	for _, device := range []string{"/dev/vdb\n/dev/vdc", "/tmp/disk", "/dev/../vdb", "/dev/vdb extra"} {
+		if validWorkspaceDevice(device) {
+			t.Fatalf("unsafe device path accepted: %q", device)
+		}
+	}
+}
+
+func TestWorkspaceMountDoesNotOvermountAfterFailedInspection(t *testing.T) {
+	b := NewBootstrapper(t.TempDir(), &workspaceRunner{})
+	if err := os.MkdirAll(filepath.Join(b.Root, "proc/self"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := "/home/boxwarden/workspaces/project"
+	line := "1 0 0:1 / " + path + " rw - ext4 /dev/vdc rw\n"
+	if err := os.WriteFile(filepath.Join(b.Root, "proc/self/mountinfo"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.workspaceMountAbsent(path); err == nil {
+		t.Fatal("unverified existing mount could be overmounted")
+	}
+}
+
 // This fails if retry changes a durable trust binding instead of returning the
 // existing exact association, CA fingerprint, and derived principal.
 func TestSerialBootstrapIsIdempotentAndRejectsConflictingBinding(t *testing.T) {

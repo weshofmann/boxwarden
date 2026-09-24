@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-24 01:32 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-24 01:41 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -130,6 +130,15 @@ malformed paths and UUIDs, and duplicate bindings. Guest mounting, host request
 wiring, and mount-backed READY are still in progress. The full guest-protocol
 package tests, focused vet, and diff checks passed; no real VM used this new
 request yet.
+The fixed guest helper now has source-tested direct-argv UUID resolution,
+ext4 mount, exact mount inspection, and a read-only mount-bound probe. It
+rejects a wrong existing device or UUID and checks the kernel mount table
+before mounting after an ambiguous `findmnt` failure. Fresh root-owned ext4
+roots gain workstation ownership only when no project data exists; retry
+does not repeat the mount. The static ARM64 helper, digest lock, and installer
+pin were rebuilt coherently. Guest package and artifact tests, focused vet,
+and diff checks passed. Independent interface review is in progress; no real
+VM has used this helper, and host READY wiring is still pending.
 
 Publish each meaningful verified implementation increment on the authorized
 alpha branch promptly, targeting a GitHub checkpoint every 30–60 minutes of
@@ -170,8 +179,8 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 
 ## Next executable action
 
-Implement the typed guest mount operation through the pinned management
-channel, include fresh mount evidence in READY, and qualify it from an updated
+Wire the typed guest mount operation through the pinned host management client,
+include fresh mount evidence in READY, and qualify it from an updated
 generic base without manual guest actions. Then test system rebuild and
 reattachment to another disposable sandbox with the same volume. The current
 public lifecycle already passes exact disk lease and stop/restart checks.

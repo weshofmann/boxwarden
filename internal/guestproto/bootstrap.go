@@ -60,6 +60,7 @@ type Bootstrapper struct {
 	Failpoint         func(string) error
 	effectiveHostname func() (string, error)
 	renameNoReplace   func(string, string) error
+	workspaceOwner    func() (int, int, error)
 }
 
 func NewBootstrapper(root string, runner Runner) *Bootstrapper {
@@ -69,7 +70,7 @@ func NewBootstrapper(root string, runner Runner) *Bootstrapper {
 	if runner == nil {
 		runner = ExecRunner{}
 	}
-	return &Bootstrapper{Root: root, Runner: runner, HostKeyPath: "/etc/ssh/ssh_host_ed25519_key.pub", ZonePath: "/etc/timezone", effectiveHostname: os.Hostname, renameNoReplace: renameWithoutReplacement}
+	return &Bootstrapper{Root: root, Runner: runner, HostKeyPath: "/etc/ssh/ssh_host_ed25519_key.pub", ZonePath: "/etc/timezone", effectiveHostname: os.Hostname, renameNoReplace: renameWithoutReplacement, workspaceOwner: lookupWorkspaceOwner}
 }
 
 func (b *Bootstrapper) Serial(ctx context.Context, request SerialRequest) (SerialResult, error) {
@@ -173,6 +174,14 @@ func (b *Bootstrapper) Management(ctx context.Context, request ManagementRequest
 	}
 	switch request.Kind {
 	case "probe":
+		if err := b.probeWorkspaceMounts(ctx, request.Workspaces); err != nil {
+			return nil, err
+		}
+		return []byte(`{"version":1,"ok":true}`), nil
+	case "ensure_workspaces":
+		if err := b.ensureWorkspaceMounts(ctx, request.Workspaces); err != nil {
+			return nil, err
+		}
 		return []byte(`{"version":1,"ok":true}`), nil
 	case "read_zone":
 		contents, err := b.readGuestFile(b.ZonePath, 0o644)
