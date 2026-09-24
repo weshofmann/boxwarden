@@ -18,7 +18,7 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
 | Inspector bundle admission | A clean-source production bundle from the pinned ISO passed independent artifact checks and host admission with both synthetic and real journal-derived requests. Admission checks tracked source bytes, kernel/ISO pins, seven artifact digests and private metadata, deterministic appended guest/request initrd, and the signed helper's sole Virtualization entitlement. The first live export-mode VM rejected an unclean volume; a later fresh clean-volume run completed selected publication with zero-NIC inspector evidence. |
 | Example | `examples/v0.2-alpha-base.json` passed public recipe/ISO validation. It requests the Desktop source, a small package set, and one named workspace intent. |
 | Recipe-bound create | `session create` accepts exact recipe/ISO/guest definition/tool inputs, prepares or reuses a qualified base, and calls `CreateFromRevision`. A focused fixture and the real public command both selected the newly prepared revision without changing the domain current golden. A later public `alpha prepare` reused the admitted cache after verified redundant installer staging was retired, without creating an attempt journal or new Tart object. |
-| Source rebuild | The public `session rebuild` command accepts an exact admitted `--base` revision, complete recipe preparation inputs, or no new input to resume a pending journal. A full fake-backend transaction kept the session UUID and workspace attachment identity, reached fresh candidate READY, deleted only the journaled old system, and then no-oped for the selected base. Full local Go tests, vet, CLI build, and diff checks passed. Real Tart rebuild and retained-volume qualification remain open. |
+| System rebuild | The public `session rebuild` command accepts an exact admitted `--base` revision, complete recipe preparation inputs, or no new input to resume a pending journal. A full fake-backend transaction kept the session UUID and workspace attachment identity, reached fresh candidate READY, deleted only the journaled old system, and then no-oped for the selected base. Full local Go tests, vet, CLI build, and diff checks passed. One public no-volume Tart rebuild then preserved the session UUID, transitioned the exact pin, reached repeated READY, retired the old object, cleared the journal, and stopped consistently. Retained-volume rebuild and failure recovery remain open. |
 
 Hosted CI is unavailable. Local checks above are source or explicitly described
 real-host checks; the full graphical, rebuild, and failure-recovery
@@ -119,6 +119,17 @@ replacement, or `--domain <domain> session rebuild <name>` to resume its
 pending journal. A requested base already selected with no journal is a
 no-op. Recipe inputs follow the public `session create` preparation flags;
 resume without repeating those inputs after an interrupted preparation.
+
+At the `6dd0f97` public-command checkpoint, host doctor, stopped Tart
+inventory, memory, disk reserve, exact old pin, and the absence of attached
+volumes or a pending journal passed preflight. A same-base public command
+no-oped. One public rebuild of that owned stopped no-volume session onto a
+separately admitted base returned READY. Repeated public status was READY,
+the stable session UUID and domain remained, the new pin matched the new
+backend, the old Tart object was absent, and the journal was gone. Public
+stop then left the new backend consistently stopped. This qualifies the
+live control path without a retained workspace. The prior failed volume is
+still preserved privately and is not a source for the next qualification.
 
 The managed-volume shutdown correction at `7eeba47` now passes one real
 attached-volume public stop: the session and backend are consistently stopped,
@@ -312,10 +323,10 @@ remain outside the prepared cache.
 
 ## Next actions
 
-1. Qualify the public rebuild on a fresh real system and retained workspace.
-   Preserve
-   the stopped failed VM and dirty volume. The guest SSH loss remains open;
-   do not claim real false-stopped or rebuild qualification from that run.
+1. Prepare a fresh clean synthetic workspace and qualify the public rebuild
+   with that volume retained. Preserve the stopped failed VM and dirty volume.
+   The guest SSH loss remains open; do not infer its resolution or a real
+   false-stopped qualification from the no-volume rebuild.
 2. Add inspected-phase export reconciliation and hostile-exit checks. Rebuild
    and export a fresh clean synthetic volume through the public path, then
    reattach it to a fresh sandbox and verify its mount and content.
