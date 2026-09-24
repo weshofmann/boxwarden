@@ -35,13 +35,19 @@ headroom guard after inspector capture; its destination stayed empty and its
 snapshot-ready transaction is preserved. Removing only a rebuildable task Go
 cache restored headroom for the fresh run.
 
-Tart 2.32.1 still reports `stopped` for this running graphical guest after
-READY. Exact supervisor/Tart/Virtualization processes, the attached disk,
-guest IP, SSH port, and Tart window proved the guest was live. Status therefore
-reports false drift during such runs. Correcting this observed-state contract
-without accepting a false READY is the active implementation problem. The
-following paragraphs retain the implementation sequence; earlier pending
-statements describe their checkpoint at the time.
+The source correction at `16d6384` now permits READY from an exact retained
+supervisor and fresh bound guest checks when Tart lists that same owned object
+as `stopped`; status preserves the raw contradiction. A fresh attached-volume
+public start and first status reached READY with Tart listing `running`.
+A later status drifted because the exact supervisor snapshot timed out while
+the supervisor, Tart child, socket, and Tart's `running` listing remained.
+The guest SSH port was unreachable. Public exact stop completed in about
+15 seconds and left the session consistently stopped, but ext4 now reports
+`needs_recovery`, consistent with bounded force-stop fallback. This failed
+qualification is preserved privately; it does not establish the new
+false-stopped path on a real VM. The following paragraphs retain the
+implementation sequence; earlier pending statements describe their
+checkpoint at the time.
 
 The admitted prepared base has been reused by public recipe-bound create.
 Public start, fresh mount-bound READY, and stop succeeded twice with separate
@@ -193,12 +199,13 @@ remain outside the prepared cache.
 
 ## Next actions
 
-1. Verify the corrected Tart false-stopped READY/status contract on an owned
-   disposable sandbox and audit stopped-only gates for contradictory state.
-   Add explicit inspected-phase recovery and
-   hostile-exit checks to the now-successful public export path.
-2. Attach the retained volume to a second fresh sandbox after export, then
-   verify its mount and content.
+1. Diagnose the fresh guest SSH loss and exact supervisor snapshot timeout
+   before another VM qualification. Preserve the failed dirty-volume run and
+   requalify from a fresh baseline; test stopped-only gates for contradictory
+   Tart state. Add inspected-phase recovery and hostile-exit checks to the
+   now-successful public export path.
+2. Once a clean stopped synthetic volume is available again, complete export
+   recovery and reattach it to a fresh sandbox; verify its mount and content.
 3. Run the full integration checks and real acceptance matrix, and publish the
    runnable build, exact source SHA, quickstart, synthetic demo, and limits.
 
