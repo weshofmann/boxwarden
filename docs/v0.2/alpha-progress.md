@@ -367,7 +367,15 @@ allowlisted internal reasons when a fresh supervisor snapshot fails. A
 regression first reproduced the previous generic result, then passed for an
 SSH probe failure, an expired observation, and suppression of arbitrary
 snapshot text. Targeted app, supervisor, and session-runtime tests and vet
-passed. This diagnostic has not yet been exercised against a live guest.
+passed. A fresh guest reached READY and remained READY through repeated public
+status checks for about eleven minutes, including five minutes idle and a
+guest GUI write to its automatically mounted volume. The new failure text
+therefore did not trigger during this run. Public stop returned a consistent
+stopped state but took 15.47 seconds, matching the bounded graceful window;
+offline ext4 retained `needs_recovery`. This does not prove which part of the
+shutdown request or guest path failed. The exact stopped VM and volume are
+preserved as failed private qualification evidence. Clean stop/restart and
+retained-volume rebuild remain unqualified.
 Bounded host logs for the failed run showed repetitive Tart AppKit geometry
 messages but no explicit VM or disk fault; there was no Tart crash report.
 Those observations do not establish the cause of lost readiness or the
@@ -375,12 +383,12 @@ recovery-required volume.
 
 ## Next actions
 
-1. Build the diagnostic CLI and run one bounded fresh attached-volume guest
-   with planned live checks before and after guest activity. Record the exact
-   predicate, guest SSH reachability, controlled-stop timing, and offline ext4
-   state. Diagnose and correct the failure without promoting the failed runs.
-   Then qualify from a fresh disposable VM and volume, verify content across a
-   clean stop/restart, then prepare a distinct mount-capable target base for
+1. Diagnose why an attended GUI session's guest shutdown request did not reap
+   within the 15-second graceful window, while an earlier attached-volume
+   stop completed in under four seconds with clean ext4. Verify the stop
+   mechanism with a bounded investigation, correct it, then qualify from a
+   fresh disposable VM and volume. Verify content across a clean stop/restart,
+   then prepare a distinct mount-capable target base for
    retained-volume rebuild. The current same-base command intentionally
    no-ops. A start on the older generic r2 clone failed at the guest
    workspace-mount SSH request after the base probe and time-zone steps
