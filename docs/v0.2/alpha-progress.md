@@ -110,13 +110,16 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   and comparator tests, the architecture guard, targeted vet, formatting, and
   diff checks pass; the full local suite was not rerun at this checkpoint
   because the host is now below the production disk reserve used by unrelated
-  capture fixtures.
+  capture fixtures. A separate source-only review found no concrete Critical
+  or Important issue in the published stopped-import verification path.
 - Next: obtain safe host headroom for an independent whole-directory export,
   run the public verify command on that result, then run fresh source-tracked
   acceptance.
 - Limits: retained import persistence, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh
-  acceptance remain open. No human action is currently needed.
+  acceptance remain open. The operator has been asked to make sufficient
+  capacity available for the existing export guard; the agent will recheck
+  the guard before resuming the stopped-volume qualification.
 
 ## Verified checkpoints
 
@@ -590,11 +593,13 @@ acceptance run and GUI/provider sign-in checks.
    guest SSH loss and false-stopped qualification remain open.
 2. Qualify or explicitly defer ambiguous post-final-rename export recovery;
    an occupied final directory still requires manual reconciliation.
-3. Implement explicit bounded synthetic host-project ingress; prior
-   reattachment and delete qualification used guest-created synthetic files.
+3. Qualify the implemented synthetic host-project ingress through a stopped
+   whole-directory export and the public verification command once the host
+   capacity guard permits it. The live transfer/readback path has already
+   passed targeted real-host checks; retained disk persistence has not.
 4. Run the fresh real acceptance matrix and publish the runnable build, exact
-   source SHA, quickstart, synthetic demo, and limits. The full local Go suite,
-   vet, and CLI build have passed; hosted CI also passed at `4d2a6eb`.
+   source SHA, and limits. The quickstart and synthetic demo are tracked;
+   their fresh guest run is pending. Hosted CI passed through `08cc42a`.
 
 ## Publication and operational policy
 
@@ -608,5 +613,6 @@ evidence out of Git and the PR. Never push or merge into `main`, force-update
 published history, or bypass checks.
 
 Before further VM mutation, verify owned resources, host doctor, RAM, and
-the free-space floor. No human action is currently required; later account
-sign-in and subjective GUI acceptance belong to Wes.
+the free-space floor. Host capacity for the independent export is the current
+operator action; later account sign-in and subjective GUI acceptance belong
+to Wes.
