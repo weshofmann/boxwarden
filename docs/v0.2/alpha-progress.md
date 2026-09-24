@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-24 01:06 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-24 01:18 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -19,7 +19,7 @@ resumable handoff if unfinished.
 | Automatic base preparation | real guest preparation reached, qualification pending | The first attempt failed before VM creation on an unsupported OpenSSL mode. A fresh attempt with exact OpenSSL 3 passed installer and guest preparation, then reached finalization. A source audit found the finalizer rejected the public random run-ID format; the operator canceled through owned stop/wait cleanup. Its journal is failed, and no cache was admitted. The exact stopped candidate was privately archived and deleted after archive verification. The finalizer contract and regression fixture are published. A source-only reserve monitor now checks the state and Tart filesystems before mutation and through build/qualification |
 | Inspector capability | synthetic boot verified, ext4 runtime pending | Pinned Tart has no NIC-off mode. A signed Virtualization.framework guest booted with zero NICs, one read-only synthetic disk, and two serial channels; the guest reported loopback only and returned a typed report. The formatter now produced a synthetic ext4 image, but the inspector has not mounted or validated it. The guest read-only mount path has targeted source tests. Real workspace export remains closed |
 | Graphical sandbox | same-clone GUI verified | Public qualr2c reached READY, GNOME Desktop and Firefox opened through Tart GUI, and Nautilus showed synthetic `bw-alpha-system-persist-r2c` in guest home after stop/restart. This is system-disk persistence only. No guest agent account sign-in or recipe-installed application has been observed |
-| Workspace lifecycle | first managed volume qualified; attachment pending | Volume-owned records, attachment/use transitions, private format journal, Linux ARM64 ext4 helper, and retained exact Tart disk/lock leases have targeted tests. Public start reserves exact Uses as a batch and persists Starting last; retries check them. The child rechecks Starting/Use/attachment/formatter evidence and passes retained leases to Tart. Stop retains Stopping through exact owner stop and batch Use release, then persists Stopped. The pinned Ubuntu initrd lacks e2fsck; preparation verifies Canonical's matching static ARM64 checker and appends it with a fixed formatter guest. A signed no-NIC VZ runner completed one synthetic and one managed fresh 64 MiB ext4 format with clean guest check, VM stop, runner reap, and host header/identity verification. The managed volume has an Available record matching its verified formatter journal and raw identity. Public attach/rebuild/reattach and Tart volume qualification remain |
+| Workspace lifecycle | real Tart disk persistence verified; automatic guest mount pending | Volume-owned records, attachment/use transitions, private format journal, Linux ARM64 ext4 helper, and retained exact Tart disk/lock leases have targeted tests. Public start reserves exact Uses as a batch and persists Starting last; retries check them. The child rechecks Starting/Use/attachment/formatter evidence and passes retained leases to Tart. Stop retains Stopping through exact owner stop and batch Use release, then persists Stopped. A signed no-NIC VZ runner completed one synthetic and one managed fresh 64 MiB ext4 format/check; the managed volume has an Available record matching its verified journal and raw identity. Public attach to the stopped `qualr2c` session, start to READY, stop, and restart to READY passed with a distinct ext4 `vdb` of the expected UUID. One synthetic file survived stop/restart with the same digest after manual guest remount. Automatic guest mount, rebuild, reattach to a replacement system, and full workflow qualification remain |
 | Controlled export | receiver implemented, acceptance closed | Host stream receiver has hostile fixtures and independent review; zero-NIC synthetic boot/transport passed, but ext4 inspection, volume lock admission, hostile exits, and real export remain unproved, so public export remains disabled |
 | Hosted CI | unavailable | Local verification is required; do not report CI passed |
 
@@ -104,6 +104,18 @@ An integration fixture attaches and detaches a promoted synthetic volume while
 preserving disk identity. The full local Go suite, focused app/workspacex race
 tests, focused vet, and diff checks passed. Independent review found no
 actionable CLI finding. The real qualified volume has not yet been attached.
+The real volume was then publicly attached to stopped `qualr2c`. Public start
+reached READY with an exact-generation Use; pinned management SSH observed a
+separate 64 MiB ext4 `vdb` with the expected UUID. A manually mounted guest
+path accepted one synthetic file whose SHA-256 was checked. Public Stop left
+the VM consistently stopped, cleared Use, and retained attachment/raw inode.
+A second public start reached READY with a new Use generation; manual remount
+found the same file digest. A second public Stop again cleared Use and left
+the VM stopped. Tart's optional guest-agent exec was unavailable in this
+Ubuntu image, so the diagnostic used strict pinned management SSH. Guest
+output is diagnostic, while host record, inode, and stopped-backend checks
+remain independent. Automatic mounting at the recorded guest path does not
+exist yet; this is not a complete hands-free workspace workflow.
 
 Publish each meaningful verified implementation increment on the authorized
 alpha branch promptly, targeting a GitHub checkpoint every 30–60 minutes of
@@ -129,7 +141,9 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
   registered in the private alpha domain for engineering qualification only;
   no automatic prepared base is admitted.
 - Alpha workspace volumes: one qualified Available 64 MiB ext4 volume,
-  unattached; exact identity and evidence are private.
+  attached to stopped qualr2c with no Use reservation. One synthetic file
+  survived a public stop/restart after manual guest remount; exact identity
+  and digests are private.
 - Synthetic formatter proof: one retained private 64 MiB raw disk and bounded
   boot evidence; it is not registered as a workspace volume.
 - Input cache: verified official Ubuntu 24.04.4 ARM64 Desktop ISO in the private
@@ -142,10 +156,11 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 
 ## Next executable action
 
-Expose bounded public attachment for the qualified volume and verify the
-source-wired start/stop loop against a disposable Tart clone. The parent writes Uses before Starting,
-the child checks exact formatter and disk evidence, and Stop clears Uses only
-after exact owner reap and fresh backend-stopped observation.
+Implement exact UUID/path guest mounting through the pinned typed management
+channel, include fresh mount evidence in READY, and qualify it from an updated
+generic base without manual guest actions. Then test system rebuild and
+reattachment to another disposable sandbox with the same volume. The current
+public lifecycle already passes exact disk lease and stop/restart checks.
 The next full prepared-base run needs more safe disk headroom. After that, record actual
 qualification run. Record actual
 package, identity, READY, and stopped-object evidence. Extend the zero-NIC inspector from
