@@ -117,15 +117,27 @@ the selected file to a new directory; an extra path and a changed snapshot
 left no published tree. These tests use a synthetic helper and stream. An
 ambiguous post-rename failure returns the exact final path and leaves the
 journal `inspected` for explicit reconciliation; that recovery path remains.
+The host now builds a private bundle from exact journal-derived request bytes
+under the transaction lock, re-admits it, and returns an inode-bound cleanup
+receipt. The real controlled builder invocation from clean source passed and
+its synthetic-request output passed production admission. A rejected receiver
+stream can be recaptured and retried from `inspected` while the exact
+destination remains empty. `workspace export` composes snapshot, build,
+capture, selected publication, and a final published-journal read for the
+explicit `alpha` domain. Its CLI routing tests pass; the managed-volume public
+command has not yet run. Repository-wide Go tests and vet passed with host
+Unix socket access at `06466ee`; the default sandbox run could not bind test
+sockets, and the architecture guard was narrowed for the v0.2 export calls.
 Real managed-volume qualification remains open. The earlier failed base
 attempt was corrected and a fresh base built and qualified; failed attempts
 remain outside the prepared cache.
 
 ## Next actions
 
-1. Generate a private bundle from the real journal request and exact snapshot,
-   then run the capture and publication path against the managed synthetic
-   volume. Add explicit inspected-phase recovery and hostile-exit checks.
+1. Run the public `workspace export` path against the stopped managed synthetic
+   volume and verify the returned file and journal. Add explicit recovery for
+   interrupted inspected-phase capture and post-rename ambiguity, plus hostile
+   exits.
 2. Attach the retained volume to a second fresh sandbox after export, then
    verify its mount and content.
 3. Run the full integration checks and real acceptance matrix, and publish the
