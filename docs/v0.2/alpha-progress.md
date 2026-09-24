@@ -89,7 +89,13 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   with no active Use or Pending marker; the import journal is `transferring`.
   Private evidence records the exact transaction and refusal. The guard was
   not bypassed, and no durable verified phase is claimed.
-- Next: implement an exact stopped-volume persistence gate, obtain safe host
+- Persistence source foundation in progress: a bounded host comparator
+  re-admits the captured source and requires an exact selected export tree,
+  including empty directories, file digests, modes, ownership, and absence of
+  extra entries or links. Targeted tests cover matching and altered trees.
+  It does not yet bind an export transaction or advance the import journal.
+- Next: bind the comparator to an exact published stopped-volume export and
+  a durable import phase transition; obtain safe host
   headroom for the independent readback, then run fresh source-tracked
   acceptance.
 - Limits: retained import persistence, software-changing rebuild, ambiguous export final-rename

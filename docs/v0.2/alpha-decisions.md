@@ -274,3 +274,10 @@ must compare the captured source to a selected read from the stopped retained
 volume, bind the exact disk and export transaction, and reject ambiguous or
 incomplete export results. Do not weaken the existing export reserve to make
 this qualification pass.
+
+Select the complete `boxwarden-import-<transaction>` directory for the
+stopped-volume export. Selecting individual files would fail to prove that
+empty directories survived and that no extra guest files appeared. The host
+comparison re-admits the original captured manifest and checks the exported
+tree exactly; a later transaction gate must also bind the export journal to
+the stopped session, volume disk identity, and published destination.
