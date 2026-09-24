@@ -21,11 +21,20 @@ import (
 // VM report bound to this format attempt. Create retains the storage lock,
 // journal, and raw file and performs its independent ext4/identity checks.
 type VZFormatter struct {
-	StateRoot  string
-	Domain     domain.ID
-	BundlePath string
-	runner     execx.Runner
-	pins       formatterPins
+	StateRoot    string
+	Domain       domain.ID
+	BundlePath   string
+	SourceRoot   string
+	runner       execx.Runner
+	pins         formatterPins
+	sourceCommit func(context.Context, string) (string, error)
+}
+
+func (v VZFormatter) admittedSourceCommit(ctx context.Context) (string, error) {
+	if v.sourceCommit != nil {
+		return v.sourceCommit(ctx, v.SourceRoot)
+	}
+	return cleanSourceCommit(ctx, v.SourceRoot)
 }
 
 func (v VZFormatter) commandRunner() execx.Runner {
@@ -52,7 +61,11 @@ func (v VZFormatter) Check(ctx context.Context) error {
 	if _, err := domain.Parse(string(v.Domain)); err != nil {
 		return err
 	}
-	_, err := admitVZBundle(ctx, v.BundlePath, v.StateRoot, v.Domain, v.commandRunner(), v.artifactPins())
+	sourceCommit, err := v.admittedSourceCommit(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = admitVZBundle(ctx, v.BundlePath, v.StateRoot, v.Domain, sourceCommit, v.commandRunner(), v.artifactPins())
 	return err
 }
 
@@ -68,7 +81,11 @@ func (v VZFormatter) FormatAndVerify(ctx context.Context, request FormatRequest)
 		return FormatEvidence{}, fmt.Errorf("formatter request differs from exact managed volume")
 	}
 	runner := v.commandRunner()
-	bundle, err := admitVZBundle(ctx, v.BundlePath, v.StateRoot, v.Domain, runner, v.artifactPins())
+	sourceCommit, err := v.admittedSourceCommit(ctx)
+	if err != nil {
+		return FormatEvidence{}, err
+	}
+	bundle, err := admitVZBundle(ctx, v.BundlePath, v.StateRoot, v.Domain, sourceCommit, runner, v.artifactPins())
 	if err != nil {
 		return FormatEvidence{}, fmt.Errorf("admit signed formatter bundle: %w", err)
 	}

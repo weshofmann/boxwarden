@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-24 00:42 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-24 00:51 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -78,7 +78,19 @@ configured root and fixed child argv, rechecks the private digest-bound signed
 bundle and creating journal, and accepts only a reaped stopped-VM report with
 matching ext4 evidence. Unit tests reject a modified initrd and a false
 stopped report, leaving a failed journal. Read-only admission of the actual
-private bundle passed; no managed-volume boot has run.
+private bundle passed; no managed-volume boot has run. Independent review found
+that the adapter accepted a self-declared source revision. The new gate
+requires an explicit clean checkout at the exact bundle revision and rejects
+a mismatch before any signed-runner command. Targeted formatter tests passed.
+The private bundle must be rebuilt from this new commit before real managed
+admission; the earlier read-only admission applied to the earlier revision.
+
+Publish each meaningful verified implementation increment on the authorized
+alpha branch promptly, targeting a GitHub checkpoint every 30–60 minutes of
+active work. Keep this progress record and Draft PR #12 current at milestones.
+Targeted checks support small commits; full integration and acceptance checks
+remain separate gates. Preserve unfinished local work without staging another
+worker's files, and never publish private host evidence or credentials.
 
 The restricted Codex shell falsely fails Unix-socket tests and host doctor
 inspection with `operation not permitted`; the corresponding elevated checks
@@ -109,7 +121,8 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 
 ## Next executable action
 
-Qualify one managed ext4 raw volume through the Go `VZFormatter` adapter,
+Rebuild the private bundle from the published source-revision gate, then
+qualify one managed ext4 raw volume through the Go `VZFormatter` adapter,
 then promote its exact verified journal and record,
 then expose bounded public attachment and verify the source-wired start/stop
 loop against a disposable Tart clone. The parent writes Uses before Starting,

@@ -111,7 +111,7 @@ func checkVZCommand(ctx context.Context, runner execx.Runner, command execx.Comm
 	return result, nil
 }
 
-func admitVZBundle(ctx context.Context, path, stateRoot string, selected domain.ID, runner execx.Runner, pins formatterPins) (vzBundle, error) {
+func admitVZBundle(ctx context.Context, path, stateRoot string, selected domain.ID, sourceCommit string, runner execx.Runner, pins formatterPins) (vzBundle, error) {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return vzBundle{}, fmt.Errorf("formatter bundle path is not clean and absolute")
 	}
@@ -141,7 +141,7 @@ func admitVZBundle(ctx context.Context, path, stateRoot string, selected domain.
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return vzBundle{}, fmt.Errorf("formatter manifest has trailing content")
 	}
-	if manifest.Version != 1 || !lowerHex(manifest.SourceCommit, 40) ||
+	if manifest.Version != 1 || !lowerHex(sourceCommit, 40) || manifest.SourceCommit != sourceCommit ||
 		manifest.ISOSHA256 != pins.iso || manifest.CheckerDebSHA256 != pins.deb ||
 		manifest.ManagedStateRoot != stateRoot || manifest.ManagedDomain != string(selected) ||
 		len(manifest.RunnerEntitlements) != 1 || !manifest.RunnerEntitlements["com.apple.security.virtualization"] {

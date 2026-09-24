@@ -58,6 +58,25 @@ func vzFixtureBundle(t *testing.T, root string) (string, formatterPins) {
 	return bundle, pins
 }
 
+func fixtureSourceCommit(context.Context, string) (string, error) {
+	return strings.Repeat("a", 40), nil
+}
+
+func TestVZFormatterRejectsDifferentSourceRevisionBeforeSignatureCheck(t *testing.T) {
+	root := testRoot(t)
+	bundle, pins := vzFixtureBundle(t, root)
+	called := false
+	formatter := VZFormatter{StateRoot: root, Domain: "work", BundlePath: bundle, pins: pins,
+		sourceCommit: func(context.Context, string) (string, error) { return strings.Repeat("b", 40), nil },
+		runner: vzRunnerFunc(func(context.Context, execx.Command) (execx.Result, error) {
+			called = true
+			return execx.Result{}, nil
+		})}
+	if err := formatter.Check(t.Context()); err == nil || called {
+		t.Fatalf("different source revision reached signature command: err=%v called=%v", err, called)
+	}
+}
+
 func TestVZFormatterRunsExactManagedRequestAndReapsBeforeReturning(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "state with spaces")
 	if err := os.Mkdir(root, 0o700); err != nil {
@@ -65,7 +84,7 @@ func TestVZFormatterRunsExactManagedRequestAndReapsBeforeReturning(t *testing.T)
 	}
 	bundle, pins := vzFixtureBundle(t, root)
 	var commands []execx.Command
-	formatter := VZFormatter{StateRoot: root, Domain: "work", BundlePath: bundle, pins: pins}
+	formatter := VZFormatter{StateRoot: root, Domain: "work", BundlePath: bundle, pins: pins, sourceCommit: fixtureSourceCommit}
 	formatter.runner = vzRunnerFunc(func(_ context.Context, command execx.Command) (execx.Result, error) {
 		commands = append(commands, command)
 		switch command.Path {
@@ -112,7 +131,7 @@ func TestVZFormatterRejectsModifiedBundleBeforeRunner(t *testing.T) {
 		t.Fatal(err)
 	}
 	called := false
-	formatter := VZFormatter{StateRoot: root, Domain: "work", BundlePath: bundle, pins: pins,
+	formatter := VZFormatter{StateRoot: root, Domain: "work", BundlePath: bundle, pins: pins, sourceCommit: fixtureSourceCommit,
 		runner: vzRunnerFunc(func(context.Context, execx.Command) (execx.Result, error) {
 			called = true
 			return execx.Result{}, nil
@@ -125,7 +144,7 @@ func TestVZFormatterRejectsModifiedBundleBeforeRunner(t *testing.T) {
 func TestVZFormatterRejectsRunnerThatDoesNotProveVMStopped(t *testing.T) {
 	root := testRoot(t)
 	bundle, pins := vzFixtureBundle(t, root)
-	formatter := VZFormatter{StateRoot: root, Domain: "work", BundlePath: bundle, pins: pins}
+	formatter := VZFormatter{StateRoot: root, Domain: "work", BundlePath: bundle, pins: pins, sourceCommit: fixtureSourceCommit}
 	formatter.runner = vzRunnerFunc(func(_ context.Context, command execx.Command) (execx.Result, error) {
 		switch command.Path {
 		case "/usr/bin/codesign":

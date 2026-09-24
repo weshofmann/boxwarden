@@ -4,6 +4,7 @@ package workspaceformat
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/weshofmann/boxwarden/internal/config"
@@ -28,7 +29,11 @@ func TestVZFormatterRealPreparedBundleAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	formatter := VZFormatter{StateRoot: selected.StateRoot, Domain: selected.ID, BundlePath: bundle}
+	sourceRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	formatter := VZFormatter{StateRoot: selected.StateRoot, Domain: selected.ID, BundlePath: bundle, SourceRoot: sourceRoot}
 	if err := formatter.Check(t.Context()); err != nil {
 		t.Fatal(err)
 	}
