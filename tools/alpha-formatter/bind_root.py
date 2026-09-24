@@ -15,7 +15,7 @@ def render_binding(state_root: str | Path, domain: str) -> str:
     if (not root.startswith("/") or os.path.normpath(root) != root
             or "//" in root or "\x00" in root or "\n" in root or "\r" in root):
         raise ValueError("managed state root must be clean and absolute")
-    if re.fullmatch(r"[a-z][a-z0-9-]{0,62}", domain) is None:
+    if re.fullmatch(r"[a-z][a-z0-9]{0,62}", domain) is None:
         raise ValueError("managed domain is invalid")
     encoded_root = base64.b64encode(root.encode()).decode("ascii")
     return ("import Foundation\n"
