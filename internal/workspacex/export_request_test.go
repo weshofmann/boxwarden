@@ -116,6 +116,10 @@ func TestEncodeExportInspectorRequestMatchesGuestEnvelope(t *testing.T) {
 		len(request.Selected) != 2 || request.Selected[0] != "project/report.txt" || request.Selected[1] != "notes" {
 		t.Fatalf("guest request = %+v, %v", request, err)
 	}
+	journal.Phase = ExportInspected
+	if retry, err := encodeExportInspectorRequest(journal); err != nil || string(retry) != string(raw) {
+		t.Fatalf("inspected retry request changed: %q, %v", retry, err)
+	}
 	journal.Phase = ExportCopying
 	journal.Snapshot = nil
 	if _, err := encodeExportInspectorRequest(journal); err == nil {

@@ -136,6 +136,25 @@ func TestPublishCapturedExportSelectedTreeAndInspectedFailure(t *testing.T) {
 				if err != nil || len(entries) != 0 {
 					t.Fatalf("rejected destination changed: %v %v", entries, err)
 				}
+				if scenario.mode == "extra" {
+					if _, err := PrepareExportInspectorRequest(context.Background(), root, domain.ID("work"), journal.ID); err != nil {
+						t.Fatalf("inspected retry could not derive request: %v", err)
+					}
+					retry, err := exportx.CaptureExportInspector(context.Background(), os.Args[0], []string{
+						"-test.run=^TestExportPublishHelperProcess$", "publish-helper", exportTransactionHex(journal.ID), "valid",
+					}, snapshotDir)
+					if err != nil {
+						t.Fatal(err)
+					}
+					path, err := PublishCapturedExport(context.Background(), root, domain.ID("work"), journal.ID, retry)
+					if err != nil || path != filepath.Join(destination, exportTransactionHex(journal.ID)) {
+						t.Fatalf("inspected retry publication = %q, %v", path, err)
+					}
+					stored, err = loadExportJournal(root, domain.ID("work"), journal.ID)
+					if err != nil || stored.Phase != ExportPublished {
+						t.Fatalf("retry did not durably publish: %s, %v", stored.Phase, err)
+					}
+				}
 				return
 			}
 			if err != nil || stored.Phase != ExportPublished || path != filepath.Join(destination, exportTransactionHex(journal.ID)) {

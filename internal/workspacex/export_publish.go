@@ -33,8 +33,8 @@ func PublishCapturedExport(ctx context.Context, stateRoot string, domainID domai
 	}
 	defer func() { err = errors.Join(err, held.Release()) }()
 	journal, err := loadExportJournal(stateRoot, domainID, transactionID)
-	if err != nil || journal.Phase != ExportSnapshotReady {
-		return "", fmt.Errorf("export journal is not snapshot-ready for publication: %v", err)
+	if err != nil || journal.Phase != ExportSnapshotReady && journal.Phase != ExportInspected {
+		return "", fmt.Errorf("export journal is not ready for publication or safe retry: %v", err)
 	}
 	spoolParent := filepath.Join(stateRoot, filepath.Dir(journal.SnapshotPath))
 	if err := captured.AdmitForPublication(spoolParent); err != nil {
@@ -63,9 +63,11 @@ func PublishCapturedExport(ctx context.Context, stateRoot string, domainID domai
 		return "", fmt.Errorf("invalid export transaction bytes: %w", err)
 	}
 	inspected := journal
-	inspected.Phase = ExportInspected
-	if err := advanceExportJournalLocked(stateRoot, journal, inspected); err != nil {
-		return "", err
+	if journal.Phase == ExportSnapshotReady {
+		inspected.Phase = ExportInspected
+		if err := advanceExportJournalLocked(stateRoot, journal, inspected); err != nil {
+			return "", err
+		}
 	}
 	options := exportx.Options{Parent: journal.DestinationParent, TransactionID: transaction,
 		Selected: append([]string(nil), journal.Selected...), MaxChunkBytes: 1 << 20,

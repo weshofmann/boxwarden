@@ -18,7 +18,8 @@ type exportBundleAdmitter func(context.Context, string, string, []byte) (exportx
 type exportInspectorCapturer func(context.Context, string, []string, string) (exportx.CapturedInspectorStream, error)
 
 // CaptureAdmittedExportInspector binds a prepared production bundle to the
-// snapshot-ready journal and captures only an export-mode stopped VM stream.
+// snapshot-ready journal or inspected retry and captures only an export-mode
+// stopped VM stream.
 // The caller owns the returned spool. Before publication it must re-admit the
 // journal and snapshot under the transaction lock and use the journal's exact
 // selection and destination; capture alone never authorizes publication.

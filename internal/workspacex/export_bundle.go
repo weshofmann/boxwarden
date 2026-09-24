@@ -51,7 +51,7 @@ func (bundle PreparedInspectorBundle) Remove() error {
 }
 
 // BuildAdmittedExportInspectorBundle builds one private request-bearing bundle
-// from a snapshot-ready journal and returns its admitted directory and inode
+// from a snapshot-ready journal (or inspected retry) and returns its directory and inode
 // receipt. The caller owns that private bundle and must remove it after capture. No VM runs
 // and no export is published here.
 func BuildAdmittedExportInspectorBundle(ctx context.Context, stateRoot string, domainID domain.ID, transactionID, sourceRoot, isoPath, goBinary string) (PreparedInspectorBundle, error) {

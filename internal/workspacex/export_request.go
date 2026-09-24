@@ -62,8 +62,8 @@ func encodeExportInspectorRequest(journal ExportJournal) ([]byte, error) {
 	if err := validateExportJournal(journal); err != nil {
 		return nil, err
 	}
-	if journal.Phase != ExportSnapshotReady {
-		return nil, fmt.Errorf("export snapshot is not ready for inspector request")
+	if journal.Phase != ExportSnapshotReady && journal.Phase != ExportInspected {
+		return nil, fmt.Errorf("export snapshot is not ready for inspector request or safe retry")
 	}
 	raw, err := json.Marshal(struct {
 		Version        int      `json:"version"`
