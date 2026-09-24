@@ -157,7 +157,7 @@ func DecodeManagementRequest(reader io.Reader) (ManagementRequest, error) {
 		return ManagementRequest{}, fmt.Errorf("management request package field is out of kind")
 	}
 	_, hasWorkspaces := fields["workspaces"]
-	if hasWorkspaces && value.Kind != "probe" && value.Kind != "ensure_workspaces" {
+	if hasWorkspaces && value.Kind != "probe" && value.Kind != "ensure_workspaces" && value.Kind != "request_shutdown" {
 		return ManagementRequest{}, fmt.Errorf("management request workspace field is out of kind")
 	}
 	if !hasWorkspaces && value.Kind == "ensure_workspaces" {
@@ -187,9 +187,13 @@ func (r ManagementRequest) Validate() error {
 		if r.Zone != "" || len(r.Packages) != 0 || len(r.Workspaces) == 0 || !validWorkspaces(r.Workspaces) {
 			return fmt.Errorf("invalid workspace mount request")
 		}
-	case "read_zone", "inspect_identity", "request_shutdown":
+	case "read_zone", "inspect_identity":
 		if r.Zone != "" || len(r.Packages) != 0 || len(r.Workspaces) != 0 {
 			return fmt.Errorf("management request has unexpected parameters")
+		}
+	case "request_shutdown":
+		if r.Zone != "" || len(r.Packages) != 0 || !validWorkspaces(r.Workspaces) {
+			return fmt.Errorf("invalid workspace-bound shutdown request")
 		}
 	case "apply_zone":
 		if !validZone(r.Zone) || len(r.Packages) != 0 || len(r.Workspaces) != 0 {

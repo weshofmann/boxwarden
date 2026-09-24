@@ -49,7 +49,7 @@ type managementClient interface {
 	timezonex.ZoneClient
 	Probe(context.Context, sshx.Connection, sshx.ProbeRequest) (sshx.ProbeResult, error)
 	EnsureWorkspaces(context.Context, sshx.Connection, []sshx.WorkspaceMount) error
-	RequestShutdown(context.Context, sshx.Connection) error
+	RequestShutdown(context.Context, sshx.Connection, []sshx.WorkspaceMount) error
 	InspectPackages(context.Context, sshx.Connection, []string) ([]sshx.PackageVersion, error)
 	InspectIdentity(context.Context, sshx.Connection) (sshx.GuestIdentity, error)
 }
@@ -697,6 +697,7 @@ func (o *Owner) RequestStop(ctx context.Context) error {
 	handle := o.handle
 	cancelMaintenance := o.maintenanceCancel
 	connection, binding := o.connection, o.sshBinding
+	mounts := append([]sshx.WorkspaceMount(nil), o.workspaceMounts...)
 	client, guestReady := o.deps.client, o.active && o.readyEstablished
 	o.mu.Unlock()
 	if handle == nil {
@@ -716,7 +717,7 @@ func (o *Owner) RequestStop(ctx context.Context) error {
 	var guestErr error
 	if guestReady && client != nil && connection.Binding == binding {
 		requestCtx, cancel := context.WithTimeout(ctx, supervisor.GuestShutdownRequestTimeout)
-		guestErr = client.RequestShutdown(requestCtx, connection)
+		guestErr = client.RequestShutdown(requestCtx, connection, mounts)
 		cancel()
 		if guestErr == nil {
 			o.graceSent = true

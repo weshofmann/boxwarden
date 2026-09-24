@@ -42,23 +42,30 @@ func TestClientProbeUsesCompleteStrictSSHPolicyAndFixedRemoteCommand(t *testing.
 
 func TestClientRequestsOnlyBoundFixedGuestShutdown(t *testing.T) {
 	connection := testConnection(t)
+	mount := WorkspaceMount{VolumeID: "00112233-4455-4677-8899-aabbccddeeff", FilesystemUUID: "10213243-5465-4768-899a-bbccddeeff00", MountPath: "/home/boxwarden/workspaces/project"}
 	runner := &fakeRunner{onRun: func(Command) Result { return Result{Stdout: `{"version":1,"ok":true}`} }}
 	client := NewClient(runner)
-	if err := client.RequestShutdown(context.Background(), connection); err != nil {
+	if err := client.RequestShutdown(context.Background(), connection, []WorkspaceMount{mount}); err != nil {
 		t.Fatal(err)
 	}
 	if len(runner.commands) != 1 || runner.commands[0].Path != sshPath || !sameStrings(runner.commands[0].Args, expectedSSHArgs(connection)) {
 		t.Fatalf("shutdown escaped the pinned fixed SSH boundary: %#v", runner.commands)
 	}
 	var request managementRequest
-	if err := json.Unmarshal(runner.commands[0].Stdin, &request); err != nil || request.Kind != "request_shutdown" || request.Domain != string(connection.Binding.Domain) || request.SessionID != connection.Binding.SessionID || request.BackendKind != connection.Binding.BackendKind || request.BackendObject != connection.Binding.BackendObject || request.Zone != "" || len(request.Packages) != 0 || len(request.Workspaces) != 0 {
+	if err := json.Unmarshal(runner.commands[0].Stdin, &request); err != nil || request.Kind != "request_shutdown" || request.Domain != string(connection.Binding.Domain) || request.SessionID != connection.Binding.SessionID || request.BackendKind != connection.Binding.BackendKind || request.BackendObject != connection.Binding.BackendObject || request.Zone != "" || len(request.Packages) != 0 || len(request.Workspaces) != 1 || request.Workspaces[0] != mount {
 		t.Fatalf("shutdown request = %+v, %v", request, err)
 	}
 	for _, response := range []string{`{"version":1,"ok":false}`, `{"version":1,"ok":true,"command":"poweroff"}`} {
 		runner.onRun = func(Command) Result { return Result{Stdout: response} }
-		if err := client.RequestShutdown(context.Background(), connection); err == nil {
+		if err := client.RequestShutdown(context.Background(), connection, []WorkspaceMount{mount}); err == nil {
 			t.Fatalf("accepted ambiguous shutdown response %s", response)
 		}
+	}
+	before := len(runner.commands)
+	bad := mount
+	bad.MountPath = "/tmp/unbound"
+	if err := client.RequestShutdown(context.Background(), connection, []WorkspaceMount{bad}); err == nil || len(runner.commands) != before {
+		t.Fatalf("invalid shutdown mount escaped SSH boundary: %v", err)
 	}
 }
 

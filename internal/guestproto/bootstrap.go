@@ -203,6 +203,9 @@ func (b *Bootstrapper) Management(ctx context.Context, request ManagementRequest
 	case "inspect_identity":
 		return b.inspectIdentity()
 	case "request_shutdown":
+		if err := b.quiesceWorkspaceMounts(ctx, request.Workspaces); err != nil {
+			return nil, err
+		}
 		// This only confirms that systemd accepted the fixed poweroff job.
 		// The trusted host still waits for its retained Tart child to exit.
 		if _, err := b.Runner.Run(ctx, "/usr/bin/systemctl", "--no-block", "--no-wall", "--ignore-inhibitors", "poweroff"); err != nil {
