@@ -362,17 +362,29 @@ evidence. Neither sustained READY nor clean retained-volume shutdown is claimed
 from this attempt. The exact readiness predicate and journal state need
 diagnosis before a fresh qualification run.
 
+The status path now reports the exact unproven READY predicates and only
+allowlisted internal reasons when a fresh supervisor snapshot fails. A
+regression first reproduced the previous generic result, then passed for an
+SSH probe failure, an expired observation, and suppression of arbitrary
+snapshot text. Targeted app, supervisor, and session-runtime tests and vet
+passed. This diagnostic has not yet been exercised against a live guest.
+Bounded host logs for the failed run showed repetitive Tart AppKit geometry
+messages but no explicit VM or disk fault; there was no Tart crash report.
+Those observations do not establish the cause of lost readiness or the
+recovery-required volume.
+
 ## Next actions
 
-1. Diagnose the live readiness drift and the recovery-required bit after
-   controlled stop without promoting the failed run. Qualify the correction
-   from a fresh disposable VM and volume, verify synthetic content across a
+1. Build the diagnostic CLI and run one bounded fresh attached-volume guest
+   with planned live checks before and after guest activity. Record the exact
+   predicate, guest SSH reachability, controlled-stop timing, and offline ext4
+   state. Diagnose and correct the failure without promoting the failed runs.
+   Then qualify from a fresh disposable VM and volume, verify content across a
    clean stop/restart, then prepare a distinct mount-capable target base for
    retained-volume rebuild. The current same-base command intentionally
-   no-ops. A
-   start on the older generic r2 clone failed at the guest workspace-mount SSH
-   request after the base probe and
-   time-zone steps succeeded. The r2 helper digest differs from the prepared
+   no-ops. A start on the older generic r2 clone failed at the guest
+   workspace-mount SSH request after the base probe and time-zone steps
+   succeeded. The r2 helper digest differs from the prepared
    mount-qualified helper, consistent with the tracked plan's warning that r2
    predates this guest definition. That failed run was controlled-stopped; its
    volume Use was released and the clean volume explicitly detached. Preserve

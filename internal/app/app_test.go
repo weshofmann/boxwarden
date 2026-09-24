@@ -819,6 +819,53 @@ func TestSessionStatusRequiresFreshExactReadyEvidence(t *testing.T) {
 	}
 }
 
+func TestSessionStatusNamesFailedLiveChecksWithoutEchoingSnapshotText(t *testing.T) {
+	binding := supervisor.Binding{Domain: "work", SessionID: "00000000-0000-4000-8000-000000000001", BackendKind: "tart", BackendObject: "boxwarden-work-dev", Generation: "11111111-2222-4333-8444-555555555555"}
+	for _, test := range []struct {
+		name     string
+		change   func(*supervisor.Snapshot)
+		want     string
+		mustOmit string
+	}{
+		{name: "SSH probe", change: func(s *supervisor.Snapshot) {
+			s.ProbeOK = false
+			s.ZoneMatches = false
+			s.Diagnostic = "strict management SSH probe failed"
+		}, want: "unproven checks: ssh probe, guest time zone; strict management SSH probe failed"},
+		{name: "expired observation", change: func(s *supervisor.Snapshot) {
+			s.BackendRunning = false
+			s.SerialHealthy = false
+			s.PinPresent = false
+			s.CertificateCurrent = false
+			s.ProbeOK = false
+			s.ZoneMatches = false
+			s.Diagnostic = "snapshot observation expired"
+		}, want: "unproven checks: backend, serial, host-key pin, certificate, ssh probe, guest time zone; snapshot observation expired"},
+		{name: "untrusted diagnostic", change: func(s *supervisor.Snapshot) { s.ProbeOK = false; s.Diagnostic = "private-token-value" }, want: "unproven checks: ssh probe", mustOmit: "private-token-value"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path, before := writeRunningStatusFixture(t, session.ReadinessReady)
+			snapshot := supervisor.Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true, ObservedAt: time.Now()}
+			test.change(&snapshot)
+			var output bytes.Buffer
+			err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "status", "dev"}, Options{
+				Observer: fake.Observer{Observations: map[string]backend.Observation{"boxwarden-work-dev": {ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectRunning}}},
+				StatusSnapshotFactory: func(config.Config, config.Domain) (StatusSnapshotReader, error) {
+					return &statusSnapshotFake{snapshot: snapshot}, nil
+				},
+				Output: &output,
+			})
+			if err != nil || !strings.Contains(output.String(), "consistency: drift\nreadiness: drift\n") || !strings.Contains(output.String(), test.want) || (test.mustOmit != "" && strings.Contains(output.String(), test.mustOmit)) {
+				t.Fatalf("status = %q, error = %v", output.String(), err)
+			}
+			after, err := os.ReadFile(filepath.Join(filepath.Dir(path), "sessions", "dev.json"))
+			if err != nil || !bytes.Equal(after, before) {
+				t.Fatalf("status changed durable state: %v", err)
+			}
+		})
+	}
+}
+
 func TestSessionStatusReportsPendingOrCorruptRebuildAsDriftWithoutMutation(t *testing.T) {
 	for _, test := range []struct {
 		name       string
