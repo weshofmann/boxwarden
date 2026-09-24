@@ -12,24 +12,27 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
 | Host and installer | Read-only host doctor is healthy. The Canonical Ubuntu 24.04.4 ARM64 Desktop ISO has a valid detached signature and exact pinned SHA-256. Pinned OpenSSL 3 and xorriso executables have been checked. |
 | Public management | A fresh disposable clone reached exact-generation READY through serial bootstrap, host-key pinning, certificate, strict SSH, and time-zone checks; it stopped and restarted to READY. GNOME, Firefox, and a synthetic home file were observed after restart. |
 | Reusable preparation | Strict versioned recipe and ISO checks, candidate build, guest preparation, fresh-clone qualifier, private evidence, and cache admission are implemented. A fresh real build using the corrected finalizer completed installation, guest preparation, clone-ready shutdown, and qualification. Its fresh clone reached READY, passed package-inventory and identity checks, and stopped; the versioned prepared record was admitted. This is base qualification, not the full workspace/export acceptance path. |
-| Workspace volume | One alpha-owned 64 MiB ext4 volume was formatted in a zero-NIC VM, independently inspected, and attached through the public CLI to a stopped session. Tart exposed it as a distinct ext4 disk on two READY generations. A synthetic file retained its digest across stop/restart after manual guest remount. It is now publicly detached, Available, and retains its exact disk identity. This proves disk persistence, not automatic guest mounting. |
-| Automatic mount and READY | The static generic guest helper resolves an exact FS UUID, mounts ext4 at a validated path, checks existing mounts and read-write state, and probes exact bindings. The host owner derives those bindings from admitted session/Use records, ensures them before READY, and repeats the bound probe for status. Full local Go tests, focused race tests, vet, and artifact checks passed at `5c84520`. The new qualified clone had no workspace attached, so real automatic mounting remains untested. |
+| Workspace volume | One alpha-owned 64 MiB ext4 volume was formatted in a zero-NIC VM and independently inspected. Its synthetic file retained its digest across an earlier stop/restart after manual remount. The same verified volume is now attached through the public CLI to the fresh recipe-created session; stop clears its exact generation Use while preserving the attachment and disk identity. Independent content verification after the new automatic mounts remains pending. |
+| Automatic mount and READY | The static generic guest helper resolves an exact FS UUID, mounts ext4 at a validated path, checks existing mounts and read-write state, and probes exact bindings. The host owner derives those bindings from admitted session/Use records, ensures them before READY, and repeats the bound probe for status. Full local Go tests, focused race tests, vet, and artifact checks passed at `5c84520`. The freshly qualified clone with the attached volume reached mount-bound READY in two distinct generations, with a public stop and fresh READY status between them; it is stopped now. Rebuild/reattach remains untested. |
 | Controlled export | Bounded host stream receiver and zero-NIC synthetic inspector boot/transport have tests. Read-only ext4 inspection and real stopped-volume export remain pending; public export is disabled. |
 | Example | `examples/v0.2-alpha-base.json` passed public recipe/ISO validation. It requests the Desktop source, a small package set, and one named workspace intent. |
-| Recipe-bound create | `session create` accepts exact recipe/ISO/guest definition/tool inputs, prepares or reuses a qualified base, and calls `CreateFromRevision`. A focused fixture and the real public command both selected the newly prepared revision without changing the domain current golden. The new session is stopped and consistent; its first workspace-backed start remains pending. |
+| Recipe-bound create | `session create` accepts exact recipe/ISO/guest definition/tool inputs, prepares or reuses a qualified base, and calls `CreateFromRevision`. A focused fixture and the real public command both selected the newly prepared revision without changing the domain current golden. A later public `alpha prepare` reused the admitted cache after verified redundant installer staging was retired, without creating an attempt journal or new Tart object. |
 
 Hosted CI is unavailable. Local checks above are source or explicitly described
-real-host checks; the full graphical, automatic mount, rebuild, and export
+real-host checks; the full graphical, rebuild, and export
 acceptance path remains open.
 
 ## Current work
 
-The corrected public recipe-bound create completed a fresh preparation and
-admitted one prepared-cache record. Its qualification clone reached READY,
-passed package and fresh-identity checks, and stopped. The public command
-then created one stopped session from that exact revision. Read-only status
-reports it stopped and consistent, and the domain current golden is unchanged.
-No workspace was attached to this new session during qualification.
+The corrected public recipe-bound create admitted one fresh prepared base and
+created a session from its exact revision. After verified redundant installer
+staging was removed, a repeated public prepare reused that cache. The public
+workspace attach bound the existing volume to the stopped session. Start,
+fresh READY status, stop, second start, fresh READY status, and second stop all
+succeeded. The two Use generation IDs differed and both stops cleared Use;
+the volume remains attached and Available, and the system clone is stopped.
+READY includes the exact writable ext4 mount probe, while independent content
+verification after automatic mounting is still needed.
 
 The previous public recipe-bound attempt reached the generic base installer
 and guest preparation. Finalization then timed out after ten minutes waiting
@@ -58,10 +61,12 @@ retained, digest-verified Canonical input. Each reconstructed stream matched
 its original SHA-256 digest after redundant staging copies were removed. Failed
 journals and other private diagnostics remain. The two older alpha builder
 installer ISOs are also retained as private, SHA-256-verified exact block maps
-against the pinned Canonical source. Only their redundant staged copies were
-retired; the current r2 golden VM and selection record are intact. Free space
-was about 41.5 GiB before the successful build and is about 26.7 GiB now;
-the fresh pre-build read-only host doctor was healthy.
+against the pinned Canonical source. The admitted successful attempt's staged
+source and installer ISOs were likewise verified as an exact block map before
+and after their redundant copies were retired. Journals and qualification
+evidence remain. The current r2 golden VM and selection record are intact.
+Free space was about 41.5 GiB before the successful build and is about 29 GiB
+after staging retirement; read-only host doctor remains healthy.
 
 Automatic approval review rejected deletion of the alpha domain's current r2
 golden because ordinary legacy session creation still points to it. It remains
@@ -73,14 +78,11 @@ current golden.
 
 ## Next actions
 
-1. Preserve the successful attempt evidence, retire only verified redundant
-   installer staging to restore safe headroom, then attach the existing
-   detached workspace to the new stopped session through the public CLI.
-2. Start that session with the revised guest helper and prove automatic ext4
-   mounting, correct READY binding, and stop/restart persistence.
-3. Rebuild the system while retaining the workspace, reattach it, prove
+1. Independently verify the synthetic file's content after automatic mounting,
+   using the bounded zero-NIC inspector path on the stopped owned volume.
+2. Rebuild the system while retaining the workspace, reattach it, prove
    stopped-volume export, then attach it to a second fresh sandbox.
-4. Run the full integration checks and real acceptance matrix, and publish the
+3. Run the full integration checks and real acceptance matrix, and publish the
    runnable build, exact source SHA, quickstart, synthetic demo, and limits.
 
 ## Publication and operational policy
