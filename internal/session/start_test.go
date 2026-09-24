@@ -645,9 +645,19 @@ func (f startCAFake) Check(context.Context, sshx.Domain, []sshx.Domain) (sshx.CA
 }
 
 type startWorkspaceFake struct {
-	prepare func() error
-	verify  func() error
-	release func() error
+	prepare        func() error
+	rebuildPrepare func(RebuildJournal) error
+	verify         func() error
+	release        func() error
+}
+
+func (f startWorkspaceFake) PrepareRebuildStart(ctx context.Context, stateRoot string, domainID domain.ID, stopped Record, generation string, observer backend.Observer, journal RebuildJournal) (Record, error) {
+	if f.rebuildPrepare != nil {
+		if err := f.rebuildPrepare(journal); err != nil {
+			return Record{}, err
+		}
+	}
+	return f.PrepareStart(ctx, stateRoot, domainID, stopped, generation, observer)
 }
 
 func (f startWorkspaceFake) PrepareStart(_ context.Context, stateRoot string, domainID domain.ID, stopped Record, generation string, _ backend.Observer) (Record, error) {

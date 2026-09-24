@@ -61,7 +61,7 @@ launch, refuses a running old backend or unavailable transition capability,
 and rechecks the unchanged journal after serial bootstrap before rotating the
 pin. An owner fixture rotated an old pin to the exact candidate and rejected a
 changed journal without changing the old pin. Affected owner, pin, session,
-and supervisor tests, targeted vet, and focused owner race tests pass. The
+and supervisor tests, targeted vet, and focused owner race tests pass.
 These owner checks have source-only fixture evidence; there is no public
 rebuild command yet.
 
@@ -70,8 +70,14 @@ the stable session record to the stopped candidate backend and base revision.
 An injected interruption between those writes left the old record intact and
 retried to the exact candidate; running old or candidate objects were refused.
 The workspace attachment retained its stable session UUID through a real
-record/gate integration fixture. The candidate is not yet startable while the
-journal exists, and no public or live VM rebuild has been qualified.
+record/gate integration fixture. The internal candidate start now permits only
+the exact `cutover` journal and candidate session binding. Its workspace
+coordinator rechecks that journal under the normal volume/session/storage
+lock order before reserving exact candidate Uses and publishing `Starting`;
+the existing supervisor path then requires fresh exact readiness. Ordinary
+start remains blocked. Targeted session/workspace/runtime/app/supervisor tests
+and vet plus focused start race tests pass. The journal has not yet advanced
+to `ready`, and no public or live VM rebuild has been qualified.
 
 The managed-volume shutdown correction at `7eeba47` now passes one real
 attached-volume public stop: the session and backend are consistently stopped,

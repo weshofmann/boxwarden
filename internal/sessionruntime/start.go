@@ -70,6 +70,10 @@ func (workspaceStartCoordinator) PrepareStart(ctx context.Context, stateRoot str
 	return workspacex.PrepareSessionStart(ctx, stateRoot, domainID, stopped, generation, observer)
 }
 
+func (workspaceStartCoordinator) PrepareRebuildStart(ctx context.Context, stateRoot string, domainID domain.ID, stopped session.Record, generation string, observer backend.Observer, journal session.RebuildJournal) (session.Record, error) {
+	return workspacex.PrepareRebuildSessionStart(ctx, stateRoot, domainID, stopped, generation, observer, journal)
+}
+
 func (workspaceStartCoordinator) VerifyUses(ctx context.Context, stateRoot string, domainID domain.ID, record session.Record) error {
 	return workspacex.VerifySessionUses(ctx, stateRoot, domainID, record)
 }

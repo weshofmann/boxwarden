@@ -50,6 +50,10 @@ type WorkspaceLifecycle interface {
 	ReleaseUses(context.Context, string, domain.ID, Record, backend.Observer) error
 }
 
+type RebuildWorkspaceLifecycle interface {
+	PrepareRebuildStart(context.Context, string, domain.ID, Record, string, backend.Observer, RebuildJournal) (Record, error)
+}
+
 type StartDependencies struct {
 	Observer          backend.Observer
 	Host              RuntimeChecker
@@ -71,6 +75,16 @@ func NewStartService(configured config.Domain, dependencies StartDependencies) *
 }
 
 func (s *Service) Start(ctx context.Context, rawName string) (record Record, err error) {
+	return s.startSession(ctx, rawName, nil)
+}
+
+// StartRebuildCandidate is the narrow internal continuation after durable
+// cutover. Ordinary Start still rejects every pending rebuild journal.
+func (s *Service) StartRebuildCandidate(ctx context.Context, rawName string, journal RebuildJournal) (Record, error) {
+	return s.startSession(ctx, rawName, &journal)
+}
+
+func (s *Service) startSession(ctx context.Context, rawName string, rebuild *RebuildJournal) (record Record, err error) {
 	if s == nil || s.start == nil {
 		return Record{}, fmt.Errorf("session start dependencies are required")
 	}
@@ -100,13 +114,20 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 			err = fmt.Errorf("release session lock: %w", releaseErr)
 		}
 	}()
-	if err := RequireNoRebuild(s.domain.StateRoot, domainID, string(name)); err != nil {
-		return Record{}, err
-	}
-
 	record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
 	if err != nil {
 		return Record{}, fmt.Errorf("load session record: %w", err)
+	}
+	if rebuild == nil {
+		if err := RequireNoRebuild(s.domain.StateRoot, domainID, string(name)); err != nil {
+			return Record{}, err
+		}
+	} else {
+		current, loadErr := LoadRebuildJournal(s.domain.StateRoot, domainID, string(name))
+		if loadErr != nil || current != *rebuild || current.Phase != RebuildCutover || current.SessionID != record.ID ||
+			current.CandidateBackend != record.Backend.ObjectID || current.CandidateRevision != record.GoldenRevision {
+			return Record{}, fmt.Errorf("starting session lacks exact candidate cutover journal: %v", loadErr)
+		}
 	}
 	_, _, err = s.admitStartPrerequisites(ctx)
 	if err != nil {
@@ -161,7 +182,17 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 		if releaseErr := held.Release(); releaseErr != nil {
 			return Record{}, fmt.Errorf("release session lock before workspace reservation: %w", releaseErr)
 		}
-		started, prepareErr := s.start.Workspaces.PrepareStart(ctx, s.domain.StateRoot, domainID, record, generation, s.observer)
+		var started Record
+		var prepareErr error
+		if rebuild == nil {
+			started, prepareErr = s.start.Workspaces.PrepareStart(ctx, s.domain.StateRoot, domainID, record, generation, s.observer)
+		} else {
+			coordinator, ok := s.start.Workspaces.(RebuildWorkspaceLifecycle)
+			if !ok {
+				return Record{}, fmt.Errorf("rebuild workspace start capability is unavailable")
+			}
+			started, prepareErr = coordinator.PrepareRebuildStart(ctx, s.domain.StateRoot, domainID, record, generation, s.observer, *rebuild)
+		}
 		if prepareErr != nil {
 			return Record{}, fmt.Errorf("reserve workspaces and persist starting session: %w", prepareErr)
 		}

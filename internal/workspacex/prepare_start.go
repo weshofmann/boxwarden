@@ -24,7 +24,20 @@ func PrepareSessionStart(ctx context.Context, stateRoot string, domainID domain.
 	})
 }
 
+// PrepareRebuildSessionStart permits only the exact journaled candidate after
+// the stable session record has switched. It uses the same volume-first batch
+// reservation and Starting commit marker as ordinary start.
+func PrepareRebuildSessionStart(ctx context.Context, stateRoot string, domainID domain.ID, expected session.Record, generation string, observer backend.Observer, journal session.RebuildJournal) (session.Record, error) {
+	return prepareSessionStartJournal(ctx, stateRoot, domainID, expected, generation, observer, &journal, func(record Record) error {
+		return saveRecordTransition(stateRoot, domainID, record, mutationReserveUse, nil)
+	})
+}
+
 func prepareSessionStart(ctx context.Context, stateRoot string, domainID domain.ID, expected session.Record, generation string, observer backend.Observer, writeUse func(Record) error) (started session.Record, err error) {
+	return prepareSessionStartJournal(ctx, stateRoot, domainID, expected, generation, observer, nil, writeUse)
+}
+
+func prepareSessionStartJournal(ctx context.Context, stateRoot string, domainID domain.ID, expected session.Record, generation string, observer backend.Observer, rebuild *session.RebuildJournal, writeUse func(Record) error) (started session.Record, err error) {
 	if expected.Domain != domainID || expected.Version != 2 || expected.IntendedState != session.StateStopped || expected.Backend.Kind != "tart" ||
 		!validUUID(expected.ID) || !validSessionName(string(expected.Name)) || !validObjectID(expected.Backend.ObjectID) || !validUUID(generation) {
 		return session.Record{}, fmt.Errorf("invalid stopped session or generation")
@@ -62,8 +75,16 @@ func prepareSessionStart(ctx context.Context, stateRoot string, domainID domain.
 	if current != expected {
 		return session.Record{}, fmt.Errorf("stopped session changed before workspace reservation")
 	}
-	if err := session.RequireNoRebuild(stateRoot, domainID, string(expected.Name)); err != nil {
-		return session.Record{}, err
+	if rebuild == nil {
+		if err := session.RequireNoRebuild(stateRoot, domainID, string(expected.Name)); err != nil {
+			return session.Record{}, err
+		}
+	} else {
+		currentJournal, loadErr := session.LoadRebuildJournal(stateRoot, domainID, string(expected.Name))
+		if loadErr != nil || currentJournal != *rebuild || currentJournal.Phase != session.RebuildCutover ||
+			currentJournal.SessionID != expected.ID || currentJournal.CandidateBackend != expected.Backend.ObjectID || currentJournal.CandidateRevision != expected.GoldenRevision {
+			return session.Record{}, fmt.Errorf("workspace start lacks exact rebuild cutover journal: %v", loadErr)
+		}
 	}
 	attached, err := listSessionAttachments(ctx, stateRoot, domainID, expected.ID, string(expected.Name))
 	if err != nil {

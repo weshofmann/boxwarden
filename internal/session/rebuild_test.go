@@ -11,6 +11,8 @@ import (
 	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/golden"
 	"github.com/weshofmann/boxwarden/internal/sshx"
+	"github.com/weshofmann/boxwarden/internal/supervisor"
+	"time"
 )
 
 type absentRebuildPin struct{}
@@ -167,5 +169,49 @@ func TestRebuildCutoverRejectsRunningOldOrCandidate(t *testing.T) {
 				t.Fatalf("rejected cutover changed journal: %#v, %v", currentJournal, err)
 			}
 		})
+	}
+}
+
+func TestStartRebuildCandidateUsesExactJournalAndOrdinaryStartStaysBlocked(t *testing.T) {
+	rebuilder, backendFake, old := rebuildPreparationFixture(t)
+	prepared, err := rebuilder.PrepareCandidate(context.Background(), "dev", "golden-r2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := rebuilder.Cutover(context.Background(), "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal, err := LoadRebuildJournal(rebuilder.domain.StateRoot, old.Domain, "dev")
+	if err != nil || journal.Phase != RebuildCutover || journal.CandidateBackend != prepared.CandidateBackend {
+		t.Fatalf("cutover journal = %#v, %v", journal, err)
+	}
+	control := &startSupervisorFake{start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+		if request.Binding.BackendObject != journal.CandidateBackend || request.Binding.SessionID != old.ID {
+			t.Fatalf("supervisor received wrong rebuild binding: %#v", request.Binding)
+		}
+		return readySnapshot(request.Binding, time.Now()), nil
+	}}
+	starter := newStartTestService(rebuilder.domain, backendFake, control, time.Now, func() (string, error) { return testStartGeneration, nil })
+	preparedWorkspaces := 0
+	starter.start.Workspaces = startWorkspaceFake{rebuildPrepare: func(got RebuildJournal) error {
+		preparedWorkspaces++
+		if got != journal {
+			t.Fatalf("workspace coordinator received foreign journal: %#v", got)
+		}
+		return nil
+	}}
+	if _, err := starter.Start(context.Background(), "dev"); err == nil || control.startCalls != 0 || preparedWorkspaces != 0 {
+		t.Fatalf("ordinary start bypassed journal: error=%v launch=%d workspaces=%d", err, control.startCalls, preparedWorkspaces)
+	}
+	wrong := journal
+	wrong.OldRevision = "foreign-old"
+	if _, err := starter.StartRebuildCandidate(context.Background(), "dev", wrong); err == nil || control.startCalls != 0 {
+		t.Fatal("wrong journal authorized candidate start")
+	}
+	started, err := starter.StartRebuildCandidate(context.Background(), "dev", journal)
+	if err != nil || started.IntendedState != StateRunning || started.Backend.ObjectID != journal.CandidateBackend ||
+		started.ID != active.ID || started.StartGeneration != testStartGeneration || preparedWorkspaces != 1 || control.startCalls != 1 {
+		t.Fatalf("journaled candidate start = %#v, %v; workspaces=%d launch=%d", started, err, preparedWorkspaces, control.startCalls)
 	}
 }
