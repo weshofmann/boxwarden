@@ -324,6 +324,32 @@ func advanceRebuildJournal(stateRoot string, expected, next RebuildJournal) erro
 	return sessionSyncRoot(rebuilds)
 }
 
+// removeRebuildJournal is the final retirement step. The caller holds the
+// transition and session locks and has re-observed the exact old object absent.
+func removeRebuildJournal(stateRoot string, expected RebuildJournal) error {
+	if err := validateRebuildJournal(expected); err != nil || expected.Phase != RebuildRetiring {
+		return fmt.Errorf("invalid completed rebuild journal: %v", err)
+	}
+	current, err := LoadRebuildJournal(stateRoot, expected.Domain, expected.SessionName)
+	if err != nil || current != expected {
+		return fmt.Errorf("rebuild journal changed before final clearance: %v", err)
+	}
+	root, err := openSessionStateRoot(stateRoot)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	rebuilds, err := openSessionChild(root, "rebuilds", false)
+	if err != nil {
+		return err
+	}
+	defer rebuilds.Close()
+	if err := rebuilds.Remove(expected.SessionName + ".json"); err != nil {
+		return err
+	}
+	return sessionSyncRoot(rebuilds)
+}
+
 func decodeRebuildJournal(raw []byte) (RebuildJournal, error) {
 	var j RebuildJournal
 	decoder := json.NewDecoder(bytes.NewReader(raw))

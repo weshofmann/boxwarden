@@ -33,7 +33,7 @@ func rebuildPreparationFixture(t *testing.T) (*RebuildService, *fake.Backend, Re
 		t.Fatal(err)
 	}
 	service := NewRebuildService(configured, RebuildDependencies{
-		Observer: backendFake, Creator: backendFake, Pins: absentRebuildPin{},
+		Observer: backendFake, Creator: backendFake, Deleter: backendFake, Pins: absentRebuildPin{},
 		Gate: func(_ context.Context, root string, domainID domain.ID, expected Record, _ backend.Observer, reserve func() error) error {
 			if root != configured.StateRoot || domainID != configured.ID || expected != old {
 				t.Fatal("rebuild gate received wrong old system")
@@ -249,4 +249,76 @@ func TestStartRebuildCandidateUsesExactJournalAndOrdinaryStartStaysBlocked(t *te
 	if retried, err := rebuilder.ConfirmReady(context.Background(), "dev", starter); err != nil || retried != confirmed {
 		t.Fatalf("ready retry = %#v, %v", retried, err)
 	}
+	backendFake.SetObservation(backend.Observation{ObjectID: old.Backend.ObjectID, State: backend.ObjectUnknown})
+	if _, err := rebuilder.RetireOld(context.Background(), "dev", starter); err == nil || len(backendFake.DeleteCalls()) != 0 {
+		t.Fatalf("missing old object before deletion intent was accepted: %v; calls=%v", err, backendFake.DeleteCalls())
+	}
+	backendFake.SetObservation(backend.Observation{ObjectID: old.Backend.ObjectID, Exists: true, State: backend.ObjectStopped})
+	retired, err := rebuilder.RetireOld(context.Background(), "dev", starter)
+	if err != nil || retired != confirmed || len(backendFake.DeleteCalls()) != 1 || backendFake.DeleteCalls()[0] != old.Backend.ObjectID {
+		t.Fatalf("old-system retirement = %#v, %v; deleted=%v", retired, err, backendFake.DeleteCalls())
+	}
+	if _, err := LoadRebuildJournal(rebuilder.domain.StateRoot, old.Domain, "dev"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("completed rebuild journal remained: %v", err)
+	}
+}
+
+type postEffectRebuildDeleter struct {
+	inner backend.Deleter
+	err   error
+}
+
+func (d postEffectRebuildDeleter) Delete(ctx context.Context, objectID string) error {
+	if err := d.inner.Delete(ctx, objectID); err != nil {
+		return err
+	}
+	return d.err
+}
+
+func TestRebuildRetirementReconcilesPostEffectDeleteFailure(t *testing.T) {
+	rebuilder, backendFake, old := rebuildPreparationFixture(t)
+	if _, err := rebuilder.PrepareCandidate(context.Background(), "dev", "golden-r2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rebuilder.Cutover(context.Background(), "dev"); err != nil {
+		t.Fatal(err)
+	}
+	control := &startSupervisorFake{
+		start: func(r supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+			return readySnapshot(r.Binding, time.Now()), nil
+		},
+		snapshot: func(b supervisor.Binding) (supervisor.Snapshot, error) { return readySnapshot(b, time.Now()), nil },
+	}
+	starter := newStartTestService(rebuilder.domain, backendFake, control, time.Now, func() (string, error) { return testStartGeneration, nil })
+	if _, err := starter.StartRebuildCandidate(context.Background(), "dev", mustRebuildJournal(t, rebuilder.domain.StateRoot, old.Domain)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rebuilder.ConfirmReady(context.Background(), "dev", starter); err != nil {
+		t.Fatal(err)
+	}
+	injected := errors.New("delete completed but reply failed")
+	rebuilder.deps.Deleter = postEffectRebuildDeleter{inner: backendFake, err: injected}
+	if _, err := rebuilder.RetireOld(context.Background(), "dev", starter); !errors.Is(err, injected) {
+		t.Fatalf("post-effect delete error = %v", err)
+	}
+	j := mustRebuildJournal(t, rebuilder.domain.StateRoot, old.Domain)
+	if j.Phase != RebuildRetiring || len(backendFake.DeleteCalls()) != 1 {
+		t.Fatalf("uncertain delete lost retirement intent: %#v calls=%v", j, backendFake.DeleteCalls())
+	}
+	rebuilder.deps.Deleter = backendFake
+	if _, err := rebuilder.RetireOld(context.Background(), "dev", starter); err != nil || len(backendFake.DeleteCalls()) != 1 {
+		t.Fatalf("retirement retry recloned or re-deleted: %v calls=%v", err, backendFake.DeleteCalls())
+	}
+	if _, err := LoadRebuildJournal(rebuilder.domain.StateRoot, old.Domain, "dev"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("retirement retry left journal: %v", err)
+	}
+}
+
+func mustRebuildJournal(t *testing.T, root string, domainID domain.ID) RebuildJournal {
+	t.Helper()
+	j, err := LoadRebuildJournal(root, domainID, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return j
 }

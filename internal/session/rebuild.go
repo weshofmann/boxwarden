@@ -30,6 +30,7 @@ type RebuildPinLoader interface {
 type RebuildDependencies struct {
 	Observer backend.Observer
 	Creator  backend.Creator
+	Deleter  backend.Deleter
 	Gate     RebuildGate
 	Pins     RebuildPinLoader
 }
@@ -373,6 +374,97 @@ func (s *RebuildService) ConfirmReady(ctx context.Context, rawName string, start
 	next.Phase = RebuildReady
 	if err := advanceRebuildJournal(s.domain.StateRoot, journal, next); err != nil {
 		return Record{}, fmt.Errorf("persist rebuild ready phase: %w", err)
+	}
+	return record, nil
+}
+
+// RetireOld records exact deletion intent before touching the old backend.
+// An absent old object is accepted only in Retiring, after which the journal
+// is removed last. The candidate remains the active session throughout.
+func (s *RebuildService) RetireOld(ctx context.Context, rawName string, starter *Service) (record Record, err error) {
+	if s == nil || s.deps.Observer == nil || s.deps.Deleter == nil || starter == nil || starter.start == nil || starter.domain != s.domain {
+		return Record{}, fmt.Errorf("exact rebuild retirement dependencies are required")
+	}
+	if err := starter.validStartDependencies(); err != nil {
+		return Record{}, err
+	}
+	domainID, err := domain.Parse(string(s.domain.ID))
+	if err != nil || domainID != s.domain.ID {
+		return Record{}, fmt.Errorf("invalid rebuild domain")
+	}
+	name, err := ParseName(rawName)
+	if err != nil {
+		return Record{}, err
+	}
+	transition, err := lock.Acquire(ctx, s.domain.StateRoot, "transition-"+string(domainID)+"-"+string(name))
+	if err != nil {
+		return Record{}, err
+	}
+	defer func() { err = errors.Join(err, transition.Release()) }()
+	held, err := lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
+	if err != nil {
+		return Record{}, err
+	}
+	defer func() {
+		if held != nil {
+			err = errors.Join(err, held.Release())
+		}
+	}()
+	journal, err := LoadRebuildJournal(s.domain.StateRoot, domainID, string(name))
+	if err != nil || (journal.Phase != RebuildReady && journal.Phase != RebuildRetiring) {
+		return Record{}, fmt.Errorf("rebuild is not ready for exact old-system retirement: %v", err)
+	}
+	record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+	if err != nil || record.ID != journal.SessionID || record.Backend.Kind != "tart" ||
+		record.Backend.ObjectID != journal.CandidateBackend || record.GoldenRevision != journal.CandidateRevision ||
+		record.IntendedState != StateRunning || record.Readiness.Status != ReadinessReady {
+		return Record{}, fmt.Errorf("active candidate changed before retirement: %v", err)
+	}
+	if err := starter.start.Workspaces.VerifyUses(ctx, s.domain.StateRoot, domainID, record); err != nil {
+		return Record{}, fmt.Errorf("verify active candidate workspace uses before retirement: %w", err)
+	}
+	record, err = starter.reconcileReady(ctx, record)
+	if err != nil {
+		return Record{}, fmt.Errorf("require fresh candidate READY before old-system retirement: %w", err)
+	}
+	old, err := s.observeExact(ctx, journal.OldBackend)
+	if err != nil || (old.Exists && old.State != backend.ObjectStopped) {
+		return Record{}, fmt.Errorf("old rebuild system is not provably stopped or absent: %v", err)
+	}
+	if journal.Phase == RebuildReady {
+		if !old.Exists {
+			return Record{}, fmt.Errorf("old rebuild system disappeared before deletion intent")
+		}
+		next := journal
+		next.Phase = RebuildRetiring
+		if err := advanceRebuildJournal(s.domain.StateRoot, journal, next); err != nil {
+			return Record{}, fmt.Errorf("persist old-system retirement intent: %w", err)
+		}
+		journal = next
+	}
+	if err := held.Release(); err != nil {
+		return Record{}, err
+	}
+	held = nil
+	if old.Exists {
+		if err := s.deps.Deleter.Delete(ctx, journal.OldBackend); err != nil {
+			return Record{}, fmt.Errorf("delete exact old rebuild object: %w", err)
+		}
+	}
+	old, err = s.observeExact(ctx, journal.OldBackend)
+	if err != nil || old.Exists || old.State != backend.ObjectUnknown {
+		return Record{}, fmt.Errorf("old rebuild object did not reconcile absent: %v", err)
+	}
+	held, err = lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
+	if err != nil {
+		return Record{}, err
+	}
+	current, err := LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+	if err != nil || current != record {
+		return Record{}, fmt.Errorf("active candidate changed during old-system deletion: %v", err)
+	}
+	if err := removeRebuildJournal(s.domain.StateRoot, journal); err != nil {
+		return Record{}, fmt.Errorf("clear completed rebuild journal: %w", err)
 	}
 	return record, nil
 }

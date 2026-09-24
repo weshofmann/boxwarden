@@ -83,7 +83,16 @@ Uses before advancing `cutover` to `ready`. A missing zone proof and an
 interruption before journal advancement both left the journal at `cutover`;
 an exact retry reached `ready`. Targeted session/workspace/runtime/app tests
 and vet plus focused race tests pass. No public or live VM rebuild has been
-qualified; old-system retirement is next.
+qualified by a real VM yet.
+
+Retirement now refreshes exact candidate owner readiness and workspace Use
+evidence, then persists `retiring` before asking the backend to delete only
+the journaled old object. A missing old object before delete intent is drift;
+an absent object after intent is an exact retry success. The journal is
+removed last. A post-effect delete error retained `retiring` and retried
+without a second deletion. Targeted session/workspace/runtime/app/fake backend
+tests and vet plus focused retirement race tests pass. This is source-only;
+public orchestration and real rebuild qualification remain open.
 
 The managed-volume shutdown correction at `7eeba47` now passes one real
 attached-volume public stop: the session and backend are consistently stopped,
@@ -277,8 +286,8 @@ remain outside the prepared cache.
 
 ## Next actions
 
-1. Implement the reviewed rebuild contract in `alpha-plan.md`: exact old-pin
-   transition, new-generation cutover, and old-system retirement. Preserve
+1. Wire the reviewed rebuild phases into one public command with exact
+   recovery behavior, then qualify a fresh real system rebuild. Preserve
    the stopped failed VM and dirty volume. The guest SSH loss remains open;
    do not claim real false-stopped or rebuild qualification from that run.
 2. Add inspected-phase export reconciliation and hostile-exit checks. Rebuild
