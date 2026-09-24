@@ -1,5 +1,20 @@
 # Boxwarden v0.2 alpha decisions
 
+## Bounded public stop outcome, 2026-09-24
+
+The supervisor now returns a typed, exact-generation stop result. It records
+whether the pinned guest request was acknowledged, Tart was requested directly
+or as fallback, and whether the retained owner sent force stop after the
+bounded wait. The session service persists this result as a non-secret stopped
+lifecycle diagnostic, and the CLI renders it on stop and status. An absent
+result remains absent after ambiguous recovery; it is never guessed from
+elapsed time or a stopped backend. `workspace_cleanliness=unverified` is
+explicit because only stopped-volume inspection can establish that property.
+
+The public result contains fixed enums and a Boolean, not guest stderr or
+private host traces. This keeps the diagnostic bounded while making the
+intermittent shutdown branch observable on the next fresh trial.
+
 ## Exact workspace quiesce before poweroff, 2026-09-24
 
 A freshly rebuilt and qualified base carrying the fixed systemd shutdown
