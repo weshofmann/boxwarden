@@ -23,8 +23,15 @@ admission gate for stopped export and import verification. This is guest
 cooperation for durability, not a new host trust boundary.
 
 The affected Go packages and guest-definition artifact checks passed locally;
-a fresh base build is required before any real-host effectiveness claim.
+at that source checkpoint, a fresh base build was required before any
+real-host effectiveness claim.
 Previous failed volumes and qualification attempts remain immutable evidence.
+
+The fresh quiesce-helper base subsequently passed separate-clone qualification,
+but an empty attached workspace still used the full 60-second stop grace and
+left ext4 requiring recovery. The explicit unmount did not establish clean
+persistence. The host must surface whether the bound guest request failed or
+was accepted before another source correction is selected.
 
 ## Bound guest shutdown before Tart force stop, 2026-09-24
 

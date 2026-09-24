@@ -17,16 +17,16 @@ with material acceptance gaps, not an alpha-ready release.
 | Import | The public command captured a bounded synthetic host tree and transferred it over pinned SFTP to an attached running workspace. Host readback matched. Its journal deliberately remains `transferring`; readback alone does not prove stopped-disk persistence. |
 | Controlled return | Selected files from clean stopped workspace snapshots were exported through a zero-NIC Linux inspector and bounded host receiver into new destinations. An `inspected` export resumed and published; a dirty ext4 snapshot was refused. Ambiguous post-final-rename recovery remains a manual evidence gate. |
 | Import verification | Source code compares a complete selected stopped export against the captured import and can advance an exact journal to `verified`. Focused tests and a separate source review passed. No real import has yet passed this stopped-disk verification. |
-| Shutdown correction | A fresh base carrying fixed guest poweroff qualified, but an attached empty workspace alone reproduced a dirty stop while the no-workspace control stopped promptly. A 120-second grace experiment also failed. The owner now passes exact bound workspace mounts to the helper, which verifies and unmounts them before queuing poweroff. The new source and pinned helper passed targeted tests; a fresh base and real stopped-disk qualification are pending. |
+| Shutdown correction | A fresh base carrying fixed guest poweroff qualified, but an attached empty workspace alone reproduced a dirty stop while the no-workspace control stopped promptly. A 120-second grace experiment also failed. The owner now passes exact bound workspace mounts to the helper, which verifies and unmounts them before queuing poweroff. The new source and pinned helper passed targeted tests and hosted CI; a second freshly qualified base carrying them still took the full stop grace and left ext4 requiring recovery. Clean stopped-disk persistence remains unverified. |
 | Host capacity | The stopped Tart store moved into an encrypted external APFS image. All 33 files matched byte for byte and by SHA-256 after remount; ownership, modes, extended attributes, and the 11 stopped VMs present at cutover matched. Doctor and disposable Tart create/clone/delete passed. A login/mount LaunchAgent remounted it without a prompt in a controlled test. The internal copy was retired, recovering 31.99 GiB immediately; an actual host reboot remains untested. |
 
-The prior published checkpoint `934d07118c833b216a5d5f47b5cb6a892e043469`
-passed [hosted macOS CI](https://github.com/weshofmann/boxwarden/actions/runs/36061777859)
-(gofmt, full Go tests, race tests, vet, and build). For the new quiesce
-change, local affected-package tests (guest protocol, SSH, runtime,
-supervisor), all-package Go compilation, guest installer/finalizer/remaster
-fixtures, artifact digest, and diff checks passed. These are targeted checks;
-hosted CI and fresh real-host qualification for this new source are pending.
+The quiesce source checkpoint `31399e5f05c089e87da82cf2bdc340ea7f059220`
+passed [hosted macOS CI](https://github.com/weshofmann/boxwarden/actions/runs/36065549820)
+(gofmt, full Go tests, race tests, vet, and build). Local affected-package
+tests (guest protocol, SSH, runtime, supervisor), all-package Go compilation,
+guest installer/finalizer/remaster fixtures, artifact digest, and diff checks
+also passed. These source checks do not establish a clean real attached-volume
+stop.
 
 ## Current work and blockers
 
@@ -43,6 +43,12 @@ hosted CI and fresh real-host qualification for this new source are pending.
   change the result. These failed runs and their exact volumes remain private
   evidence. A single source-digest preflight anomaly did not recur in two
   read-only checks or a bounded public create retry; its cause remains unproven.
+- The quiesce-helper source built and qualified another fresh generic base. A
+  new public session with an empty attached ext4 workspace reached bound
+  READY. Controlled stop took 60.96 seconds and the stopped ext4 header still
+  had `needs_recovery`; no import was involved. Its VM and volume are retained
+  privately without restart or repair. The host currently does not expose
+  whether the guest unmount request failed or shutdown later timed out.
 - The external Tart migration recovered 31.99 GiB of unique internal space.
   If the encrypted image is unavailable, the unmounted
   Tart path is mode `000` and operations fail closed. Login and filesystem
@@ -62,9 +68,10 @@ hosted CI and fresh real-host qualification for this new source are pending.
 
 ## Remaining acceptance
 
-1. Build and qualify a fresh generic base with the new exact workspace
-   quiesce helper. From a new baseline, verify clean stopped ext4, repeat
-   public synthetic import and stopped export, then `workspace import verify`.
+1. Distinguish guest request/unmount failure from a later shutdown timeout
+   with bounded private diagnostics. Correct the actual failure, qualify a
+   new baseline, prove clean stopped ext4, then repeat public synthetic import,
+   stopped export, and `workspace import verify`.
 2. Implement guest-only `once`, explicit `reconfigure`, `startup`, and `launch`
    actions with bounded durable attempts, visible retry/skip, and truthful
    failure or waiting-for-sign-in states.
@@ -77,11 +84,12 @@ hosted CI and fresh real-host qualification for this new source are pending.
 
 ## Next step and publication policy
 
-Preserve the failed diagnostic runs, build and qualify the newly pinned guest
-helper from a fresh baseline, then test a clean stopped workspace before a
-new public import. Continue durable per-action attempt records and tests as
-the next source increment. Publish each
-independently verified increment promptly on the alpha branch and keep the
+Preserve the failed diagnostic runs. Add bounded stop-path diagnostics so the
+next fresh empty-volume trial can identify whether the pinned guest request
+or the later poweroff failed, then correct and retest from a new baseline.
+Continue durable per-action attempt records and tests as the next source
+increment. Publish each independently verified increment promptly on the alpha
+branch and keep the
 Draft PR accurate. Keep private host evidence, VM disks, credentials, and the
 vault key out of Git.
 Never push or merge into `main`, rewrite published history, or bypass checks.
