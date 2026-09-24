@@ -266,6 +266,17 @@ stopped-host evidence and removes a spool from a synthetic helper. The
 publication. Their focused tests pass, but production artifact admission and
 journal transitions are not connected yet.
 
+`prepare_export_bundle.sh` now builds a private per-transaction inspector
+bundle from the pinned Canonical ISO and source checkout: verified ARM64
+kernel extraction, Linux guest binary, request-bearing initramfs, and signed
+Swift helper with only the virtualization entitlement. It records exact file
+digests and source revision. A dirty checkout can run a distinctly marked
+test-only build; it cannot claim production qualification. One test-only full
+build passed, its seven manifest digests were independently rechecked, and
+the appended root-owned executable and private request members matched the
+source files byte-for-byte. Clean-source bundle admission and a live export
+boot remain pending.
+
 Inside the isolated Linux guest, validate the expected whole-device ext4 UUID
 and mount with `ro,noload,nodev,nosuid,noexec`. Linux documents that plain
 `ro` can replay ext4's journal and write to the disk; `noload` prevents that

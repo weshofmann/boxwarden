@@ -88,14 +88,19 @@ Explicit capture and receive entry points now fail closed if the helper lacks
 export-mode stopped-host evidence or the receiver lacks a host selection.
 The former removes a rejected synthetic spool. They remain disconnected from
 production artifact admission and journal phase transitions.
+The source builder for a private per-transaction inspector bundle passed one
+test-only full build from the pinned ISO. Independent checks rehashed all
+manifested files and parsed the appended guest and request cpio members.
+The ordinary builder refused the dirty checkout. A clean-source build,
+control-plane artifact admission, and live export boot remain pending.
 Real managed-volume qualification remains open. The earlier failed base
 attempt was corrected and a fresh base built and qualified; failed attempts
 remain outside the prepared cache.
 
 ## Next actions
 
-1. Place the prepared request in a private pinned kernel/initramfs bundle for
-   the exact snapshot. Connect the journaled snapshot to capture, require
+1. Qualify and admit a clean-source private inspector bundle for the prepared
+   request and exact snapshot. Connect the journaled snapshot to capture, require
    export-mode evidence, pass the journal selection to the receiver, recheck snapshot bytes
    after helper reap, then invoke the receiver. Qualify with the managed
    synthetic volume and hostile exits.
