@@ -79,6 +79,11 @@ snapshot-ready durable journal after re-admitting and hashing the private
 snapshot. Tests reject a copying journal, another domain, a missing or short
 snapshot, and changed snapshot bytes. This preparation does not create an
 initramfs bundle or authorize publication.
+The host receiver now has an optional exact selection gate. When supplied
+the journal's selection, it admits only selected paths and necessary parent
+directories, requires every selected path to appear, and rejects an extra
+sibling before publication. Host orchestration must supply the journal
+selection; no public export invokes the receiver yet.
 Real managed-volume qualification remains open. The earlier failed base
 attempt was corrected and a fresh base built and qualified; failed attempts
 remain outside the prepared cache.
@@ -87,7 +92,7 @@ remain outside the prepared cache.
 
 1. Place the prepared request in a private pinned kernel/initramfs bundle for
    the exact snapshot. Connect the journaled snapshot to capture, require
-   export-mode evidence, compare received paths to the journal, recheck snapshot bytes
+   export-mode evidence, pass the journal selection to the receiver, recheck snapshot bytes
    after helper reap, then invoke the receiver. Qualify with the managed
    synthetic volume and hostile exits.
 2. Attach the retained volume to a second fresh sandbox after export, then

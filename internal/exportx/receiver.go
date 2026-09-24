@@ -51,8 +51,11 @@ const (
 // is a sampled free-space floor, not an allocation reservation; callers must
 // account for concurrent host writes and their own global disk policy.
 type Options struct {
-	Parent         string
-	TransactionID  [16]byte
+	Parent        string
+	TransactionID [16]byte
+	// Selected, when provided, binds every received path and requires every
+	// selected path to appear before publication. Production callers must set it.
+	Selected       []string
 	MaxChunkBytes  uint32
 	MaxFileBytes   uint64
 	MaxTotalBytes  uint64
@@ -182,6 +185,9 @@ func Receive(ctx context.Context, stream io.ReadCloser, options Options) (string
 			if err := admitPath(name, seen); err != nil {
 				return "", err
 			}
+			if err := admitSelectedPath(name, recordDirectory, options.Selected); err != nil {
+				return "", err
+			}
 			if dirs >= options.MaxDirectories {
 				return "", fmt.Errorf("directory count exceeds limit")
 			}
@@ -196,6 +202,9 @@ func Receive(ctx context.Context, stream io.ReadCloser, options Options) (string
 				return "", fmt.Errorf("invalid file record")
 			}
 			if err := admitPath(name, seen); err != nil {
+				return "", err
+			}
+			if err := admitSelectedPath(name, recordFile, options.Selected); err != nil {
 				return "", err
 			}
 			if files >= options.MaxFiles || rec.declared > options.MaxFileBytes || rec.declared > options.MaxTotalBytes-total {
@@ -236,6 +245,12 @@ func Receive(ctx context.Context, stream io.ReadCloser, options Options) (string
 		case recordTerminal:
 			if current != nil || rec.pathLen != 0 || rec.declared != total || !zeroDigest(rec.digest) {
 				return "", fmt.Errorf("invalid terminal record")
+			}
+			for _, selected := range options.Selected {
+				entry, ok := seen[strings.ToLower(selected)]
+				if !ok || entry.name != selected {
+					return "", fmt.Errorf("selected export path is absent")
+				}
 			}
 			var tail [1]byte
 			n, err := io.ReadFull(stream, tail[:])
@@ -280,7 +295,31 @@ func validateOptions(o Options) error {
 	if o.Parent == "" || o.TransactionID == [16]byte{} || o.MaxChunkBytes == 0 || o.MaxChunkBytes > hardMaxChunk || o.MaxFileBytes == 0 || o.MaxTotalBytes == 0 || o.MaxFiles == 0 || o.MaxDirectories == 0 || o.MinFreeBytes == 0 {
 		return fmt.Errorf("invalid export receiver options")
 	}
+	if len(o.Selected) > 1024 {
+		return fmt.Errorf("too many selected export paths")
+	}
+	selected := make(map[string]bool, len(o.Selected))
+	for _, name := range o.Selected {
+		folded := strings.ToLower(name)
+		if !validPath(name) || selected[folded] {
+			return fmt.Errorf("invalid or colliding selected export path")
+		}
+		selected[folded] = true
+	}
 	return nil
+}
+
+func admitSelectedPath(name string, kind byte, selected []string) error {
+	if len(selected) == 0 {
+		return nil
+	}
+	for _, choice := range selected {
+		if name == choice || strings.HasPrefix(name, choice+"/") ||
+			(kind == recordDirectory && strings.HasPrefix(choice, name+"/")) {
+			return nil
+		}
+	}
+	return fmt.Errorf("received path is outside host selection")
 }
 
 func readRecord(r io.Reader) (record, error) {

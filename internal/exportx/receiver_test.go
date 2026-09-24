@@ -117,6 +117,40 @@ func TestReceivePublishesVerifiedTree(t *testing.T) {
 	}
 }
 
+func TestReceiveBindsPublishedPathsToHostSelection(t *testing.T) {
+	base := validStream()
+	terminal := base[len(base)-recordSize:]
+	extra := append([]byte(nil), base[:len(base)-recordSize]...)
+	extra = append(extra, fixtureRecord(recordFile, "project/secrets.txt", nil, 0, [32]byte{})...)
+	extra = append(extra, fixtureRecord(recordFileEnd, "", nil, 0, sha256.Sum256(nil))...)
+	extra = append(extra, terminal...)
+	for _, tc := range []struct {
+		name     string
+		stream   []byte
+		selected []string
+		accept   bool
+	}{
+		{"exact file", base, []string{"project/README.txt"}, true},
+		{"selected directory", base, []string{"project"}, true},
+		{"missing selected file", base, []string{"project/missing.txt"}, false},
+		{"wrong case", base, []string{"project/readme.txt"}, false},
+		{"extra sibling", extra, []string{"project/README.txt"}, false},
+		{"invalid host selection", base, []string{"../escape"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := fixtureOptions(t)
+			opts.Selected = tc.selected
+			_, err := receiveFixture(t, tc.stream, opts)
+			if (err == nil) != tc.accept {
+				t.Fatalf("selection %v accepted=%t, error=%v", tc.selected, err == nil, err)
+			}
+			if !tc.accept {
+				assertNoPublication(t, opts.Parent)
+			}
+		})
+	}
+}
+
 func TestReceiveRejectsMalformedOrUnverifiedStreamWithoutPublication(t *testing.T) {
 	base := validStream()
 	badHash := append([]byte(nil), base...)

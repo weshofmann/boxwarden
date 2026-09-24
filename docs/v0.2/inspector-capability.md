@@ -253,6 +253,14 @@ selection. It rejects missing or changed bytes before any bundle is built.
 Bundle creation, helper capture, and receiver publication are separate
 remaining gates.
 
+The receiver can now enforce an exact host-supplied selection: each received
+file or directory must be a selected path, a descendant of a selected
+directory, or a necessary parent directory. Every selected path must appear
+before the terminal record can publish. Focused tests reject a missing
+selection, wrong case, extra sibling, and invalid host selection. The public
+caller must supply the journal selection; the generic receiver keeps its
+existing unselected mode for protocol fixtures.
+
 Inside the isolated Linux guest, validate the expected whole-device ext4 UUID
 and mount with `ro,noload,nodev,nosuid,noexec`. Linux documents that plain
 `ro` can replay ext4's journal and write to the disk; `noload` prevents that

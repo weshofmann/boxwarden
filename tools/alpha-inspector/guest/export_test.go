@@ -36,7 +36,7 @@ func TestSelectedExportStreamRoundTripsThroughHostReceiver(t *testing.T) {
 		t.Fatal(err)
 	}
 	output, err := exportx.Receive(context.Background(), io.NopCloser(bytes.NewReader(stream.Bytes())), exportx.Options{
-		Parent: parent, TransactionID: transaction, MaxChunkBytes: 1 << 20,
+		Parent: parent, TransactionID: transaction, Selected: []string{"project/report.txt", "project"}, MaxChunkBytes: 1 << 20,
 		MaxFileBytes: 256 << 20, MaxTotalBytes: 256 << 20, MaxFiles: 4096,
 		MaxDirectories: 4096, MinFreeBytes: 1,
 	})
@@ -111,7 +111,7 @@ func TestExportStreamCannotPublishBeforeUnmountTerminal(t *testing.T) {
 	if err := os.Chmod(parent, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	options := exportx.Options{Parent: parent, TransactionID: tx, MaxChunkBytes: 1 << 20,
+	options := exportx.Options{Parent: parent, TransactionID: tx, Selected: []string{"result.txt"}, MaxChunkBytes: 1 << 20,
 		MaxFileBytes: 256 << 20, MaxTotalBytes: 256 << 20, MaxFiles: 4096,
 		MaxDirectories: 4096, MinFreeBytes: 1}
 	if _, err := exportx.Receive(context.Background(), io.NopCloser(bytes.NewReader(stream.Bytes())), options); err == nil {
