@@ -1,6 +1,7 @@
 //go:build darwin
 
-package importx
+// Package renamex publishes owner-private state without replacing an existing name.
+package renamex
 
 import (
 	"os"
@@ -8,9 +9,8 @@ import (
 	"unsafe"
 )
 
-// renameExclusive publishes a complete snapshot without replacing another
-// transaction's destination. Darwin's renameatx_np supports RENAME_EXCL.
-func renameExclusive(parent *os.Root, from, to string) error {
+// NoReplace uses Darwin renameatx_np with RENAME_EXCL through an open parent.
+func NoReplace(parent *os.Root, from, to string) error {
 	directory, err := parent.Open(".")
 	if err != nil {
 		return err

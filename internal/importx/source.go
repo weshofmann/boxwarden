@@ -20,6 +20,7 @@ import (
 
 	"github.com/weshofmann/boxwarden/internal/diskreserve"
 	"github.com/weshofmann/boxwarden/internal/privateacl"
+	"github.com/weshofmann/boxwarden/internal/renamex"
 )
 
 const (
@@ -129,6 +130,9 @@ func CaptureSource(ctx context.Context, sourcePath, stagingParent, transactionID
 		if err != nil {
 			return err
 		}
+		if len(raw)+1 > maxManifestBytes {
+			return fmt.Errorf("import manifest exceeds %d bytes", maxManifestBytes)
+		}
 		digest := sha256.Sum256(raw)
 		snapshot.Digest = hex.EncodeToString(digest[:])
 		manifest, err := stage.OpenFile(manifestName, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
@@ -159,7 +163,7 @@ func CaptureSource(ctx context.Context, sourcePath, stagingParent, transactionID
 		if _, err := parent.Lstat(transactionID); !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("import snapshot destination changed: %v", err)
 		}
-		if err := renameExclusive(parent, temporary, transactionID); err != nil {
+		if err := renamex.NoReplace(parent, temporary, transactionID); err != nil {
 			return err
 		}
 		published = true

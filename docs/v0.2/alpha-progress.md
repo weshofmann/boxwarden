@@ -30,13 +30,23 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   transaction directory. Targeted import tests and vet pass; a separate
   source-only rereview found no remaining Critical/Important defect. No public
   ingress command exists yet.
+- Implemented for the next checkpoint: readmission rehashes every captured
+  file and requires exact manifest membership. A durable import journal has
+  only `captured` and `transferring` phases, with atomic creation and exact
+  retry after uncertain directory sync. `BeginImport` binds the capture to a
+  clean running session, exact active workspace Use and mount, and a fresh
+  supervisor READY snapshot under transition, session, and storage locks.
+  Changed-package tests and vet pass; a separate read-only rereview found no
+  remaining Critical/Important defect in this reservation foundation.
+  Transfer, readback, and a verified phase are not implemented or claimed.
 - Transport probe: the exact alpha-owned disposable sandbox reached READY;
   an exact-generation, host-key-pinned SFTP batch read its remote working
   directory successfully. The sandbox was stopped again. No project file was
   transferred; this is a capability probe, not ingress qualification.
-- Next: durably bind the snapshot to an exact running session/workspace and
-  implement bounded SFTP transfer with readback and retry reporting, then run
-  fresh source-tracked acceptance.
+- Next: transfer the re-admitted synthetic snapshot over pinned SFTP while
+  retaining the exact transition binding, measure bounded host readback, then
+  add a verified journal phase and public command. Fresh source-tracked
+  acceptance follows.
 - Limits: hosted CI, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh
   acceptance remain open. No human action is currently needed.

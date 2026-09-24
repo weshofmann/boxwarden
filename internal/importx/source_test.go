@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/weshofmann/boxwarden/internal/renamex"
 )
 
 const testTransaction = "11111111-2222-4333-8444-555555555555"
@@ -163,7 +165,7 @@ func TestRenameExclusiveCannotReplaceDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer root.Close()
-	if err := renameExclusive(root, "source", "destination"); err == nil {
+	if err := renamex.NoReplace(root, "source", "destination"); err == nil {
 		t.Fatal("existing empty destination was replaced")
 	}
 	if _, err := os.Stat(filepath.Join(parent, "source")); err != nil {
@@ -171,5 +173,88 @@ func TestRenameExclusiveCannotReplaceDestination(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(parent, "destination")); err != nil {
 		t.Fatalf("destination was removed: %v", err)
+	}
+}
+
+func TestInspectSnapshotReadmitsExactCapturedBytes(t *testing.T) {
+	source, parent := privateDirectory(t), privateDirectory(t)
+	if err := os.Mkdir(filepath.Join(source, "empty"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "project.txt"), []byte("synthetic project\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	captured, err := CaptureSource(context.Background(), source, parent, testTransaction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readmitted, err := InspectSnapshot(parent, testTransaction)
+	if err != nil || readmitted.Digest != captured.Digest || readmitted.TotalBytes != captured.TotalBytes {
+		t.Fatalf("snapshot readmission: %#v, %v", readmitted, err)
+	}
+	if err := os.WriteFile(filepath.Join(captured.Directory, "project.txt"), []byte("different project\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectSnapshot(parent, testTransaction); err == nil {
+		t.Fatal("changed snapshot bytes were readmitted")
+	}
+}
+
+func TestInspectSnapshotRejectsUnlistedAndLinkedEntries(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*testing.T, string)
+	}{
+		{"extra file", func(t *testing.T, directory string) {
+			if err := os.WriteFile(filepath.Join(directory, "extra"), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"link", func(t *testing.T, directory string) {
+			if err := os.Symlink("project.txt", filepath.Join(directory, "unexpected")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"manifest", func(t *testing.T, directory string) {
+			if err := os.WriteFile(filepath.Join(directory, manifestName), []byte("{}\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source, parent := privateDirectory(t), privateDirectory(t)
+			if err := os.WriteFile(filepath.Join(source, "project.txt"), []byte("synthetic project\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			captured, err := CaptureSource(context.Background(), source, parent, testTransaction)
+			if err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(t, captured.Directory)
+			if _, err := InspectSnapshot(parent, testTransaction); err == nil {
+				t.Fatal("changed snapshot was readmitted")
+			}
+		})
+	}
+}
+
+func TestInspectSnapshotRejectsDeclaredFileDisappearingAfterHash(t *testing.T) {
+	source, parent := privateDirectory(t), privateDirectory(t)
+	if err := os.WriteFile(filepath.Join(source, "project.txt"), []byte("synthetic\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	captured, err := CaptureSource(context.Background(), source, parent, testTransaction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := beforeSnapshotWalk
+	defer func() { beforeSnapshotWalk = previous }()
+	beforeSnapshotWalk = func() {
+		if err := os.Remove(filepath.Join(captured.Directory, "project.txt")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := InspectSnapshot(parent, testTransaction); err == nil {
+		t.Fatal("declared file removed after hashing was readmitted")
 	}
 }
