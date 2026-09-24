@@ -42,19 +42,30 @@ type guestExportWriter struct {
 // An error may leave an incomplete stream; the host receiver never publishes
 // such a stream because it requires the terminal record and immediate EOF.
 func writeSelectedExport(ctx context.Context, output io.Writer, rootPath string, transaction [16]byte, selected []string, limits guestExportLimits) error {
-	if err := ctx.Err(); err != nil {
+	total, err := writeSelectedExportBody(ctx, output, rootPath, transaction, selected, limits)
+	if err != nil {
 		return err
+	}
+	return writeExportTerminal(output, total)
+}
+
+// writeSelectedExportBody deliberately omits the terminal record. A booting
+// inspector writes it only after the read-only ext4 mount has unmounted, so a
+// failed unmount cannot leave a publishable complete stream.
+func writeSelectedExportBody(ctx context.Context, output io.Writer, rootPath string, transaction [16]byte, selected []string, limits guestExportLimits) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
 	}
 	if output == nil || transaction == [16]byte{} || len(selected) == 0 || len(selected) > 1024 ||
 		limits.maxFile <= 0 || limits.maxFile > defaultGuestExportLimits.maxFile ||
 		limits.maxTotal <= 0 || limits.maxTotal > defaultGuestExportLimits.maxTotal ||
 		limits.maxFiles <= 0 || limits.maxFiles > defaultGuestExportLimits.maxFiles ||
 		limits.maxDirectories <= 0 || limits.maxDirectories > defaultGuestExportLimits.maxDirectories {
-		return fmt.Errorf("invalid selected export request")
+		return 0, fmt.Errorf("invalid selected export request")
 	}
 	root, err := os.OpenRoot(rootPath)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer root.Close()
 	writer := guestExportWriter{ctx: ctx, root: root, output: output, limits: limits, seen: make(map[string]string), walked: make(map[string]bool)}
@@ -62,14 +73,21 @@ func writeSelectedExport(ctx context.Context, output io.Writer, rootPath string,
 	copy(header[:6], []byte{'B', 'W', 'E', 'X', 0, 1})
 	copy(header[6:], transaction[:])
 	if err := writeAll(output, header[:]); err != nil {
-		return err
+		return 0, err
 	}
 	for _, name := range selected {
 		if err := writer.exportPath(name); err != nil {
-			return err
+			return 0, err
 		}
 	}
-	return writeFrame(output, 5, "", nil, uint64(writer.total), [32]byte{})
+	return writer.total, nil
+}
+
+func writeExportTerminal(output io.Writer, total int64) error {
+	if output == nil || total < 0 || total > defaultGuestExportLimits.maxTotal {
+		return fmt.Errorf("invalid export terminal length")
+	}
+	return writeFrame(output, 5, "", nil, uint64(total), [32]byte{})
 }
 
 func (w *guestExportWriter) exportPath(name string) error {

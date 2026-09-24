@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"strings"
+	"syscall"
 )
 
 // The durable host journal is capped at 64 KiB. The request adds its own
@@ -21,6 +23,32 @@ type guestExportRequest struct {
 	FilesystemUUID string
 	DiskBytes      int64
 	Selected       []string
+}
+
+func loadExportRequest(path string, transaction [16]byte) (guestExportRequest, error) {
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return guestExportRequest{}, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o400 ||
+		info.Size() <= 0 || info.Size() > maxExportRequestBytes {
+		return guestExportRequest{}, fmt.Errorf("inspector request member is not exact private data: %v", err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || stat.Uid != 0 || stat.Nlink != 1 {
+		return guestExportRequest{}, fmt.Errorf("inspector request member owner or link count changed")
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, maxExportRequestBytes+1))
+	if err != nil || int64(len(raw)) != info.Size() {
+		return guestExportRequest{}, fmt.Errorf("inspector request member length changed: %v", err)
+	}
+	pathInfo, err := os.Lstat(path)
+	if err != nil || !os.SameFile(info, pathInfo) || pathInfo.Mode() != info.Mode() {
+		return guestExportRequest{}, fmt.Errorf("inspector request member path changed: %v", err)
+	}
+	return decodeExportRequest(raw, transaction)
 }
 
 // decodeExportRequest admits transaction-specific data placed by the trusted

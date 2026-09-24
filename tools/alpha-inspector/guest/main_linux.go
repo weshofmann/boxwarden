@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -67,6 +68,13 @@ func runProof() error {
 	if err != nil {
 		return err
 	}
+	var exportRequest guestExportRequest
+	if mode == "export" {
+		exportRequest, err = loadExportRequest("/alpha-export-request.json", transaction)
+		if err != nil {
+			return err
+		}
+	}
 	deadline := time.Now().Add(20 * time.Second)
 	for _, name := range []string{"/dev/hvc1", "/dev/vda", "/sys/block/vda/ro"} {
 		for {
@@ -115,14 +123,18 @@ func runProof() error {
 		NetworkInterfaces: []string{"lo"},
 		ReadOnly:          true,
 	}
-	if mode == "ext4" || mode == "copy" {
+	if mode == "ext4" || mode == "copy" || mode == "export" {
 		sectors, readErr := os.ReadFile("/sys/block/vda/size")
 		if readErr != nil {
 			return readErr
 		}
 		count, parseErr := strconv.ParseUint(strings.TrimSpace(string(sectors)), 10, 64)
-		if parseErr != nil || count != 64*1024*1024/512 {
-			return fmt.Errorf("synthetic ext4 disk size mismatch")
+		expectedSectors := uint64(64 * 1024 * 1024 / 512)
+		if mode == "export" {
+			expectedSectors = uint64(exportRequest.DiskBytes / 512)
+		}
+		if parseErr != nil || count != expectedSectors {
+			return fmt.Errorf("inspector ext4 disk size mismatch")
 		}
 		device, openErr := os.Open("/dev/vda")
 		if openErr != nil {
@@ -137,6 +149,12 @@ func runProof() error {
 		uuid, err := inspectExt4Superblock(superblock[:])
 		if err != nil {
 			return err
+		}
+		if mode == "export" {
+			if uuid != exportRequest.FilesystemUUID {
+				return fmt.Errorf("inspector ext4 UUID differs from bound request")
+			}
+			return exportMountedSnapshot(transaction, exportRequest)
 		}
 		if mode == "ext4" {
 			if uuid != fixtureUUID {
@@ -220,29 +238,64 @@ func mountAndHashExt4Copy() (digest string, size int64, err error) {
 }
 
 func withReadOnlyExt4(read func(string) ([]byte, error)) (content []byte, err error) {
+	var result []byte
+	err = withReadOnlyExt4Action(func(target string) error {
+		var readErr error
+		result, readErr = read(target)
+		return readErr
+	})
+	return result, err
+}
+
+func withReadOnlyExt4Action(action func(string) error) (err error) {
 	const target = "/mnt/alpha-fixture"
 	if err := os.MkdirAll(target, 0o700); err != nil {
-		return nil, err
+		return err
 	}
 	const flags = syscall.MS_RDONLY | syscall.MS_NODEV | syscall.MS_NOSUID | syscall.MS_NOEXEC
 	if err := syscall.Mount("/dev/vda", target, "ext4", flags, "noload"); err != nil {
-		return nil, fmt.Errorf("mount synthetic ext4 ro,noload: %w", err)
+		return fmt.Errorf("mount inspector ext4 ro,noload: %w", err)
 	}
 	defer func() {
 		if unmountErr := syscall.Unmount(target, 0); unmountErr != nil && err == nil {
-			err = fmt.Errorf("unmount synthetic ext4: %w", unmountErr)
+			err = fmt.Errorf("unmount inspector ext4: %w", unmountErr)
 		}
 	}()
 	var state syscall.Statfs_t
 	if err := syscall.Statfs(target, &state); err != nil {
-		return nil, err
+		return err
 	}
 	// Linux statfs ST_RDONLY|ST_NOSUID|ST_NODEV|ST_NOEXEC. The noload
 	// guarantee comes from the exact mount data above and the RO block device.
 	if uint64(state.Flags)&0x0f != 0x0f {
-		return nil, fmt.Errorf("synthetic ext4 mount flags are not restrictive")
+		return fmt.Errorf("inspector ext4 mount flags are not restrictive")
 	}
-	return read(target)
+	return action(target)
+}
+
+func exportMountedSnapshot(transaction [16]byte, request guestExportRequest) error {
+	dataPort, err := os.OpenFile("/dev/hvc1", os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer dataPort.Close()
+	if err := disableOutputProcessing(dataPort.Fd()); err != nil {
+		return err
+	}
+	var total int64
+	if err := withReadOnlyExt4Action(func(target string) error {
+		var writeErr error
+		total, writeErr = writeSelectedExportBody(context.Background(), dataPort, target, transaction, request.Selected, defaultGuestExportLimits)
+		return writeErr
+	}); err != nil {
+		return err
+	}
+	// No terminal is sent until the ext4 mount has been released. The host
+	// receiver treats any earlier interruption as incomplete and unpublishable.
+	if err := writeExportTerminal(dataPort, total); err != nil {
+		return err
+	}
+	return dataPort.Close()
 }
 
 func consoleLine(message string) {

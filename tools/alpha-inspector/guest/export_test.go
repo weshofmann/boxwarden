@@ -95,3 +95,32 @@ func TestSelectedExportRejectsLinksUnsafeNamesAndLimits(t *testing.T) {
 		})
 	}
 }
+
+func TestExportStreamCannotPublishBeforeUnmountTerminal(t *testing.T) {
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "result.txt"), []byte("done"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tx := [16]byte{1}
+	var stream bytes.Buffer
+	total, err := writeSelectedExportBody(context.Background(), &stream, source, tx, []string{"result.txt"}, defaultGuestExportLimits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	options := exportx.Options{Parent: parent, TransactionID: tx, MaxChunkBytes: 1 << 20,
+		MaxFileBytes: 256 << 20, MaxTotalBytes: 256 << 20, MaxFiles: 4096,
+		MaxDirectories: 4096, MinFreeBytes: 1}
+	if _, err := exportx.Receive(context.Background(), io.NopCloser(bytes.NewReader(stream.Bytes())), options); err == nil {
+		t.Fatal("unterminated guest stream published")
+	}
+	if err := writeExportTerminal(&stream, total); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := exportx.Receive(context.Background(), io.NopCloser(bytes.NewReader(stream.Bytes())), options); err != nil {
+		t.Fatalf("completed stream rejected: %v", err)
+	}
+}

@@ -27,7 +27,7 @@ func parseFixtureMode(commandLine string) (string, error) {
 		}
 		seen = true
 		mode = strings.TrimPrefix(field, "alpha_fixture=")
-		if mode != "ext4" && mode != "copy" {
+		if mode != "ext4" && mode != "copy" && mode != "export" {
 			return "", fmt.Errorf("unknown fixture selector")
 		}
 	}
@@ -45,14 +45,18 @@ func inspectExt4Superblock(sb []byte) (string, error) {
 	if uuid == strings.Repeat("0", 32) {
 		return "", fmt.Errorf("missing ext4 filesystem UUID")
 	}
-	if binary.LittleEndian.Uint16(sb[0x3a:0x3c])&1 == 0 {
+	if binary.LittleEndian.Uint16(sb[0x3a:0x3c]) != 1 {
 		return "", fmt.Errorf("ext4 filesystem is not clean")
 	}
 	if binary.LittleEndian.Uint32(sb[0x5c:0x60])&0x04 == 0 {
 		return "", fmt.Errorf("ext4 filesystem lacks journal")
 	}
-	if binary.LittleEndian.Uint32(sb[0x60:0x64])&0x40 == 0 {
+	incompatible := binary.LittleEndian.Uint32(sb[0x60:0x64])
+	if incompatible&0x40 == 0 {
 		return "", fmt.Errorf("ext4 filesystem lacks extents")
+	}
+	if incompatible&0x04 != 0 || binary.LittleEndian.Uint32(sb[0x64:0x68])&0x10000 != 0 {
+		return "", fmt.Errorf("ext4 filesystem requires recovery")
 	}
 	return uuid[:8] + "-" + uuid[8:12] + "-" + uuid[12:16] + "-" + uuid[16:20] + "-" + uuid[20:], nil
 }

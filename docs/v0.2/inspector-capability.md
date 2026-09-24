@@ -213,9 +213,9 @@ root, rejects symlinks, hardlinked regular files, unsupported object types,
 unsafe/colliding names, and excessive directory entries, and enforces the
 256 MiB file/content and 4096 file/directory alpha limits. It emits the BWEX
 v1 records accepted by `exportx.Receive`; a local round-trip test verifies
-the selected subtree and omission of an unselected sibling. This writer is
-not yet invoked by the booting guest. Request transport, production artifact
-admission, and complete host publication checks remain open.
+the selected subtree and omission of an unselected sibling. The guest boot
+path now invokes this writer. Production artifact admission and complete host
+publication checks remain open.
 
 A proposed per-transaction request is now parsed with strict duplicate and
 unknown-field rejection, the kernel-command-line transaction binding, exact
@@ -224,8 +224,15 @@ append that request as a private root-owned data member beside the unchanged
 generic guest executable. This avoids a host directory share and keeps the
 selection out of the kernel command line. The request envelope is capped at
 128 KiB to contain the already capped 64 KiB journal selection plus metadata.
-The production host has not yet generated or admitted this per-transaction
-initramfs, and the guest boot path does not yet read the member.
+The guest boot path now reads the root-owned member, binds it to the boot
+transaction, verifies the read-only block device's exact size and ext4 UUID,
+rejects ext4 error, orphan, and recovery-required superblock states, and
+writes selected content while mounted `ro,noload,nodev,nosuid,noexec`.
+It omits the terminal record until the mount has unmounted, so a failed
+unmount leaves an incomplete stream that the receiver cannot publish. Source
+tests verify that missing-terminal stream is rejected; the Linux ARM64 guest
+cross-build passes. A live export-mode boot and production host bundle
+generation/admission remain pending.
 
 Inside the isolated Linux guest, validate the expected whole-device ext4 UUID
 and mount with `ro,noload,nodev,nosuid,noexec`. Linux documents that plain

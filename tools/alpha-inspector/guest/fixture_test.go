@@ -18,6 +18,7 @@ func TestFixtureModeIsExplicit(t *testing.T) {
 		{"console=hvc0", "zero", false},
 		{"console=hvc0 alpha_fixture=ext4", "ext4", false},
 		{"console=hvc0 alpha_fixture=copy", "copy", false},
+		{"console=hvc0 alpha_fixture=export", "export", false},
 		{"alpha_fixture=ext4 alpha_fixture=ext4", "", true},
 		{"alpha_fixture=other", "", true},
 	} {
@@ -63,6 +64,18 @@ func TestExt4IdentityRequiresMagicUUIDJournalExtentsAndCleanState(t *testing.T) 
 		broken[offset] = 0
 		if err := validateExt4FixtureSuperblock(broken); err == nil {
 			t.Fatalf("accepted broken superblock offset %#x", offset)
+		}
+	}
+	for name, mutate := range map[string]func([]byte){
+		"error state": func(sb []byte) { sb[0x3a] = 0x03 },
+		"orphan state": func(sb []byte) { sb[0x3a] = 0x05 },
+		"journal recovery": func(sb []byte) { sb[0x60] |= 0x04 },
+		"orphan recovery": func(sb []byte) { sb[0x66] |= 0x01 },
+	} {
+		broken := bytes.Clone(superblock)
+		mutate(broken)
+		if err := validateExt4FixtureSuperblock(broken); err == nil {
+			t.Fatalf("accepted ext4 superblock requiring %s", name)
 		}
 	}
 	if err := validateExt4FixtureSuperblock(superblock[:100]); err == nil {
