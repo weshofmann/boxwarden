@@ -123,5 +123,8 @@ func readRecipeIntent(intents *os.Root, digest string) ([]byte, error) {
 	if fmt.Sprintf("%x", actual[:]) != digest {
 		return nil, fmt.Errorf("recipe intent digest mismatch")
 	}
+	if _, err := recipe.DecodeIntent(raw); err != nil {
+		return nil, fmt.Errorf("invalid stored recipe intent: %w", err)
+	}
 	return raw, nil
 }

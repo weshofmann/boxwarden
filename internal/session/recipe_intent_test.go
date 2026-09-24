@@ -1,6 +1,8 @@
 package session
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,5 +70,24 @@ func TestLoadRecipeIntentRejectsInvalidDigestAndLink(t *testing.T) {
 	}
 	if _, err := LoadRecipeIntent(root, digest); err == nil {
 		t.Fatal("linked intent accepted")
+	}
+}
+
+func TestLoadRecipeIntentRejectsDigestMatchingInvalidRecipe(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "recipe-intents"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{"intent_version":1,"recipe":{}}`)
+	sum := sha256.Sum256(raw)
+	digest := fmt.Sprintf("%x", sum[:])
+	if err := os.WriteFile(filepath.Join(root, "recipe-intents", digest+".json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadRecipeIntent(root, digest); err == nil {
+		t.Fatal("digest-matching invalid recipe entered action authority")
 	}
 }

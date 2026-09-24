@@ -139,8 +139,11 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   existing object, then rechecks the digest on read. Tests show whitespace
   changes preserve identity, changed session actions retain the base key but
   change intent identity, source-file edits do not mutate a captured value,
-  and missing, linked, or corrupt stored objects are rejected. Recipe and
-  session package tests, targeted vet, formatting, and diff checks passed.
+  and missing, linked, or corrupt stored objects are rejected. Stored reads
+  now also require an exact canonical, structurally valid recipe, so a file
+  with a matching digest but invalid semantics cannot enter action authority.
+  Recipe and session package tests, targeted vet, formatting, and diff checks
+  passed.
   The public recipe-create route now carries that exact parsed-value digest
   through preparation and persists it in the creating session record before
   clone mutation. An exact retry succeeds; a changed or absent intent fails

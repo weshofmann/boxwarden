@@ -83,6 +83,34 @@ func TestCanonicalIntentSeparatesSessionActionsFromReusableBase(t *testing.T) {
 	}
 }
 
+func TestDecodeIntentAdmitsOnlyCanonicalValidatedSnapshot(t *testing.T) {
+	value, err := Load(writeRecipe(t, validRecipe))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := CanonicalIntent(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeIntent(raw)
+	if err != nil || len(decoded.Steps) != 1 || decoded.Steps[0].Phase != "once" {
+		t.Fatalf("decoded canonical intent = %#v, %v", decoded, err)
+	}
+	for name, altered := range map[string][]byte{
+		"whitespace":         append(append([]byte(nil), raw...), '\n'),
+		"unknown envelope":   []byte(strings.Replace(string(raw), `"intent_version":1`, `"intent_version":1,"extra":true`, 1)),
+		"duplicate envelope": []byte(strings.Replace(string(raw), `"intent_version":1`, `"intent_version":1,"intent_version":1`, 1)),
+		"wrong version":      []byte(strings.Replace(string(raw), `"intent_version":1`, `"intent_version":2`, 1)),
+		"invalid recipe":     []byte(strings.Replace(string(raw), `"version":1`, `"version":2`, 1)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := DecodeIntent(altered); err == nil {
+				t.Fatal("noncanonical or invalid intent accepted")
+			}
+		})
+	}
+}
+
 func TestLoadSupportedRecipeKeepsGuestOperationsExplicit(t *testing.T) {
 	got, err := Load(writeRecipe(t, validRecipe))
 	if err != nil {
