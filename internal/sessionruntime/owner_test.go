@@ -610,6 +610,29 @@ func TestOwnerStopRetriesTransientHandleSignalError(t *testing.T) {
 	}
 }
 
+type guestStopHandle struct{ requests, stops int }
+
+func (h *guestStopHandle) RequestStop(context.Context) error { h.requests++; return nil }
+func (h *guestStopHandle) Stop(context.Context) error        { h.stops++; return nil }
+func (*guestStopHandle) Wait(context.Context) error          { return nil }
+
+func TestOwnerRequestsGuestShutdownBeforeBoundedForceStop(t *testing.T) {
+	handle := &guestStopHandle{}
+	owner := &Owner{handle: handle}
+	if err := owner.RequestStop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.RequestStop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if handle.requests != 1 || handle.stops != 0 {
+		t.Fatalf("guest request / force stop = %d / %d", handle.requests, handle.stops)
+	}
+	if err := owner.Stop(context.Background()); err != nil || handle.stops != 1 {
+		t.Fatalf("force stop after guest request = %v; calls=%d", err, handle.stops)
+	}
+}
+
 func TestCancellationOrPoisonAfterHandleStillReapsAndCloses(t *testing.T) {
 	for _, failure := range []string{"cancel", "poison"} {
 		t.Run(failure, func(t *testing.T) {

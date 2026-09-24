@@ -17,6 +17,21 @@ import (
 // instead of interpreting that error as authority to remove its outer namespace.
 var ErrRuntimeCleanupUnproven = errors.New("runtime cleanup is unproven; preserve exact generation")
 
+var gracefulStopWait = gracefulStopTimeout
+
+func waitForGuestStop(ctx context.Context, reaped <-chan struct{}, window time.Duration) bool {
+	timer := time.NewTimer(window)
+	defer timer.Stop()
+	select {
+	case <-reaped:
+		return true
+	case <-timer.C:
+		return false
+	case <-ctx.Done():
+		return false
+	}
+}
+
 // RuntimeOwner retains actual backend/serial handles. Start failure must finish
 // its owned-handle stop/reap and serial cleanup path before returning. If final
 // runtime cleanup proof remains incomplete, it wraps ErrRuntimeCleanupUnproven.
@@ -88,28 +103,39 @@ func Run(ctx context.Context, path string, owner RuntimeOwner) error {
 	go func() { waitErr = owner.Wait(context.Background()); close(reaped) }()
 	var stopMu sync.Mutex
 	stopSent := false
+	graceRequested := false
 	var lastStopErr error
 	stop := func() error {
-		waitCtx, cancel := context.WithTimeout(context.Background(), lifecycleTimeout)
+		waitCtx, cancel := context.WithTimeout(context.Background(), lifecycleTimeout+gracefulStopTimeout)
 		defer cancel()
 		stopMu.Lock()
+		defer stopMu.Unlock()
 		select {
 		case <-reaped:
-			result := errors.Join(lastStopErr, waitErr)
-			stopMu.Unlock()
-			return result
+			return errors.Join(lastStopErr, waitErr)
 		default:
 		}
 		if !stopSent {
+			if requester, ok := owner.(interface{ RequestStop(context.Context) error }); ok && !graceRequested {
+				graceRequested = true
+				if err := requester.RequestStop(waitCtx); err == nil {
+					if waitForGuestStop(waitCtx, reaped, gracefulStopWait) {
+						return waitErr
+					}
+				}
+			}
+			select {
+			case <-reaped:
+				return waitErr
+			default:
+			}
 			if err := owner.Stop(waitCtx); err != nil {
 				lastStopErr = err
-				stopMu.Unlock()
 				return err
 			}
 			stopSent = true
 			lastStopErr = nil
 		}
-		stopMu.Unlock()
 		select {
 		case <-reaped:
 			return waitErr
@@ -221,7 +247,7 @@ func (detachedLauncher) Launch(ctx context.Context, request LaunchRequest) error
 		// A started supervisor owns cleanup: ask it to stop, never reconstruct or
 		// signal backend process identities from disk. If control is unavailable,
 		// retain the detached child for subsequent exact-generation reconciliation.
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), lifecycleTimeout+controlIOTimeout)
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), lifecycleTimeout+gracefulStopTimeout+controlIOTimeout)
 		stopErr := client.Stop(stopCtx, request.Binding)
 		stopCancel()
 		return errors.Join(err, stopErr)

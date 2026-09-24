@@ -186,14 +186,51 @@ type osProcessHandle struct {
 	process        *os.Process
 	done           chan struct{}
 	signalGroup    func(int) error
+	requestStop    func(int) error
 	stopMu         sync.Mutex
 	stopSent       bool
+	requestSent    bool
 	reaped         bool
 	authorityLost  bool
 	waitOnce       sync.Once
 	waitErr        error
 	pollWait       func(int) (int, syscall.WaitStatus, error)
 	releaseProcess func() error
+}
+
+// RequestStop asks the exact retained Tart child to request guest OS shutdown.
+// It never substitutes for Stop: a noncooperating guest still needs a bounded
+// process-group SIGINT followed by the normal exact reap.
+func (h *osProcessHandle) RequestStop(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if h == nil || h.process == nil {
+		return fmt.Errorf("owned Tart process is unavailable")
+	}
+	request := h.requestStop
+	if request == nil {
+		request = requestOwnedProcessStop
+	}
+	h.stopMu.Lock()
+	defer h.stopMu.Unlock()
+	if h.reaped {
+		return nil
+	}
+	if h.authorityLost {
+		return ErrReapUnproven
+	}
+	if h.requestSent || h.stopSent {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := request(h.process.Pid); err != nil {
+		return err
+	}
+	h.requestSent = true
+	return nil
 }
 
 // ErrReapUnproven means the retained direct-child wait no longer proves that

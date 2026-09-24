@@ -109,6 +109,14 @@ type scratchHandle struct {
 	cleanupErr  error
 }
 
+func (h *scratchHandle) RequestStop(ctx context.Context) error {
+	requester, ok := h.Handle.(interface{ RequestStop(context.Context) error })
+	if !ok {
+		return fmt.Errorf("owned Tart handle cannot request guest shutdown")
+	}
+	return requester.RequestStop(ctx)
+}
+
 func (h *scratchHandle) Wait(ctx context.Context) error {
 	err := h.Handle.Wait(ctx)
 	if ctx.Err() != nil {

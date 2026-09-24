@@ -97,7 +97,7 @@ type Owner struct {
 	maintenanceDone                 chan struct{}
 	runtimePath, tartPath, tartHome string
 	stopMu                          sync.Mutex
-	stopSent                        bool
+	stopSent, graceSent             bool
 	waitOnce                        sync.Once
 	waitErr                         error
 }
@@ -625,6 +625,39 @@ func (o *Owner) Snapshot(ctx context.Context) supervisor.Snapshot {
 	o.mu.Unlock()
 	snapshot.ObservedAt = time.Now()
 	return snapshot
+}
+
+// RequestStop asks the retained backend handle to let the guest OS shut down.
+// The supervisor observes actual reap and sends a bounded force stop if the
+// guest does not cooperate; this request grants no guest authority over state.
+func (o *Owner) RequestStop(ctx context.Context) error {
+	o.mu.Lock()
+	handle := o.handle
+	cancelMaintenance := o.maintenanceCancel
+	o.mu.Unlock()
+	if handle == nil {
+		return fmt.Errorf("runtime handle is unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if cancelMaintenance != nil {
+		cancelMaintenance()
+	}
+	o.stopMu.Lock()
+	defer o.stopMu.Unlock()
+	if o.graceSent || o.stopSent {
+		return nil
+	}
+	requester, ok := handle.(interface{ RequestStop(context.Context) error })
+	if !ok {
+		return fmt.Errorf("backend handle cannot request guest shutdown")
+	}
+	if err := requester.RequestStop(ctx); err != nil {
+		return err
+	}
+	o.graceSent = true
+	return nil
 }
 
 func (o *Owner) Stop(ctx context.Context) error {

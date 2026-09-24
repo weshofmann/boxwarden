@@ -111,6 +111,9 @@ func TestAmbiguousOwnedWaitPreservesScratchAndRefusesLateSignal(t *testing.T) {
 			if err := handle.Stop(context.Background()); !errors.Is(err, ErrReapUnproven) || signals != 0 {
 				t.Fatalf("Stop() after lost wait authority = %v; signals=%d", err, signals)
 			}
+			if err := handle.RequestStop(context.Background()); !errors.Is(err, ErrReapUnproven) {
+				t.Fatalf("RequestStop() after lost wait authority = %v", err)
+			}
 		})
 	}
 }
@@ -141,6 +144,48 @@ func TestOwnedHandleStopsOnlyItsProcessGroup(t *testing.T) {
 	workers.Wait()
 	if got, want := groups, []int{-4242}; !sameInts(got, want) {
 		t.Fatalf("signaled groups = %#v, want exact owned group %#v", got, want)
+	}
+}
+
+func TestOwnedHandleRequestsGuestShutdownOnExactProcess(t *testing.T) {
+	var targets []int
+	handle := &osProcessHandle{
+		process: &os.Process{Pid: 4242}, done: make(chan struct{}),
+		requestStop: func(pid int) error { targets = append(targets, pid); return nil },
+		signalGroup: func(int) error { t.Fatal("guest request used force-stop group"); return nil },
+	}
+	if err := handle.RequestStop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := handle.RequestStop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := targets, []int{4242}; !sameInts(got, want) {
+		t.Fatalf("requested guest stop targets = %v, want %v", got, want)
+	}
+}
+
+func TestOwnedHandleRetriesFailedGuestShutdownRequest(t *testing.T) {
+	attempts := 0
+	want := errors.New("transient request failure")
+	handle := &osProcessHandle{
+		process: &os.Process{Pid: 4242}, done: make(chan struct{}),
+		requestStop: func(pid int) error {
+			if pid != 4242 {
+				t.Fatalf("request targeted process %d", pid)
+			}
+			attempts++
+			if attempts == 1 {
+				return want
+			}
+			return nil
+		},
+	}
+	if err := handle.RequestStop(context.Background()); !errors.Is(err, want) {
+		t.Fatalf("first guest stop request = %v", err)
+	}
+	if err := handle.RequestStop(context.Background()); err != nil || attempts != 2 {
+		t.Fatalf("retried guest stop request = %v; attempts=%d", err, attempts)
 	}
 }
 

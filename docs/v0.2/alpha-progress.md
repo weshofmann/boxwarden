@@ -129,21 +129,26 @@ public command preserved its snapshot and reached the inspector, but guest
 ext4 admission rejected a recovery-required filesystem. The host capture had
 accepted zero export bytes and the receiver rejected EOF before publication;
 the new capture regression rejects that false pass and removes its spool.
+Pinned Tart 2.32.1 source confirms that the previous `SIGINT` stop invoked an
+immediate VM stop. Normal supervised stop now asks the retained Tart child for
+guest OS shutdown, waits up to 15 seconds, and then uses the existing exact
+force-stop/reap path if necessary. This is a source-verified correction; a real
+managed-volume clean-shutdown result has not yet been observed.
 Focused export tests and vet pass. Repository-wide Go tests and vet previously
 passed with host Unix socket access at `06466ee`; the default sandbox run
 could not bind test sockets, and the architecture guard was narrowed for the
-v0.2 export calls.
+v0.2 export calls. The lifecycle correction passed the full local Go suite,
+focused Tart/runtime/supervisor race checks, and targeted vet.
 Real managed-volume qualification remains open. The earlier failed base
 attempt was corrected and a fresh base built and qualified; failed attempts
 remain outside the prepared cache.
 
 ## Next actions
 
-1. Determine why normal session stop left the synthetic ext4 volume requiring
-   recovery. Restore a clean state through an isolated guest operation, then
-   repeat public export with a fresh transaction and destination and verify
-   returned bytes and journal. Add explicit inspected-phase recovery and
-   hostile-exit checks.
+1. Validate the new bounded guest shutdown on the attached synthetic volume,
+   confirm stopped ext4 is clean, then repeat public export with a fresh
+   transaction and destination and verify returned bytes and journal. Add
+   explicit inspected-phase recovery and hostile-exit checks.
 2. Attach the retained volume to a second fresh sandbox after export, then
    verify its mount and content.
 3. Run the full integration checks and real acceptance matrix, and publish the

@@ -14,3 +14,7 @@ func supportsOwnedProcessGroups() bool { return false }
 func signalOwnedProcessGroup(int) error {
 	return fmt.Errorf("owned process groups are unsupported on this platform")
 }
+
+func requestOwnedProcessStop(int) error {
+	return fmt.Errorf("guest stop requests are unsupported on this platform")
+}

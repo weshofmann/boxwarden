@@ -883,6 +883,69 @@ func (o *retrySignalRuntime) Stop(context.Context) error {
 	return nil
 }
 
+type guestShutdownRuntime struct {
+	runtimeFixture
+	requests  atomic.Int32
+	cooperate bool
+	fail      bool
+}
+
+func (o *guestShutdownRuntime) RequestStop(context.Context) error {
+	o.requests.Add(1)
+	if o.fail {
+		return errors.New("guest request signal failed")
+	}
+	if o.cooperate {
+		o.once.Do(func() { close(o.done) })
+	}
+	return nil
+}
+
+func TestStopRequestsGuestShutdownBeforeForceFallback(t *testing.T) {
+	previous := gracefulStopWait
+	gracefulStopWait = 25 * time.Millisecond
+	t.Cleanup(func() { gracefulStopWait = previous })
+	for _, tc := range []struct {
+		name      string
+		cooperate bool
+		fail      bool
+		wantForce int32
+	}{
+		{"cooperating", true, false, 0},
+		{"unresponsive", false, false, 1},
+		{"request-failed", false, true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := minimalRequest(t)
+			path, _, err := publishOrAdmitRequest(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner := &guestShutdownRuntime{runtimeFixture: runtimeFixture{done: make(chan struct{})}, cooperate: tc.cooperate, fail: tc.fail}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			runDone := make(chan error, 1)
+			go func() { runDone <- Run(ctx, path, owner) }()
+			client := &Client{RuntimeDirectory: request.RuntimeDirectory}
+			if _, err := awaitSnapshot(ctx, request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+				t.Fatal(err)
+			}
+			_ = client.Stop(context.Background(), request.Binding) // Response can race exact reap.
+			select {
+			case err := <-runDone:
+				if err != nil {
+					t.Fatalf("Run after guest request = %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("guest stop or bounded force did not reap")
+			}
+			if owner.requests.Load() != 1 || owner.stops.Load() != tc.wantForce || owner.waits.Load() != 1 {
+				t.Fatalf("requests/force/wait = %d/%d/%d, want 1/%d/1", owner.requests.Load(), owner.stops.Load(), owner.waits.Load(), tc.wantForce)
+			}
+		})
+	}
+}
+
 func TestStopRetriesFailedSignalWhileExactOwnerRemainsLive(t *testing.T) {
 	request := minimalRequest(t)
 	path, _, err := publishOrAdmitRequest(request)

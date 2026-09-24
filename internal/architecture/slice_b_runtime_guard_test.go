@@ -101,6 +101,7 @@ func f(ctx context.Context, expectation struct{ Manifest struct{ Operator string
 }`,
 		},
 		{"host admission manifest", "internal/hostx/manifest.go", `package hostx; type Manifest struct{ Operator string }`},
+		{"ephemeral process argument", "internal/backend/tart/process_group_darwin.go", `package tart; func request(processID int) { _ = processID }`},
 		{"guest trust foundation", "internal/guestproto/bootstrap.go", `package guestproto; type bindingManifest struct{ Domain string }`},
 		{"serial protocol foundation", "internal/serialx/runtime.go", `package serialx
 import protocol "github.com/weshofmann/boxwarden/internal/guestproto"
@@ -312,18 +313,20 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 			if isPersistedProcessName(name) || isOwnershipMetadataName(name) {
 				p.add(path, "persisted process authority", name)
 			}
-		case *ast.Field:
-			for _, name := range value.Names {
-				if isPersistedProcessName(name.Name) || isOwnershipMetadataName(name.Name) {
-					p.add(path, "persisted process authority", name.Name)
+		case *ast.StructType:
+			for _, field := range value.Fields.List {
+				for _, name := range field.Names {
+					if isPersistedProcessName(name.Name) || isOwnershipMetadataName(name.Name) {
+						p.add(path, "persisted process authority", name.Name)
+					}
 				}
-			}
-			if value.Tag != nil {
-				tag, err := strconv.Unquote(value.Tag.Value)
-				if err == nil {
-					jsonName := strings.Split(reflect.StructTag(tag).Get("json"), ",")[0]
-					if isPersistedProcessName(jsonName) || isOwnershipMetadataName(jsonName) {
-						p.add(path, "persisted process authority", jsonName)
+				if field.Tag != nil {
+					tag, err := strconv.Unquote(field.Tag.Value)
+					if err == nil {
+						jsonName := strings.Split(reflect.StructTag(tag).Get("json"), ",")[0]
+						if isPersistedProcessName(jsonName) || isOwnershipMetadataName(jsonName) {
+							p.add(path, "persisted process authority", jsonName)
+						}
 					}
 				}
 			}
