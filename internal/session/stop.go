@@ -8,6 +8,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/lock"
+	"github.com/weshofmann/boxwarden/internal/supervisor"
 )
 
 // Stop records the exact generation being stopped before contacting its live
@@ -61,7 +62,7 @@ func (s *Service) Stop(ctx context.Context, rawName string) (record Record, err 
 		if observation.State != backend.ObjectStopped {
 			return Record{}, fmt.Errorf("stopped intent conflicts with running backend")
 		}
-		return s.finishStopped(ctx, domainID, name, record, &held)
+		return s.finishStopped(ctx, domainID, name, record, &held, "")
 	}
 	if record.IntendedState != StateStarting && record.IntendedState != StateRunning && record.IntendedState != StateStopping {
 		return Record{}, fmt.Errorf("session %q has incompatible stop state %q", name, record.IntendedState)
@@ -75,7 +76,7 @@ func (s *Service) Stop(ctx context.Context, rawName string) (record Record, err 
 			return Record{}, fmt.Errorf("prove exact generation quiesced: %w", proofErr)
 		}
 		if quiesced {
-			return s.finishStopped(ctx, domainID, name, record, &held)
+			return s.finishStopped(ctx, domainID, name, record, &held, "")
 		}
 	}
 	if record.IntendedState != StateStopping {
@@ -90,17 +91,28 @@ func (s *Service) Stop(ctx context.Context, rawName string) (record Record, err 
 	if err := held.Release(); err != nil {
 		return Record{}, fmt.Errorf("release session lock before supervisor stop: %w", err)
 	}
-	if err := s.start.Supervisor.Stop(ctx, startBinding(record)); err != nil {
-		return Record{}, fmt.Errorf("stop exact generation: %w", err)
+	var diagnostic string
+	if reporter, ok := s.start.Supervisor.(interface {
+		StopWithOutcome(context.Context, supervisor.Binding) (supervisor.StopOutcome, error)
+	}); ok {
+		outcome, stopErr := reporter.StopWithOutcome(ctx, startBinding(record))
+		if stopErr != nil {
+			return Record{}, fmt.Errorf("stop exact generation: %w", stopErr)
+		}
+		if outcome.Valid() {
+			diagnostic = fmt.Sprintf("request=%s forced=%t workspace_cleanliness=unverified", outcome.Request, outcome.Forced)
+		}
+	} else if stopErr := s.start.Supervisor.Stop(ctx, startBinding(record)); stopErr != nil {
+		return Record{}, fmt.Errorf("stop exact generation: %w", stopErr)
 	}
-	return s.finishStopped(ctx, domainID, name, record, &held)
+	return s.finishStopped(ctx, domainID, name, record, &held, diagnostic)
 }
 
 // finishStopped releases the session lock before the volume-first batch, then
 // reacquires it to publish Stopped only after exact Use release. The caller
 // already proved stop/wait/reap for Stopping, or has durable Stopped intent
 // with no launch commit to reconcile.
-func (s *Service) finishStopped(ctx context.Context, domainID domain.ID, name Name, expected Record, held **lock.Held) (Record, error) {
+func (s *Service) finishStopped(ctx context.Context, domainID domain.ID, name Name, expected Record, held **lock.Held, diagnostic string) (Record, error) {
 	if err := (*held).Release(); err != nil {
 		return Record{}, fmt.Errorf("release session lock before workspace use release: %w", err)
 	}
@@ -129,6 +141,7 @@ func (s *Service) finishStopped(ctx context.Context, domainID domain.ID, name Na
 	if current.IntendedState == StateStopped {
 		return current, nil
 	}
+	current.Readiness.Diagnostic = diagnostic
 	return s.persistStopped(current)
 }
 
@@ -140,7 +153,7 @@ func sameStoppedIdentity(before, after Record) bool {
 func (s *Service) persistStopped(record Record) (Record, error) {
 	record.IntendedState = StateStopped
 	record.StartGeneration = ""
-	record.Readiness = ReadinessRecord{Status: ReadinessNotReady}
+	record.Readiness = ReadinessRecord{Status: ReadinessNotReady, Diagnostic: record.Readiness.Diagnostic}
 	if err := SaveRecord(s.domain.StateRoot, record.Domain, record); err != nil {
 		return Record{}, fmt.Errorf("persist stopped session: %w", err)
 	}

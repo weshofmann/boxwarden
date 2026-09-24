@@ -761,6 +761,18 @@ func TestSessionStopUsesExactAdmittedFactoryAndReportsStoppedState(t *testing.T)
 	}
 }
 
+func TestStoppedSessionReportsPersistedStopOutcome(t *testing.T) {
+	record := session.Record{Domain: "work", Name: "dev", IntendedState: session.StateStopped,
+		Readiness: session.ReadinessRecord{Status: session.ReadinessNotReady, Diagnostic: "request=tart_fallback forced=true workspace_cleanliness=unverified"}}
+	var output bytes.Buffer
+	if err := writeStoppedSession(&output, record); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "stop-outcome: request=tart_fallback forced=true workspace_cleanliness=unverified\n") {
+		t.Fatalf("missing stop outcome: %q", output.String())
+	}
+}
+
 func TestSessionStatusRendersPersistedAndObservedState(t *testing.T) {
 	configPath := writeStatusFixture(t, "work", "dev")
 	recordPath := filepath.Join(filepath.Dir(configPath), "sessions", "dev.json")

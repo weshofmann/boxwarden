@@ -973,6 +973,9 @@ func writeStatus(output io.Writer, record session.Record, observed backend.Obser
 			return fmt.Errorf("write live readiness: %w", err)
 		}
 	}
+	if err := writeStopOutcome(output, record); err != nil {
+		return err
+	}
 	if observed.Diagnostic != "" {
 		if _, err := fmt.Fprintf(output, "backend-diagnostic: %s\n", observed.Diagnostic); err != nil {
 			return fmt.Errorf("write backend diagnostic: %w", err)
@@ -1010,6 +1013,16 @@ func writeStartedSession(output io.Writer, record session.Record) error {
 func writeStoppedSession(output io.Writer, record session.Record) error {
 	if _, err := fmt.Fprintf(output, "domain: %s\nsession: %s\nstate: %s\nreadiness: %s\n", record.Domain, record.Name, record.IntendedState, record.Readiness.Status); err != nil {
 		return fmt.Errorf("write stopped session: %w", err)
+	}
+	return writeStopOutcome(output, record)
+}
+
+func writeStopOutcome(output io.Writer, record session.Record) error {
+	if record.IntendedState != session.StateStopped || !strings.HasPrefix(record.Readiness.Diagnostic, "request=") {
+		return nil
+	}
+	if _, err := fmt.Fprintf(output, "stop-outcome: %s\n", record.Readiness.Diagnostic); err != nil {
+		return fmt.Errorf("write stop outcome: %w", err)
 	}
 	return nil
 }

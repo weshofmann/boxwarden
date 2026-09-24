@@ -118,6 +118,14 @@ func (c *ExactController) Stop(ctx context.Context, binding Binding) error {
 	return (&Client{RuntimeDirectory: directory, MaxSnapshotAge: time.Minute}).Stop(ctx, binding)
 }
 
+func (c *ExactController) StopWithOutcome(ctx context.Context, binding Binding) (StopOutcome, error) {
+	directory, err := c.runtimeDirectory(binding)
+	if err != nil {
+		return StopOutcome{}, err
+	}
+	return (&Client{RuntimeDirectory: directory, MaxSnapshotAge: time.Minute}).StopWithOutcome(ctx, binding)
+}
+
 // Quiesced is a read-only recovery proof for a stop whose control reply was
 // lost. A stopped backend observation is required separately. The canonical
 // generation and both exact cleanup residues must all be absent; this state is

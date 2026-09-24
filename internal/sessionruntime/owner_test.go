@@ -749,6 +749,9 @@ func TestOwnerRequestsGuestShutdownBeforeBoundedForceStop(t *testing.T) {
 	if handle.requests != 1 || handle.stops != 0 {
 		t.Fatalf("guest request / force stop = %d / %d", handle.requests, handle.stops)
 	}
+	if got := owner.StopOutcome(); got.Request != supervisor.StopRequestTartOnly || got.Forced {
+		t.Fatalf("Tart-only request outcome = %+v", got)
+	}
 	if err := owner.Stop(context.Background()); err != nil || handle.stops != 1 {
 		t.Fatalf("force stop after guest request = %v; calls=%d", err, handle.stops)
 	}
@@ -777,6 +780,13 @@ func TestOwnerRequestsPinnedGuestShutdownWithTartFallback(t *testing.T) {
 		if err := owner.RequestStop(context.Background()); err != nil {
 			t.Fatal(err)
 		}
+		wantPath := supervisor.StopRequestGuestAccepted
+		if failed {
+			wantPath = supervisor.StopRequestTartFallback
+		}
+		if got := owner.StopOutcome(); got.Request != wantPath || got.Forced {
+			t.Fatalf("stop outcome before force = %+v, want request %q", got, wantPath)
+		}
 		if calls != 1 || handle.stops != 0 {
 			t.Fatalf("guest calls=%d force stops=%d", calls, handle.stops)
 		}
@@ -785,6 +795,12 @@ func TestOwnerRequestsPinnedGuestShutdownWithTartFallback(t *testing.T) {
 		}
 		if err := owner.RequestStop(context.Background()); err != nil || calls != 1 {
 			t.Fatalf("duplicate shutdown = %v; guest calls=%d", err, calls)
+		}
+		if err := owner.Stop(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if got := owner.StopOutcome(); got.Request != wantPath || !got.Forced {
+			t.Fatalf("stop outcome after force = %+v, want request %q and forced", got, wantPath)
 		}
 	}
 }

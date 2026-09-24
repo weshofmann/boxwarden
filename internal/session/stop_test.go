@@ -75,6 +75,45 @@ func TestStopPersistsIntentBeforeExactSupervisorStop(t *testing.T) {
 	}
 }
 
+type outcomeSupervisorFake struct {
+	*startSupervisorFake
+	outcome supervisor.StopOutcome
+}
+
+func (f *outcomeSupervisorFake) StopWithOutcome(ctx context.Context, binding supervisor.Binding) (supervisor.StopOutcome, error) {
+	if err := f.Stop(ctx, binding); err != nil {
+		return supervisor.StopOutcome{}, err
+	}
+	return f.outcome, nil
+}
+
+func TestStopPersistsObservedOutcomeWithoutClaimingCleanVolume(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	created, err := creator.Create(context.Background(), "dev", ModeClean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	running := saveRunningRecord(t, domainConfig, created)
+	backendFake.SetObservation(backend.Observation{ObjectID: running.Backend.ObjectID, Exists: true, State: backend.ObjectRunning})
+	control := &outcomeSupervisorFake{
+		startSupervisorFake: &startSupervisorFake{stop: func(supervisor.Binding) error {
+			backendFake.SetObservation(backend.Observation{ObjectID: running.Backend.ObjectID, Exists: true, State: backend.ObjectStopped})
+			return nil
+		}},
+		outcome: supervisor.StopOutcome{Request: supervisor.StopRequestTartFallback, Forced: true},
+	}
+	service := newStartTestService(domainConfig, backendFake, control, time.Now, nil)
+	stopped, err := service.Stop(context.Background(), "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "request=tart_fallback forced=true workspace_cleanliness=unverified"
+	if stopped.Readiness.Diagnostic != want {
+		t.Fatalf("stop diagnostic = %q, want %q", stopped.Readiness.Diagnostic, want)
+	}
+	assertStoredRecord(t, domainConfig, stopped)
+}
+
 func TestStopFailureRetainsExactStoppingIntent(t *testing.T) {
 	domainConfig, backendFake, creator := createFixture(t)
 	created, err := creator.Create(context.Background(), "dev", ModeClean)

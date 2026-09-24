@@ -48,6 +48,7 @@ type controlResponse struct {
 	Packages []PackageVersion `json:"packages,omitempty"`
 	Identity *GuestIdentity   `json:"identity,omitempty"`
 	Import   *ImportResult    `json:"import,omitempty"`
+	Stop     *StopOutcome     `json:"stop,omitempty"`
 }
 
 // PackageInspector is an optional read-only capability of a live runtime
@@ -277,6 +278,13 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 	} else if request.Action == "stop" {
 		if err := stop(); err != nil {
 			response.Error = err.Error()
+		} else if reporter, ok := owner.(interface{ StopOutcome() StopOutcome }); ok {
+			outcome := reporter.StopOutcome()
+			if outcome.Valid() {
+				response.Stop = &outcome
+			} else {
+				response.Error = "invalid stop outcome"
+			}
 		}
 	} else if request.Action == "inspect_packages" {
 		before := owner.Snapshot(operationCtx)
@@ -474,6 +482,19 @@ func validateSnapshotFreshness(s Snapshot, now time.Time, maxAge time.Duration) 
 func (c *Client) Stop(ctx context.Context, binding Binding) error {
 	_, err := c.call(ctx, binding, "stop")
 	return err
+}
+
+// StopWithOutcome returns the exact owner's bounded stop observation. A
+// missing result is an error; callers must not silently infer graceful stop.
+func (c *Client) StopWithOutcome(ctx context.Context, binding Binding) (StopOutcome, error) {
+	response, err := c.call(ctx, binding, "stop")
+	if err != nil {
+		return StopOutcome{}, err
+	}
+	if response.Stop == nil || !response.Stop.Valid() {
+		return StopOutcome{}, fmt.Errorf("supervisor stop outcome is missing or invalid")
+	}
+	return *response.Stop, nil
 }
 func (c *Client) InspectPackages(ctx context.Context, binding Binding, names []string) ([]PackageVersion, error) {
 	request := controlRequest{Action: "inspect_packages", Packages: append([]string(nil), names...)}
