@@ -477,7 +477,11 @@ acceptance run and GUI/provider sign-in checks.
    guest SSH loss and false-stopped qualification remain open.
 2. Qualify or explicitly defer ambiguous post-final-rename export recovery;
    an occupied final directory still requires manual reconciliation.
-3. Run the fresh real acceptance matrix and publish the runnable build, exact
+3. Implement the missing public stopped-only sandbox delete-with-retain and
+   explicit synthetic host-project ingress surfaces under the closeout plan.
+   Neither command exists yet; prior reattachment used two retained sessions
+   and guest-created synthetic files.
+4. Run the fresh real acceptance matrix and publish the runnable build, exact
    source SHA, quickstart, synthetic demo, and limits. The full local Go suite,
    vet, and CLI build have passed; hosted CI remains unavailable.
 

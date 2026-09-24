@@ -239,3 +239,38 @@ preparation command before treating a prepared cache entry as verified. Prove
 live zero-NIC ext4 inspection, qualify automatic mount and rebuild/reattach,
 and complete controlled export on fresh synthetic resources before claiming
 the alpha ready.
+
+## Remaining public workflow closeout
+
+The acceptance audit after the full source-suite checkpoint found two missing
+public operations. They are separate integration units and must be qualified
+on synthetic data before the fresh end-to-end repetition.
+
+1. **Sandbox deletion with retained workspace.** Add a stopped-only public
+   `session delete` transition. Persist deleting intent before any backend
+   mutation; block ordinary start, rebuild, attachment, and export for that
+   session. Under the established volume-use → session → storage lock order,
+   prove every attached volume Available with no Use/Pending, then detach only
+   records bound to the exact session UUID while leaving their raw disks and
+   formatter journals untouched. Delete only the recorded stopped backend
+   object. A retry after a post-effect deletion error accepts absence only
+   with durable deleting intent, then completes exact metadata cleanup. Test
+   interruption at each boundary, conflicting volume state, false-stopped
+   observations, and unchanged workspace bytes. Review the destructive path
+   before real VM use.
+2. **Synthetic project ingress.** Add one explicit bounded host-to-guest copy
+   through pinned management SSH to an already mounted, READY workspace.
+   Scan an explicitly selected private host source as regular files and
+   directories with exact size/path bounds and no links; never expose a live
+   host tree or general command service. Bind the transfer to the exact
+   domain, session, backend, generation, volume, mount path and source digest.
+   Keep incomplete imports visibly retryable rather than claiming success from
+   guest output alone. Verify the pinned transfer mechanism on one disposable
+   guest before fixing its CLI contract, and review the new data boundary
+   before real use. Keep the original synthetic host source unchanged.
+3. **Fresh acceptance and handoff.** From committed source, create a separate
+   clean sandbox using the example recipe, import a tracked synthetic project,
+   check the GUI/application, stop/start, rebuild, delete while retaining the
+   workspace, attach it to a fresh replacement, and export selected files.
+   Record exact source/build SHA, observed outcomes, test commands, host limits,
+   and owner-only sign-in actions. Leave all owned VMs stopped.
