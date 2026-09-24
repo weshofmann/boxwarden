@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-24 00:18 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-24 00:23 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -17,9 +17,9 @@ resumable handoff if unfinished.
 | Recipe schema | real preparation exchange reached | Versioned strict JSON loader and exact ISO verification have passing tests. The fixed guest-only preparation helper validates package/argv payloads and executes exact argv with a closed environment in source tests. A real candidate reached the guest preparation completion marker before finalization, but no fresh-clone package inventory or cache admission followed |
 | Serial bootstrap and READY | real fresh clone verified | Corrected generic r2 candidate and public qualr2c clone completed serial bootstrap, host-key pin, certificate, strict SSH probe, time-zone convergence, READY, stop, restart to READY, and consistent stop. The management fixes are published |
 | Automatic base preparation | real guest preparation reached, qualification pending | The first attempt failed before VM creation on an unsupported OpenSSL mode. A fresh attempt with exact OpenSSL 3 passed installer and guest preparation, then reached finalization. A source audit found the finalizer rejected the public random run-ID format; the operator canceled through owned stop/wait cleanup. Its journal is failed, and no cache was admitted. The exact stopped candidate was privately archived and deleted after archive verification. The finalizer contract and regression fixture are published. A source-only reserve monitor now checks the state and Tart filesystems before mutation and through build/qualification |
-| Inspector capability | synthetic boot verified, ext4 runtime pending | Pinned Tart has no NIC-off mode. A signed Virtualization.framework guest booted with zero NICs, one read-only synthetic disk, and two serial channels; the guest reported loopback only and returned a typed report. A source-only 64 MiB ext4 fixture contract and guest read-only mount path have targeted tests, but no ext4 image or live mount proof exists. Real workspace export remains closed |
+| Inspector capability | synthetic boot verified, ext4 runtime pending | Pinned Tart has no NIC-off mode. A signed Virtualization.framework guest booted with zero NICs, one read-only synthetic disk, and two serial channels; the guest reported loopback only and returned a typed report. The formatter now produced a synthetic ext4 image, but the inspector has not mounted or validated it. The guest read-only mount path has targeted source tests. Real workspace export remains closed |
 | Graphical sandbox | same-clone GUI verified | Public qualr2c reached READY, GNOME Desktop and Firefox opened through Tart GUI, and Nautilus showed synthetic `bw-alpha-system-persist-r2c` in guest home after stop/restart. This is system-disk persistence only. No guest agent account sign-in or recipe-installed application has been observed |
-| Workspace lifecycle | source start/stop loop wired, real path pending | Volume-owned records, attachment/use transitions, private format journal, Linux ARM64 ext4 helper, and retained exact Tart disk/lock leases have targeted tests. Public start reserves exact Uses as a batch and persists Starting last; retries check them. The child rechecks Starting/Use/attachment/formatter evidence and passes retained leases to Tart. Stop retains Stopping through exact owner stop and batch Use release, then persists Stopped. The pinned Ubuntu initrd lacks e2fsck; preparation verifies Canonical's matching static ARM64 checker and appends it with a fixed formatter guest. A signed no-NIC VZ runner passed no-start synthetic preflight with one writable disk, two serial ports, and exact creating-journal admission; changed inode, journal state, and zero marker were rejected. The source runner still needs a live boot, Go Formatter integration, public attach/rebuild/reattach, and real storage qualification |
+| Workspace lifecycle | isolated synthetic formatter boot verified; production path pending | Volume-owned records, attachment/use transitions, private format journal, Linux ARM64 ext4 helper, and retained exact Tart disk/lock leases have targeted tests. Public start reserves exact Uses as a batch and persists Starting last; retries check them. The child rechecks Starting/Use/attachment/formatter evidence and passes retained leases to Tart. Stop retains Stopping through exact owner stop and batch Use release, then persists Stopped. The pinned Ubuntu initrd lacks e2fsck; preparation verifies Canonical's matching static ARM64 checker and appends it with a fixed formatter guest. A signed no-NIC VZ runner completed one fresh 64 MiB synthetic ext4 format, clean guest check, VM stop, runner reap, and host header/identity verification. Go Formatter integration, public attach/rebuild/reattach, and production volume qualification remain |
 | Controlled export | receiver implemented, acceptance closed | Host stream receiver has hostile fixtures and independent review; zero-NIC synthetic boot/transport passed, but ext4 inspection, volume lock admission, hostile exits, and real export remain unproved, so public export remains disabled |
 | Hosted CI | unavailable | Local verification is required; do not report CI passed |
 
@@ -56,7 +56,7 @@ SSH policy coexistence is pending.
 The formatter preparation check verified the pinned ISO, Canonical's
 `e2fsck-static` package SHA-256, the extracted static ARM64 checker, and the
 ARM64 guest build. The appended initrd preserves the source bytes. This is
-source preparation only; no formatter VM or ext4 volume has been run yet.
+source preparation with one subsequent synthetic VM proof, not a managed volume.
 The VZ runner's signed no-start preflight left the synthetic disk unchanged.
 An independent pre-boot review caught a broad caller-selected target and an
 unbound input bundle. The runner now requires an exact private `formatting`
@@ -65,8 +65,12 @@ digest-bound, signed preparation bundle from committed source. A further
 review restricted this exploratory runner to a fresh private synthetic probe
 root and closed extended ACL admission on every private target path; the
 negative no-start probes reject a caller-selected root and ACL-bearing
-journal. These source changes still await a boot and exact process-reap
-observation.
+journal. The retained private synthetic boot from published source returned a
+transaction-bound clean ext4 result. The host observed VM stop, runner reap,
+unchanged raw identity and size, changed disk digest, and a matching ext4
+superblock. Doctor, stopped Tart inventory, RAM, and disk headroom passed the
+alpha preflight. This does not qualify managed workspace creation or Tart
+attachment.
 
 The restricted Codex shell falsely fails Unix-socket tests and host doctor
 inspection with `operation not permitted`; the corresponding elevated checks
@@ -85,6 +89,8 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
   registered in the private alpha domain for engineering qualification only;
   no automatic prepared base is admitted.
 - Alpha workspace volumes: none.
+- Synthetic formatter proof: one retained private 64 MiB raw disk and bounded
+  boot evidence; it is not registered as a workspace volume.
 - Input cache: verified official Ubuntu 24.04.4 ARM64 Desktop ISO in the private
   alpha state tree; the first private candidate was installed from it.
 - Temporary services: installer and probe drivers completed; public qualr2c
@@ -95,9 +101,8 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 
 ## Next executable action
 
-Prepare the signed formatter bundle from this published source and run one
-retained synthetic no-NIC VM boot. Then wire the stopped/reaped VZ result into
-`workspaceformat.Formatter` and qualify one real ext4 raw volume,
+Wire the stopped/reaped VZ result into `workspaceformat.Formatter` with exact
+trusted state-root and artifact admission, then qualify one managed ext4 raw volume,
 then expose bounded public attachment and verify the source-wired start/stop
 loop against a disposable Tart clone. The parent writes Uses before Starting,
 the child checks exact formatter and disk evidence, and Stop clears Uses only
