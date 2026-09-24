@@ -134,17 +134,55 @@ guest or its package repository is trustworthy. These contracts and their
 recovery tests must be implemented before accepting recipes with packages or
 custom steps.
 
+## Workspace mount completion gate
+
+The first real managed volume is now formatted, host-qualified, and attached
+through two public start/stop generations. A manually mounted synthetic file
+survived restart, but the recorded guest path is not mounted automatically.
+The next implementation increment makes that path part of READY:
+
+1. The supervisor retains a sorted copy of the exact volume UUID, filesystem
+   UUID, and guest path from the already admitted Starting/Use records while
+   holding the volume leases. It never accepts a guest-selected host path or
+   disk identity.
+2. A typed, bounded pinned-management request asks the fixed guest helper to
+   mount only those ext4 UUIDs at validated `/home/boxwarden/workspaces/<name>`
+   paths. Repeating the request succeeds only when each exact mount already
+   exists; a different device, filesystem, or mountpoint fails without
+   substituting one. The helper uses direct argv, not a remote shell or
+   arbitrary host command.
+3. After mount convergence, READY requires a mount-bound probe. Every fresh
+   supervisor status snapshot repeats the same probe, so a later unmount is
+   non-ready. Guest mount reports are operational evidence; the host's raw
+   inode, journal, Use lock, backend observation, pin, and certificate remain
+   separate authority checks. On failure, retain the session's Starting or
+   drift state and the volume record; do not format or clear a live Use.
+4. Build and digest-lock the revised generic guest helper, prepare and qualify
+   a fresh base, then test first mount, same-system restart, system rebuild,
+   and reattachment to a replacement sandbox with synthetic data. The older
+   engineering candidate lacks this helper and cannot qualify this path.
+
+Source increments are guest protocol/validation, fixed guest mount/probe,
+host client/owner readiness, and fresh artifact/base qualification. Test wrong
+UUID, wrong path, duplicate input, already mounted correct and incorrect
+devices, guest helper failure, stale Use, and status after a later unmount.
+Review the new guest-to-host interface separately before real VM use.
+
 ## Current next action
 
 The corrected generic r2 candidate and a fresh public clone reached READY,
 displayed GNOME and Firefox, and passed same-system stop/restart persistence.
+One real managed ext4 volume was qualified and attached to that clone; two
+public READY generations retained a manually mounted synthetic file. Automatic
+mount and rebuild/reattach remain open.
 The source-only installer launcher, prepared-base cache identity, exact input
 staging, serial ACL admission, fixed guest preparation, fresh-clone qualifier,
 typed package and identity inspection, host/CA preflight, builder composition,
 production qualification lifecycle, ordered preparation composition, and the
 public alpha preparation command are source-verified. The current r2 candidate
-predates the latest tracked guest definition. Exercise a fresh candidate
-through the public command before treating a prepared cache entry as verified. Prove
-live zero-NIC ext4 inspection, wire the workspace formatter and lifecycle, and
-qualify rebuild/reattach and controlled export on fresh synthetic resources
-before claiming the alpha ready.
+predates the latest tracked guest definition. Implement the workspace mount
+completion gate above and exercise a fresh candidate through the public
+preparation command before treating a prepared cache entry as verified. Prove
+live zero-NIC ext4 inspection, qualify automatic mount and rebuild/reattach,
+and complete controlled export on fresh synthetic resources before claiming
+the alpha ready.
