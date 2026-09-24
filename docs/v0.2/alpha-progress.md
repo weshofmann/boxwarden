@@ -133,6 +133,15 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   app package run stopped in an unrelated workspace fixture at the host disk
   reserve; no full-suite result is claimed for this checkpoint. Session intent
   binding and phase execution are the current source work.
+- Recipe intent foundation: the complete validated recipe now has a canonical
+  SHA-256 identity separate from the reusable base preparation key. A private
+  content-addressed store publishes exact bytes durably without replacing an
+  existing object, then rechecks the digest on read. Tests show whitespace
+  changes preserve identity, changed session actions retain the base key but
+  change intent identity, source-file edits do not mutate a captured value,
+  and missing, linked, or corrupt stored objects are rejected. Recipe and
+  session package tests, targeted vet, formatting, and diff checks passed.
+  Create/rebuild records do not yet bind or execute this intent.
 - Stopped import export: with host headroom restored, the public whole-directory
   export reached a durable `snapshot-ready` transaction but the zero-NIC
   inspector produced no export header. Read-only inspection of both the exact

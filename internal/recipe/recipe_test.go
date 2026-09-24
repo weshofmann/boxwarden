@@ -35,6 +35,54 @@ func writeRecipe(t *testing.T, contents string) string {
 	return path
 }
 
+func TestCanonicalIntentSeparatesSessionActionsFromReusableBase(t *testing.T) {
+	path := writeRecipe(t, validRecipe)
+	before, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, firstDigest, err := CanonicalIntent(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+	changedSource := strings.Replace(validRecipe, "echo guest-only", "echo changed", 1)
+	if err := os.WriteFile(path, []byte(changedSource), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldAgain, oldDigest, err := CanonicalIntent(before)
+	if err != nil || oldDigest != firstDigest || string(oldAgain) != string(first) {
+		t.Fatalf("captured intent changed after source mutation: digest=%q err=%v", oldDigest, err)
+	}
+	after, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, secondDigest, err := CanonicalIntent(after)
+	if err != nil || secondDigest == firstDigest {
+		t.Fatalf("changed session action did not change intent identity: digest=%q err=%v", secondDigest, err)
+	}
+	const definitionSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	firstBase, err := PreparationKey(before, definitionSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondBase, err := PreparationKey(after, definitionSHA)
+	if err != nil || firstBase != secondBase {
+		t.Fatalf("session action changed reusable base identity: before=%q after=%q err=%v", firstBase, secondBase, err)
+	}
+	compact, err := Load(writeRecipe(t, strings.ReplaceAll(validRecipe, "\n", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, compactDigest, err := CanonicalIntent(compact)
+	if err != nil || compactDigest != firstDigest {
+		t.Fatalf("formatting changed canonical intent: digest=%q err=%v", compactDigest, err)
+	}
+}
+
 func TestLoadSupportedRecipeKeepsGuestOperationsExplicit(t *testing.T) {
 	got, err := Load(writeRecipe(t, validRecipe))
 	if err != nil {
