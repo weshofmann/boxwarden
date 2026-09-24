@@ -157,6 +157,12 @@ func loadImportJournal(stateRoot string, expectedDomain domain.ID, id string) (I
 	return loadImportJournalFromRoot(imports, expectedDomain, id)
 }
 
+// LoadImportJournal strictly reads one domain-bound import transaction. The
+// caller must separately admit the current source and live workspace binding.
+func LoadImportJournal(stateRoot string, expectedDomain domain.ID, id string) (ImportJournal, error) {
+	return loadImportJournal(stateRoot, expectedDomain, id)
+}
+
 func loadImportJournalFromRoot(imports *os.Root, expectedDomain domain.ID, id string) (ImportJournal, error) {
 	file, err := openPrivateFile(imports, id+".json")
 	if err != nil {

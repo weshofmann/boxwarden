@@ -29,13 +29,15 @@ const gracefulStopTimeout = 15 * time.Second
 const bootstrapTimeout = 4 * time.Minute
 const readyTimeout = 5 * time.Minute
 const inspectTimeout = 90 * time.Second
+const importTimeout = 11 * time.Minute
 
 type controlRequest struct {
-	Version   int       `json:"version"`
-	Action    string    `json:"action"`
-	Binding   Binding   `json:"binding"`
-	ExpiresAt time.Time `json:"expires_at"`
-	Packages  []string  `json:"packages,omitempty"`
+	Version   int             `json:"version"`
+	Action    string          `json:"action"`
+	Binding   Binding         `json:"binding"`
+	ExpiresAt time.Time       `json:"expires_at"`
+	Packages  []string        `json:"packages,omitempty"`
+	Import    *ImportTransfer `json:"import,omitempty"`
 }
 type controlResponse struct {
 	Version  int              `json:"version"`
@@ -44,6 +46,7 @@ type controlResponse struct {
 	Error    string           `json:"error"`
 	Packages []PackageVersion `json:"packages,omitempty"`
 	Identity *GuestIdentity   `json:"identity,omitempty"`
+	Import   *ImportResult    `json:"import,omitempty"`
 }
 
 // PackageInspector is an optional read-only capability of a live runtime
@@ -54,13 +57,16 @@ type PackageInspector interface {
 type IdentityInspector interface {
 	InspectIdentity(context.Context) (GuestIdentity, error)
 }
+type Importer interface {
+	TransferImport(context.Context, ImportTransfer) (ImportResult, error)
+}
 
 func validControlAction(request controlRequest) bool {
 	switch request.Action {
 	case "snapshot", "bootstrap", "ready", "stop", "inspect_identity":
-		return len(request.Packages) == 0
+		return len(request.Packages) == 0 && request.Import == nil
 	case "inspect_packages":
-		if len(request.Packages) == 0 || len(request.Packages) > 32 {
+		if request.Import != nil || len(request.Packages) == 0 || len(request.Packages) > 32 {
 			return false
 		}
 		seen := make(map[string]bool, len(request.Packages))
@@ -71,9 +77,52 @@ func validControlAction(request controlRequest) bool {
 			seen[name] = true
 		}
 		return true
+	case "transfer_import":
+		return len(request.Packages) == 0 && request.Import != nil && validImportTransfer(*request.Import)
 	default:
 		return false
 	}
+}
+
+func validImportTransfer(spec ImportTransfer) bool {
+	if !validControlUUID(spec.TransactionID) || !validControlUUID(spec.VolumeID) || !validControlUUID(spec.FilesystemUUID) || len(spec.SourceDigest) != 64 ||
+		!validControlMountPath(spec.MountPath) {
+		return false
+	}
+	for _, c := range spec.SourceDigest {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func validControlMountPath(path string) bool {
+	const prefix = "/home/boxwarden/workspaces/"
+	if !strings.HasPrefix(path, prefix) || len(path) <= len(prefix) || len(path) > len(prefix)+63 || path[len(prefix)] < 'a' || path[len(prefix)] > 'z' {
+		return false
+	}
+	for _, c := range path[len(prefix)+1:] {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func validControlUUID(value string) bool {
+	if len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' {
+		return false
+	}
+	for i, c := range value {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			continue
+		}
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func validControlPackageName(name string) bool {
@@ -182,6 +231,8 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 		serverDeadline = acceptedAt.Add(lifecycleTimeout + gracefulStopTimeout + controlIOTimeout)
 	} else if request.Action == "inspect_packages" || request.Action == "inspect_identity" {
 		serverDeadline = acceptedAt.Add(inspectTimeout)
+	} else if request.Action == "transfer_import" {
+		serverDeadline = acceptedAt.Add(importTimeout)
 	}
 	now := time.Now()
 	if request.ExpiresAt.IsZero() || !request.ExpiresAt.After(now) || request.ExpiresAt.After(serverDeadline) {
@@ -252,6 +303,20 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 				response.Identity = &identity
 			}
 		}
+	} else if request.Action == "transfer_import" {
+		before := owner.Snapshot(operationCtx)
+		if before.Binding != binding || !snapshotReady(before) {
+			response.Error = "exact runtime is not ready for import transfer"
+		} else if importer, ok := owner.(Importer); !ok {
+			response.Error = "import transfer is unavailable"
+		} else {
+			result, transferErr := importer.TransferImport(operationCtx, *request.Import)
+			if transferErr != nil {
+				response.Error = "import transfer failed: " + transferErr.Error()
+			} else {
+				response.Import = &result
+			}
+		}
 	}
 	response.Snapshot = owner.Snapshot(operationCtx)
 	if request.Action == "snapshot" && operationCtx.Err() != nil {
@@ -274,11 +339,22 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 			response.Error = "identity inspection result or readiness changed"
 		}
 	}
+	if request.Action == "transfer_import" && (!exactAfterBinding || !snapshotReady(response.Snapshot) || !validImportResult(*request.Import, response.Import)) {
+		response.Import = nil
+		if response.Error == "" {
+			response.Error = "import transfer result or readiness changed"
+		}
+	}
 	data, err = encodeControlResponse(response)
 	if err != nil {
 		return
 	}
 	_ = writeFrame(connection, data)
+}
+
+func validImportResult(spec ImportTransfer, result *ImportResult) bool {
+	return result != nil && result.Digest == spec.SourceDigest && result.FileCount > 0 && result.FileCount <= 256 &&
+		result.TotalBytes >= 0 && result.TotalBytes <= 16<<20 && result.RemotePath == spec.MountPath+"/boxwarden-import-"+spec.TransactionID
 }
 
 // Measure the complete encoded response: JSON escaping can expand each
@@ -428,10 +504,29 @@ func (c *Client) InspectIdentity(ctx context.Context, binding Binding) (GuestIde
 	}
 	return *response.Identity, nil
 }
+func (c *Client) TransferImport(ctx context.Context, binding Binding, spec ImportTransfer) (ImportResult, error) {
+	if !validImportTransfer(spec) {
+		return ImportResult{}, fmt.Errorf("invalid bounded import transfer")
+	}
+	response, err := c.callRequest(ctx, binding, controlRequest{Action: "transfer_import", Import: &spec})
+	if err != nil {
+		return ImportResult{}, err
+	}
+	if err := c.validateSnapshot(response.Snapshot); err != nil {
+		return ImportResult{}, err
+	}
+	if !snapshotReady(response.Snapshot) || !validImportResult(spec, response.Import) {
+		return ImportResult{}, fmt.Errorf("exact import transfer result is not ready or matching")
+	}
+	return *response.Import, nil
+}
 func (c *Client) call(ctx context.Context, binding Binding, action string) (controlResponse, error) {
 	return c.callWithPackages(ctx, binding, action, nil)
 }
 func (c *Client) callWithPackages(ctx context.Context, binding Binding, action string, packages []string) (controlResponse, error) {
+	return c.callRequest(ctx, binding, controlRequest{Action: action, Packages: packages})
+}
+func (c *Client) callRequest(ctx context.Context, binding Binding, requestBody controlRequest) (controlResponse, error) {
 	var response controlResponse
 	if err := ctx.Err(); err != nil {
 		return response, err
@@ -458,7 +553,11 @@ func (c *Client) callWithPackages(ctx context.Context, binding Binding, action s
 	if state != exactGenerationLive {
 		return response, fmt.Errorf("supervisor generation has no live owner")
 	}
+	if !validControlAction(requestBody) {
+		return response, fmt.Errorf("invalid control request")
+	}
 	timeout := controlIOTimeout
+	action := requestBody.Action
 	if action == "bootstrap" {
 		timeout = bootstrapTimeout
 	} else if action == "ready" {
@@ -467,6 +566,8 @@ func (c *Client) callWithPackages(ctx context.Context, binding Binding, action s
 		timeout += lifecycleTimeout + gracefulStopTimeout
 	} else if action == "inspect_packages" || action == "inspect_identity" {
 		timeout = inspectTimeout
+	} else if action == "transfer_import" {
+		timeout = importTimeout
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -484,7 +585,8 @@ func (c *Client) callWithPackages(ctx context.Context, binding Binding, action s
 	}
 	cancelIO := context.AfterFunc(operationCtx, func() { connection.SetDeadline(time.Now()) })
 	defer cancelIO()
-	data, err := json.Marshal(controlRequest{Version: 1, Action: action, Binding: binding, ExpiresAt: deadline.UTC(), Packages: packages})
+	requestBody.Version, requestBody.Binding, requestBody.ExpiresAt = 1, binding, deadline.UTC()
+	data, err := json.Marshal(requestBody)
 	if err != nil {
 		return response, err
 	}

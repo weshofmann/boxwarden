@@ -237,6 +237,61 @@ func TestReadyControlIsExactBoundAndReturnsFreshSnapshot(t *testing.T) {
 	}
 }
 
+type importRuntimeFixture struct {
+	runtimeFixture
+	imports atomic.Int32
+	result  ImportResult
+}
+
+func (o *importRuntimeFixture) TransferImport(_ context.Context, spec ImportTransfer) (ImportResult, error) {
+	o.imports.Add(1)
+	if spec.TransactionID != "039179af-8411-4790-9587-890922080236" {
+		return ImportResult{}, fmt.Errorf("unexpected transaction")
+	}
+	return o.result, nil
+}
+
+func TestImportControlRequiresExactTypedReadyGenerationAndMeasuredResult(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := ImportTransfer{TransactionID: "039179af-8411-4790-9587-890922080236", SourceDigest: strings.Repeat("a", 64),
+		VolumeID: "a7d43c10-344e-4617-812d-c8a1c7253631", FilesystemUUID: "691ec498-707b-47f0-a0f2-1869259068ed", MountPath: "/home/boxwarden/workspaces/project"}
+	owner := &importRuntimeFixture{runtimeFixture: runtimeFixture{done: make(chan struct{})}, result: ImportResult{Digest: spec.SourceDigest, FileCount: 1, TotalBytes: 9, RemotePath: spec.MountPath + "/boxwarden-import-" + spec.TransactionID}}
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(context.Background(), path, owner) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, MaxSnapshotAge: time.Minute}
+	if _, err := awaitSnapshot(context.Background(), request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	wrong := request.Binding
+	wrong.Generation = "foreign"
+	if _, err := client.TransferImport(context.Background(), wrong, spec); err == nil || owner.imports.Load() != 0 {
+		t.Fatalf("foreign generation reached import owner: %v", err)
+	}
+	bad := spec
+	bad.MountPath = "/home/boxwarden/workspaces/project/other"
+	if _, err := client.TransferImport(context.Background(), request.Binding, bad); err == nil || owner.imports.Load() != 0 {
+		t.Fatalf("untyped mount reached import owner: %v", err)
+	}
+	result, err := client.TransferImport(context.Background(), request.Binding, spec)
+	if err != nil || result != owner.result || owner.imports.Load() != 1 {
+		t.Fatalf("exact measured import = %#v, calls=%d, err=%v", result, owner.imports.Load(), err)
+	}
+	owner.result.Digest = strings.Repeat("b", 64)
+	if _, err := client.TransferImport(context.Background(), request.Binding, spec); err == nil || owner.imports.Load() != 2 {
+		t.Fatalf("mismatched owner result accepted: %v", err)
+	}
+	if err := client.Stop(context.Background(), request.Binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPackageInspectionUsesExactReadySupervisorAndTypedNames(t *testing.T) {
 	request := minimalRequest(t)
 	path, _, err := publishOrAdmitRequest(request)

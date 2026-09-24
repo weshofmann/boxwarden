@@ -53,6 +53,10 @@ type managementClient interface {
 	InspectIdentity(context.Context, sshx.Connection) (sshx.GuestIdentity, error)
 }
 
+type importClient interface {
+	TransferImport(context.Context, sshx.Connection, string, string, string, string) (sshx.ImportReceipt, error)
+}
+
 type dependencies struct {
 	host           session.RuntimeChecker
 	ca             session.CAValidator
@@ -64,6 +68,7 @@ type dependencies struct {
 	key            func(context.Context, string) (string, error)
 	issuer         func(sshx.CAIdentity) certificateIssuer
 	client         managementClient
+	importer       importClient
 	zone           func() (string, error)
 	now            func() time.Time
 	newNonce       func() (string, error)
@@ -89,7 +94,7 @@ type Owner struct {
 	serial                          serialRuntime
 	pins                            pinStore
 	rebuildJournal                  *session.RebuildJournal
-	rebuildRoot                     string
+	stateRoot, sessionName          string
 	bootstrapRequest                guestproto.SerialRequest
 	bootstrapResult                 guestproto.SerialResult
 	bootstrapResolved               bool
@@ -131,6 +136,7 @@ func NewOwner() *Owner {
 			return sshx.NewCertificateIssuer(ca, sshx.NewExecRunner(), sshx.OSIdentity{}, time.Now)
 		},
 		client:       sshx.NewClient(sshx.NewExecRunner()),
+		importer:     sshx.NewSFTPClient(),
 		zone:         timezonex.DetectHost,
 		now:          time.Now,
 		newNonce:     sshx.RandomUUID,
@@ -278,7 +284,7 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) (re
 	sshBinding := sshx.Binding{Domain: record.Domain, SessionID: record.ID, BackendKind: record.Backend.Kind, BackendObject: record.Backend.ObjectID}
 	o.mu.Lock()
 	o.binding, o.sshBinding, o.ca, o.observer, o.handle, o.serial, o.pins = binding, sshBinding, ca, observer, handle, serial, pins
-	o.rebuildJournal, o.rebuildRoot = rebuild, selected.StateRoot
+	o.rebuildJournal, o.stateRoot, o.sessionName = rebuild, selected.StateRoot, string(record.Name)
 	o.workspaceMounts = mounts
 	o.runtimePath, o.tartPath, o.tartHome = directory, admission.Host.TartExecutable, admission.Host.TartHome
 	o.mu.Unlock()
@@ -305,7 +311,7 @@ func (o *Owner) Bootstrap(ctx context.Context) error {
 	}
 	o.mu.Lock()
 	active, binding, sshBinding, ca, serial, pins := o.active, o.binding, o.sshBinding, o.ca, o.serial, o.pins
-	rebuild, rebuildRoot := o.rebuildJournal, o.rebuildRoot
+	rebuild, rebuildRoot := o.rebuildJournal, o.stateRoot
 	resolved, request, result := o.bootstrapResolved, o.bootstrapRequest, o.bootstrapResult
 	o.mu.Unlock()
 	if !active || serial == nil || pins == nil {

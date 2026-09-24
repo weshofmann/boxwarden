@@ -50,14 +50,24 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   in this private transport. No guest file transfer or durable verified
   journal phase is claimed. Remote file fsync and readback do not alone prove
   directory persistence after a guest crash.
+- Implemented for the next source checkpoint: a typed, bounded retained-owner
+  import control action keeps the current-generation SSH connection private.
+  The owner admits the durable transferring journal, current running session,
+  exact workspace Use, launch mount, and fresh READY evidence before and after
+  transfer. The host caller persists `transferring` before mutation, holds the
+  transition and session locks through the RPC while releasing the domain
+  storage lock, then rechecks source, journal, workspace, readiness, and
+  measured receipt. Tests cover foreign generation, invalid mount, changed
+  Use, false readback, readiness loss, and lock lifetime. Changed-package
+  tests, vet, and diff check pass; separate read-only review found no remaining
+  Critical/Important defect. The journal remains `transferring` after receipt.
 - Transport probe: the exact alpha-owned disposable sandbox reached READY;
   an exact-generation, host-key-pinned SFTP batch read its remote working
   directory successfully. The sandbox was stopped again. No project file was
   transferred; this is a capability probe, not ingress qualification.
-- Next: wire the transport to the retained supervisor's current-generation
-  connection under the exact transition binding, perform a real synthetic
-  transfer and readback, then define the durable verified journal gate and
-  public command. Fresh source-tracked acceptance follows.
+- Next: add the narrow public capture/begin/transfer command, exercise one
+  real synthetic guest transfer and readback, then define the durable verified
+  journal gate. Fresh source-tracked acceptance follows.
 - Limits: hosted CI, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh
   acceptance remain open. No human action is currently needed.

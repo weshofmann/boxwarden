@@ -44,6 +44,24 @@ type GuestIdentity struct {
 	MachineID string `json:"machine_id"`
 	Hostname  string `json:"hostname"`
 }
+
+// ImportTransfer binds one private host snapshot to an exact mounted
+// workspace. The retained owner admits the journal and performs the transfer.
+type ImportTransfer struct {
+	TransactionID  string `json:"transaction_id"`
+	SourceDigest   string `json:"source_digest"`
+	VolumeID       string `json:"volume_id"`
+	FilesystemUUID string `json:"filesystem_uuid"`
+	MountPath      string `json:"mount_path"`
+}
+
+// ImportResult is a measured host readback, not durable guest persistence.
+type ImportResult struct {
+	Digest     string `json:"digest"`
+	FileCount  int    `json:"file_count"`
+	TotalBytes int64  `json:"total_bytes"`
+	RemotePath string `json:"remote_path"`
+}
 type Controller interface {
 	Snapshot(context.Context, Binding) (Snapshot, error)
 	Bootstrap(context.Context, Binding) (Snapshot, error)
