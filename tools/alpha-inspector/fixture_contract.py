@@ -39,19 +39,21 @@ def fixture_request():
     }
 
 
-def check_ext4_structure(image):
+def check_ext4_structure(image, expected_uuid=FIXTURE_UUID):
     if len(image) != SIZE:
         raise ValueError("synthetic ext4 image size mismatch")
+    if not isinstance(expected_uuid, str) or re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", expected_uuid) is None:
+        raise ValueError("invalid expected ext4 UUID")
     sb = memoryview(image)[1024:2048]
     if sb[0x38:0x3a].tobytes() != b"\x53\xef":
         raise ValueError("ext4 magic mismatch")
-    if sb[0x68:0x78].tobytes() != bytes.fromhex(FIXTURE_UUID.replace("-", "")):
+    if sb[0x68:0x78].tobytes() != bytes.fromhex(expected_uuid.replace("-", "")):
         raise ValueError("synthetic ext4 UUID mismatch")
     if not sb[0x3a] & 1 or not sb[0x5c] & 4 or not sb[0x60] & 0x40:
         raise ValueError("synthetic ext4 is not clean, journaled, and extent-based")
 
 
-def copy_admitted_fixture(source: Path, destination: Path, expected_sha256: str):
+def copy_admitted_fixture(source: Path, destination: Path, expected_sha256: str, expected_uuid=FIXTURE_UUID):
     source = source.absolute()
     destination = destination.absolute()
     if (source.parent.parent != Path("/private/tmp")
@@ -88,7 +90,7 @@ def copy_admitted_fixture(source: Path, destination: Path, expected_sha256: str)
         os.close(descriptor)
     if hashlib.sha256(image).hexdigest() != expected_sha256:
         raise ValueError("fixture source digest mismatch")
-    check_ext4_structure(image)
+    check_ext4_structure(image, expected_uuid)
     output = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
         with os.fdopen(output, "wb") as handle:
@@ -104,6 +106,7 @@ if __name__ == "__main__":
     if len(sys.argv) == 2 and sys.argv[1] == "--request":
         print(json.dumps(fixture_request(), sort_keys=True))
         raise SystemExit(0)
-    if len(sys.argv) != 4:
-        raise SystemExit("usage: fixture_contract.py --request | <private-synthetic-ext4.raw> <destination-synthetic.raw> <sha256>")
-    copy_admitted_fixture(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3])
+    if len(sys.argv) not in (4, 5):
+        raise SystemExit("usage: fixture_contract.py --request | <private-synthetic-ext4.raw> <destination-synthetic.raw> <sha256> [expected-uuid]")
+    copy_admitted_fixture(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3],
+                          sys.argv[4] if len(sys.argv) == 5 else FIXTURE_UUID)

@@ -21,6 +21,8 @@ type bootReport struct {
 	ReadOnly          bool     `json:"read_only"`
 	FixtureUUID       string   `json:"fixture_uuid,omitempty"`
 	FixtureContent    string   `json:"fixture_content,omitempty"`
+	CopyFileSHA256    string   `json:"copy_file_sha256,omitempty"`
+	CopyFileSize      int64    `json:"copy_file_size,omitempty"`
 	MountOptions      []string `json:"mount_options,omitempty"`
 }
 
@@ -112,7 +114,7 @@ func runProof() error {
 		NetworkInterfaces: []string{"lo"},
 		ReadOnly:          true,
 	}
-	if mode == "ext4" {
+	if mode == "ext4" || mode == "copy" {
 		sectors, readErr := os.ReadFile("/sys/block/vda/size")
 		if readErr != nil {
 			return readErr
@@ -131,15 +133,27 @@ func runProof() error {
 		if readErr != nil || closeErr != nil {
 			return fmt.Errorf("read ext4 superblock: %v, close: %v", readErr, closeErr)
 		}
-		if err := validateExt4FixtureSuperblock(superblock[:]); err != nil {
-			return err
-		}
-		content, err := mountAndReadExt4Fixture()
+		uuid, err := inspectExt4Superblock(superblock[:])
 		if err != nil {
 			return err
 		}
-		report.FixtureUUID = fixtureUUID
-		report.FixtureContent = string(content)
+		if mode == "ext4" {
+			if uuid != fixtureUUID {
+				return fmt.Errorf("synthetic filesystem UUID mismatch")
+			}
+			content, err := mountAndReadExt4Fixture()
+			if err != nil {
+				return err
+			}
+			report.FixtureContent = string(content)
+		} else {
+			digest, size, err := mountAndHashExt4Copy()
+			if err != nil {
+				return err
+			}
+			report.CopyFileSHA256, report.CopyFileSize = digest, size
+		}
+		report.FixtureUUID = uuid
 		report.MountOptions = []string{"ro", "noload", "nodev", "nosuid", "noexec"}
 	}
 	body, err := json.Marshal(report)
@@ -162,6 +176,25 @@ func runProof() error {
 }
 
 func mountAndReadExt4Fixture() (content []byte, err error) {
+	return withReadOnlyExt4(func(target string) ([]byte, error) {
+		return readAllowedFixtureFile(target + "/proof.txt")
+	})
+}
+
+func mountAndHashExt4Copy() (digest string, size int64, err error) {
+	var content []byte
+	content, err = withReadOnlyExt4(func(target string) ([]byte, error) {
+		hash, length, readErr := readAllowedCopyFile(target + "/boxwarden-alpha-synthetic.txt")
+		if readErr != nil {
+			return nil, readErr
+		}
+		size = length
+		return []byte(hash), nil
+	})
+	return string(content), size, err
+}
+
+func withReadOnlyExt4(read func(string) ([]byte, error)) (content []byte, err error) {
 	const target = "/mnt/alpha-fixture"
 	if err := os.MkdirAll(target, 0o700); err != nil {
 		return nil, err
@@ -184,7 +217,7 @@ func mountAndReadExt4Fixture() (content []byte, err error) {
 	if uint64(state.Flags)&0x0f != 0x0f {
 		return nil, fmt.Errorf("synthetic ext4 mount flags are not restrictive")
 	}
-	return readAllowedFixtureFile(target + "/proof.txt")
+	return read(target)
 }
 
 func consoleLine(message string) {

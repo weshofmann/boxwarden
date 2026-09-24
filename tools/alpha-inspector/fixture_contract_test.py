@@ -36,6 +36,16 @@ class FixtureContractTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 check_ext4_structure(changed)
 
+    def test_copy_structure_requires_supplied_uuid(self):
+        image = structural_image()
+        copy_uuid = "e915855e-801c-405b-9fb8-7c8b62bd8f45"
+        image[1024 + 0x68:1024 + 0x78] = bytes.fromhex(copy_uuid.replace("-", ""))
+        check_ext4_structure(image, copy_uuid)
+        with self.assertRaises(ValueError):
+            check_ext4_structure(image)
+        with self.assertRaises(ValueError):
+            check_ext4_structure(image, "invalid")
+
     def test_copy_admits_only_private_synthetic_source(self):
         image = structural_image()
         with tempfile.TemporaryDirectory(prefix="boxwarden-inspector-fixture.", dir="/private/tmp") as source_dir:

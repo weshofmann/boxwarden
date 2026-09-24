@@ -69,7 +69,7 @@ def safe_file(root, relative):
     return path, info
 
 
-def parse_stream(stream, transaction_hex, fixture_kind="zero", disk_prefix_sha=None):
+def parse_stream(stream, transaction_hex, fixture_kind="zero", disk_prefix_sha=None, copy_expectation=None):
     if len(stream) > MAX_STREAM or stream[:6] != b"BWEX\x00\x01" or len(stream) < 22:
         raise ValueError("invalid stream header or size")
     if stream[6:22] != bytes.fromhex(transaction_hex):
@@ -116,6 +116,17 @@ def parse_stream(stream, transaction_hex, fixture_kind="zero", disk_prefix_sha=N
             "fixture_content": FIXTURE_CONTENT.decode("ascii"),
             "mount_options": ["ro", "noload", "nodev", "nosuid", "noexec"],
         }
+    elif fixture_kind == "copy":
+        if not isinstance(copy_expectation, dict) or set(copy_expectation) != {"uuid", "file_sha256", "file_size"}:
+            raise ValueError("missing exact synthetic copy expectation")
+        expected = {
+            "disk_prefix_sha256": disk_prefix_sha,
+            "network_interfaces": ["lo"], "read_only": True,
+            "fixture_uuid": copy_expectation["uuid"],
+            "copy_file_sha256": copy_expectation["file_sha256"],
+            "copy_file_size": copy_expectation["file_size"],
+            "mount_options": ["ro", "noload", "nodev", "nosuid", "noexec"],
+        }
     else:
         raise ValueError("unknown synthetic fixture kind")
     if report != expected:
@@ -145,9 +156,20 @@ def admit(root):
     if set(manifest.get("digests", {})) != set(FILES):
         raise ValueError("unexpected digest inventory")
     fixture_kind = manifest.get("fixture_kind", "zero")
-    if fixture_kind not in ("zero", "ext4"):
+    if fixture_kind not in ("zero", "ext4", "copy"):
         raise ValueError("unknown fixture kind")
-    expected_disk_size = EXT4_SIZE if fixture_kind == "ext4" else 8 * 1024 * 1024
+    expected_disk_size = EXT4_SIZE if fixture_kind in ("ext4", "copy") else 8 * 1024 * 1024
+    copy_expectation = manifest.get("copy_expectation")
+    if fixture_kind == "copy":
+        if (not isinstance(copy_expectation, dict)
+                or set(copy_expectation) != {"uuid", "file_sha256", "file_size"}
+                or re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", str(copy_expectation["uuid"])) is None
+                or re.fullmatch(r"[0-9a-f]{64}", str(copy_expectation["file_sha256"])) is None
+                or type(copy_expectation["file_size"]) is not int
+                or not 1 <= copy_expectation["file_size"] <= 4096):
+            raise ValueError("invalid synthetic copy expectation")
+    elif copy_expectation is not None:
+        raise ValueError("unexpected synthetic copy expectation")
     if (manifest["digests"]["casper/vmlinuz"] != SOURCE_KERNEL_SHA256
             or manifest["digests"]["kernel-image"] != IMAGE_KERNEL_SHA256):
         raise ValueError("unpinned kernel source or Image digest")
@@ -160,8 +182,9 @@ def admit(root):
                 manifest["disk_device"], manifest["disk_inode"], expected_disk_size
             ):
                 raise ValueError("synthetic disk identity changed")
-    if fixture_kind == "ext4":
-        check_ext4_structure((root / "synthetic.raw").read_bytes())
+    if fixture_kind in ("ext4", "copy"):
+        check_ext4_structure((root / "synthetic.raw").read_bytes(),
+                             copy_expectation["uuid"] if fixture_kind == "copy" else FIXTURE_UUID)
     check_kernel_provenance(root / "casper/vmlinuz", root / "kernel-image",
                             SOURCE_KERNEL_SHA256, IMAGE_KERNEL_SHA256)
     subprocess.run(["codesign", "--verify", "--strict", str(root / "alpha-inspector")], check=True,
@@ -174,7 +197,7 @@ def admit(root):
     physical = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"], timeout=5))
     if physical < 4 * 1024**3:
         raise ValueError("2 GiB guest exceeds half of physical RAM")
-    preflight_kind = "preflight-ext4" if fixture_kind == "ext4" else "preflight"
+    preflight_kind = {"ext4": "preflight-ext4", "copy": "preflight-copy"}.get(fixture_kind, "preflight")
     command = [str(root / "alpha-inspector"), preflight_kind, str(root / "kernel-image"),
                str(root / "inspector-initrd"), str(root / "synthetic.raw"), transaction]
     observed = json.loads(subprocess.check_output(command, timeout=15))
@@ -189,7 +212,7 @@ def create_output(path):
 
 def run(root, manifest, preflight_command):
     command = preflight_command.copy()
-    command[1] = "boot-ext4" if manifest.get("fixture_kind", "zero") == "ext4" else "boot-probe"
+    command[1] = {"ext4": "boot-ext4", "copy": "boot-copy"}.get(manifest.get("fixture_kind", "zero"), "boot-probe")
     disk = root / "synthetic.raw"
     before = sha256_file(disk)
     timeout = False
@@ -227,7 +250,8 @@ def run(root, manifest, preflight_command):
     with disk.open("rb") as handle:
         prefix_sha = hashlib.sha256(handle.read(4096)).hexdigest()
     report = parse_stream(stream_bytes, manifest["transaction"],
-                          manifest.get("fixture_kind", "zero"), prefix_sha)
+                          manifest.get("fixture_kind", "zero"), prefix_sha,
+                          manifest.get("copy_expectation"))
     return {"host": evidence, "guest": report, "disk_unchanged": True, "helper_reaped": True}
 
 
@@ -241,7 +265,7 @@ def main():
     root = args.directory.absolute()
     manifest, preflight, available, floor = admit(root)
     if args.preflight_only:
-        preflight[1] = "boot-ext4" if manifest.get("fixture_kind", "zero") == "ext4" else "boot-probe"
+        preflight[1] = {"ext4": "boot-ext4", "copy": "boot-copy"}.get(manifest.get("fixture_kind", "zero"), "boot-probe")
         print(json.dumps({"vm_started": False, "launch_argv": preflight,
                           "disk_sha256": manifest["digests"]["synthetic.raw"],
                           "free_bytes": available, "free_floor_bytes": floor,

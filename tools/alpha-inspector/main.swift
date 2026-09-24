@@ -34,7 +34,7 @@ private enum ProbeFailure: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .usage:
-            return "usage: alpha-inspector probe <kernel> <initrd> <synthetic.raw> | preflight|boot-probe|preflight-ext4|boot-ext4 <kernel> <initrd> <synthetic.raw> <transaction-hex>"
+            return "usage: alpha-inspector probe <kernel> <initrd> <synthetic.raw> | preflight|boot-probe|preflight-ext4|boot-ext4|preflight-copy|boot-copy <kernel> <initrd> <synthetic.raw> <transaction-hex>"
         case .unsafeDisk:
             return "probe accepts only a fixed 8 MiB zero or 64 MiB ext4 synthetic.raw under a /private/tmp/boxwarden-inspector-probe.* or boxwarden-inspector-boot.* directory"
         case .unexpectedConfiguration:
@@ -68,12 +68,13 @@ struct PreparedConfiguration {
     let exportOutput: Pipe
 }
 
-func prepareConfiguration(kernelURL: URL, initrdURL: URL, diskURL: URL, transactionHex: String?, ext4Fixture: Bool = false) throws -> PreparedConfiguration {
+func prepareConfiguration(kernelURL: URL, initrdURL: URL, diskURL: URL, transactionHex: String?, ext4Fixture: Bool = false, copyFixture: Bool = false) throws -> PreparedConfiguration {
+    guard !(ext4Fixture && copyFixture) else { throw ProbeFailure.unexpectedConfiguration }
     try requireSyntheticDisk(diskURL)
     let diskValues = try diskURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
     guard diskValues.isRegularFile == true,
           diskValues.isSymbolicLink != true,
-          diskValues.fileSize == (ext4Fixture ? 64 : 8) * 1024 * 1024 else {
+          diskValues.fileSize == ((ext4Fixture || copyFixture) ? 64 : 8) * 1024 * 1024 else {
         throw ProbeFailure.unsafeDisk
     }
 
@@ -90,7 +91,7 @@ func prepareConfiguration(kernelURL: URL, initrdURL: URL, diskURL: URL, transact
               transactionHex.utf8.allSatisfy({ ($0 >= 48 && $0 <= 57) || ($0 >= 97 && $0 <= 102) }) else {
             throw ProbeFailure.invalidTransaction
         }
-        let selector = ext4Fixture ? " alpha_fixture=ext4" : ""
+        let selector = ext4Fixture ? " alpha_fixture=ext4" : (copyFixture ? " alpha_fixture=copy" : "")
         bootLoader.commandLine = "console=hvc0 rdinit=/alpha-probe alpha_tx=\(transactionHex)\(selector)"
     } else {
         bootLoader.commandLine = "console=hvc0"
@@ -141,8 +142,8 @@ func prepareConfiguration(kernelURL: URL, initrdURL: URL, diskURL: URL, transact
     )
 }
 
-private func probe(kernelURL: URL, initrdURL: URL, diskURL: URL, transactionHex: String? = nil, ext4Fixture: Bool = false) throws -> ProbeEvidence {
-    let prepared = try prepareConfiguration(kernelURL: kernelURL, initrdURL: initrdURL, diskURL: diskURL, transactionHex: transactionHex, ext4Fixture: ext4Fixture)
+private func probe(kernelURL: URL, initrdURL: URL, diskURL: URL, transactionHex: String? = nil, ext4Fixture: Bool = false, copyFixture: Bool = false) throws -> ProbeEvidence {
+    let prepared = try prepareConfiguration(kernelURL: kernelURL, initrdURL: initrdURL, diskURL: diskURL, transactionHex: transactionHex, ext4Fixture: ext4Fixture, copyFixture: copyFixture)
     let virtualMachine = VZVirtualMachine(configuration: prepared.configuration)
     guard virtualMachine.networkDevices.isEmpty, virtualMachine.state == .stopped else {
         throw ProbeFailure.unexpectedConfiguration
@@ -173,26 +174,28 @@ do {
         let output = try encoder.encode(evidence)
         FileHandle.standardOutput.write(output)
         FileHandle.standardOutput.write(Data([0x0a]))
-    } else if CommandLine.arguments.count == 6, ["preflight", "preflight-ext4"].contains(CommandLine.arguments[1]) {
+    } else if CommandLine.arguments.count == 6, ["preflight", "preflight-ext4", "preflight-copy"].contains(CommandLine.arguments[1]) {
         let evidence = try probe(
             kernelURL: URL(fileURLWithPath: CommandLine.arguments[2]),
             initrdURL: URL(fileURLWithPath: CommandLine.arguments[3]),
             diskURL: URL(fileURLWithPath: CommandLine.arguments[4]),
             transactionHex: CommandLine.arguments[5],
-            ext4Fixture: CommandLine.arguments[1] == "preflight-ext4"
+            ext4Fixture: CommandLine.arguments[1] == "preflight-ext4",
+            copyFixture: CommandLine.arguments[1] == "preflight-copy"
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let output = try encoder.encode(evidence)
         FileHandle.standardOutput.write(output)
         FileHandle.standardOutput.write(Data([0x0a]))
-    } else if CommandLine.arguments.count == 6, ["boot-probe", "boot-ext4"].contains(CommandLine.arguments[1]) {
+    } else if CommandLine.arguments.count == 6, ["boot-probe", "boot-ext4", "boot-copy"].contains(CommandLine.arguments[1]) {
         let prepared = try prepareConfiguration(
             kernelURL: URL(fileURLWithPath: CommandLine.arguments[2]),
             initrdURL: URL(fileURLWithPath: CommandLine.arguments[3]),
             diskURL: URL(fileURLWithPath: CommandLine.arguments[4]),
             transactionHex: CommandLine.arguments[5],
-            ext4Fixture: CommandLine.arguments[1] == "boot-ext4"
+            ext4Fixture: CommandLine.arguments[1] == "boot-ext4",
+            copyFixture: CommandLine.arguments[1] == "boot-copy"
         )
         try bootProof(prepared)
     } else {

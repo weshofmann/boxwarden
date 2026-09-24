@@ -77,6 +77,36 @@ class StreamTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_stream(stream_for(json.dumps(report).encode()), transaction.hex(), "ext4", "a" * 64)
 
+    def test_copy_report_requires_exact_expected_uuid_and_file_digest(self):
+        transaction = bytes.fromhex("04" * 16)
+        expected = {
+            "disk_prefix_sha256": "b" * 64,
+            "network_interfaces": ["lo"],
+            "read_only": True,
+            "fixture_uuid": "e915855e-801c-405b-9fb8-7c8b62bd8f45",
+            "copy_file_sha256": "c" * 64,
+            "copy_file_size": 57,
+            "mount_options": ["ro", "noload", "nodev", "nosuid", "noexec"],
+        }
+
+        def stream_for(report):
+            body = json.dumps(report, separators=(",", ":")).encode()
+            def frame(kind, path=b"", chunk=b"", declared=0, digest=bytes(32)):
+                return struct.pack(">BHIQ", kind, len(path), len(chunk), declared) + digest + path + chunk
+            return (b"BWEX\x00\x01" + transaction
+                    + frame(2, b"report.json", declared=len(body))
+                    + frame(3, chunk=body)
+                    + frame(4, digest=hashlib.sha256(body).digest())
+                    + frame(5, declared=len(body)))
+
+        self.assertEqual(parse_stream(stream_for(expected), transaction.hex(), "copy", "b" * 64,
+                                      {"uuid": expected["fixture_uuid"], "file_sha256": "c" * 64,
+                                       "file_size": 57}), expected)
+        with self.assertRaises(ValueError):
+            parse_stream(stream_for({**expected, "copy_file_sha256": "d" * 64}), transaction.hex(),
+                         "copy", "b" * 64, {"uuid": expected["fixture_uuid"],
+                                           "file_sha256": "c" * 64, "file_size": 57})
+
 
 if __name__ == "__main__":
     unittest.main()

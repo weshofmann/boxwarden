@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/hex"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ func TestFixtureModeIsExplicit(t *testing.T) {
 	}{
 		{"console=hvc0", "zero", false},
 		{"console=hvc0 alpha_fixture=ext4", "ext4", false},
+		{"console=hvc0 alpha_fixture=copy", "copy", false},
 		{"alpha_fixture=ext4 alpha_fixture=ext4", "", true},
 		{"alpha_fixture=other", "", true},
 	} {
@@ -23,6 +25,22 @@ func TestFixtureModeIsExplicit(t *testing.T) {
 		if (err != nil) != tc.bad || got != tc.want {
 			t.Fatalf("parseFixtureMode(%q) = %q, %v", tc.command, got, err)
 		}
+	}
+}
+
+func TestCopySuperblockReportsExactUUIDWithoutChangingFixturePin(t *testing.T) {
+	superblock := make([]byte, 1024)
+	copy(superblock[0x38:], []byte{0x53, 0xef})
+	copy(superblock[0x68:], []byte{0xe9, 0x15, 0x85, 0x5e, 0x80, 0x1c, 0x40, 0x5b, 0x9f, 0xb8, 0x7c, 0x8b, 0x62, 0xbd, 0x8f, 0x45})
+	superblock[0x5c] = 0x04
+	superblock[0x60] = 0x40
+	superblock[0x3a] = 0x01
+	uuid, err := inspectExt4Superblock(superblock)
+	if err != nil || uuid != "e915855e-801c-405b-9fb8-7c8b62bd8f45" {
+		t.Fatalf("inspect copy superblock = %q, %v", uuid, err)
+	}
+	if err := validateExt4FixtureSuperblock(superblock); err == nil {
+		t.Fatal("fixed fixture unexpectedly accepted the copy UUID")
 	}
 }
 
@@ -75,5 +93,34 @@ func TestAllowedFixtureFileRejectsChangedBytesAndSymlink(t *testing.T) {
 	}
 	if _, err := readAllowedFixtureFile(file); err == nil {
 		t.Fatal("accepted symlink")
+	}
+}
+
+func TestCopyFileReadIsBoundedAndRefusesSymlink(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "boxwarden-alpha-synthetic.txt")
+	data := []byte("synthetic persistence proof\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := sha256.Sum256(data)
+	digest, size, err := readAllowedCopyFile(path)
+	if err != nil || digest != hex.EncodeToString(want[:]) || size != int64(len(data)) {
+		t.Fatalf("copy file = %s, %d, %v", digest, size, err)
+	}
+	if err := os.WriteFile(path, bytes.Repeat([]byte("x"), 4097), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := readAllowedCopyFile(path); err == nil {
+		t.Fatal("accepted oversized copy proof")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/etc/passwd", path); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := readAllowedCopyFile(path); err == nil {
+		t.Fatal("accepted copy proof symlink")
 	}
 }

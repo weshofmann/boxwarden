@@ -32,7 +32,26 @@ GOCACHE="$probe_dir/gocache" GOMODCACHE="$probe_dir/modcache" GOTOOLCHAIN=local 
 python3 "$script_dir/pack_initramfs.py" \
   "$probe_dir/casper/initrd" "$probe_dir/alpha-probe" "$probe_dir/inspector-initrd"
 fixture_kind=zero
-if [[ -n "${BOXWARDEN_ALPHA_EXT4_FIXTURE_SOURCE:-}" || -n "${BOXWARDEN_ALPHA_EXT4_FIXTURE_SHA256:-}" ]]; then
+copy_uuid=''
+copy_file_sha=''
+copy_file_size=''
+if [[ -n "${BOXWARDEN_ALPHA_EXT4_COPY_SOURCE:-}" || -n "${BOXWARDEN_ALPHA_EXT4_COPY_SHA256:-}" || -n "${BOXWARDEN_ALPHA_EXT4_COPY_UUID:-}" || -n "${BOXWARDEN_ALPHA_EXT4_COPY_FILE_SHA256:-}" || -n "${BOXWARDEN_ALPHA_EXT4_COPY_FILE_SIZE:-}" ]]; then
+  if [[ -n "${BOXWARDEN_ALPHA_EXT4_FIXTURE_SOURCE:-}" || -n "${BOXWARDEN_ALPHA_EXT4_FIXTURE_SHA256:-}" ]]; then
+    echo 'fixed ext4 fixture and synthetic copy modes cannot be combined' >&2
+    exit 2
+  fi
+  if [[ -z "${BOXWARDEN_ALPHA_EXT4_COPY_SOURCE:-}" || -z "${BOXWARDEN_ALPHA_EXT4_COPY_SHA256:-}" || -z "${BOXWARDEN_ALPHA_EXT4_COPY_UUID:-}" || -z "${BOXWARDEN_ALPHA_EXT4_COPY_FILE_SHA256:-}" || -z "${BOXWARDEN_ALPHA_EXT4_COPY_FILE_SIZE:-}" ]]; then
+    echo 'synthetic copy mode requires source, disk SHA-256, UUID, file SHA-256, and file size' >&2
+    exit 2
+  fi
+  copy_uuid=$BOXWARDEN_ALPHA_EXT4_COPY_UUID
+  copy_file_sha=$BOXWARDEN_ALPHA_EXT4_COPY_FILE_SHA256
+  copy_file_size=$BOXWARDEN_ALPHA_EXT4_COPY_FILE_SIZE
+  python3 "$script_dir/fixture_contract.py" \
+    "$BOXWARDEN_ALPHA_EXT4_COPY_SOURCE" "$probe_dir/synthetic.raw" \
+    "$BOXWARDEN_ALPHA_EXT4_COPY_SHA256" "$copy_uuid"
+  fixture_kind=copy
+elif [[ -n "${BOXWARDEN_ALPHA_EXT4_FIXTURE_SOURCE:-}" || -n "${BOXWARDEN_ALPHA_EXT4_FIXTURE_SHA256:-}" ]]; then
   if [[ -z "${BOXWARDEN_ALPHA_EXT4_FIXTURE_SOURCE:-}" || -z "${BOXWARDEN_ALPHA_EXT4_FIXTURE_SHA256:-}" ]]; then
     echo 'both ext4 fixture source and SHA-256 are required' >&2
     exit 2
@@ -72,20 +91,30 @@ codesign --verify --strict "$probe_dir/alpha-inspector"
 transaction_hex="$(cat "$probe_dir/transaction.txt")"
 preflight_command=preflight
 if [[ "$fixture_kind" == ext4 ]]; then preflight_command=preflight-ext4; fi
+if [[ "$fixture_kind" == copy ]]; then preflight_command=preflight-copy; fi
 "$probe_dir/alpha-inspector" "$preflight_command" \
   "$probe_dir/kernel-image" \
   "$probe_dir/inspector-initrd" \
   "$probe_dir/synthetic.raw" \
   "$transaction_hex" > "$probe_dir/preflight.json"
 
-python3 - "$probe_dir" "$fixture_kind" <<'PY'
+python3 - "$probe_dir" "$fixture_kind" "$copy_uuid" "$copy_file_sha" "$copy_file_size" <<'PY'
 import hashlib
 import json
 from pathlib import Path
+import re
 import sys
 
 root = Path(sys.argv[1])
 fixture_kind = sys.argv[2]
+copy_uuid, copy_file_sha, copy_file_size = sys.argv[3:]
+if fixture_kind == "copy":
+    if (re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", copy_uuid) is None
+            or re.fullmatch(r"[0-9a-f]{64}", copy_file_sha) is None
+            or not copy_file_size.isdecimal() or not 1 <= int(copy_file_size) <= 4096):
+        raise SystemExit("invalid exact synthetic copy expectation")
+elif copy_uuid or copy_file_sha or copy_file_size:
+    raise SystemExit("unexpected synthetic copy expectation")
 preflight = json.loads((root / "preflight.json").read_text(encoding="utf-8"))
 expected = {
     "validated": True,
@@ -122,6 +151,12 @@ manifest = {
     "preflight": preflight,
     "vm_started": False,
 }
+if fixture_kind == "copy":
+    manifest["copy_expectation"] = {
+        "uuid": copy_uuid,
+        "file_sha256": copy_file_sha,
+        "file_size": int(copy_file_size),
+    }
 with (root / "manifest.json").open("x", encoding="utf-8") as handle:
     json.dump(manifest, handle, sort_keys=True)
     handle.write("\n")

@@ -7,10 +7,10 @@ to this helper, and no ext4 data has been read.
 
 ## Fixed probe surface
 
-`tools/alpha-inspector/main.swift` has `probe`, `preflight`, and `boot-probe`
-commands. Only `boot-probe` starts a VM. All three require a synthetic 8 MiB
-`synthetic.raw` in a unique `/private/tmp` probe directory; there is no path
-for an existing workspace disk. The helper constructs
+The initial `tools/alpha-inspector/main.swift` capability proof used `probe`,
+`preflight`, and `boot-probe` commands against a synthetic 8 MiB `synthetic.raw`
+in a unique `/private/tmp` probe directory. Only `boot-probe` started a VM.
+The helper constructs
 a generic ARM64 Linux configuration with two CPUs, 2 GiB RAM, a direct kernel
 and initramfs boot loader, exactly one Virtio block disk using
 `VZDiskImageStorageDeviceAttachment(url:readOnly: true)`, and two Virtio serial
@@ -86,6 +86,22 @@ can be read-only, and that a process needs the virtualization entitlement:
 [runtime network devices](https://developer.apple.com/documentation/virtualization/vzvirtualmachine/networkdevices),
 [read-only raw disk](https://developer.apple.com/documentation/virtualization/vzdiskimagestoragedeviceattachment/init%28url%3Areadonly%3A%29-9qeco),
 [entitlement](https://developer.apple.com/documentation/virtualization/adding-the-virtualization-entitlement-to-your-project).
+
+## Synthetic ext4 copy probe
+
+The source now also has `preflight-copy` and `boot-copy` for an exact 64 MiB
+private `synthetic.raw`. Preparation accepts a one-link private synthetic copy
+with a pinned whole-disk SHA-256 and expected ext4 UUID. Its manifest binds
+the expected SHA-256 and length of the fixed
+`boxwarden-alpha-synthetic.txt` file. The guest confirms one read-only Virtio
+disk, only loopback, a clean whole-device ext4 superblock, and a mount with
+`ro,noload,nodev,nosuid,noexec`. It opens that fixed file without following a
+final symlink, reads at most 4 KiB, and reports only its digest and size over
+the bounded typed serial channel. The host requires an exact matching report,
+unchanged disk digest and identity, stopped VM evidence, and a reaped helper.
+The source and focused tests are verified; a live `boot-copy` run is pending.
+The probe still accepts only the private synthetic path. It cannot open a
+managed workspace disk or write a host export directory.
 
 ## Inspector contract before export can open
 
