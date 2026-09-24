@@ -570,7 +570,7 @@ func (o *Owner) Snapshot(ctx context.Context) supervisor.Snapshot {
 	defer o.observationMu.Unlock()
 	o.mu.Lock()
 	snapshot := supervisor.Snapshot{Binding: o.binding, ObservedAt: time.Now()}
-	active, observer, serial, pins, binding, expectedPin, diagnostic := o.active, o.observer, o.serial, o.pins, o.sshBinding, o.expectedPin, o.bootstrapDiagnostic
+	active, observer, handle, serial, pins, binding, expectedPin, diagnostic := o.active, o.observer, o.handle, o.serial, o.pins, o.sshBinding, o.expectedPin, o.bootstrapDiagnostic
 	connection, certificate, ready := o.connection, o.certificate, o.readyEstablished
 	mounts := append([]sshx.WorkspaceMount(nil), o.workspaceMounts...)
 	o.mu.Unlock()
@@ -578,9 +578,11 @@ func (o *Owner) Snapshot(ctx context.Context) supervisor.Snapshot {
 		return snapshot
 	}
 	observation, err := observeExact(ctx, observer, snapshot.Binding.BackendObject)
+	liveness, retained := handle.(backend.RetainedChildLiveness)
+	childLive := retained && liveness.RetainedChildLive()
 	o.mu.Lock()
 	snapshot.ObservedAt = time.Now()
-	snapshot.BackendRunning = o.active && err == nil && observation.State == backend.ObjectRunning
+	snapshot.BackendRunning = o.active && err == nil && childLive
 	snapshot.SerialHealthy = o.active && serial.Err() == nil
 	o.mu.Unlock()
 	if snapshot.BackendRunning && snapshot.SerialHealthy && expectedPin.Version != 0 {
@@ -592,6 +594,8 @@ func (o *Owner) Snapshot(ctx context.Context) supervisor.Snapshot {
 	}
 	if err != nil {
 		snapshot.Diagnostic = "exact backend observation failed"
+	} else if !childLive {
+		snapshot.Diagnostic = "exact retained Tart child lifetime is unavailable"
 	} else {
 		snapshot.Diagnostic = diagnostic
 	}
@@ -616,8 +620,11 @@ func (o *Owner) Snapshot(ctx context.Context) supervisor.Snapshot {
 			}
 		}
 	}
+	if observation.State == backend.ObjectStopped && snapshot.BackendRunning && snapshot.SerialHealthy && snapshot.PinPresent && snapshot.CertificateCurrent && snapshot.ProbeOK && snapshot.ZoneMatches && snapshot.Diagnostic == "" {
+		snapshot.Diagnostic = "Tart listing reports stopped; exact retained child and guest checks were observed"
+	}
 	o.mu.Lock()
-	if !o.active || o.binding != snapshot.Binding || o.expectedPin != expectedPin {
+	if !o.active || o.binding != snapshot.Binding || o.expectedPin != expectedPin || !retained || !liveness.RetainedChildLive() {
 		snapshot.BackendRunning, snapshot.SerialHealthy, snapshot.PinPresent = false, false, false
 		snapshot.CertificateCurrent, snapshot.ProbeOK, snapshot.ZoneMatches = false, false, false
 		snapshot.Diagnostic = "exact runtime changed during observation"

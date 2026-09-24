@@ -859,6 +859,15 @@ type fakeHandle struct {
 	stopErr, waitErr error
 }
 
+func (h *fakeHandle) RetainedChildLive() bool {
+	select {
+	case <-h.done:
+		return false
+	default:
+		return true
+	}
+}
+
 func (h *fakeHandle) Stop(context.Context) error {
 	h.trace.add("stop")
 	h.stop.Do(func() { close(h.done) })

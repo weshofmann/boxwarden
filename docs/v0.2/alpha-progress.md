@@ -174,9 +174,13 @@ paths, and disk evidence remain outside this document.
 An independent source review scoped the correction to exact retained-child
 liveness plus fresh bound guest checks; it warned that a contradictory Tart
 listing never proves a VM stopped. The Tart direct-child handle now exposes a
-read-only liveness signal through both scratch and managed-disk wrappers,
-with focused tests for reaped and unprovable children. READY and status do not
-yet consume that signal, so the false-stopped behavior remains open.
+read-only liveness signal through both scratch and managed-disk wrappers.
+The exact owner snapshot uses it with fresh pin, certificate, strict SSH,
+workspace, and zone checks and rechecks it after probing. Public status retains
+the raw `stopped` listing while reporting READY only with a fresh exact owner;
+starting retries check that owner before requesting exact-start admission.
+Focused backend, owner, session, and status tests pass. A fresh real sandbox
+run is still needed to qualify this behavior and stopped-only recovery paths.
 Focused export tests and vet pass. Repository-wide Go tests and vet previously
 passed with host Unix socket access at `06466ee`; the default sandbox run
 could not bind test sockets, and the architecture guard was narrowed for the
@@ -189,9 +193,9 @@ remain outside the prepared cache.
 
 ## Next actions
 
-1. Correct the observed-state/READY contract for Tart's false `stopped`
-   report using exact live supervisor and guest evidence, then verify it on
-   the owned disposable sandbox. Add explicit inspected-phase recovery and
+1. Verify the corrected Tart false-stopped READY/status contract on an owned
+   disposable sandbox and audit stopped-only gates for contradictory state.
+   Add explicit inspected-phase recovery and
    hostile-exit checks to the now-successful public export path.
 2. Attach the retained volume to a second fresh sandbox after export, then
    verify its mount and content.

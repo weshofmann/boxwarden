@@ -279,13 +279,62 @@ func TestStartingRetryReusesGenerationAndClassifiesBackendBeforeMutation(t *test
 			if generationCalls != 0 {
 				t.Fatalf("NewGeneration calls = %d, want 0", generationCalls)
 			}
-			if state == backend.ObjectRunning && (control.startCalls != 0 || control.snapshotCalls != 1) {
-				t.Fatalf("running retry start/snapshot calls = %d/%d, want 0/1", control.startCalls, control.snapshotCalls)
-			}
-			if state == backend.ObjectStopped && (control.startCalls != 1 || control.snapshotCalls != 0) {
-				t.Fatalf("stopped retry start/snapshot calls = %d/%d, want 1/0", control.startCalls, control.snapshotCalls)
+			if control.startCalls != 0 || control.snapshotCalls != 1 {
+				t.Fatalf("%s retry start/snapshot calls = %d/%d, want 0/1 for exact retained owner", state, control.startCalls, control.snapshotCalls)
 			}
 		})
+	}
+}
+
+func TestStartingRetryPrefersExactReadyOwnerWhenTartFalselyListsStopped(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	created, err := creator.Create(context.Background(), "dev", ModeClean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := saveStartingRecord(t, domainConfig, created)
+	backendFake.SetObservation(backend.Observation{ObjectID: created.Backend.ObjectID, Exists: true, State: backend.ObjectStopped})
+	now := time.Date(2026, 9, 24, 3, 0, 0, 0, time.UTC)
+	control := &startSupervisorFake{snapshot: func(binding supervisor.Binding) (supervisor.Snapshot, error) {
+		return readySnapshot(binding, now), nil
+	}}
+	service := newStartTestService(domainConfig, backendFake, control, func() time.Time { return now }, func() (string, error) {
+		t.Fatal("false-stopped retry allocated another generation")
+		return "", nil
+	})
+	got, err := service.Start(context.Background(), "dev")
+	if err != nil || got.IntendedState != StateRunning || got.StartGeneration != before.StartGeneration || control.startCalls != 0 || control.snapshotCalls != 1 {
+		t.Fatalf("false-stopped retry = %#v, %v; start/snapshot calls=%d/%d", got, err, control.startCalls, control.snapshotCalls)
+	}
+}
+
+func TestStartingRetryWithStoppedListingAndNoOwnerUsesExactStartAdmission(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	created, err := creator.Create(context.Background(), "dev", ModeClean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := saveStartingRecord(t, domainConfig, created)
+	backendFake.SetObservation(backend.Observation{ObjectID: created.Backend.ObjectID, Exists: true, State: backend.ObjectStopped})
+	now := time.Date(2026, 9, 24, 3, 0, 0, 0, time.UTC)
+	control := &startSupervisorFake{
+		snapshot: func(supervisor.Binding) (supervisor.Snapshot, error) {
+			return supervisor.Snapshot{}, errors.New("no exact owner")
+		},
+		start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+			if request.Binding.Generation != before.StartGeneration {
+				t.Fatal("exact start changed generation")
+			}
+			return startedSnapshot(request.Binding, now), nil
+		},
+	}
+	service := newStartTestService(domainConfig, backendFake, control, func() time.Time { return now }, func() (string, error) {
+		t.Fatal("stopped retry allocated another generation")
+		return "", nil
+	})
+	got, err := service.Start(context.Background(), "dev")
+	if err != nil || got != before || control.snapshotCalls != 1 || control.startCalls != 1 {
+		t.Fatalf("exact start fallback = %#v, %v; snapshot/start=%d/%d", got, err, control.snapshotCalls, control.startCalls)
 	}
 }
 

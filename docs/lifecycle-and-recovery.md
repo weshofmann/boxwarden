@@ -45,11 +45,17 @@ That check is operational product evidence, not formal qualification; later
 checks continue at the serial-bootstrap and SSH boundaries. See
 `docs/evidence/slice-b-controlled-exact-start.md`.
 
-The eventual supervisor owns generation SSH credentials, CA-validated renewal,
-and periodic strict read-only probes. READY requires a fresh exact-generation
-snapshot with running backend, healthy serial drain, exact pin, current
-certificate, strict probe, and host/guest-zone agreement. Status reads current
-observations without creating credentials, applying configuration, or repairing.
+The supervisor owns generation SSH credentials, CA-validated renewal, and
+periodic strict read-only probes. READY requires a fresh exact-generation
+snapshot with a retained direct child that has not reaped or lost ownership,
+a structurally valid exact Tart listing, healthy serial drain, exact pin,
+current certificate, strict probe, and host/guest-zone agreement. Tart 2.32.1
+can list a demonstrably live owned VM as `stopped`; status retains that raw
+observation and reports the contradiction when the exact owner passes every
+fresh readiness check. An absent or unprovable owner remains drift/non-ready.
+The listing alone cannot authorize stopped-only operations or release a live
+managed-volume use. Status reads current observations without creating
+credentials, applying configuration, or repairing.
 
 The supervisor owns the outer generation namespace; `serialx` exclusively
 creates, validates, and cleans its new `serial/` subtree. Ownership stays held

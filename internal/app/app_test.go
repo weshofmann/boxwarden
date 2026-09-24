@@ -676,6 +676,25 @@ func TestSessionStatusRequiresFreshExactReadyEvidence(t *testing.T) {
 	}
 }
 
+func TestSessionStatusKeepsContradictoryTartListingVisibleWithExactReadyOwner(t *testing.T) {
+	path, before := writeRunningStatusFixture(t, session.ReadinessReady)
+	binding := supervisor.Binding{Domain: "work", SessionID: "00000000-0000-4000-8000-000000000001", BackendKind: "tart", BackendObject: "boxwarden-work-dev", Generation: "11111111-2222-4333-8444-555555555555"}
+	reader := &statusSnapshotFake{snapshot: supervisor.Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true, ObservedAt: time.Now()}}
+	var output bytes.Buffer
+	err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "status", "dev"}, Options{
+		Observer:              fake.Observer{Observations: map[string]backend.Observation{"boxwarden-work-dev": {ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectStopped}}},
+		StatusSnapshotFactory: func(config.Config, config.Domain) (StatusSnapshotReader, error) { return reader, nil },
+		Output:                &output,
+	})
+	if err != nil || reader.calls != 1 || reader.binding != binding || !strings.Contains(output.String(), "observed: stopped\n") || !strings.Contains(output.String(), "consistency: consistent\nreadiness: ready\n") || !strings.Contains(output.String(), "Tart listing reports stopped") {
+		t.Fatalf("contradictory status = %q; error=%v; reader=%+v", output.String(), err, reader)
+	}
+	after, err := os.ReadFile(filepath.Join(filepath.Dir(path), "sessions", "dev.json"))
+	if err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("status mutated durable state: %v", err)
+	}
+}
+
 func TestSessionStatusReportsDriftWithoutSupervisorReader(t *testing.T) {
 	path, _ := writeRunningStatusFixture(t, session.ReadinessReady)
 	var output bytes.Buffer
@@ -709,7 +728,11 @@ func TestSessionStatusDoesNotPromotePersistedDriftOrStoppedBackend(t *testing.T)
 				},
 				Output: &output,
 			})
-			if err != nil || !strings.Contains(output.String(), "readiness: drift\n") || !strings.Contains(output.String(), "consistency: drift\n") || readerCalls != 0 {
+			wantCalls := 0
+			if test.backend == backend.ObjectStopped && test.readiness == session.ReadinessReady {
+				wantCalls = 1
+			}
+			if err != nil || !strings.Contains(output.String(), "readiness: drift\n") || !strings.Contains(output.String(), "consistency: drift\n") || readerCalls != wantCalls {
 				t.Fatalf("status = %q, err=%v reader calls=%d", output.String(), err, readerCalls)
 			}
 		})

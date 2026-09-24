@@ -179,14 +179,25 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 			return Record{}, fmt.Errorf("starting session backend is missing")
 		}
 		switch observation.State {
-		case backend.ObjectRunning:
+		case backend.ObjectRunning, backend.ObjectStopped:
 			snapshot, snapshotErr := s.start.Supervisor.Snapshot(ctx, startBinding(record))
 			if snapshotErr != nil {
-				return Record{}, fmt.Errorf("inspect exact starting generation: %w", snapshotErr)
+				if observation.State == backend.ObjectRunning {
+					return Record{}, fmt.Errorf("inspect exact starting generation: %w", snapshotErr)
+				}
+				// No exact owner is available. StartExact must independently
+				// classify the generation before any launch or bootstrap.
+				break
 			}
 			now := s.start.Now()
-			if snapshot.Binding != startBinding(record) || !snapshot.BackendRunning || snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || now.Sub(snapshot.ObservedAt) > maxReadySnapshotAge {
+			if snapshot.Binding != startBinding(record) || snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || now.Sub(snapshot.ObservedAt) > maxReadySnapshotAge {
 				return Record{}, fmt.Errorf("supervisor did not provide a fresh exact running snapshot")
+			}
+			if !snapshot.BackendRunning {
+				if observation.State == backend.ObjectRunning {
+					return Record{}, fmt.Errorf("supervisor did not provide a fresh exact running snapshot")
+				}
+				break
 			}
 			if snapshot.SerialHealthy && snapshot.PinPresent {
 				if snapshot.CertificateCurrent && snapshot.ProbeOK && snapshot.ZoneMatches {
@@ -225,8 +236,6 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 			// A healthy but incomplete owner reuses its validated exchange or
 			// performs the one bootstrap below. A poisoned owner was explicitly
 			// stopped and relaunches below with the same durable generation.
-		case backend.ObjectStopped:
-			// Relaunch below using only the durable generation.
 		default:
 			return Record{}, fmt.Errorf("starting session backend state is ambiguous")
 		}

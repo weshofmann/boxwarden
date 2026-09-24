@@ -145,6 +145,38 @@ func TestReadyConvergesCurrentGenerationAndSnapshotRechecksLiveEvidence(t *testi
 	_ = f.owner.Wait(context.Background())
 }
 
+func TestSnapshotRequiresRetainedChildAndFreshGuestProofWhenTartListsStopped(t *testing.T) {
+	f, client := readyFixture(t)
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Bootstrap(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	f.observe = func(_ context.Context, object string) (backend.Observation, error) {
+		return backend.Observation{ObjectID: object, Exists: true, State: backend.ObjectStopped}, nil
+	}
+	snapshot := f.owner.Snapshot(context.Background())
+	if !snapshot.BackendRunning || !snapshot.SerialHealthy || !snapshot.PinPresent || !snapshot.CertificateCurrent || !snapshot.ProbeOK || !snapshot.ZoneMatches || !strings.Contains(snapshot.Diagnostic, "Tart listing") {
+		t.Fatalf("false-stopped listing hid live exact owner: %#v", snapshot)
+	}
+	client.probe = func(sshx.Connection) error { return errors.New("probe failed") }
+	if snapshot := f.owner.Snapshot(context.Background()); snapshot.ProbeOK || snapshot.ZoneMatches {
+		t.Fatalf("false-stopped listing bypassed fresh probe: %#v", snapshot)
+	}
+	client.probe = func(sshx.Connection) error {
+		_ = f.handle.Stop(context.Background())
+		return nil
+	}
+	if snapshot := f.owner.Snapshot(context.Background()); snapshot.BackendRunning || snapshot.ProbeOK || snapshot.ZoneMatches {
+		t.Fatalf("snapshot published READY after child exit during probe: %#v", snapshot)
+	}
+	_ = f.owner.Wait(context.Background())
+}
+
 func TestReadyRequiresWorkspaceMountAndFreshBoundProbe(t *testing.T) {
 	f, client := readyFixture(t)
 	if err := f.owner.Start(context.Background(), f.request); err != nil {

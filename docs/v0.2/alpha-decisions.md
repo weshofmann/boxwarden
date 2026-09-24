@@ -1,5 +1,33 @@
 # Boxwarden v0.2 alpha decisions
 
+## Tart false-stopped observation and retained ownership, 2026-09-24
+
+A real attached-volume sandbox returned READY, but Tart 2.32.1 subsequently
+listed the exact object as `stopped` while its retained Tart child, VM process,
+GUI window, guest address, and SSH endpoint remained live. An earlier host
+spike saw the same contradiction. Tart's source derives `list` running state
+from a config-file PID lock; the specific reason for the lost lock indication
+has not been proved. This is a false negative in a backend observation, not
+evidence that an orphan can be adopted or a volume released.
+
+For an intended-running or starting *exact existing generation*, admit a
+structurally valid exact Tart listing and reconcile its `stopped` state with
+the supervisor's retained direct-child lifetime. READY still requires the
+same fresh bound serial, host-key pin, current certificate, strict SSH probe
+(including configured workspace mounts), and host/guest time-zone evidence.
+Recheck retained lifetime after the guest probes and preserve the raw Tart
+listing and contradiction in public status. Missing, wrong, stale, exited,
+or unprovable exact-owner evidence remains drift/non-ready. A stopped listing
+with no exact owner is never itself proof that a launched VM is safely stopped.
+No persisted PID or path reconstructs authority.
+
+The read-only retained-child method is a lifetime observation, not an
+independent READY bit. Stop still persists stopping intent before asking the
+exact owner to stop/wait/reap; managed-volume locks remain held until that
+reap. Clone, export, detach, and recovery paths that require a stopped VM must
+retain their independent ownership and lock checks. Source review and focused
+regressions cover this decision; a fresh real sandbox run remains required.
+
 ## Initial scope and environment, 2026-09-23
 
 - Use a private alpha context alongside the admitted host toolchain. The

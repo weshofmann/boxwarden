@@ -623,7 +623,7 @@ func reconcileStatusSnapshot(ctx context.Context, loaded config.Config, selected
 	if record.IntendedState != session.StateRunning {
 		return reconciled, ""
 	}
-	if !observed.Exists || observed.ObjectID != record.Backend.ObjectID || observed.State != backend.ObjectRunning {
+	if !observed.Exists || observed.ObjectID != record.Backend.ObjectID || (observed.State != backend.ObjectRunning && observed.State != backend.ObjectStopped) {
 		return reconciled, session.ReadinessDrift
 	}
 	if record.Readiness.Status != session.ReadinessReady {
@@ -647,6 +647,9 @@ func reconcileStatusSnapshot(ctx context.Context, loaded config.Config, selected
 	}
 	if !snapshot.BackendRunning || !snapshot.SerialHealthy || !snapshot.PinPresent || !snapshot.CertificateCurrent || !snapshot.ProbeOK || !snapshot.ZoneMatches {
 		return lifecycle.Reconciliation{Consistency: lifecycle.Drift, Diagnostic: "exact live supervisor readiness checks failed"}, session.ReadinessDrift
+	}
+	if observed.State == backend.ObjectStopped {
+		return lifecycle.Reconciliation{Consistency: lifecycle.Consistent, Diagnostic: "Tart listing reports stopped; exact retained supervisor generation passed fresh readiness checks"}, session.ReadinessReady
 	}
 	return lifecycle.Reconciliation{Consistency: lifecycle.Consistent}, session.ReadinessReady
 }
