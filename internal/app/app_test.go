@@ -239,6 +239,86 @@ func TestAlphaPrepareRoutesExactDomainAndReportsOnlyPassingCacheReceipt(t *testi
 	}
 }
 
+func TestRecipeSessionCreateUsesPreparedRevisionWithoutChangingCurrent(t *testing.T) {
+	configPath, selected := writeV2DomainFixture(t, "alpha")
+	legacy := "golden-alpha-legacy"
+	prepared := "boxwarden-alpha-base-prepared"
+	vm := fake.New(
+		backend.Observation{ObjectID: legacy, Exists: true, State: backend.ObjectStopped},
+		backend.Observation{ObjectID: prepared, Exists: true, State: backend.ObjectStopped},
+	)
+	if _, err := golden.Register(t.Context(), selected, legacy, vm); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	input := AlphaPrepareInput{RecipePath: filepath.Join(root, "recipe.json"), ISOPath: filepath.Join(root, "ubuntu.iso"), GuestDefinitionRoot: filepath.Join(root, "guest"), OpenSSLPath: "/usr/bin/openssl", OpenSSLSHA256: strings.Repeat("a", 64), XorrisoPath: "/usr/bin/xorriso", XorrisoSHA256: strings.Repeat("b", 64)}
+	args := []string{"--config", configPath, "--domain", "alpha", "session", "create", "--mode", "clean", "--recipe", input.RecipePath, "--iso", input.ISOPath, "--guest-definition", input.GuestDefinitionRoot, "--openssl", input.OpenSSLPath, "--openssl-sha256", input.OpenSSLSHA256, "--xorriso", input.XorrisoPath, "--xorriso-sha256", input.XorrisoSHA256, "dev"}
+	result := basebuild.PreparedResult{Disposition: basebuild.PreparedReused, Record: basebuild.PreparedRecord{Version: 2, CandidateID: prepared, CandidateIdentity: strings.Repeat("c", 64), PreparationKey: strings.Repeat("d", 64), AttemptDirectory: filepath.Join(selected.StateRoot, "prepared-attempts", "attempt-1"), Qualification: basebuild.QualificationReceipt{CandidateID: prepared, PreparationKey: strings.Repeat("d", 64), CloneID: "boxwarden-alpha-qualified-clone", EvidenceSHA256: strings.Repeat("e", 64), BOMSHA256: strings.Repeat("f", 64), Passed: true}}}
+	calls := 0
+	preparer := func(_ context.Context, loaded config.Config, domain config.Domain, path string, got AlphaPrepareInput) (basebuild.PreparedResult, error) {
+		calls++
+		admitted, err := loaded.Domain("alpha")
+		if err != nil || domain != admitted || path != configPath || got != input {
+			t.Fatalf("preparer binding: %+v %q %+v %v", domain, path, got, err)
+		}
+		if _, err := golden.RegisterRevision(t.Context(), selected, prepared, vm); err != nil {
+			t.Fatal(err)
+		}
+		return result, nil
+	}
+	var output bytes.Buffer
+	options := Options{Observer: vm, Creator: vm, AlphaPrepare: preparer, Output: &output}
+	if err := Run(t.Context(), args, options); err != nil {
+		t.Fatal(err)
+	}
+	record, err := session.LoadRecord(selected.StateRoot, "alpha", "dev")
+	if err != nil || record.GoldenRevision != prepared || record.IntendedState != session.StateStopped || calls != 1 {
+		t.Fatalf("recipe create = %+v, calls %d, err %v", record, calls, err)
+	}
+	if clones := vm.CloneCalls(); len(clones) != 1 || clones[0].SourceID != prepared {
+		t.Fatalf("recipe create cloned wrong source: %+v", clones)
+	}
+	current, err := golden.LoadCurrent(t.Context(), selected)
+	if err != nil || current.Revision != legacy {
+		t.Fatalf("recipe create changed current golden: %+v, %v", current, err)
+	}
+	if output.String() != "domain: alpha\nsession: dev\nmode: clean\nstate: stopped\n" {
+		t.Fatalf("recipe create output: %q", output.String())
+	}
+}
+
+func TestRecipeSessionCreateRejectsIncompleteOrInvalidReceiptBeforeClone(t *testing.T) {
+	configPath, selected := writeV2DomainFixture(t, "alpha")
+	vm := fake.New(backend.Observation{ObjectID: "golden-alpha-legacy", Exists: true, State: backend.ObjectStopped})
+	if _, err := golden.Register(t.Context(), selected, "golden-alpha-legacy", vm); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	base := []string{"--config", configPath, "--domain", "alpha", "session", "create"}
+	for _, suffix := range [][]string{
+		{"--recipe", "", "dev"},
+		{"--recipe", filepath.Join(root, "recipe.json"), "dev"},
+		{"--iso", filepath.Join(root, "ubuntu.iso"), "dev"},
+	} {
+		called := false
+		err := Run(t.Context(), append(append([]string(nil), base...), suffix...), Options{Observer: vm, Creator: vm, Output: &bytes.Buffer{}, AlphaPrepare: func(context.Context, config.Config, config.Domain, string, AlphaPrepareInput) (basebuild.PreparedResult, error) {
+			called = true
+			return basebuild.PreparedResult{}, nil
+		}})
+		if err == nil || called || len(vm.CloneCalls()) != 0 {
+			t.Fatalf("incomplete recipe flags reached preparation or clone: %q, %v", suffix, err)
+		}
+	}
+	input := AlphaPrepareInput{RecipePath: filepath.Join(root, "recipe.json"), ISOPath: filepath.Join(root, "ubuntu.iso"), GuestDefinitionRoot: filepath.Join(root, "guest"), OpenSSLPath: "/usr/bin/openssl", OpenSSLSHA256: strings.Repeat("a", 64), XorrisoPath: "/usr/bin/xorriso", XorrisoSHA256: strings.Repeat("b", 64)}
+	args := append(append([]string(nil), base...), "--recipe", input.RecipePath, "--iso", input.ISOPath, "--guest-definition", input.GuestDefinitionRoot, "--openssl", input.OpenSSLPath, "--openssl-sha256", input.OpenSSLSHA256, "--xorriso", input.XorrisoPath, "--xorriso-sha256", input.XorrisoSHA256, "dev")
+	err := Run(t.Context(), args, Options{Observer: vm, Creator: vm, Output: &bytes.Buffer{}, AlphaPrepare: func(context.Context, config.Config, config.Domain, string, AlphaPrepareInput) (basebuild.PreparedResult, error) {
+		return basebuild.PreparedResult{Disposition: basebuild.PreparedBuilt, Record: basebuild.PreparedRecord{Version: 2, CandidateID: "golden-alpha-legacy"}}, nil
+	}})
+	if err == nil || len(vm.CloneCalls()) != 0 {
+		t.Fatalf("invalid preparation receipt reached clone: %v", err)
+	}
+}
+
 func TestBackendFactoryIsUnreachableForInvalidInputAndOtherCommands(t *testing.T) {
 	path, _ := writeV2DomainFixture(t, "work")
 	for _, args := range [][]string{

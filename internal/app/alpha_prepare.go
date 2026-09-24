@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -22,6 +23,27 @@ type AlphaPrepareInput struct {
 }
 
 type AlphaPrepareFunc func(context.Context, config.Config, config.Domain, string, AlphaPrepareInput) (basebuild.PreparedResult, error)
+
+func bindAlphaPrepareFlags(set *flag.FlagSet, input *AlphaPrepareInput) {
+	set.StringVar(&input.RecipePath, "recipe", "", "versioned recipe JSON")
+	set.StringVar(&input.ISOPath, "iso", "", "local installer ISO")
+	set.StringVar(&input.GuestDefinitionRoot, "guest-definition", "", "tracked generic guest definition")
+	set.StringVar(&input.OpenSSLPath, "openssl", "", "pinned OpenSSL executable")
+	set.StringVar(&input.OpenSSLSHA256, "openssl-sha256", "", "pinned OpenSSL digest")
+	set.StringVar(&input.XorrisoPath, "xorriso", "", "pinned xorriso executable")
+	set.StringVar(&input.XorrisoSHA256, "xorriso-sha256", "", "pinned xorriso digest")
+}
+
+func hasAlphaPrepareFlags(set *flag.FlagSet) bool {
+	present := false
+	set.Visit(func(value *flag.Flag) {
+		switch value.Name {
+		case "recipe", "iso", "guest-definition", "openssl", "openssl-sha256", "xorriso", "xorriso-sha256":
+			present = true
+		}
+	})
+	return present
+}
 
 func validAlphaPrepareInput(input AlphaPrepareInput) error {
 	for _, path := range []string{input.RecipePath, input.ISOPath, input.GuestDefinitionRoot, input.OpenSSLPath, input.XorrisoPath} {
@@ -48,6 +70,15 @@ func lowerSHA(value string) bool {
 }
 
 func writeAlphaPrepared(output io.Writer, selected config.Domain, result basebuild.PreparedResult) error {
+	if err := validateAlphaPrepared(selected, result); err != nil {
+		return err
+	}
+	record := result.Record
+	_, err := fmt.Fprintf(output, "domain: %s\nprepared-base: %s\npreparation-key: %s\ncache: %s\n", selected.ID, record.CandidateID, record.PreparationKey, result.Disposition)
+	return err
+}
+
+func validateAlphaPrepared(selected config.Domain, result basebuild.PreparedResult) error {
 	record := result.Record
 	qualification := record.Qualification
 	attemptRoot := filepath.Join(selected.StateRoot, "prepared-attempts")
@@ -58,6 +89,5 @@ func writeAlphaPrepared(output io.Writer, selected config.Domain, result basebui
 		filepath.Dir(record.AttemptDirectory) != attemptRoot {
 		return errors.New("alpha preparation returned an invalid cache receipt")
 	}
-	_, err := fmt.Fprintf(output, "domain: %s\nprepared-base: %s\npreparation-key: %s\ncache: %s\n", selected.ID, record.CandidateID, record.PreparationKey, result.Disposition)
-	return err
+	return nil
 }

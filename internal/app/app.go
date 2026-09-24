@@ -239,7 +239,23 @@ func Run(ctx context.Context, args []string, options Options) error {
 		if options.Creator == nil {
 			return errors.New("backend creator is required")
 		}
-		record, err := session.NewService(selectedDomain, options.Observer, options.Creator).Create(ctx, command.name, command.mode)
+		creator := session.NewService(selectedDomain, options.Observer, options.Creator)
+		var record session.Record
+		if command.recipeCreate {
+			if options.AlphaPrepare == nil {
+				return errors.New("alpha base preparer is required for recipe session creation")
+			}
+			prepared, prepareErr := options.AlphaPrepare(ctx, loaded, selectedDomain, command.configPath, command.alphaPrepare)
+			if prepareErr != nil {
+				return fmt.Errorf("prepare session base: %w", prepareErr)
+			}
+			if err := validateAlphaPrepared(selectedDomain, prepared); err != nil {
+				return err
+			}
+			record, err = creator.CreateFromRevision(ctx, command.name, command.mode, prepared.Record.CandidateID)
+		} else {
+			record, err = creator.Create(ctx, command.name, command.mode)
+		}
 		if err != nil {
 			return fmt.Errorf("create session: %w", err)
 		}
@@ -331,6 +347,7 @@ type parsedCommand struct {
 	recipePath   string
 	isoPath      string
 	alphaPrepare AlphaPrepareInput
+	recipeCreate bool
 	volumeID     string
 	mountPath    string
 }
@@ -391,13 +408,7 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		prepareSet := flag.NewFlagSet("alpha prepare", flag.ContinueOnError)
 		prepareSet.SetOutput(io.Discard)
 		input := AlphaPrepareInput{}
-		prepareSet.StringVar(&input.RecipePath, "recipe", "", "versioned recipe JSON")
-		prepareSet.StringVar(&input.ISOPath, "iso", "", "local installer ISO")
-		prepareSet.StringVar(&input.GuestDefinitionRoot, "guest-definition", "", "tracked generic guest definition")
-		prepareSet.StringVar(&input.OpenSSLPath, "openssl", "", "pinned OpenSSL executable")
-		prepareSet.StringVar(&input.OpenSSLSHA256, "openssl-sha256", "", "pinned OpenSSL digest")
-		prepareSet.StringVar(&input.XorrisoPath, "xorriso", "", "pinned xorriso executable")
-		prepareSet.StringVar(&input.XorrisoSHA256, "xorriso-sha256", "", "pinned xorriso digest")
+		bindAlphaPrepareFlags(prepareSet, &input)
 		if err := prepareSet.Parse(remaining[2:]); err != nil {
 			return parsedCommand{}, fmt.Errorf("parse alpha prepare: %w", err)
 		}
@@ -443,6 +454,8 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		createSet := flag.NewFlagSet("session create", flag.ContinueOnError)
 		createSet.SetOutput(io.Discard)
 		mode := createSet.String("mode", string(session.ModeClean), "session mode")
+		input := AlphaPrepareInput{}
+		bindAlphaPrepareFlags(createSet, &input)
 		if err := createSet.Parse(remaining[2:]); err != nil {
 			return parsedCommand{}, fmt.Errorf("parse session create: %w", err)
 		}
@@ -452,6 +465,12 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.mode = session.Mode(*mode)
 		if base.mode != session.ModeClean && base.mode != session.ModeQuarantine {
 			return parsedCommand{}, fmt.Errorf("invalid session mode %q", base.mode)
+		}
+		if hasAlphaPrepareFlags(createSet) {
+			if err := validAlphaPrepareInput(input); err != nil {
+				return parsedCommand{}, err
+			}
+			base.recipeCreate, base.alphaPrepare = true, input
 		}
 		base.kind = commandSessionCreate
 		base.name = createSet.Args()[0]
@@ -484,7 +503,7 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.kind, base.volumeID, base.name = commandWorkspaceDetach, remaining[2], remaining[3]
 		return base, nil
 	}
-	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] <session>, session start <session>, session stop <session>, session status <session>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
+	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] [--recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256] <session>, session start <session>, session stop <session>, session status <session>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
 }
 
 func writeWorkspaceAttachment(output io.Writer, record workspacex.Record, state string) error {
