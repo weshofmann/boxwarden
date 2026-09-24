@@ -12,8 +12,8 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
 | Host and installer | Read-only host doctor is healthy. The Canonical Ubuntu 24.04.4 ARM64 Desktop ISO has a valid detached signature and exact pinned SHA-256. Pinned OpenSSL 3 and xorriso executables have been checked. |
 | Public management | A fresh disposable clone reached exact-generation READY through serial bootstrap, host-key pinning, certificate, strict SSH, and time-zone checks; it stopped and restarted to READY. GNOME, Firefox, and a synthetic home file were observed after restart. |
 | Reusable preparation | Strict versioned recipe and ISO checks, candidate build, guest preparation, fresh-clone qualifier, private evidence, and cache admission are implemented. A fresh real build using the corrected finalizer completed installation, guest preparation, clone-ready shutdown, and qualification. Its fresh clone reached READY, passed package-inventory and identity checks, and stopped; the versioned prepared record was admitted. This is base qualification, not the full workspace/export acceptance path. |
-| Workspace volume | One alpha-owned 64 MiB ext4 volume was formatted in a zero-NIC VM and independently inspected. Its synthetic file retained its digest across an earlier stop/restart after manual remount. The same verified volume is now attached through the public CLI to the fresh recipe-created session; stop clears its exact generation Use while preserving the attachment and disk identity. Independent content verification after the new automatic mounts remains pending. |
-| Automatic mount and READY | The static generic guest helper resolves an exact FS UUID, mounts ext4 at a validated path, checks existing mounts and read-write state, and probes exact bindings. The host owner derives those bindings from admitted session/Use records, ensures them before READY, and repeats the bound probe for status. Full local Go tests, focused race tests, vet, and artifact checks passed at `5c84520`. The freshly qualified clone with the attached volume reached mount-bound READY in two distinct generations, with a public stop and fresh READY status between them; it is stopped now. Rebuild/reattach remains untested. |
+| Workspace volume | One alpha-owned 64 MiB ext4 volume was formatted in a zero-NIC VM and independently inspected. Its synthetic file retained its digest across an earlier stop/restart after manual remount. Public detach and attach moved this exact volume from a stopped original system clone to a separate replacement system clone without copying the disk. Both stops cleared exact generation Use while preserving the volume identity. Independent content verification after the new automatic mounts remains pending. |
+| Automatic mount and READY | The static generic guest helper resolves an exact FS UUID, mounts ext4 at a validated path, checks existing mounts and read-write state, and probes exact bindings. The host owner derives those bindings from admitted session/Use records, ensures them before READY, and repeats the bound probe for status. Full local Go tests, focused race tests, vet, and artifact checks passed at `5c84520`. The fresh original clone reached mount-bound READY in two generations; the separate replacement clone also reached mount-bound READY with the same reattached volume. Both are stopped now. |
 | Controlled export | Bounded host stream receiver and zero-NIC synthetic inspector boot/transport have tests. Read-only ext4 inspection and real stopped-volume export remain pending; public export is disabled. |
 | Example | `examples/v0.2-alpha-base.json` passed public recipe/ISO validation. It requests the Desktop source, a small package set, and one named workspace intent. |
 | Recipe-bound create | `session create` accepts exact recipe/ISO/guest definition/tool inputs, prepares or reuses a qualified base, and calls `CreateFromRevision`. A focused fixture and the real public command both selected the newly prepared revision without changing the domain current golden. A later public `alpha prepare` reused the admitted cache after verified redundant installer staging was retired, without creating an attempt journal or new Tart object. |
@@ -29,10 +29,18 @@ created a session from its exact revision. After verified redundant installer
 staging was removed, a repeated public prepare reused that cache. The public
 workspace attach bound the existing volume to the stopped session. Start,
 fresh READY status, stop, second start, fresh READY status, and second stop all
-succeeded. The two Use generation IDs differed and both stops cleared Use;
-the volume remains attached and Available, and the system clone is stopped.
-READY includes the exact writable ext4 mount probe, while independent content
-verification after automatic mounting is still needed.
+succeeded. The two Use generation IDs differed and both stops cleared Use.
+Public recipe-bound create then made a separate stopped system clone from the
+admitted base. Public detach and attach moved the Available volume to it
+without copying the disk. The replacement reached fresh mount-bound READY;
+its public stop cleared Use. The volume remains attached and Available, and
+both system clones are stopped. READY includes the exact writable ext4 mount
+probe, while independent content verification remains pending.
+
+The first replacement create input had an incorrect supplied OpenSSL digest;
+strict preflight rejected it before any attempt journal, session, or VM was
+created. The subsequent run used freshly observed digests for both tools and
+succeeded. This was an input error, not a qualified-build failure.
 
 The previous public recipe-bound attempt reached the generic base installer
 and guest preparation. Finalization then timed out after ten minutes waiting
@@ -78,10 +86,11 @@ current golden.
 
 ## Next actions
 
-1. Independently verify the synthetic file's content after automatic mounting,
-   using the bounded zero-NIC inspector path on the stopped owned volume.
-2. Rebuild the system while retaining the workspace, reattach it, prove
-   stopped-volume export, then attach it to a second fresh sandbox.
+1. Independently verify the synthetic file's content after automatic mounting
+   and reattachment, using the bounded zero-NIC inspector path on the stopped
+   owned volume. Complete controlled stopped-volume export.
+2. Attach the retained volume to a second fresh sandbox after export, then
+   verify its mount and content.
 3. Run the full integration checks and real acceptance matrix, and publish the
    runnable build, exact source SHA, quickstart, synthetic demo, and limits.
 
