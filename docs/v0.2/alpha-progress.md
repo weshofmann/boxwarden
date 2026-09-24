@@ -55,16 +55,20 @@ cap, a 16 KiB diagnostic cap, disk-reserve sampling, private ACL admission,
 and exact stopped/zero-NIC/byte-count evidence before exposing a closed spool.
 Its tests use a synthetic subprocess. It is not yet connected to an admitted
 production inspector or the receiver, and no exported tree has been published.
+The generic guest-side selected-file writer now serializes regular files and
+directories into the receiver's typed format, with path, type, link, count,
+and byte limits. A local round-trip test passed through the host receiver.
+It is not yet wired to the inspector boot path.
 Real managed-volume qualification remains open. The earlier failed base
 attempt was corrected and a fresh base built and qualified; failed attempts
 remain outside the prepared cache.
 
 ## Next actions
 
-1. Admit a production inspector helper, kernel, and initramfs; connect the
-   journaled snapshot to the capture gate, recheck its bytes after helper
-   reap, then invoke the receiver. Qualify the path with the managed synthetic
-   volume and hostile exits.
+1. Carry the exact selected-file request into a production inspector boot
+   using admitted helper/kernel/initramfs artifacts. Connect the journaled
+   snapshot to capture, recheck its bytes after helper reap, then invoke the
+   receiver. Qualify with the managed synthetic volume and hostile exits.
 2. Attach the retained volume to a second fresh sandbox after export, then
    verify its mount and content.
 3. Run the full integration checks and real acceptance matrix, and publish the

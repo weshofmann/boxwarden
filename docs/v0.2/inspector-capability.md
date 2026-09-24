@@ -208,6 +208,15 @@ spool after receiver disposition. Focused tests use subprocess fixtures; this
 gate does not yet admit production helper artifacts or recheck the snapshot
 after VM stop, so it cannot currently authorize publication.
 
+The generic guest stream writer now walks selected paths beneath an opened
+root, rejects symlinks, hardlinked regular files, unsupported object types,
+unsafe/colliding names, and excessive directory entries, and enforces the
+256 MiB file/content and 4096 file/directory alpha limits. It emits the BWEX
+v1 records accepted by `exportx.Receive`; a local round-trip test verifies
+the selected subtree and omission of an unselected sibling. This writer is
+not yet invoked by the booting guest. Request transport, production artifact
+admission, and complete host publication checks remain open.
+
 Inside the isolated Linux guest, validate the expected whole-device ext4 UUID
 and mount with `ro,noload,nodev,nosuid,noexec`. Linux documents that plain
 `ro` can replay ext4's journal and write to the disk; `noload` prevents that
