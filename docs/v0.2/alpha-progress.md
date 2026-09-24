@@ -18,11 +18,12 @@ with material acceptance gaps, not an alpha-ready release.
 | Controlled return | Selected files from clean stopped workspace snapshots were exported through a zero-NIC Linux inspector and bounded host receiver into new destinations. An `inspected` export resumed and published; a dirty ext4 snapshot was refused. Ambiguous post-final-rename recovery remains a manual evidence gate. |
 | Import verification | Source code compares a complete selected stopped export against the captured import and can advance an exact journal to `verified`. Focused tests and a separate source review passed. No real import has yet passed this stopped-disk verification. |
 | Shutdown correction | The retained owner now asks the exact bound guest helper to enqueue a fixed systemd poweroff, then retains Tart stop and force-stop fallbacks. Source checks passed. Existing bases contain the older helper, so no real-host effectiveness is claimed yet. |
+| Host capacity | The stopped Tart store moved into an encrypted external APFS image. All 33 files matched byte for byte and by SHA-256 after remount; ownership, modes, extended attributes, and the exact 11 stopped VMs matched. Doctor and disposable Tart create/clone/delete passed. A login/mount LaunchAgent remounted it without a prompt in a controlled test. The internal copy was retired, recovering 31.99 GiB immediately; an actual host reboot remains untested. |
 
 The latest verified source checkpoint is `b125cfd4428ffd7a8f2a115b150aadd0cc8fa5a5`.
-[Hosted macOS CI](https://github.com/weshofmann/boxwarden/actions/runs/36045893281)
+[Hosted macOS CI](https://github.com/weshofmann/boxwarden/actions/runs/36052952268)
 passed gofmt, the full Go test suite, race tests, vet, and build at the
-subsequent documentation checkpoint `a1ba4e676588adad98f587462a18d3105585d4d3`.
+subsequent documentation checkpoint `07dbf70cc95e00d520b5f86e8fd7602bbec71ee4`.
 For the shutdown change, local targeted guest, SSH, runtime, supervisor,
 helper-artifact, base-build, and architecture checks passed. The full local
 SSH package was blocked by the internal disk reserve; hosted CI subsequently
@@ -35,15 +36,14 @@ passed the full suite. Source checks do not replace real-host qualification.
   refused the dirty snapshot; another was not attempted. Their volumes,
   journals, and remaining failed VM evidence are retained privately.
 - A new qualified base must be built with the corrected helper before a fresh
-  stop can test the shutdown change. To recover build headroom, the stopped
-  Tart VM store is being migrated into an encrypted external APFS image. The
-  first-pass byte comparison matched all 33 files (350,001,444,862 logical
-  bytes), filesystem metadata and extended attributes matched, and Tart saw
-  the exact 11 stopped VMs. Post-remount digest verification is in progress.
-  The internal original remains authoritative until cutover and operational
-  checks pass. Separately, a cold historical private archive was verified
-  after relocation into the encrypted evidence vault; its internal copy was
-  retired and the evidence vault is unmounted.
+  stop can test the shutdown change. The external Tart migration recovered
+  31.99 GiB of unique internal space; the new base build still needs its own
+  free-space preflight. If the encrypted image is unavailable, the unmounted
+  Tart path is mode `000` and operations fail closed. Login and filesystem
+  mount triggers are installed, but an actual reboot has not been exercised.
+  Separately, a cold historical private archive was verified after relocation
+  into the encrypted evidence vault; its internal copy was retired and that
+  vault is unmounted.
 - One stopped synthetic system clone was retired through public `session
   delete`; its independent workspace kept the same inode, size, and SHA-256
   and is now available and detached. A later private ledger check showed that
@@ -71,9 +71,10 @@ passed the full suite. Source checks do not replace real-host qualification.
 
 ## Next step and publication policy
 
-Finish the VM-store digest verification and safe cutover, then build the
-revised generic base and run fresh stopped-import qualification. Continue
-durable per-action attempt records and tests as the next source increment.
-Publish each independently verified increment promptly on the alpha branch and keep the Draft PR accurate. Keep
-private host evidence, VM disks, credentials, and the vault key out of Git.
+Run the new base build preflight, build and qualify the revised generic base,
+then repeat fresh stopped-import qualification. Continue durable per-action
+attempt records and tests as the next source increment. Publish each
+independently verified increment promptly on the alpha branch and keep the
+Draft PR accurate. Keep private host evidence, VM disks, credentials, and the
+vault key out of Git.
 Never push or merge into `main`, rewrite published history, or bypass checks.
