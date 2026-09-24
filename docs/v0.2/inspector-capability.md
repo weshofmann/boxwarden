@@ -137,7 +137,11 @@ and samples the reserve throughout. The copy has a five-minute deadline. The
 inspector retains its 80-second outer deadline. An over-limit request fails
 before reserving the volume. These limits keep a full-size copy plus stream
 spool and receiver staging within a bounded host footprint; they are alpha
-policy, not workspace-format limits.
+policy, not workspace-format limits. The copy deadline is checked between
+bounded local-file I/O chunks and during source/copy hashing. A blocked host
+filesystem call itself is not interruptible by Go context cancellation; a
+stalled host filesystem can hold the locks past the nominal deadline and must
+be diagnosed as host I/O failure, not a completed export.
 
 The host first acquires the exact volume-use lock, then the attached session
 and domain storage locks in that order. It requires Stopped intent and a fresh

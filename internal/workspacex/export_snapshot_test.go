@@ -17,7 +17,10 @@ func TestExportSnapshotPendingBlocksStartAndDetachAfterCopyInterruption(t *testi
 		t.Fatal(err)
 	}
 	volume.Pending = &Pending{Kind: "export-snapshot", ID: testGeneration}
-	if err := SaveRecord(root, domain.ID("work"), volume); err != nil {
+	if err := SaveRecord(root, domain.ID("work"), volume); err == nil {
+		t.Fatal("generic record write bypassed dedicated export reservation")
+	}
+	if err := saveRecordTransition(root, domain.ID("work"), volume, mutationBeginExportSnapshot, nil); err != nil {
 		t.Fatal(err)
 	}
 	observer := stoppedObserver{state: backend.ObjectStopped, object: stopped.Backend.ObjectID}
@@ -45,5 +48,29 @@ func TestExportSnapshotPendingRequiresAvailableAttachedVolume(t *testing.T) {
 	available.Disk = &DiskIdentity{Device: 1, Inode: 2}
 	if err := SaveRecord(root, domain.ID("work"), available); err == nil {
 		t.Fatal("unattached workspace claimed an export copy")
+	}
+}
+
+func TestExportSnapshotPendingClearRequiresExactReadyJournal(t *testing.T) {
+	root, _ := stoppedLaunchFixture(t)
+	volume, err := LoadRecord(root, domain.ID("work"), testVolumeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	volume.Pending = &Pending{Kind: "export-snapshot", ID: testGeneration}
+	if err := saveRecordTransition(root, domain.ID("work"), volume, mutationBeginExportSnapshot, nil); err != nil {
+		t.Fatal(err)
+	}
+	cleared := volume
+	cleared.Pending = nil
+	if err := saveRecordTransitionExpectedPending(root, domain.ID("work"), cleared, mutationFinishExportSnapshot, testVolumeID, nil); err == nil {
+		t.Fatal("different transaction cleared export Pending")
+	}
+	if err := saveRecordTransitionExpectedPending(root, domain.ID("work"), cleared, mutationFinishExportSnapshot, testGeneration, nil); err == nil {
+		t.Fatal("missing snapshot-ready journal cleared export Pending")
+	}
+	current, err := LoadRecord(root, domain.ID("work"), testVolumeID)
+	if err != nil || current.Pending == nil || current.Pending.ID != testGeneration {
+		t.Fatalf("rejected clear changed export marker: %#v, %v", current.Pending, err)
 	}
 }

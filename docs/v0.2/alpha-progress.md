@@ -14,7 +14,7 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
 | Reusable preparation | Strict versioned recipe and ISO checks, candidate build, guest preparation, fresh-clone qualifier, private evidence, and cache admission are implemented. A fresh real build using the corrected finalizer completed installation, guest preparation, clone-ready shutdown, and qualification. Its fresh clone reached READY, passed package-inventory and identity checks, and stopped; the versioned prepared record was admitted. This is base qualification, not the full workspace/export acceptance path. |
 | Workspace volume | One alpha-owned 64 MiB ext4 volume was formatted in a zero-NIC VM and independently inspected. Its synthetic file retained its digest across an earlier stop/restart after manual remount. Public detach and attach moved this exact volume from a stopped original system clone to a separate replacement system clone without copying the disk. The replacement guest file manager opened the mounted 57-byte synthetic file and displayed its expected content; the known bytes match the previously recorded SHA-256. Public stops cleared exact generation Use while preserving the volume identity. Offline export qualification remains pending. |
 | Automatic mount and READY | The static generic guest helper resolves an exact FS UUID, mounts ext4 at a validated path, checks existing mounts and read-write state, and probes exact bindings. The host owner derives those bindings from admitted session/Use records, ensures them before READY, and repeats the bound probe for status. Full local Go tests, focused race tests, vet, and artifact checks passed at `5c84520`. The fresh original clone reached mount-bound READY in two generations; the separate replacement clone also reached mount-bound READY with the same reattached volume and later exposed the expected file in its GUI. Both are stopped now. |
-| Controlled export | Bounded host stream receiver and zero-NIC synthetic inspector boot/transport have tests. The inspector mounted a private 64 MiB ext4 copy read-only with journal replay disabled and reported the exact digest and size of one fixed file. After a rejected first run exposed TTY CRLF corruption, a fresh run passed strict 573-byte stream parsing, zero-NIC/stopped/helper checks, and unchanged disk identity and SHA-256. The standalone hardlink gate rejects a linked disk and admits a valid one-link control. Real stopped-volume export and public export remain pending. |
+| Controlled export | Bounded host stream receiver and zero-NIC synthetic inspector boot/transport have tests. The inspector mounted a private 64 MiB ext4 copy read-only with journal replay disabled and reported the exact digest and size of one fixed file. After a rejected first run exposed TTY CRLF corruption, a fresh run passed strict 573-byte stream parsing, zero-NIC/stopped/helper checks, and unchanged disk identity and SHA-256. The standalone hardlink gate rejects a linked disk and admits a valid one-link control. A source-level stopped-volume snapshot transaction now copies qualified bytes under locks and journals exact identity before clearing Pending; focused tests cover success, running-backend rejection, changed source, and partial-copy cancellation. Real managed-volume and public export remain pending. |
 | Example | `examples/v0.2-alpha-base.json` passed public recipe/ISO validation. It requests the Desktop source, a small package set, and one named workspace intent. |
 | Recipe-bound create | `session create` accepts exact recipe/ISO/guest definition/tool inputs, prepares or reuses a qualified base, and calls `CreateFromRevision`. A focused fixture and the real public command both selected the newly prepared revision without changing the domain current golden. A later public `alpha prepare` reused the admitted cache after verified redundant installer staging was retired, without creating an attempt journal or new Tart object. |
 
@@ -42,11 +42,12 @@ qualifies the private-copy probe, not public stopped-volume export.
 An independent export design review found publication, recovery, and resource
 bounds that must be enforced. `af857ec` admits a durable `export-snapshot`
 Pending marker and verifies that interrupted copying blocks start and detach.
-The current increment adds a strict private transaction journal with exact
-identity, deterministic snapshot path, serialized phase changes, and bounded
-records. It is not yet connected to snapshot copying or Pending clearance.
-Snapshot copying, closed-stream inspection,
-crash recovery, and public export are still being implemented. The earlier
+The current increment connects the strict private transaction journal to
+stopped-volume snapshot copying and Pending clearance. It admits a qualified
+source, verifies a distinct copy and source digest, and leaves Pending plus a
+copying journal on partial cancellation. These are local source tests; the
+managed volume has not yet passed public export. Exact crash recovery,
+closed-stream inspection, and public export remain to implement. The earlier
 failed base attempt was corrected and a fresh base built and qualified; failed
 attempts remain outside the prepared cache.
 

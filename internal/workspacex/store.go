@@ -29,6 +29,8 @@ const (
 	mutationReserveUse
 	mutationReleaseUse
 	mutationPromoteVerified
+	mutationBeginExportSnapshot
+	mutationFinishExportSnapshot
 )
 
 const (
@@ -50,6 +52,10 @@ func saveRecord(stateRoot string, expectedDomain domain.ID, record Record, hook 
 }
 
 func saveRecordTransition(stateRoot string, expectedDomain domain.ID, record Record, mutation mutationKind, hook func(storeStage) error) error {
+	return saveRecordTransitionExpectedPending(stateRoot, expectedDomain, record, mutation, "", hook)
+}
+
+func saveRecordTransitionExpectedPending(stateRoot string, expectedDomain domain.ID, record Record, mutation mutationKind, expectedPendingID string, hook func(storeStage) error) error {
 	if err := validateRecord(expectedDomain, record); err != nil {
 		return err
 	}
@@ -63,7 +69,7 @@ func saveRecordTransition(stateRoot string, expectedDomain domain.ID, record Rec
 		return fmt.Errorf("workspace directory: %w", err)
 	}
 	defer workspaces.Close()
-	if err := checkBindings(workspaces, expectedDomain, record, mutation); err != nil {
+	if err := checkBindings(workspaces, stateRoot, expectedDomain, record, mutation, expectedPendingID); err != nil {
 		return err
 	}
 	name := record.VolumeID + ".json"
@@ -148,7 +154,7 @@ func saveRecordTransition(stateRoot string, expectedDomain domain.ID, record Rec
 	return nil
 }
 
-func checkBindings(workspaces *os.Root, expectedDomain domain.ID, next Record, mutation mutationKind) error {
+func checkBindings(workspaces *os.Root, stateRoot string, expectedDomain domain.ID, next Record, mutation mutationKind, expectedPendingID string) error {
 	directory, err := workspaces.Open(".")
 	if err != nil {
 		return err
@@ -190,7 +196,7 @@ func checkBindings(workspaces *os.Root, expectedDomain domain.ID, next Record, m
 			if existing.Disk != nil && (next.Disk == nil || *existing.Disk != *next.Disk) {
 				return fmt.Errorf("workspace disk identity is immutable")
 			}
-			if existing.Pending != nil && !reflect.DeepEqual(existing.Pending, next.Pending) {
+			if existing.Pending != nil && !reflect.DeepEqual(existing.Pending, next.Pending) && mutation != mutationFinishExportSnapshot {
 				return fmt.Errorf("pending workspace operation requires explicit reconciliation")
 			}
 			switch mutation {
@@ -201,6 +207,27 @@ func checkBindings(workspaces *os.Root, expectedDomain domain.ID, next Record, m
 			case mutationGeneric:
 				if !reflect.DeepEqual(existing.Attachment, next.Attachment) || !reflect.DeepEqual(existing.Use, next.Use) {
 					return fmt.Errorf("attachment or use requires a dedicated observed transition")
+				}
+				if existing.Pending == nil && next.Pending != nil && next.Pending.Kind == "export-snapshot" {
+					return fmt.Errorf("export snapshot requires a dedicated stopped-volume transition")
+				}
+			case mutationBeginExportSnapshot:
+				unchanged := existing
+				unchanged.Pending = next.Pending
+				if existing.State != StateAvailable || existing.Attachment == nil || existing.Use != nil || existing.Pending != nil ||
+					next.Pending == nil || next.Pending.Kind != "export-snapshot" || !reflect.DeepEqual(unchanged, next) {
+					return fmt.Errorf("invalid export snapshot reservation")
+				}
+			case mutationFinishExportSnapshot:
+				unchanged := existing
+				unchanged.Pending = nil
+				if existing.Pending == nil || existing.Pending.Kind != "export-snapshot" || existing.Pending.ID != expectedPendingID || next.Pending != nil || !reflect.DeepEqual(unchanged, next) {
+					return fmt.Errorf("invalid export snapshot completion")
+				}
+				journal, err := loadExportJournal(stateRoot, expectedDomain, expectedPendingID)
+				if err != nil || journal.Phase != ExportSnapshotReady || journal.Snapshot == nil || journal.VolumeID != existing.VolumeID ||
+					journal.Source != *existing.Disk || journal.SessionID != existing.Attachment.SessionID || journal.SessionName != existing.Attachment.SessionName {
+					return fmt.Errorf("export snapshot lacks exact durable ready journal: %v", err)
 				}
 			case mutationAttach:
 				if existing.Attachment != nil || next.Attachment == nil || existing.Use != nil || next.Use != nil {
