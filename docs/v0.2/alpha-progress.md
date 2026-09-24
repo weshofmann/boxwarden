@@ -94,6 +94,14 @@ without a second deletion. Targeted session/workspace/runtime/app/fake backend
 tests and vet plus focused retirement race tests pass. This is source-only;
 public orchestration and real rebuild qualification remain open.
 
+The source-level phase driver now resumes the strict journal from reserved,
+cloned, cutover, ready, or retiring state. It invokes the exact candidate
+start and fresh ready gate before deletion. A complete fake-backend run kept
+the stable session ID, ended with one replacement clone and one old deletion,
+and left no journal; repeating the already selected base did not reclone or
+delete again. This driver is not yet wired into the CLI or production Tart
+dependencies.
+
 The managed-volume shutdown correction at `7eeba47` now passes one real
 attached-volume public stop: the session and backend are consistently stopped,
 Use is released, and ext4 `needs_recovery` is clear. A fresh public export

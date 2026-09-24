@@ -322,3 +322,25 @@ func mustRebuildJournal(t *testing.T, root string, domainID domain.ID) RebuildJo
 	}
 	return j
 }
+
+func TestExecuteRebuildRunsAllPhasesAndRepeatedBaseDoesNotReclone(t *testing.T) {
+	rebuilder, backendFake, old := rebuildPreparationFixture(t)
+	control := &startSupervisorFake{
+		start: func(r supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+			return readySnapshot(r.Binding, time.Now()), nil
+		},
+		snapshot: func(b supervisor.Binding) (supervisor.Snapshot, error) { return readySnapshot(b, time.Now()), nil },
+	}
+	starter := newStartTestService(rebuilder.domain, backendFake, control, time.Now, func() (string, error) { return testStartGeneration, nil })
+	result, err := rebuilder.Execute(context.Background(), "dev", "golden-r2", starter)
+	if err != nil || result.ID != old.ID || result.GoldenRevision != "golden-r2" || result.IntendedState != StateRunning {
+		t.Fatalf("complete rebuild = %#v, %v", result, err)
+	}
+	if _, err := LoadRebuildJournal(rebuilder.domain.StateRoot, old.Domain, "dev"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("completed rebuild retained journal: %v", err)
+	}
+	if again, err := rebuilder.Execute(context.Background(), "dev", "golden-r2", starter); err != nil || again != result ||
+		len(backendFake.CloneCalls()) != 2 || len(backendFake.DeleteCalls()) != 1 || control.startCalls != 1 {
+		t.Fatalf("repeated completed rebuild = %#v, %v; clone=%d delete=%d start=%d", again, err, len(backendFake.CloneCalls()), len(backendFake.DeleteCalls()), control.startCalls)
+	}
+}

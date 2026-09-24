@@ -350,6 +350,25 @@ func removeRebuildJournal(stateRoot string, expected RebuildJournal) error {
 	return sessionSyncRoot(rebuilds)
 }
 
+// A repeated completed-base request can settle an uncertain directory sync
+// after journal removal before reporting the visible absence as durable.
+func syncRebuildJournalRegistry(stateRoot string) error {
+	root, err := openSessionStateRoot(stateRoot)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	rebuilds, err := openSessionChild(root, "rebuilds", false)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer rebuilds.Close()
+	return sessionSyncRoot(rebuilds)
+}
+
 func decodeRebuildJournal(raw []byte) (RebuildJournal, error) {
 	var j RebuildJournal
 	decoder := json.NewDecoder(bytes.NewReader(raw))

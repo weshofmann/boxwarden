@@ -468,3 +468,81 @@ func (s *RebuildService) RetireOld(ctx context.Context, rawName string, starter 
 	}
 	return record, nil
 }
+
+// Execute advances one requested replacement through its durable journal.
+// Every phase is retryable; an incomplete boot remains Starting and needs a
+// later invocation. An already selected base with no journal is a no-op, so
+// retrying a completed command does not create another disposable system.
+func (s *RebuildService) Execute(ctx context.Context, rawName, revision string, starter *Service) (Record, error) {
+	if s == nil || starter == nil || starter.domain != s.domain {
+		return Record{}, fmt.Errorf("matching rebuild starter is required")
+	}
+	name, err := ParseName(rawName)
+	if err != nil {
+		return Record{}, err
+	}
+	current, err := LoadRecord(s.domain.StateRoot, string(s.domain.ID), string(name))
+	if err != nil {
+		return Record{}, err
+	}
+	j, err := LoadRebuildJournal(s.domain.StateRoot, s.domain.ID, string(name))
+	if errors.Is(err, os.ErrNotExist) {
+		if revision == "" {
+			return Record{}, fmt.Errorf("new rebuild requires an exact prepared base revision")
+		}
+		if current.GoldenRevision == revision {
+			if err := syncRebuildJournalRegistry(s.domain.StateRoot); err != nil {
+				return Record{}, fmt.Errorf("settle completed rebuild journal directory: %w", err)
+			}
+			if current.IntendedState != StateStopped && (current.IntendedState != StateRunning || current.Readiness.Status != ReadinessReady) {
+				return Record{}, fmt.Errorf("session already uses requested base but is not stopped or ready")
+			}
+			if current.IntendedState == StateRunning {
+				return starter.Start(ctx, string(name)) // fresh exact owner evidence
+			}
+			observation, observeErr := s.observeExact(ctx, current.Backend.ObjectID)
+			if observeErr != nil || !observation.Exists || observation.State != backend.ObjectStopped {
+				return Record{}, fmt.Errorf("same-base stopped session is not exactly stopped: %v", observeErr)
+			}
+			return current, nil
+		}
+	} else if err != nil {
+		return Record{}, err
+	} else {
+		if revision == "" {
+			revision = j.CandidateRevision
+		}
+		if revision != j.CandidateRevision {
+			return Record{}, fmt.Errorf("pending rebuild is bound to base %q", j.CandidateRevision)
+		}
+	}
+	if err := backend.ValidateObjectID(revision); err != nil {
+		return Record{}, err
+	}
+	if errors.Is(err, os.ErrNotExist) || j.Phase == RebuildReserved || j.Phase == RebuildCloned {
+		j, err = s.PrepareCandidate(ctx, string(name), revision)
+		if err != nil {
+			return Record{}, err
+		}
+	}
+	if j.Phase == RebuildCloned || j.Phase == RebuildCutover {
+		if _, err := s.Cutover(ctx, string(name)); err != nil {
+			return Record{}, err
+		}
+		j, err = LoadRebuildJournal(s.domain.StateRoot, s.domain.ID, string(name))
+		if err != nil {
+			return Record{}, err
+		}
+		record, startErr := starter.StartRebuildCandidate(ctx, string(name), j)
+		if startErr != nil {
+			return Record{}, startErr
+		}
+		if record.IntendedState != StateRunning || record.Readiness.Status != ReadinessReady {
+			return Record{}, fmt.Errorf("candidate remains %s; retry exact rebuild after readiness converges", record.IntendedState)
+		}
+		if _, err := s.ConfirmReady(ctx, string(name), starter); err != nil {
+			return Record{}, err
+		}
+	}
+	return s.RetireOld(ctx, string(name), starter)
+}
