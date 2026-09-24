@@ -260,6 +260,11 @@ before the terminal record can publish. Focused tests reject a missing
 selection, wrong case, extra sibling, and invalid host selection. The public
 caller must supply the journal selection; the generic receiver keeps its
 existing unselected mode for protocol fixtures.
+The `CaptureExportInspector` entry point requires the helper's export-mode
+stopped-host evidence and removes a spool from a synthetic helper. The
+`ReceiveSelectedExport` entry point requires a nonempty host selection before
+publication. Their focused tests pass, but production artifact admission and
+journal transitions are not connected yet.
 
 Inside the isolated Linux guest, validate the expected whole-device ext4 UUID
 and mount with `ro,noload,nodev,nosuid,noexec`. Linux documents that plain

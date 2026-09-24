@@ -84,6 +84,18 @@ type pathEntry struct {
 	name string
 }
 
+// ReceiveSelectedExport is the production publication entry point. It fails
+// closed if the caller omits the journal-bound host selection.
+func ReceiveSelectedExport(ctx context.Context, stream io.ReadCloser, options Options) (string, error) {
+	if len(options.Selected) == 0 {
+		if stream != nil {
+			_ = stream.Close()
+		}
+		return "", fmt.Errorf("selected export requires host path selection")
+	}
+	return Receive(ctx, stream, options)
+}
+
 // Receive owns and closes stream. It requires EOF immediately after the
 // terminal record. On failure before publication, it removes private staging.
 // On success it returns Parent/<lowercase transaction hex>. The caller must

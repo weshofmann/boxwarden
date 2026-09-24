@@ -17,6 +17,9 @@ func TestCaptureInspectorHelperProcess(t *testing.T) {
 	case "ok":
 		_, _ = io.WriteString(os.Stdout, "BWEX test bytes")
 		_, _ = io.WriteString(os.Stderr, "BOOT_EVIDENCE {\"console_bytes\":10,\"export_bytes\":15,\"runtime_network_devices\":0,\"vm_state\":\"stopped\"}\n")
+	case "export":
+		_, _ = io.WriteString(os.Stdout, "BWEX test bytes")
+		_, _ = io.WriteString(os.Stderr, "BOOT_EVIDENCE {\"console_bytes\":10,\"export_bytes\":15,\"runtime_network_devices\":0,\"vm_state\":\"stopped\",\"inspector_mode\":\"export\"}\n")
 	case "overflow":
 		_, _ = io.WriteString(os.Stdout, strings.Repeat("x", 64))
 		_, _ = io.WriteString(os.Stderr, "BOOT_EVIDENCE {\"console_bytes\":0,\"export_bytes\":64,\"runtime_network_devices\":0,\"vm_state\":\"stopped\"}\n")
@@ -32,6 +35,39 @@ func TestCaptureInspectorHelperProcess(t *testing.T) {
 		os.Exit(8)
 	}
 	os.Exit(0)
+}
+
+func TestCaptureExportInspectorRequiresExportModeAndRemovesSyntheticSpool(t *testing.T) {
+	for _, tc := range []struct {
+		mode string
+		pass bool
+	}{{"ok", false}, {"export", true}} {
+		t.Run(tc.mode, func(t *testing.T) {
+			parent := t.TempDir()
+			if err := os.Chmod(parent, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			result, err := CaptureExportInspector(context.Background(), os.Args[0], []string{"-test.run=^TestCaptureInspectorHelperProcess$", "capture-helper", tc.mode}, parent)
+			if (err == nil) != tc.pass {
+				t.Fatalf("capture export = %+v, %v", result, err)
+			}
+			if !tc.pass {
+				if result.Stream != nil {
+					t.Fatal("synthetic helper exposed an export stream")
+				}
+				if _, statErr := os.Lstat(parent + "/stream.bin"); !os.IsNotExist(statErr) {
+					t.Fatalf("synthetic spool survived rejection: %v", statErr)
+				}
+				return
+			}
+			if result.Evidence.Mode != "export" || result.Stream == nil {
+				t.Fatalf("export evidence missing: %+v", result.Evidence)
+			}
+			if err := result.Remove(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }
 
 func TestCaptureInspectorRequiresStoppedZeroNICReapedHelperBeforeStream(t *testing.T) {

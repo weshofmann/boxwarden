@@ -151,6 +151,18 @@ func TestReceiveBindsPublishedPathsToHostSelection(t *testing.T) {
 	}
 }
 
+func TestReceiveSelectedExportRejectsMissingHostSelection(t *testing.T) {
+	opts := fixtureOptions(t)
+	if _, err := ReceiveSelectedExport(context.Background(), io.NopCloser(bytes.NewReader(validStream())), opts); err == nil {
+		t.Fatal("production receiver published without a host selection")
+	}
+	assertNoPublication(t, opts.Parent)
+	opts.Selected = []string{"project/README.txt"}
+	if _, err := ReceiveSelectedExport(context.Background(), io.NopCloser(bytes.NewReader(validStream())), opts); err != nil {
+		t.Fatalf("exact host selection rejected: %v", err)
+	}
+}
+
 func TestReceiveRejectsMalformedOrUnverifiedStreamWithoutPublication(t *testing.T) {
 	base := validStream()
 	badHash := append([]byte(nil), base...)

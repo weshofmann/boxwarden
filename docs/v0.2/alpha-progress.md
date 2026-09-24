@@ -84,6 +84,10 @@ the journal's selection, it admits only selected paths and necessary parent
 directories, requires every selected path to appear, and rejects an extra
 sibling before publication. Host orchestration must supply the journal
 selection; no public export invokes the receiver yet.
+Explicit capture and receive entry points now fail closed if the helper lacks
+export-mode stopped-host evidence or the receiver lacks a host selection.
+The former removes a rejected synthetic spool. They remain disconnected from
+production artifact admission and journal phase transitions.
 Real managed-volume qualification remains open. The earlier failed base
 attempt was corrected and a fresh base built and qualified; failed attempts
 remain outside the prepared cache.

@@ -105,6 +105,22 @@ func CaptureInspector(ctx context.Context, executable string, args []string, pri
 	return result, nil
 }
 
+// CaptureExportInspector refuses a synthetic helper even when it produced a
+// well-formed typed stream under the same transaction. Production callers
+// must still admit the executable and boot artifacts before invoking it.
+func CaptureExportInspector(ctx context.Context, executable string, args []string, privateParent string) (CapturedInspectorStream, error) {
+	captured, err := CaptureInspector(ctx, executable, args, privateParent)
+	if err != nil {
+		return CapturedInspectorStream{}, err
+	}
+	if captured.Evidence.Mode != "export" {
+		return CapturedInspectorStream{}, errors.Join(
+			fmt.Errorf("inspector helper did not prove export mode"), captured.Remove(),
+		)
+	}
+	return captured, nil
+}
+
 func captureInspector(ctx context.Context, executable string, args []string, privateParent string, streamLimit, logLimit int64) (captured CapturedInspectorStream, err error) {
 	if executable == "" || !filepath.IsAbs(executable) || filepath.Clean(executable) != executable || streamLimit <= 0 || logLimit <= 0 {
 		return CapturedInspectorStream{}, fmt.Errorf("invalid inspector capture inputs")
