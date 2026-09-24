@@ -24,9 +24,19 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   CLI build, and `git diff --check` pass for this source checkpoint. The
   separate reviewer rechecked the corrected deletion path.
 - In progress: explicit bounded synthetic host-project ingress into an
-  independent workspace. No public ingress command exists yet.
-- Next: establish a pinned, bounded transfer mechanism and implement the
-  public ingress path, then run fresh source-tracked acceptance.
+  independent workspace. A private host-source snapshot primitive now accepts
+  only an owner-controlled tree with bounded regular files and safe names,
+  captures exact digests, and publishes without replacing an existing
+  transaction directory. Targeted import tests and vet pass; a separate
+  source-only rereview found no remaining Critical/Important defect. No public
+  ingress command exists yet.
+- Transport probe: the exact alpha-owned disposable sandbox reached READY;
+  an exact-generation, host-key-pinned SFTP batch read its remote working
+  directory successfully. The sandbox was stopped again. No project file was
+  transferred; this is a capability probe, not ingress qualification.
+- Next: durably bind the snapshot to an exact running session/workspace and
+  implement bounded SFTP transfer with readback and retry reporting, then run
+  fresh source-tracked acceptance.
 - Limits: hosted CI, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh
   acceptance remain open. No human action is currently needed.
