@@ -11,19 +11,22 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   across stop, reattach, and same-software rebuild, plus selected stopped
   export and inspected-phase resume on synthetic data. The full local Go
   suite, vet, and CLI build passed at the prior source checkpoint.
-- In progress: public stopped-only `session delete` now has source-level CLI,
-  Tart composition, durable deleting intent, exact backend retirement, and
-  volume retention. Regression tests cover disk bytes, post-effect retry,
-  partial two-volume detach, sync failure, missing disk, running backend,
-  and active Use. A separate reviewer found three Important issues; all were
-  corrected and the rereview found no remaining Important issue. Real-VM
-  deletion has not yet been exercised.
+- Complete: public stopped-only `session delete` has durable deleting intent,
+  exact backend retirement, and volume retention. Tests cover disk bytes,
+  post-effect retry, partial two-volume detach, sync failure, missing disk,
+  running backend, and active Use. A separate reviewer found three Important
+  issues; all were corrected and rereview found no remaining Important issue.
+  One exact alpha-owned stopped Tart sandbox was deleted through the public
+  CLI. Its session record and VM became absent; its 64 MiB volume became
+  Available and detached with no Use or Pending. Raw inode, size, and SHA-256
+  stayed unchanged. This is targeted real-host qualification.
 - Verification: `GOTOOLCHAIN=local go test -count=1 ./...`, `go vet ./...`,
   CLI build, and `git diff --check` pass for this source checkpoint. The
   separate reviewer rechecked the corrected deletion path.
-- Next: qualify deletion of one exact alpha-owned stopped sandbox and verify
-  its retained volume. Implement explicit bounded synthetic project ingress
-  afterward.
+- In progress: explicit bounded synthetic host-project ingress into an
+  independent workspace. No public ingress command exists yet.
+- Next: establish a pinned, bounded transfer mechanism and implement the
+  public ingress path, then run fresh source-tracked acceptance.
 - Limits: hosted CI, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh
   acceptance remain open. No human action is currently needed.
@@ -500,10 +503,8 @@ acceptance run and GUI/provider sign-in checks.
    guest SSH loss and false-stopped qualification remain open.
 2. Qualify or explicitly defer ambiguous post-final-rename export recovery;
    an occupied final directory still requires manual reconciliation.
-3. Qualify the new public stopped-only sandbox delete-with-retain on one
-   exact alpha-owned synthetic session and verify its workspace stays intact.
-   Then implement explicit bounded synthetic host-project ingress; prior
-   reattachment used guest-created synthetic files.
+3. Implement explicit bounded synthetic host-project ingress; prior
+   reattachment and delete qualification used guest-created synthetic files.
 4. Run the fresh real acceptance matrix and publish the runnable build, exact
    source SHA, quickstart, synthetic demo, and limits. The full local Go suite,
    vet, and CLI build have passed; hosted CI remains unavailable.
