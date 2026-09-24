@@ -3,6 +3,7 @@ package workspacex
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -130,5 +131,190 @@ func TestExportSourceRecheckRejectsChangedBytes(t *testing.T) {
 	}
 	if err := verifyExportSource(context.Background(), root, request, source, *volume.Disk, digest[:]); err == nil {
 		t.Fatal("changed source bytes matched copied digest")
+	}
+}
+
+func TestRecoverInterruptedExportCopyRequiresStopAndClearsExactPending(t *testing.T) {
+	root, stopped := stoppedLaunchFixture(t)
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := createExportSnapshot(context.Background(), root, domain.ID("work"), testVolumeID, parent, []string{"project/report.txt"}, stoppedObserver{state: backend.ObjectStopped, object: stopped.Backend.ObjectID},
+		func(_ context.Context, _ string, _ workspaceformat.Request, _ *os.File, dir *os.Root, _ ExportJournal) (ExportSnapshot, error) {
+			partial, err := dir.OpenFile("snapshot.raw", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+			if err != nil {
+				return ExportSnapshot{}, err
+			}
+			if _, err := partial.Write([]byte("partial")); err != nil {
+				return ExportSnapshot{}, err
+			}
+			if err := partial.Close(); err != nil {
+				return ExportSnapshot{}, err
+			}
+			return ExportSnapshot{}, errors.New("injected copy failure")
+		})
+	if err == nil {
+		t.Fatal("injected copy failure was accepted")
+	}
+	volume, err := LoadRecord(root, domain.ID("work"), testVolumeID)
+	if err != nil || volume.Pending == nil {
+		t.Fatalf("copy did not retain Pending: %#v, %v", volume.Pending, err)
+	}
+	id := volume.Pending.ID
+	foreign := filepath.Join(root, "exports", id, "foreign")
+	if err := os.WriteFile(foreign, []byte("unexpected"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RecoverExportSnapshot(context.Background(), root, domain.ID("work"), id, stoppedObserver{state: backend.ObjectStopped, object: stopped.Backend.ObjectID}); err == nil {
+		t.Fatal("recovery removed a transaction directory with unexpected state")
+	}
+	if _, err := os.Stat(filepath.Join(root, "exports", id, "snapshot.raw")); err != nil {
+		t.Fatalf("ambiguous cleanup removed partial copy: %v", err)
+	}
+	if err := os.Remove(foreign); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RecoverExportSnapshot(context.Background(), root, domain.ID("work"), id, stoppedObserver{state: backend.ObjectRunning, object: stopped.Backend.ObjectID}); err == nil {
+		t.Fatal("recovery cleared copy while backend ran")
+	}
+	blocked, err := LoadRecord(root, domain.ID("work"), testVolumeID)
+	if err != nil || blocked.Pending == nil || blocked.Pending.ID != id {
+		t.Fatalf("running-backend rejection cleared Pending: %#v, %v", blocked.Pending, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "exports", id, "snapshot.raw")); err != nil {
+		t.Fatalf("running-backend rejection removed partial copy: %v", err)
+	}
+	recovered, err := RecoverExportSnapshot(context.Background(), root, domain.ID("work"), id, stoppedObserver{state: backend.ObjectStopped, object: stopped.Backend.ObjectID})
+	if err != nil || recovered.Phase != ExportAborted {
+		t.Fatalf("recovery = %#v, %v", recovered, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, recovered.SnapshotPath)); !os.IsNotExist(err) {
+		t.Fatalf("owned partial snapshot retained: %v", err)
+	}
+	volume, err = LoadRecord(root, domain.ID("work"), testVolumeID)
+	if err != nil || volume.Pending != nil || volume.Use != nil {
+		t.Fatalf("recovery left blocked or in-use volume: %#v, %v", volume, err)
+	}
+	if _, err := PrepareSessionStart(context.Background(), root, domain.ID("work"), stopped, testGeneration, stoppedObserver{state: backend.ObjectStopped, object: stopped.Backend.ObjectID}); err != nil {
+		t.Fatalf("aborted snapshot did not release volume for start: %v", err)
+	}
+	if again, err := RecoverExportSnapshot(context.Background(), root, domain.ID("work"), id, stoppedObserver{state: backend.ObjectRunning, object: stopped.Backend.ObjectID}); err != nil || again.Phase != ExportAborted {
+		t.Fatalf("idempotent recovery = %#v, %v", again, err)
+	}
+}
+
+func TestRecoverReadyExportSnapshotRechecksBytesBeforePendingClear(t *testing.T) {
+	for _, tamper := range []bool{false, true} {
+		t.Run(fmt.Sprintf("tamper=%t", tamper), func(t *testing.T) {
+			root, stopped := stoppedLaunchFixture(t)
+			parent := t.TempDir()
+			if err := os.Chmod(parent, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			observer := stoppedObserver{state: backend.ObjectStopped, object: stopped.Backend.ObjectID}
+			journal, err := CreateExportSnapshot(context.Background(), root, domain.ID("work"), testVolumeID, parent, []string{"project/report.txt"}, observer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			volume, err := LoadRecord(root, domain.ID("work"), testVolumeID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			volume.Pending = &Pending{Kind: "export-snapshot", ID: journal.ID}
+			if err := saveRecordTransition(root, domain.ID("work"), volume, mutationBeginExportSnapshot, nil); err != nil {
+				t.Fatal(err)
+			}
+			if tamper {
+				file, err := os.OpenFile(filepath.Join(root, journal.SnapshotPath), os.O_WRONLY, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := file.WriteAt([]byte{0x42}, 4096); err != nil {
+					t.Fatal(err)
+				}
+				if err := file.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err = RecoverExportSnapshot(context.Background(), root, domain.ID("work"), journal.ID, observer)
+			if (err != nil) != tamper {
+				t.Fatalf("ready recovery err = %v, tamper=%t", err, tamper)
+			}
+			volume, err = LoadRecord(root, domain.ID("work"), testVolumeID)
+			if err != nil || (volume.Pending != nil) != tamper {
+				t.Fatalf("ready recovery marker = %#v, %v", volume.Pending, err)
+			}
+		})
+	}
+}
+
+func TestRecoverExportCopyAfterCleanupBeforeAbortJournal(t *testing.T) {
+	root, stopped := stoppedLaunchFixture(t)
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	observer := stoppedObserver{state: backend.ObjectStopped, object: stopped.Backend.ObjectID}
+	_, err := createExportSnapshot(context.Background(), root, domain.ID("work"), testVolumeID, parent, []string{"project/report.txt"}, observer,
+		func(_ context.Context, _ string, _ workspaceformat.Request, _ *os.File, dir *os.Root, _ ExportJournal) (ExportSnapshot, error) {
+			partial, err := dir.OpenFile("snapshot.raw", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+			if err != nil {
+				return ExportSnapshot{}, err
+			}
+			if err := partial.Close(); err != nil {
+				return ExportSnapshot{}, err
+			}
+			return ExportSnapshot{}, errors.New("injected copy failure")
+		})
+	if err == nil {
+		t.Fatal("injected copy failure was accepted")
+	}
+	volume, err := LoadRecord(root, domain.ID("work"), testVolumeID)
+	if err != nil || volume.Pending == nil {
+		t.Fatalf("copy marker = %#v, %v", volume.Pending, err)
+	}
+	id := volume.Pending.ID
+	journal, err := loadExportJournal(root, domain.ID("work"), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Model interruption at the recovery boundary immediately after exact
+	// cleanup, before the durable aborted journal update.
+	if err := removeExactPartialSnapshot(root, journal); err != nil {
+		t.Fatal(err)
+	}
+	journal, err = loadExportJournal(root, domain.ID("work"), id)
+	if err != nil || journal.Phase != ExportCopying {
+		t.Fatalf("cleanup crash journal = %#v, %v", journal, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "exports", id)); !os.IsNotExist(err) {
+		t.Fatalf("partial directory survived cleanup: %v", err)
+	}
+	volume, err = LoadRecord(root, domain.ID("work"), testVolumeID)
+	if err != nil || volume.Pending == nil || volume.Pending.ID != id {
+		t.Fatalf("cleanup crash cleared marker: %#v, %v", volume.Pending, err)
+	}
+	recovered, err := RecoverExportSnapshot(context.Background(), root, domain.ID("work"), id, observer)
+	if err != nil || recovered.Phase != ExportAborted {
+		t.Fatalf("retry after cleanup = %#v, %v", recovered, err)
+	}
+	volume, err = LoadRecord(root, domain.ID("work"), testVolumeID)
+	if err != nil || volume.Pending != nil {
+		t.Fatalf("retry retained marker: %#v, %v", volume.Pending, err)
+	}
+	// Model a crash after the aborted journal is durable but before the
+	// exact Pending marker is cleared. The retry must finish that transition.
+	volume.Pending = &Pending{Kind: "export-snapshot", ID: id}
+	if err := saveRecordTransition(root, domain.ID("work"), volume, mutationBeginExportSnapshot, nil); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err = RecoverExportSnapshot(context.Background(), root, domain.ID("work"), id, observer)
+	if err != nil || recovered.Phase != ExportAborted {
+		t.Fatalf("retry after aborted journal = %#v, %v", recovered, err)
+	}
+	volume, err = LoadRecord(root, domain.ID("work"), testVolumeID)
+	if err != nil || volume.Pending != nil {
+		t.Fatalf("aborted retry retained marker: %#v, %v", volume.Pending, err)
 	}
 }

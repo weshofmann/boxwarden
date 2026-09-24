@@ -25,6 +25,7 @@ type ExportPhase string
 
 const (
 	ExportCopying       ExportPhase = "copying"
+	ExportAborted       ExportPhase = "aborted"
 	ExportSnapshotReady ExportPhase = "snapshot-ready"
 	ExportInspected     ExportPhase = "inspected"
 	ExportPublished     ExportPhase = "published"
@@ -80,9 +81,9 @@ func validateExportJournal(j ExportJournal) error {
 		seen[strings.ToLower(selected)] = true
 	}
 	switch j.Phase {
-	case ExportCopying:
+	case ExportCopying, ExportAborted:
 		if j.Snapshot != nil {
-			return fmt.Errorf("copying export cannot claim a snapshot")
+			return fmt.Errorf("copying or aborted export cannot claim a snapshot")
 		}
 	case ExportSnapshotReady, ExportInspected, ExportPublished:
 		if j.Snapshot == nil || j.Snapshot.Identity.Device == 0 || j.Snapshot.Identity.Inode == 0 ||
@@ -337,7 +338,7 @@ func encodeExportJournal(journal ExportJournal) ([]byte, error) {
 func validExportPhaseAdvance(old, next ExportJournal) bool {
 	switch old.Phase {
 	case ExportCopying:
-		return next.Phase == ExportSnapshotReady && next.Snapshot != nil
+		return next.Phase == ExportSnapshotReady && next.Snapshot != nil || next.Phase == ExportAborted && next.Snapshot == nil
 	case ExportSnapshotReady:
 		return next.Phase == ExportInspected && reflect.DeepEqual(next.Snapshot, old.Snapshot)
 	case ExportInspected:

@@ -163,14 +163,20 @@ journal. Only after that durable journal update may it clear the exact Pending
 marker and release the volume lease. The journal remains live after Pending
 clears, so the original volume may safely restart while inspection continues.
 
-A crash during copying leaves Pending and an untrusted partial copy. Recovery
-must reacquire the exact volume lock and recheck the session/volume binding,
-stopped backend, source identity, and transaction journal before removing only
-its owned partial copy and clearing that exact Pending marker. Copying is
-in-process under the volume lock; an absent PID or lockfile alone proves
-nothing. Ambiguous ownership or backend state keeps Pending and requires
-explicit reconciliation. The inspector is never launched before Pending
-clears. After that transition, recovery uses the journal: it may remove a
+A crash during copying leaves Pending and an untrusted partial copy. The
+snapshot-stage recovery implementation reacquires the volume, session, and
+storage locks and rechecks the exact session/volume binding, stopped backend,
+source identity, and transaction journal. It rejects unexpected transaction
+directory entries, removes only the recognized partial copy, durably records
+`aborted`, then clears the exact Pending marker. A retry after cleanup but
+before the abort journal update repeats safely; a retry after the journal
+update clears a surviving marker. A `snapshot-ready` retry rehashes the exact
+private copy before clearing Pending. These transitions have targeted source
+tests; no real managed-volume recovery has passed yet. Copying is in-process
+under the volume lock; an absent PID or lockfile alone proves nothing.
+Ambiguous ownership or backend state keeps Pending and requires explicit
+reconciliation. The inspector is never launched before Pending clears. After
+that transition, recovery uses the journal: it may remove a
 snapshot only after proving any inspector stopped and reaped, and never removes
 a possibly published destination. A crash around receiver rename is resolved
 by inspecting the exact final name and parent identity; ambiguity is reported,

@@ -31,6 +31,7 @@ const (
 	mutationPromoteVerified
 	mutationBeginExportSnapshot
 	mutationFinishExportSnapshot
+	mutationAbortExportSnapshot
 )
 
 const (
@@ -196,7 +197,7 @@ func checkBindings(workspaces *os.Root, stateRoot string, expectedDomain domain.
 			if existing.Disk != nil && (next.Disk == nil || *existing.Disk != *next.Disk) {
 				return fmt.Errorf("workspace disk identity is immutable")
 			}
-			if existing.Pending != nil && !reflect.DeepEqual(existing.Pending, next.Pending) && mutation != mutationFinishExportSnapshot {
+			if existing.Pending != nil && !reflect.DeepEqual(existing.Pending, next.Pending) && mutation != mutationFinishExportSnapshot && mutation != mutationAbortExportSnapshot {
 				return fmt.Errorf("pending workspace operation requires explicit reconciliation")
 			}
 			switch mutation {
@@ -228,6 +229,17 @@ func checkBindings(workspaces *os.Root, stateRoot string, expectedDomain domain.
 				if err != nil || journal.Phase != ExportSnapshotReady || journal.Snapshot == nil || journal.VolumeID != existing.VolumeID ||
 					journal.Source != *existing.Disk || journal.SessionID != existing.Attachment.SessionID || journal.SessionName != existing.Attachment.SessionName {
 					return fmt.Errorf("export snapshot lacks exact durable ready journal: %v", err)
+				}
+			case mutationAbortExportSnapshot:
+				unchanged := existing
+				unchanged.Pending = nil
+				if existing.Pending == nil || existing.Pending.Kind != "export-snapshot" || existing.Pending.ID != expectedPendingID || next.Pending != nil || !reflect.DeepEqual(unchanged, next) {
+					return fmt.Errorf("invalid export snapshot abort")
+				}
+				journal, err := loadExportJournal(stateRoot, expectedDomain, expectedPendingID)
+				if err != nil || journal.Phase != ExportAborted || journal.Snapshot != nil || journal.VolumeID != existing.VolumeID ||
+					journal.Source != *existing.Disk || journal.SessionID != existing.Attachment.SessionID || journal.SessionName != existing.Attachment.SessionName {
+					return fmt.Errorf("export snapshot lacks exact durable aborted journal: %v", err)
 				}
 			case mutationAttach:
 				if existing.Attachment != nil || next.Attachment == nil || existing.Use != nil || next.Use != nil {

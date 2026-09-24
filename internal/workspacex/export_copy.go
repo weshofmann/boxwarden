@@ -129,7 +129,13 @@ func createExportSnapshot(ctx context.Context, stateRoot string, domainID domain
 		return ExportJournal{}, err
 	}
 	defer exports.Close()
-	transaction, err := openChild(exports, id, true)
+	if err := exports.Mkdir(id, 0o700); err != nil {
+		return ExportJournal{}, fmt.Errorf("create exact private export transaction directory: %w", err)
+	}
+	if err := syncDirectory(exports); err != nil {
+		return ExportJournal{}, err
+	}
+	transaction, err := openChild(exports, id, false)
 	if err != nil {
 		return ExportJournal{}, err
 	}
