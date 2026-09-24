@@ -99,9 +99,14 @@ disk, only loopback, a clean whole-device ext4 superblock, and a mount with
 final symlink, reads at most 4 KiB, and reports only its digest and size over
 the bounded typed serial channel. The host requires an exact matching report,
 unchanged disk digest and identity, stopped VM evidence, and a reaped helper.
-The source and focused tests are verified; a live `boot-copy` run is pending.
-The probe still accepts only the private synthetic path. It cannot open a
-managed workspace disk or write a host export directory.
+The standalone `preflight-copy` and `boot-copy` commands also require an exact
+private `/private/tmp/boxwarden-inspector-boot.*` directory and an
+operator-owned, private, one-link `synthetic.raw`. This rejects a hardlink to
+a managed workspace inode. `run_boot_probe.py` is the sole supported launcher:
+it binds the whole-disk digest, ext4 UUID, fixed-file expectation, and post-run
+disk identity. The source and focused tests are verified; a live `boot-copy`
+run is pending. This synthetic probe cannot name a managed workspace path or
+write a host export directory.
 
 ## Inspector contract before export can open
 

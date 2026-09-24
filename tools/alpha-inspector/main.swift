@@ -1,5 +1,6 @@
 import Foundation
 import Virtualization
+import Darwin
 
 private struct ProbeEvidence: Encodable {
     let validated: Bool
@@ -45,10 +46,33 @@ private enum ProbeFailure: Error, CustomStringConvertible {
     }
 }
 
-private func requireSyntheticDisk(_ url: URL) throws {
+private func requireSyntheticDisk(_ url: URL, copyFixture: Bool) throws {
     let normalized = url.standardizedFileURL
     let parent = normalized.deletingLastPathComponent()
     let tempRoot = parent.deletingLastPathComponent().path
+    if copyFixture {
+        guard normalized.lastPathComponent == "synthetic.raw",
+              tempRoot == "/private/tmp",
+              parent.lastPathComponent.range(
+                of: #"^boxwarden-inspector-boot\.[A-Za-z0-9]{6}$"#,
+                options: .regularExpression
+              ) != nil else {
+            throw ProbeFailure.unsafeDisk
+        }
+        var directory = stat()
+        var disk = stat()
+        guard lstat(parent.path, &directory) == 0,
+              lstat(normalized.path, &disk) == 0,
+              directory.st_mode & S_IFMT == S_IFDIR,
+              disk.st_mode & S_IFMT == S_IFREG,
+              directory.st_uid == getuid(), disk.st_uid == getuid(),
+              directory.st_mode & 0o077 == 0,
+              disk.st_mode & 0o077 == 0,
+              disk.st_nlink == 1 else {
+            throw ProbeFailure.unsafeDisk
+        }
+        return
+    }
     guard normalized.lastPathComponent == "synthetic.raw",
           (parent.lastPathComponent.hasPrefix("boxwarden-inspector-probe.") ||
            parent.lastPathComponent.hasPrefix("boxwarden-inspector-boot.")),
@@ -70,7 +94,7 @@ struct PreparedConfiguration {
 
 func prepareConfiguration(kernelURL: URL, initrdURL: URL, diskURL: URL, transactionHex: String?, ext4Fixture: Bool = false, copyFixture: Bool = false) throws -> PreparedConfiguration {
     guard !(ext4Fixture && copyFixture) else { throw ProbeFailure.unexpectedConfiguration }
-    try requireSyntheticDisk(diskURL)
+    try requireSyntheticDisk(diskURL, copyFixture: copyFixture)
     let diskValues = try diskURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
     guard diskValues.isRegularFile == true,
           diskValues.isSymbolicLink != true,
