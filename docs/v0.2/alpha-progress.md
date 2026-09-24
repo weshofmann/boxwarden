@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-24 00:23 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-24 00:36 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -70,7 +70,11 @@ transaction-bound clean ext4 result. The host observed VM stop, runner reap,
 unchanged raw identity and size, changed disk digest, and a matching ext4
 superblock. Doctor, stopped Tart inventory, RAM, and disk headroom passed the
 alpha preflight. This does not qualify managed workspace creation or Tart
-attachment.
+attachment. The next source increment adds a separate signed managed-run mode
+bound to one configured domain and state root. A no-start test accepts that
+exact root and rejects a different private root, wrong domain journal, and
+synthetic mode on the managed path. The Go adapter and managed-volume boot are
+still in progress.
 
 The restricted Codex shell falsely fails Unix-socket tests and host doctor
 inspection with `operation not permitted`; the corresponding elevated checks

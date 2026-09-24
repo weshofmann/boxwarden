@@ -2,6 +2,11 @@ import Darwin
 import Foundation
 import Virtualization
 
+#if !MANAGED_BOUND
+private func managedStateRoot() -> String? { nil }
+private func managedDomain() -> String? { nil }
+#endif
+
 enum FormatterFailure: Error, CustomStringConvertible {
     case usage
     case unsafeDisk(String)
@@ -11,7 +16,7 @@ enum FormatterFailure: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .usage:
-            return "usage: alpha-formatter preflight|preflight-run|run <kernel> <initrd> <managed-raw> <device> <inode> <size> <transaction> <filesystem-uuid> <marker>"
+            return "usage: alpha-formatter preflight|preflight-run|run|preflight-managed|run-managed <kernel> <initrd> <managed-raw> <device> <inode> <size> <transaction> <filesystem-uuid> <marker>"
         case .unsafeDisk(let reason):
             return "formatter disk is not the exact private regular one-link raw file: \(reason)"
         case .invalidRequest:
@@ -36,7 +41,7 @@ struct FormatterArguments {
 
     init(_ arguments: [String]) throws {
         guard arguments.count == 11,
-              ["preflight", "preflight-run", "run"].contains(arguments[1]),
+              ["preflight", "preflight-run", "run", "preflight-managed", "run-managed"].contains(arguments[1]),
               let device = UInt64(arguments[5]),
               let inode = UInt64(arguments[6]),
               let size = Int64(arguments[7]),
@@ -230,6 +235,11 @@ private func admitCreatingJournal(_ arguments: FormatterArguments) throws -> (Fi
           journal.identity?.inode == arguments.inode else {
         throw FormatterFailure.unsafeDisk("creating journal does not bind this exact format")
     }
+    if arguments.command == "preflight-managed" || arguments.command == "run-managed" {
+        guard journal.domain == managedDomain() else {
+            throw FormatterFailure.unsafeDisk("creating journal domain differs from signed binding")
+        }
+    }
     return (handle, journalPath, initial.st_ino, bytes)
 }
 
@@ -245,8 +255,14 @@ func prepareFormatter(_ arguments: FormatterArguments) throws -> PreparedFormatt
         throw FormatterFailure.unsafeDisk("filename is not raw")
     }
     let rootPath = arguments.diskURL.deletingLastPathComponent().deletingLastPathComponent().path
-    if arguments.command != "preflight" && !isFreshSyntheticRoot(rootPath) {
-        throw FormatterFailure.unsafeDisk("run target is outside a fresh synthetic probe root")
+    if arguments.command == "preflight-run" || arguments.command == "run" {
+        guard isFreshSyntheticRoot(rootPath) else {
+            throw FormatterFailure.unsafeDisk("run target is outside a fresh synthetic probe root")
+        }
+    } else if arguments.command == "preflight-managed" || arguments.command == "run-managed" {
+        guard rootPath == managedStateRoot() else {
+            throw FormatterFailure.unsafeDisk("run target differs from signed managed state root")
+        }
     }
     let parent = try metadata(arguments.diskURL.deletingLastPathComponent().path)
     let root = try metadata(rootPath)
@@ -341,7 +357,7 @@ private struct PreflightEvidence: Encodable {
 do {
     let arguments = try FormatterArguments(CommandLine.arguments)
     let prepared = try prepareFormatter(arguments)
-    if arguments.command != "run" {
+    if arguments.command != "run" && arguments.command != "run-managed" {
         let vm = VZVirtualMachine(configuration: prepared.configuration)
         guard vm.state == .stopped, vm.networkDevices.isEmpty else {
             throw FormatterFailure.unexpectedConfiguration

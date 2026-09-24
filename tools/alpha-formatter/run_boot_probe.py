@@ -13,13 +13,15 @@ import sys
 import tempfile
 import uuid
 
+from bind_root import render_binding
+
 
 SIZE = 64 * 1024 * 1024
 KERNEL_SHA256 = "a1586ff3cb7ced7c40dcb0aba5bf320ebb94a46d1a6505eb03157a8f9525632d"
 ISO_SHA256 = "c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"
 DEB_SHA256 = "0a3d402fd7c7c07f63b8104d84a47378f57022e7c816190e6cc99950492d8cae"
 CHECKER_SHA256 = "e5e8f8b30641fab6e3f402c9746ce0537ad95c528e96cde2e446ca0968e63279"
-ARTIFACTS = ("kernel-image", "formatter-initrd", "alpha-formatter", "e2fsck.static", "alpha-formatter-host")
+ARTIFACTS = ("kernel-image", "formatter-initrd", "alpha-formatter", "e2fsck.static", "alpha-formatter-host", "binding.swift")
 
 
 def digest(path: Path) -> str:
@@ -78,6 +80,11 @@ def admitted_bundle(bundle: Path) -> tuple[Path, Path, Path, dict]:
             raise ValueError(f"formatter artifact {name} is not an admitted regular file")
         if digest(path) != manifest["files"][name]:
             raise ValueError(f"formatter artifact {name} digest differs")
+    if (not isinstance(manifest.get("managed_state_root"), str)
+            or not isinstance(manifest.get("managed_domain"), str)
+            or (bundle / "binding.swift").read_text() != render_binding(
+                manifest["managed_state_root"], manifest["managed_domain"])):
+        raise ValueError("formatter signed managed binding differs")
     runner = bundle / "alpha-formatter-host"
     subprocess.run(["codesign", "--verify", "--strict", str(runner)], check=True, capture_output=True)
     entitlements = subprocess.run(["codesign", "-d", "--entitlements", ":-", str(runner)], check=True, capture_output=True)

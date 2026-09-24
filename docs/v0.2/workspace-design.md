@@ -30,7 +30,12 @@ only after a fresh `workspaceformat.Admit` proves the exact verified journal,
 ext4 header, raw-file inode, and capacity. If the atomic record rename succeeds
 but later sync reports an error, an exact retry re-admits that same file and
 fsyncs the record directory before returning success. The trusted Linux
-formatter VM adapter and real filesystem health proof are still pending.
+formatter VM adapter and managed-volume health proof are still pending. A
+signed exploratory formatter runner has completed one fresh synthetic no-NIC
+ext4 boot, clean check, VM stop, runner reap, and host header verification.
+The production runner's managed mode binds exactly one domain and state root
+in its signed binary; the Go adapter must independently match that binding to
+the configured root and exact `FormatRequest` before boot.
 The pinned Ubuntu 24.04.4 ARM64 Desktop initrd has `mkfs.ext4` and `blkid`
 but omits `e2fsck`. Formatter boot preparation verifies the exact ISO and
 Canonical's matching ARM64 `e2fsck-static` package before appending only the
