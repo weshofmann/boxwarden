@@ -89,6 +89,14 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   with no active Use or Pending marker; the import journal is `transferring`.
   Private evidence records the exact transaction and refusal. The guard was
   not bypassed, and no durable verified phase is claimed.
+- Capacity audit: one completed stopped alpha qualification clone had no
+  workspace or pending transaction and was retired through public `session
+  delete` after exact ownership and healthy-host checks. Its VM and session
+  record are absent; the prepared base and qualification files remain. No
+  immediate increase in available capacity was measurable. Other large VM
+  objects still carry active base, workspace, or failed-run evidence, so the
+  export guard remains the real-host gate. Exact inventory and measurements
+  are private.
 - A tracked, credential-free synthetic Node project and a draft operator
   [quickstart](alpha-quickstart.md) now describe exact build identity, private
   staging, public import, whole-directory export, and verification commands.
@@ -117,9 +125,8 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   acceptance.
 - Limits: retained import persistence, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh
-  acceptance remain open. The operator has been asked to make sufficient
-  capacity available for the existing export guard; the agent will recheck
-  the guard before resuming the stopped-volume qualification.
+  acceptance remain open. An external capacity option is being checked; the
+  agent will recheck the guard before resuming stopped-volume qualification.
 
 ## Verified checkpoints
 
@@ -613,6 +620,6 @@ evidence out of Git and the PR. Never push or merge into `main`, force-update
 published history, or bypass checks.
 
 Before further VM mutation, verify owned resources, host doctor, RAM, and
-the free-space floor. Host capacity for the independent export is the current
-operator action; later account sign-in and subjective GUI acceptance belong
-to Wes.
+the free-space floor. Safe host capacity for the independent export remains
+the current operator dependency; later account sign-in and subjective GUI
+acceptance belong to Wes.
