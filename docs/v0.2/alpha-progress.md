@@ -19,9 +19,10 @@ with material acceptance gaps, not an alpha-ready release.
 | Import verification | Source code compares a complete selected stopped export against the captured import and can advance an exact journal to `verified`. Focused tests and a separate source review passed. No real import has yet passed this stopped-disk verification. |
 | Shutdown correction | The retained owner now asks the exact bound guest helper to enqueue a fixed systemd poweroff, then retains Tart stop and force-stop fallbacks. Source checks passed. Existing bases contain the older helper, so no real-host effectiveness is claimed yet. |
 
-The latest pushed commit is `b125cfd4428ffd7a8f2a115b150aadd0cc8fa5a5`.
-[Hosted macOS CI](https://github.com/weshofmann/boxwarden/actions/runs/36043797725)
-passed gofmt, the full Go test suite, race tests, vet, and build at that SHA.
+The latest verified source checkpoint is `b125cfd4428ffd7a8f2a115b150aadd0cc8fa5a5`.
+[Hosted macOS CI](https://github.com/weshofmann/boxwarden/actions/runs/36045893281)
+passed gofmt, the full Go test suite, race tests, vet, and build at the
+subsequent documentation checkpoint `a1ba4e676588adad98f587462a18d3105585d4d3`.
 For the shutdown change, local targeted guest, SSH, runtime, supervisor,
 helper-artifact, base-build, and architecture checks passed. The full local
 SSH package was blocked by the internal disk reserve; hosted CI subsequently
@@ -34,12 +35,15 @@ passed the full suite. Source checks do not replace real-host qualification.
   refused the dirty snapshot; another was not attempted. Their volumes,
   journals, and remaining failed VM evidence are retained privately.
 - A new qualified base must be built with the corrected helper before a fresh
-  stop can test the shutdown change. Internal build headroom remains tight.
-  A cold historical private archive was relocated into the existing encrypted
-  external evidence vault. Every file digest and mode matched before and
-  after a detach/remount; the internal copy was retired and a private locator
-  remains. The vault is unmounted. Current free space clears the stopped
-  export reserve but is not yet a safe full-build margin.
+  stop can test the shutdown change. To recover build headroom, the stopped
+  Tart VM store is being migrated into an encrypted external APFS image. The
+  first-pass byte comparison matched all 33 files (350,001,444,862 logical
+  bytes), filesystem metadata and extended attributes matched, and Tart saw
+  the exact 11 stopped VMs. Post-remount digest verification is in progress.
+  The internal original remains authoritative until cutover and operational
+  checks pass. Separately, a cold historical private archive was verified
+  after relocation into the encrypted evidence vault; its internal copy was
+  retired and the evidence vault is unmounted.
 - One stopped synthetic system clone was retired through public `session
   delete`; its independent workspace kept the same inode, size, and SHA-256
   and is now available and detached. A later private ledger check showed that
@@ -67,9 +71,9 @@ passed the full suite. Source checks do not replace real-host qualification.
 
 ## Next step and publication policy
 
-Implement durable per-action attempt records and tests while planning a safe
-internal build-capacity path. Then build the revised generic base and run the
-fresh stopped-import qualification. Publish each independently verified
-increment promptly on the alpha branch and keep the Draft PR accurate. Keep
+Finish the VM-store digest verification and safe cutover, then build the
+revised generic base and run fresh stopped-import qualification. Continue
+durable per-action attempt records and tests as the next source increment.
+Publish each independently verified increment promptly on the alpha branch and keep the Draft PR accurate. Keep
 private host evidence, VM disks, credentials, and the vault key out of Git.
 Never push or merge into `main`, rewrite published history, or bypass checks.
