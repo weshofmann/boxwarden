@@ -28,8 +28,7 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   only an owner-controlled tree with bounded regular files and safe names,
   captures exact digests, and publishes without replacing an existing
   transaction directory. Targeted import tests and vet pass; a separate
-  source-only rereview found no remaining Critical/Important defect. No public
-  ingress command exists yet.
+  source-only rereview found no remaining Critical/Important defect.
 - Complete source foundation: readmission rehashes every captured
   file and requires exact manifest membership. A durable import journal has
   only `captured` and `transferring` phases, with atomic creation and exact
@@ -65,6 +64,15 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   an exact-generation, host-key-pinned SFTP batch read its remote working
   directory successfully. The sandbox was stopped again. No project file was
   transferred; this is a capability probe, not ingress qualification.
+- Public import source checkpoint: `workspace import --source PATH <volume>
+  <running-session>` captures a new bounded source and prints its transaction
+  identity before host mutation; `workspace import resume --volume UUID
+  --session NAME <transaction>` reuses an exact captured/journaled transaction.
+  The production command uses only an exact retained-supervisor controller.
+  It reports `readback-matched` with journal phase `transferring`, without
+  claiming durable guest persistence. Focused app, architecture, supervisor,
+  workspace, import, and CLI package tests, targeted vet, CLI build, and diff
+  check pass. No real guest project transfer has yet been performed.
 - CI repair in progress: the formatting gate passed after `5183b8b`, then
   the Ubuntu job exposed Darwin-only ACL and file-identity checks plus three
   missing retained-owner selector admissions. The deterministic job now
@@ -72,9 +80,9 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   selectors. The full local Go test and race suites, vet, and CLI build pass;
   the hosted rerun is pending. This is source verification, not real-host
   qualification.
-- Next: add the narrow public capture/begin/transfer command, exercise one
-  real synthetic guest transfer and readback, then define the durable verified
-  journal gate. Fresh source-tracked acceptance follows.
+- Next: exercise one real synthetic guest transfer and readback through the
+  public command, then define the durable verified journal gate. Fresh
+  source-tracked acceptance follows.
 - Limits: CI rerun, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh
   acceptance remain open. No human action is currently needed.

@@ -17,6 +17,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/execx"
 	"github.com/weshofmann/boxwarden/internal/hostx"
+	"github.com/weshofmann/boxwarden/internal/importx"
 	"github.com/weshofmann/boxwarden/internal/recipe"
 	"github.com/weshofmann/boxwarden/internal/sessionruntime"
 	"github.com/weshofmann/boxwarden/internal/sshx"
@@ -121,6 +122,36 @@ func publicOptions(output io.Writer) app.Options {
 		AlphaExportResume: func(ctx context.Context, selected config.Domain, input app.AlphaExportResumeInput) (workspacex.ExportJournal, string, error) {
 			return workspacex.ResumeSelectedWorkspace(ctx, selected.StateRoot, selected.ID, input.TransactionID,
 				input.SourceRoot, input.ISOPath, input.GoBinary)
+		},
+		AlphaImport: func(ctx context.Context, selected config.Domain, input app.AlphaImportInput) (workspacex.ImportJournal, supervisor.ImportResult, error) {
+			controller, err := supervisor.NewExactImportController(filepath.Join(selected.StateRoot, "runtime"))
+			if err != nil {
+				return workspacex.ImportJournal{}, supervisor.ImportResult{}, err
+			}
+			staging := filepath.Join(selected.StateRoot, "imports")
+			if !input.Resume {
+				if err := os.Mkdir(staging, 0o700); err != nil && !os.IsExist(err) {
+					return workspacex.ImportJournal{}, supervisor.ImportResult{}, err
+				}
+				if _, err := importx.CaptureSource(ctx, input.SourcePath, staging, input.TransactionID); err != nil {
+					return workspacex.ImportJournal{}, supervisor.ImportResult{}, err
+				}
+			}
+			journal, err := workspacex.LoadImportJournal(selected.StateRoot, selected.ID, input.TransactionID)
+			if os.IsNotExist(err) {
+				journal, err = workspacex.BeginImport(ctx, selected.StateRoot, selected.ID, input.SessionName, input.VolumeID, input.TransactionID, controller)
+			} else if err == nil && (journal.SessionName != input.SessionName || journal.VolumeID != input.VolumeID) {
+				return workspacex.ImportJournal{}, supervisor.ImportResult{}, fmt.Errorf("import transaction differs from requested session or volume")
+			}
+			if err != nil {
+				return workspacex.ImportJournal{}, supervisor.ImportResult{}, err
+			}
+			receipt, err := workspacex.TransferCapturedImport(ctx, selected.StateRoot, selected.ID, input.TransactionID, controller)
+			if err != nil {
+				return journal, supervisor.ImportResult{}, err
+			}
+			journal, err = workspacex.LoadImportJournal(selected.StateRoot, selected.ID, input.TransactionID)
+			return journal, receipt, err
 		},
 		Output: output,
 	}

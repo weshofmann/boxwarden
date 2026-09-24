@@ -253,3 +253,13 @@ and destructive lifecycle qualification remain on the attended alpha host.
 The architecture guard admits only the retained import owner's pinned SFTP
 receipt/client selectors and launch-mount type needed by that narrow control
 action. It does not open a general transport or backend seam.
+
+## Public alpha import command and evidence vocabulary, 2026-09-24
+
+The public alpha-only import command captures a new private source snapshot
+and exposes the transaction UUID before transferring. An explicit resume uses
+that exact UUID, volume, and session; it never selects a different source.
+The command's result says `readback-matched` and leaves the journal in
+`transferring`, because remote file fsync and host readback establish matching
+bytes at that moment but do not establish durable guest directory state after
+a crash. A separate verified-phase gate will require its own evidence.

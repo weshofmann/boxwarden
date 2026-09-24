@@ -97,6 +97,7 @@ type Options struct {
 	AlphaWorkspaceCreate  AlphaWorkspaceCreateFunc
 	AlphaExport           AlphaExportFunc
 	AlphaExportResume     AlphaExportResumeFunc
+	AlphaImport           AlphaImportFunc
 	Output                io.Writer
 }
 
@@ -411,6 +412,28 @@ func Run(ctx context.Context, args []string, options Options) error {
 			return fmt.Errorf("resume workspace export: %w", err)
 		}
 		return writeAlphaExport(options.Output, selectedDomain, journal, published)
+	case commandWorkspaceImport:
+		if selectedDomain.ID != "alpha" {
+			return errors.New("v0.2 workspace import is limited to the explicit alpha domain")
+		}
+		if options.AlphaImport == nil {
+			return errors.New("alpha workspace importer is required")
+		}
+		input := command.alphaImport
+		if !input.Resume {
+			input.TransactionID, err = sshx.RandomUUID()
+			if err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintf(options.Output, "transaction: %s\n", input.TransactionID); err != nil {
+			return err
+		}
+		journal, receipt, err := options.AlphaImport(ctx, selectedDomain, input)
+		if err != nil {
+			return fmt.Errorf("import workspace transaction %s: %w", input.TransactionID, err)
+		}
+		return writeAlphaImport(options.Output, selectedDomain, input, journal, receipt)
 	default:
 		return errors.New("unsupported command")
 	}
@@ -436,6 +459,7 @@ const (
 	commandWorkspaceDetach
 	commandWorkspaceExport
 	commandWorkspaceExportResume
+	commandWorkspaceImport
 )
 
 type parsedCommand struct {
@@ -449,6 +473,7 @@ type parsedCommand struct {
 	alphaPrepare         AlphaPrepareInput
 	alphaExport          AlphaExportInput
 	alphaExportResume    AlphaExportResumeInput
+	alphaImport          AlphaImportInput
 	alphaWorkspaceCreate AlphaWorkspaceCreateInput
 	recipeCreate         bool
 	rebuildBase          string
@@ -663,6 +688,41 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.kind, base.volumeID, base.name = commandWorkspaceDetach, remaining[2], remaining[3]
 		return base, nil
 	}
+	if len(remaining) >= 4 && remaining[0] == "workspace" && remaining[1] == "import" && remaining[2] == "resume" {
+		resumeSet := flag.NewFlagSet("workspace import resume", flag.ContinueOnError)
+		resumeSet.SetOutput(io.Discard)
+		volume := resumeSet.String("volume", "", "exact attached workspace UUID")
+		sessionName := resumeSet.String("session", "", "exact running session")
+		if err := resumeSet.Parse(remaining[3:]); err != nil {
+			return parsedCommand{}, fmt.Errorf("parse workspace import resume: %w", err)
+		}
+		if len(resumeSet.Args()) != 1 {
+			return parsedCommand{}, errors.New("workspace import resume requires --volume UUID --session NAME <transaction-uuid>")
+		}
+		input := AlphaImportInput{TransactionID: resumeSet.Args()[0], VolumeID: *volume, SessionName: *sessionName, Resume: true}
+		if err := validAlphaImportInput(input); err != nil {
+			return parsedCommand{}, err
+		}
+		base.kind, base.alphaImport = commandWorkspaceImport, input
+		return base, nil
+	}
+	if len(remaining) >= 3 && remaining[0] == "workspace" && remaining[1] == "import" {
+		importSet := flag.NewFlagSet("workspace import", flag.ContinueOnError)
+		importSet.SetOutput(io.Discard)
+		source := importSet.String("source", "", "owner-controlled private source directory")
+		if err := importSet.Parse(remaining[2:]); err != nil {
+			return parsedCommand{}, fmt.Errorf("parse workspace import: %w", err)
+		}
+		if len(importSet.Args()) != 2 {
+			return parsedCommand{}, errors.New("workspace import requires --source PATH <volume-uuid> <running-session>")
+		}
+		input := AlphaImportInput{SourcePath: *source, VolumeID: importSet.Args()[0], SessionName: importSet.Args()[1]}
+		if err := validAlphaImportInput(input); err != nil {
+			return parsedCommand{}, err
+		}
+		base.kind, base.alphaImport = commandWorkspaceImport, input
+		return base, nil
+	}
 	if len(remaining) >= 4 && remaining[0] == "workspace" && remaining[1] == "export" && remaining[2] == "resume" {
 		resumeSet := flag.NewFlagSet("workspace export resume", flag.ContinueOnError)
 		resumeSet.SetOutput(io.Discard)
@@ -706,7 +766,7 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.kind, base.alphaExport = commandWorkspaceExport, input
 		return base, nil
 	}
-	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] [--recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256] <session>, session start <session>, session stop <session>, session delete <stopped-session>, session rebuild [--base REVISION | recipe inputs] <session>, session status <session>, workspace create --bundle PATH --source-root PATH --filesystem-uuid UUID --size-mib N <new-volume-uuid>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, workspace export --destination PATH --select RELATIVE [--select RELATIVE...] --source-root PATH --iso PATH --go PATH <volume-uuid>, workspace export resume --source-root PATH --iso PATH --go PATH <transaction-uuid>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
+	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] [--recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256] <session>, session start <session>, session stop <session>, session delete <stopped-session>, session rebuild [--base REVISION | recipe inputs] <session>, session status <session>, workspace create --bundle PATH --source-root PATH --filesystem-uuid UUID --size-mib N <new-volume-uuid>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, workspace import --source PATH <volume-uuid> <running-session>, workspace import resume --volume UUID --session NAME <transaction-uuid>, workspace export --destination PATH --select RELATIVE [--select RELATIVE...] --source-root PATH --iso PATH --go PATH <volume-uuid>, workspace export resume --source-root PATH --iso PATH --go PATH <transaction-uuid>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
 }
 
 func writeWorkspaceAttachment(output io.Writer, record workspacex.Record, state string) error {
