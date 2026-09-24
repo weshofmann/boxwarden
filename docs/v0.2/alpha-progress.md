@@ -50,6 +50,15 @@ this remains a source-only checkpoint without public rebuild or live VM proof.
 The next implementation step is the journal-authorized pin transition and
 internal new-generation cutover, followed by exact old-system retirement.
 
+The host-key store now has a narrow rebuild-only transition primitive. It
+requires the old pin's exact binding and full-record digest, the candidate
+binding, operation UUID, and serial-observed Ed25519 key. A private sibling
+staging file supports atomic replacement and exact retry after an interrupted
+rename; conflicting old, candidate, or staged bytes fail closed. Pin-store,
+runtime, and session package tests, targeted vet, and focused pin race tests
+pass. The detached owner does not call this primitive yet, so no rebuild pin
+has been rotated by the public path.
+
 The managed-volume shutdown correction at `7eeba47` now passes one real
 attached-volume public stop: the session and backend are consistently stopped,
 Use is released, and ext4 `needs_recovery` is clear. A fresh public export

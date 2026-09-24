@@ -138,7 +138,9 @@ its findings are incorporated below. It is a plan, not implemented behavior.
    checks the exact journal witness and serial-observed candidate host key,
    then atomically transitions the pin from the exact old bytes to the exact
    new binding/key. An absent old pin is permitted only if the journal recorded
-   absence; retry accepts only exact old or exact new state. No old and new VM
+   absence; a private sibling staging file makes an interrupted replacement
+   retryable without exposing a partial pin to normal reads. Retry accepts
+   only exact old or exact new state. No old and new VM
    may run concurrently. A failure after candidate launch retains both system
    objects, the workspace record, and the journal; it never silently rolls
    back a candidate that may have written the workspace.
