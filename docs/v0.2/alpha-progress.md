@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-24 01:51 UTC. Launch-relative target: complete tested alpha
+Updated: 2026-09-24 01:57 UTC. Launch-relative target: complete tested alpha
 within ten days; stop starting new work after 2026-10-03 14:44 UTC and leave a
 resumable handoff if unfinished.
 
@@ -145,6 +145,15 @@ and we corrected read-only filesystem false READY, existing-mount symlink
 ancestry, and empty zone-field acceptance. The mount probe checks both VFS
 and filesystem read-only flags. Full local Go tests, focused vet, and diff
 checks and targeted guest/SSH/owner race tests passed. Real qualification remains.
+The fresh-base preflight at the current published source found a healthy host
+doctor, all admitted Tart objects stopped, 16 GiB physical RAM, and about
+33.4 GiB free on the state/Tart filesystem. The Canonical ISO and exact
+OpenSSL/xorriso executables matched their pinned digests. The tracked
+`examples/v0.2-alpha-base.json` uses the supported desktop source, four
+ordinary guest packages, one named workspace intent, and no unimplemented
+application launch step. The public recipe check validated the recipe and ISO.
+No new candidate has started yet; reserve monitoring remains mandatory during
+the actual attempt.
 
 Publish each meaningful verified implementation increment on the authorized
 alpha branch promptly, targeting a GitHub checkpoint every 30–60 minutes of
@@ -185,8 +194,9 @@ could verify only GPT-6 family metadata, not the exact routed variant/effort.
 
 ## Next executable action
 
-Qualify the revised guest helper and mount-bound READY from an updated generic
-base without manual guest actions. Then test system rebuild and
+Publish the checked example recipe, then run the public alpha preparation
+command from a clean source checkout to qualify the revised guest helper and
+mount-bound READY without manual guest actions. Then test system rebuild and
 reattachment to another disposable sandbox with the same volume. The current
 public lifecycle already passes exact disk lease and stop/restart checks.
 The next full prepared-base run needs more safe disk headroom. After that, record actual
