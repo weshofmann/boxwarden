@@ -62,6 +62,9 @@ func prepareSessionStart(ctx context.Context, stateRoot string, domainID domain.
 	if current != expected {
 		return session.Record{}, fmt.Errorf("stopped session changed before workspace reservation")
 	}
+	if err := session.RequireNoRebuild(stateRoot, domainID, string(expected.Name)); err != nil {
+		return session.Record{}, err
+	}
 	attached, err := listSessionAttachments(ctx, stateRoot, domainID, expected.ID, string(expected.Name))
 	if err != nil {
 		return session.Record{}, fmt.Errorf("reload workspace attachments before reservation: %w", err)

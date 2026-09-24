@@ -115,10 +115,11 @@ transition during serial bootstrap. Ordinary pin admission remains immutable.
 This design was challenged in a separate read-only lifecycle/storage review;
 its findings are incorporated below. It is a plan, not implemented behavior.
 
-1. Extend the strict session record with a bounded rebuild journal: operation
-   UUID, phase, exact old and candidate backend IDs and base revisions, and
+1. Add a separate strict, bounded, session-name-keyed rebuild journal that
+   survives ordinary session-record writes: operation UUID, phase, stable
+   session UUID, exact old and candidate backend IDs and base revisions, and
    exact old pin presence, binding, and digest. Reserve the candidate ID across
-   both active records and all rebuild journals. A journal blocks competing
+   both active records and all rebuild journals. The journal blocks competing
    start, attach, detach, export, and rebuild mutations, while status remains
    read-only and exact safety stop of the active generation remains available.
 2. Require durable stopped old intent from clone creation or exact stop/reap,

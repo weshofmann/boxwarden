@@ -222,6 +222,13 @@ func Run(ctx context.Context, args []string, options Options) error {
 		if observed.Exists && observed.ObjectID != record.Backend.ObjectID {
 			reconciled = lifecycle.Reconciliation{Consistency: lifecycle.Drift, Diagnostic: "backend observation does not match the exact session object"}
 		}
+		if _, rebuildErr := session.LoadRebuildJournal(selectedDomain.StateRoot, record.Domain, string(record.Name)); rebuildErr == nil {
+			reconciled = lifecycle.Reconciliation{Consistency: lifecycle.Drift, Diagnostic: "system rebuild in progress; readiness requires rebuild reconciliation"}
+			return writeStatus(options.Output, record, observed, reconciled, session.ReadinessDrift)
+		} else if !errors.Is(rebuildErr, os.ErrNotExist) {
+			reconciled = lifecycle.Reconciliation{Consistency: lifecycle.Drift, Diagnostic: "system rebuild journal is unavailable or invalid"}
+			return writeStatus(options.Output, record, observed, reconciled, session.ReadinessDrift)
+		}
 		reconciled, readiness := reconcileStatusSnapshot(ctx, loaded, selectedDomain, record, observed, reconciled, options.StatusSnapshotFactory)
 		return writeStatus(options.Output, record, observed, reconciled, readiness)
 	case commandGoldenRegister:

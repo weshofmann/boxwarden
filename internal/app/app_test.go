@@ -676,6 +676,44 @@ func TestSessionStatusRequiresFreshExactReadyEvidence(t *testing.T) {
 	}
 }
 
+func TestSessionStatusReportsPendingOrCorruptRebuildAsDriftWithoutMutation(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		journal    string
+		diagnostic string
+	}{
+		{name: "pending", journal: `{"version":1,"domain":"work","session_name":"dev","session_id":"00000000-0000-4000-8000-000000000001","operation_id":"00112233-4455-4677-8899-aabbccddeeff","phase":"reserved","old_backend":"boxwarden-work-dev","old_revision":"golden-work-r1","candidate_backend":"boxwarden-work-00112233445546778899aabbccddeeff","candidate_revision":"golden-work-r2","old_pin_present":false,"old_pin_digest":""}`, diagnostic: "system rebuild in progress"},
+		{name: "corrupt", journal: `{"version":1}`, diagnostic: "system rebuild journal is unavailable or invalid"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path, before := writeRunningStatusFixture(t, session.ReadinessReady)
+			root := filepath.Dir(path)
+			if err := os.Mkdir(filepath.Join(root, "rebuilds"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			journalPath := filepath.Join(root, "rebuilds", "dev.json")
+			if err := os.WriteFile(journalPath, []byte(test.journal), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			binding := supervisor.Binding{Domain: "work", SessionID: "00000000-0000-4000-8000-000000000001", BackendKind: "tart", BackendObject: "boxwarden-work-dev", Generation: "11111111-2222-4333-8444-555555555555"}
+			reader := &statusSnapshotFake{snapshot: supervisor.Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true, ObservedAt: time.Now()}}
+			var output bytes.Buffer
+			err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "status", "dev"}, Options{
+				Observer:              fake.Observer{Observations: map[string]backend.Observation{"boxwarden-work-dev": {ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectRunning}}},
+				StatusSnapshotFactory: func(config.Config, config.Domain) (StatusSnapshotReader, error) { return reader, nil },
+				Output:                &output,
+			})
+			if err != nil || reader.calls != 0 || !strings.Contains(output.String(), "consistency: drift\nreadiness: drift\n") || !strings.Contains(output.String(), test.diagnostic) {
+				t.Fatalf("rebuild status = %q, %v", output.String(), err)
+			}
+			after, err := os.ReadFile(filepath.Join(root, "sessions", "dev.json"))
+			if err != nil || !bytes.Equal(after, before) {
+				t.Fatalf("status changed session: %v", err)
+			}
+		})
+	}
+}
+
 func TestSessionStatusKeepsContradictoryTartListingVisibleWithExactReadyOwner(t *testing.T) {
 	path, before := writeRunningStatusFixture(t, session.ReadinessReady)
 	binding := supervisor.Binding{Domain: "work", SessionID: "00000000-0000-4000-8000-000000000001", BackendKind: "tart", BackendObject: "boxwarden-work-dev", Generation: "11111111-2222-4333-8444-555555555555"}

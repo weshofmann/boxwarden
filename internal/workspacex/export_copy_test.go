@@ -3,6 +3,7 @@ package workspacex
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -87,6 +88,40 @@ func TestFalseStoppedListingCannotDetachExportOrReleaseLiveWorkspace(t *testing.
 	persisted, err := LoadRecord(root, domain.ID("work"), testVolumeID)
 	if err != nil || persisted.Use == nil || *persisted.Use != *volume.Use || persisted.Attachment == nil || *persisted.Attachment != *volume.Attachment {
 		t.Fatalf("rejected storage actions changed live binding: %#v, %v", persisted, err)
+	}
+}
+
+func TestPendingRebuildBlocksStoppedWorkspaceOperations(t *testing.T) {
+	root, stopped := stoppedLaunchFixture(t)
+	j := session.RebuildJournal{
+		Version: 1, Domain: domain.ID("work"), SessionName: string(stopped.Name), SessionID: stopped.ID,
+		OperationID: "7fb25db7-3cc1-4d92-a04c-b60fd05fa421", Phase: session.RebuildReserved,
+		OldBackend: stopped.Backend.ObjectID, OldRevision: stopped.GoldenRevision,
+		CandidateBackend: "boxwarden-work-7fb25db73cc14d92a04cb60fd05fa421", CandidateRevision: stopped.GoldenRevision,
+	}
+	raw, err := json.Marshal(j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "rebuilds"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "rebuilds", string(stopped.Name)+".json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	observer := stoppedObserver{state: backend.ObjectStopped, object: stopped.Backend.ObjectID}
+	if _, err := Detach(context.Background(), root, domain.ID("work"), testVolumeID, string(stopped.Name), observer); err == nil {
+		t.Fatal("pending rebuild allowed workspace detach")
+	}
+	if _, err := CreateExportSnapshot(context.Background(), root, domain.ID("work"), testVolumeID, t.TempDir(), []string{"project/report.txt"}, observer); err == nil {
+		t.Fatal("pending rebuild allowed offline export")
+	}
+	if _, err := PrepareSessionStart(context.Background(), root, domain.ID("work"), stopped, testGeneration, observer); err == nil {
+		t.Fatal("pending rebuild allowed ordinary workspace start reservation")
+	}
+	volume, err := LoadRecord(root, domain.ID("work"), testVolumeID)
+	if err != nil || volume.Use != nil || volume.Pending != nil || volume.Attachment == nil {
+		t.Fatalf("blocked rebuild operations changed workspace: %#v, %v", volume, err)
 	}
 }
 

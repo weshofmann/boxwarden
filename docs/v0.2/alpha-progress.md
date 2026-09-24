@@ -25,6 +25,18 @@ acceptance path remains open.
 
 ## Current work
 
+The rebuild foundation now has a separate strict, bounded, durable journal
+that binds the stable sandbox identity to exact old/candidate systems and base
+revisions. Candidate reservation checks active sessions and other rebuilds;
+ordinary create/start and stopped workspace mutation refuse a pending or
+corrupt journal. Read-only status reports drift during a pending rebuild and
+does not wait on the supervisor. The old pin witness is defined over the full
+validated pin record loaded under the exact old binding. Targeted session,
+workspace, and app tests plus targeted vet, formatting, and diff checks pass.
+There is no public rebuild command or candidate clone yet, and no real rebuild
+qualification is claimed. The next increment will add the locked journal
+producer and candidate clone preparation.
+
 The managed-volume shutdown correction at `7eeba47` now passes one real
 attached-volume public stop: the session and backend are consistently stopped,
 Use is released, and ext4 `needs_recovery` is clear. A fresh public export
@@ -217,9 +229,9 @@ remain outside the prepared cache.
 
 ## Next actions
 
-1. Implement the reviewed rebuild contract in `alpha-plan.md`, starting with
-   durable journal validation and ordinary-operation gates, then exact
-   candidate preparation, pin transition, cutover, and retirement. Preserve
+1. Implement the reviewed rebuild contract in `alpha-plan.md`: locked journal
+   producer and exact candidate preparation, then pin transition, cutover,
+   and retirement. Preserve
    the stopped failed VM and dirty volume. The guest SSH loss remains open;
    do not claim real false-stopped or rebuild qualification from that run.
 2. Add inspected-phase export reconciliation and hostile-exit checks. Rebuild

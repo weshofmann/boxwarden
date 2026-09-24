@@ -207,6 +207,9 @@ func stoppedSession(ctx context.Context, stateRoot string, domainID domain.ID, n
 	if record.IntendedState != session.StateStopped || record.Backend.Kind != "tart" {
 		return session.Record{}, fmt.Errorf("session is not durably stopped")
 	}
+	if err := session.RequireNoRebuild(stateRoot, domainID, name); err != nil {
+		return session.Record{}, err
+	}
 	if err := observedStopped(ctx, observer, record.Backend.ObjectID); err != nil {
 		return session.Record{}, err
 	}

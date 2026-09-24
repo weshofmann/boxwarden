@@ -100,6 +100,9 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 			err = fmt.Errorf("release session lock: %w", releaseErr)
 		}
 	}()
+	if err := RequireNoRebuild(s.domain.StateRoot, domainID, string(name)); err != nil {
+		return Record{}, err
+	}
 
 	record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
 	if err != nil {
