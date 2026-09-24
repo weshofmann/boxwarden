@@ -35,7 +35,9 @@ cleanup, and that the installed helper digest differed from the finalizer's
 embedded pin. The finalizer pin now matches the installed, artifact-locked
 helper. Its existing real-artifact fixture failed before the correction and
 passed afterward; remaster, render, bootstrap, and recipe helper checks also
-passed. These are source checks, not real build qualification.
+passed. These are source checks, not real build qualification. The stopped
+failed VM was byte-verified into the private archive before its live object
+was retired; its journal and forensic reports remain.
 
 An earlier fresh attempt was canceled by the disk-reserve guard during
 installation. Its failed journal and verified private VM archive are retained.
@@ -45,10 +47,13 @@ after stopped, ownership, and workspace checks. The r2c system VM was archived
 and byte-verified privately before retirement; the independent workspace was
 detached through the public CLI and remains intact. Failed remastered installer
 ISOs are preserved as private exact block-map representations against the
-retained, digest-verified Canonical input. Reconstructed streams matched both
-original SHA-256 digests after redundant staging copies were removed. Failed
-journals and other private diagnostics remain. Free space after the latest
-candidate is about 27.4 GiB; the pre-build read-only host doctor was healthy.
+retained, digest-verified Canonical input. Each reconstructed stream matched
+its original SHA-256 digest after redundant staging copies were removed. Failed
+journals and other private diagnostics remain. The two older alpha builder
+installer ISOs are also retained as private, SHA-256-verified exact block maps
+against the pinned Canonical source. Only their redundant staged copies were
+retired; the current r2 golden VM and selection record are intact. Free space
+is about 41.5 GiB; the previous pre-build read-only host doctor was healthy.
 
 Automatic approval review rejected deletion of the alpha domain's current r2
 golden because ordinary legacy session creation still points to it. It remains
@@ -61,9 +66,9 @@ reach session creation because the base failed finalization.
 
 ## Next actions
 
-1. Preserve the failed candidate's private forensic evidence, restore disk
-   headroom without touching protected or active golden state, then run a fresh
-   qualification attempt with the corrected finalizer pin.
+1. Recheck host doctor, input/tool digests, exact stopped VM inventory, and
+   disk/RAM headroom; then run one fresh qualification attempt with the
+   corrected finalizer pin.
 2. Qualify a fresh prepared base, then use public recipe-bound create/reuse
    and the revised guest helper with the existing workspace volume.
 3. Prove automatic ext4 mounting, stop/restart, system rebuild and workspace
