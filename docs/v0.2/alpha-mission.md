@@ -60,3 +60,6 @@ port exposure, automatic credential migration, and rich merge are deferred.
 
 The active execution sequence and actual status are in
 [`alpha-plan.md`](alpha-plan.md) and [`alpha-progress.md`](alpha-progress.md).
+The current source-tracked operator commands are in
+[`alpha-quickstart.md`](alpha-quickstart.md); that guide does not replace the
+fresh acceptance evidence required before calling the alpha ready.

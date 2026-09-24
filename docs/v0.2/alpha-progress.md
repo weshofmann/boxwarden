@@ -81,14 +81,19 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   the Ubuntu job exposed Darwin-only ACL and file-identity checks plus three
   missing retained-owner selector admissions. The deterministic job now
   targets hosted `macos-26`, and the architecture guard admits only those
-  selectors. Hosted CI passed all steps at `df0da1c` and `4d2a6eb`, including
-  gofmt, full Go tests, race, vet, and build. This is source verification.
+  selectors. Hosted CI passed all steps through `08cc42a`, including gofmt,
+  full Go tests, race, vet, and build. This is source verification.
 - Persistence check pending: a selected stopped-volume export of the two
   imported files refused before creating a transaction because the host was
   below the export headroom reserve. The workspace is stopped and attached,
   with no active Use or Pending marker; the import journal is `transferring`.
   Private evidence records the exact transaction and refusal. The guard was
   not bypassed, and no durable verified phase is claimed.
+- A tracked, credential-free synthetic Node project and a draft operator
+  [quickstart](alpha-quickstart.md) now describe exact build identity, private
+  staging, public import, whole-directory export, and verification commands.
+  The script has only built-in Node dependencies. This is source/demo material;
+  the fresh end-to-end run from it is pending.
 - Persistence source foundation: a bounded host comparator
   re-admits the captured source and requires an exact selected export tree,
   including empty directories, file digests, modes, ownership, and absence of
