@@ -19,7 +19,7 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
 | Inspector bundle admission | A clean-source production bundle from the pinned ISO passed independent artifact checks and host admission with both synthetic and real journal-derived requests. Admission checks tracked source bytes, kernel/ISO pins, seven artifact digests and private metadata, deterministic appended guest/request initrd, and the signed helper's sole Virtualization entitlement. The first live export-mode VM rejected an unclean volume; a later fresh clean-volume run completed selected publication with zero-NIC inspector evidence. |
 | Example | `examples/v0.2-alpha-base.json` passed public recipe/ISO validation. It requests the Desktop source, a small package set, and one named workspace intent. |
 | Recipe-bound create | `session create` accepts exact recipe/ISO/guest definition/tool inputs, prepares or reuses a qualified base, and calls `CreateFromRevision`. A focused fixture and the real public command both selected the newly prepared revision without changing the domain current golden. A later public `alpha prepare` reused the admitted cache after verified redundant installer staging was retired, without creating an attempt journal or new Tart object. |
-| System rebuild | The public `session rebuild` command accepts an exact admitted `--base` revision, complete recipe preparation inputs, or no new input to resume a pending journal. A full fake-backend transaction kept the session UUID and workspace attachment identity, reached fresh candidate READY, deleted only the journaled old system, and then no-oped for the selected base. Full local Go tests, vet, CLI build, and diff checks passed. One public no-volume Tart rebuild then preserved the session UUID, transitioned the exact pin, reached repeated READY, retired the old object, cleared the journal, and stopped consistently. Retained-volume rebuild and failure recovery remain open. |
+| System rebuild | The public `session rebuild` command accepts an exact admitted `--base` revision, complete recipe preparation inputs, or no new input to resume a pending journal. A full fake-backend transaction kept the session UUID and workspace attachment identity, reached fresh candidate READY, deleted only the journaled old system, and then no-oped for the selected base. Full local Go tests, vet, CLI build, and diff checks passed. One public no-volume Tart rebuild preserved the session UUID, transitioned the exact pin, reached repeated READY, retired the old object, cleared the journal, and stopped consistently. A later public rebuild with an attached ext4 volume preserved its identity and content, reached mount-bound READY, retired the old system, and stopped cleanly. That target was a distinct qualified Tart object with the same generic software image; a software-changing upgrade and failure recovery remain open. |
 
 Hosted CI is unavailable. Local checks above are source or explicitly described
 real-host checks; the full graphical, rebuild, and failure-recovery
@@ -396,15 +396,32 @@ crash dialog appeared during the long run while status stayed READY; no
 causal link to the stop result was established. All exact VM and volume
 ownership records remain private.
 
+The public retained-volume rebuild path then passed a bounded real-host
+qualification. A copy-on-write clone of the already qualified generic base
+was separately admitted; its fresh qualification clone reached READY with a
+different host-key pin and stopped cleanly. The alpha domain's prior default
+golden selector was restored afterward. The source session was stopped, its
+attachment Available and ext4 clean, and the rebuild journal absent before
+the command. The public rebuild completed in 41.49 seconds. It preserved the
+session and volume UUIDs, moved the exact volume Use and host-key pin to the
+new generation, reported fresh mount-bound READY, retired only the recorded
+old VM, and cleared the journal. Guest Files showed the preexisting synthetic
+directory and created a second one on the retained volume. Public stop took
+3.88 seconds; status and Tart agreed on stopped, Use cleared, and offline ext4
+had no `needs_recovery` flag. This qualifies the mechanical cutover and
+retention path using the same software image under a distinct base object.
+It does not qualify a software-changing upgrade or the intermittent dirty
+stop. These were real-host checks; no new source tests or full acceptance
+suite were run for this checkpoint.
+
 ## Next actions
 
 1. Diagnose the intermittent attached-volume readiness loss and 15-second
-   dirty stop. The bounded differential above did not reproduce it. Preserve
-   the failed VM and volume evidence while using the separate clean synthetic
-   volume for the next retained-volume rebuild qualification. Prepare a
-   distinct mount-capable target base and verify retained content after
-   cutover; the current same-base command intentionally
-   no-ops. A start on the older generic r2 clone failed at the guest
+   dirty stop. The bounded differential and retained-volume rebuild above did
+   not reproduce it; preserve failed VM and volume evidence. Qualify a
+   software-changing rebuild when disk headroom supports a fresh prepared
+   base. The current same-base command intentionally no-ops. A start on the
+   older generic r2 clone failed at the guest
    workspace-mount SSH request after the base probe and time-zone steps
    succeeded. The r2 helper digest differs from the prepared
    mount-qualified helper, consistent with the tracked plan's warning that r2
