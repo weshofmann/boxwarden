@@ -2,8 +2,37 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from pack_initramfs import append_probe
+
+
+def appended_members(data, original_size):
+    offset = original_size + (-original_size) % 4
+    members = []
+    while True:
+        header = data[offset:offset + 110]
+        if len(header) != 110 or header[:6] != b"070701":
+            raise AssertionError("invalid appended newc header")
+        mode = int(header[14:22], 16)
+        size = int(header[54:62], 16)
+        name_size = int(header[94:102], 16)
+        offset += 110
+        name = data[offset:offset + name_size]
+        if len(name) != name_size or not name.endswith(b"\x00"):
+            raise AssertionError("invalid appended newc name")
+        offset += name_size
+        offset += (-offset) % 4
+        payload = data[offset:offset + size]
+        if len(payload) != size:
+            raise AssertionError("truncated appended newc payload")
+        offset += size
+        offset += (-offset) % 4
+        members.append((name[:-1], mode, payload))
+        if name == b"TRAILER!!!\x00":
+            if offset != len(data):
+                raise AssertionError("trailing appended newc bytes")
+            return members
 
 
 class PackInitramfsTest(unittest.TestCase):
@@ -43,6 +72,31 @@ class PackInitramfsTest(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 append_probe(original, guest, output)
             self.assertEqual(output.read_bytes(), b"keep")
+
+    def test_appends_private_bounded_export_request_as_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original, guest, request, output = (root / name for name in ("original", "guest", "request", "combined"))
+            original.write_bytes(b"signed-initrd")
+            guest.write_bytes(b"guest-program")
+            request.write_bytes(b'{"version":1}')
+            request.chmod(0o600)
+
+            append_probe(original, guest, output, request)
+
+            data = output.read_bytes()
+            members = appended_members(data, len(b"signed-initrd"))
+            self.assertEqual(members, [
+                (b"alpha-probe", 0o100755, b"guest-program"),
+                (b"alpha-export-request.json", 0o100400, b'{"version":1}'),
+                (b"TRAILER!!!", 0, b""),
+            ])
+            with patch("pack_initramfs._check_no_acl", side_effect=ValueError("extended ACL")):
+                with self.assertRaises(ValueError):
+                    append_probe(original, guest, root / "acl-rejected", request)
+            request.chmod(0o644)
+            with self.assertRaises(ValueError):
+                append_probe(original, guest, root / "rejected", request)
 
 
 if __name__ == "__main__":

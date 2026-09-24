@@ -217,6 +217,16 @@ the selected subtree and omission of an unselected sibling. This writer is
 not yet invoked by the booting guest. Request transport, production artifact
 admission, and complete host publication checks remain open.
 
+A proposed per-transaction request is now parsed with strict duplicate and
+unknown-field rejection, the kernel-command-line transaction binding, exact
+ext4 UUID and disk size, and bounded selected paths. The initramfs packer can
+append that request as a private root-owned data member beside the unchanged
+generic guest executable. This avoids a host directory share and keeps the
+selection out of the kernel command line. The request envelope is capped at
+128 KiB to contain the already capped 64 KiB journal selection plus metadata.
+The production host has not yet generated or admitted this per-transaction
+initramfs, and the guest boot path does not yet read the member.
+
 Inside the isolated Linux guest, validate the expected whole-device ext4 UUID
 and mount with `ro,noload,nodev,nosuid,noexec`. Linux documents that plain
 `ro` can replay ext4's journal and write to the disk; `noload` prevents that
