@@ -250,8 +250,8 @@ The host preparation API now loads a snapshot-ready journal under its export
 lock, re-admits the exact private snapshot and SHA-256, then derives the guest
 request bytes from the journal's transaction, ext4 UUID, disk size, and
 selection. It rejects missing or changed bytes before any bundle is built.
-Bundle creation, helper capture, and receiver publication are separate
-remaining gates.
+Bundle admission and connection to helper capture and receiver publication
+remain separate gates.
 
 The receiver can now enforce an exact host-supplied selection: each received
 file or directory must be a selected path, a descendant of a selected
@@ -274,8 +274,12 @@ digests and source revision. A dirty checkout can run a distinctly marked
 test-only build; it cannot claim production qualification. One test-only full
 build passed, its seven manifest digests were independently rechecked, and
 the appended root-owned executable and private request members matched the
-source files byte-for-byte. Clean-source bundle admission and a live export
-boot remain pending.
+source files byte-for-byte. A subsequent clean-source production build passed
+from published `b51d900`; its pinned ISO digest, exact source SHA, seven file
+digests, signed helper, ARM64 guest type, and appended members passed
+independent checks. The request was a synthetic private test request.
+Control-plane admission against a real journal and a live export boot remain
+pending.
 
 Inside the isolated Linux guest, validate the expected whole-device ext4 UUID
 and mount with `ro,noload,nodev,nosuid,noexec`. Linux documents that plain

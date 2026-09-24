@@ -91,18 +91,21 @@ production artifact admission and journal phase transitions.
 The source builder for a private per-transaction inspector bundle passed one
 test-only full build from the pinned ISO. Independent checks rehashed all
 manifested files and parsed the appended guest and request cpio members.
-The ordinary builder refused the dirty checkout. A clean-source build,
-control-plane artifact admission, and live export boot remain pending.
+The ordinary builder refused the dirty checkout. A clean-source build then
+passed from published `b51d900`; its source and ISO pins, seven file
+digests, signed helper, ARM64 guest type, and appended guest/request members
+were independently checked. It used a synthetic private request.
+Control-plane artifact admission and live export boot remain pending.
 Real managed-volume qualification remains open. The earlier failed base
 attempt was corrected and a fresh base built and qualified; failed attempts
 remain outside the prepared cache.
 
 ## Next actions
 
-1. Qualify and admit a clean-source private inspector bundle for the prepared
-   request and exact snapshot. Connect the journaled snapshot to capture, require
-   export-mode evidence, pass the journal selection to the receiver, recheck snapshot bytes
-   after helper reap, then invoke the receiver. Qualify with the managed
+1. Admit the clean-source inspector bundle against the real journal request
+   and exact snapshot. Connect capture and require export-mode evidence,
+   recheck snapshot bytes after helper reap, then give the journal selection
+   and closed stream to the receiver. Qualify with the managed
    synthetic volume and hostile exits.
 2. Attach the retained volume to a second fresh sandbox after export, then
    verify its mount and content.
