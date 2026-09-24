@@ -58,6 +58,43 @@ func TestRebuildJournalOldPinWitnessBindsFullRecordAndBackend(t *testing.T) {
 	}
 }
 
+func TestRebuildJournalAdvancesOnlyExactNextPhase(t *testing.T) {
+	root := sessionRoot(t)
+	j := testRebuildJournal()
+	if err := createRebuildJournal(root, j); err != nil {
+		t.Fatal(err)
+	}
+	skipped := j
+	skipped.Phase = RebuildCutover
+	if err := advanceRebuildJournal(root, j, skipped); err == nil {
+		t.Fatal("rebuild journal skipped cloned phase")
+	}
+	changed := j
+	changed.Phase = RebuildCloned
+	changed.CandidateRevision = "foreign-base"
+	if err := advanceRebuildJournal(root, j, changed); err == nil {
+		t.Fatal("rebuild transition changed candidate revision")
+	}
+	for _, phase := range []RebuildPhase{RebuildCloned, RebuildCutover, RebuildReady, RebuildRetiring} {
+		next := j
+		next.Phase = phase
+		if err := advanceRebuildJournal(root, j, next); err != nil {
+			t.Fatalf("advance to %q: %v", phase, err)
+		}
+		if err := advanceRebuildJournal(root, j, next); err != nil {
+			t.Fatalf("retry visible phase %q: %v", phase, err)
+		}
+		loaded, err := LoadRebuildJournal(root, j.Domain, j.SessionName)
+		if err != nil || loaded != next {
+			t.Fatalf("durable phase %q = %#v, %v", phase, loaded, err)
+		}
+		j = next
+	}
+	if err := advanceRebuildJournal(root, j, j); err == nil {
+		t.Fatal("retiring rebuild advanced past terminal phase")
+	}
+}
+
 func TestRebuildJournalReservationIsStrictDurableAndBlocksOrdinaryMutation(t *testing.T) {
 	root := sessionRoot(t)
 	j := testRebuildJournal()

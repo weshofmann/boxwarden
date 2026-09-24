@@ -3,14 +3,52 @@ package workspacex
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
+	"github.com/weshofmann/boxwarden/internal/backend/fake"
+	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/domain"
+	"github.com/weshofmann/boxwarden/internal/golden"
 	"github.com/weshofmann/boxwarden/internal/lock"
 	"github.com/weshofmann/boxwarden/internal/session"
+	"github.com/weshofmann/boxwarden/internal/sshx"
 )
+
+type absentPinForRebuildGate struct{}
+
+func (absentPinForRebuildGate) Load(context.Context, sshx.Binding) (sshx.HostKeyPin, error) {
+	return sshx.HostKeyPin{}, os.ErrNotExist
+}
+
+func TestPrepareCandidateThroughRealWorkspaceGateKeepsAttachmentIdle(t *testing.T) {
+	root, stopped := stoppedLaunchFixture(t)
+	domainConfig := config.Domain{ID: domain.ID("work"), StateRoot: root}
+	backendFake := fake.New(
+		backend.Observation{ObjectID: stopped.Backend.ObjectID, Exists: true, State: backend.ObjectStopped},
+		backend.Observation{ObjectID: "golden-r2", Exists: true, State: backend.ObjectStopped},
+	)
+	if _, err := golden.Register(context.Background(), domainConfig, "golden-r2", backendFake); err != nil {
+		t.Fatal(err)
+	}
+	service := session.NewRebuildService(domainConfig, session.RebuildDependencies{
+		Observer: backendFake, Creator: backendFake, Gate: WithStoppedRebuildGate, Pins: absentPinForRebuildGate{},
+	})
+	journal, err := service.PrepareCandidate(context.Background(), "dev", "golden-r2")
+	if err != nil || journal.Phase != session.RebuildCloned || journal.SessionID != stopped.ID || journal.OldBackend != stopped.Backend.ObjectID {
+		t.Fatalf("integrated candidate preparation = %#v, %v", journal, err)
+	}
+	current, err := session.LoadRecord(root, "work", "dev")
+	if err != nil || current != stopped {
+		t.Fatalf("preparation changed old session: %#v, %v", current, err)
+	}
+	volume, err := LoadRecord(root, domain.ID("work"), testVolumeID)
+	if err != nil || volume.Attachment == nil || volume.Attachment.SessionID != stopped.ID || volume.Use != nil || volume.Pending != nil {
+		t.Fatalf("preparation changed volume authority: %#v, %v", volume, err)
+	}
+}
 
 func TestStoppedRebuildGateHoldsVolumeSessionAndStorageThroughReservation(t *testing.T) {
 	root, stopped := stoppedLaunchFixture(t)

@@ -246,6 +246,84 @@ func createRebuildJournal(stateRoot string, j RebuildJournal) error {
 	return sessionSyncRoot(rebuilds)
 }
 
+// advanceRebuildJournal changes only the phase under the exact session and
+// transition locks. The old version is checked before an atomic replacement;
+// a failed post-rename sync leaves the new phase visible for retry.
+func advanceRebuildJournal(stateRoot string, expected, next RebuildJournal) error {
+	if err := validateRebuildJournal(expected); err != nil {
+		return err
+	}
+	if err := validateRebuildJournal(next); err != nil {
+		return err
+	}
+	want := expected
+	switch expected.Phase {
+	case RebuildReserved:
+		want.Phase = RebuildCloned
+	case RebuildCloned:
+		want.Phase = RebuildCutover
+	case RebuildCutover:
+		want.Phase = RebuildReady
+	case RebuildReady:
+		want.Phase = RebuildRetiring
+	default:
+		return fmt.Errorf("rebuild phase %q cannot advance", expected.Phase)
+	}
+	if next != want {
+		return fmt.Errorf("rebuild journal transition changed identity or skipped phase")
+	}
+	current, err := LoadRebuildJournal(stateRoot, expected.Domain, expected.SessionName)
+	if err != nil {
+		return err
+	}
+	if current == next {
+		return nil // prior atomic rename became visible before a failed sync
+	}
+	if current != expected {
+		return fmt.Errorf("rebuild journal changed before phase advancement")
+	}
+	root, err := openSessionStateRoot(stateRoot)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	rebuilds, err := openSessionChild(root, "rebuilds", false)
+	if err != nil {
+		return err
+	}
+	defer rebuilds.Close()
+	target := expected.SessionName + ".json"
+	temporaryName, err := sessionTemporaryName(target)
+	if err != nil {
+		return err
+	}
+	temporary, err := rebuilds.OpenFile(temporaryName, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return err
+	}
+	defer rebuilds.Remove(temporaryName)
+	raw, err := json.Marshal(next)
+	if err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(append(raw, '\n')); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := rebuilds.Rename(temporaryName, target); err != nil {
+		return err
+	}
+	return sessionSyncRoot(rebuilds)
+}
+
 func decodeRebuildJournal(raw []byte) (RebuildJournal, error) {
 	var j RebuildJournal
 	decoder := json.NewDecoder(bytes.NewReader(raw))

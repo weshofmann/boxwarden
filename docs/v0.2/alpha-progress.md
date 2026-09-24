@@ -33,17 +33,22 @@ corrupt journal. Read-only status reports drift during a pending rebuild and
 does not wait on the supervisor. The old pin witness is defined over the full
 validated pin record loaded under the exact old binding. Targeted session,
 workspace, and app tests plus targeted vet, formatting, and diff checks pass.
-There is no public rebuild command or candidate clone yet, and no real rebuild
-qualification is claimed. The next increment will add the locked journal
-producer and candidate clone preparation.
+There is no public rebuild command or real rebuild qualification yet.
 
 The stopped rebuild reservation gate now holds all attached volume Use locks,
 the exact session lock, and the domain storage lock through the journal writer.
 It rechecks the session, attachments, backend stopped observation, and absence
 of Use or Pending before invoking that writer. Focused lock and refusal tests,
 the affected package tests, targeted vet, and diff checks pass. The producer
-will acquire the golden lock inside this gate and persist candidate intent
-before releasing it for cloning.
+acquires the golden lock inside this gate and persists candidate intent before
+releasing it for cloning. It accepts only an exact admitted stopped base,
+observes the new candidate ID absent, captures the exact old pin witness,
+clones the recorded candidate, randomizes its MAC while stopped, and advances
+the journal to `cloned`. A clone error after backend mutation was retried
+without a second clone. Targeted session/workspace/app tests and vet pass;
+this remains a source-only checkpoint without public rebuild or live VM proof.
+The next implementation step is the journal-authorized pin transition and
+internal new-generation cutover, followed by exact old-system retirement.
 
 The managed-volume shutdown correction at `7eeba47` now passes one real
 attached-volume public stop: the session and backend are consistently stopped,
@@ -237,9 +242,8 @@ remain outside the prepared cache.
 
 ## Next actions
 
-1. Implement the reviewed rebuild contract in `alpha-plan.md`: locked journal
-   producer and exact candidate preparation, then pin transition, cutover,
-   and retirement. Preserve
+1. Implement the reviewed rebuild contract in `alpha-plan.md`: exact old-pin
+   transition, new-generation cutover, and old-system retirement. Preserve
    the stopped failed VM and dirty volume. The guest SSH loss remains open;
    do not claim real false-stopped or rebuild qualification from that run.
 2. Add inspected-phase export reconciliation and hostile-exit checks. Rebuild
