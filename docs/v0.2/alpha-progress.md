@@ -12,18 +12,36 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
 | Host and installer | Read-only host doctor is healthy. The Canonical Ubuntu 24.04.4 ARM64 Desktop ISO has a valid detached signature and exact pinned SHA-256. Pinned OpenSSL 3 and xorriso executables have been checked. |
 | Public management | A fresh disposable clone reached exact-generation READY through serial bootstrap, host-key pinning, certificate, strict SSH, and time-zone checks; it stopped and restarted to READY. GNOME, Firefox, and a synthetic home file were observed after restart. |
 | Reusable preparation | Strict versioned recipe and ISO checks, candidate build, guest preparation, fresh-clone qualifier, private evidence, and cache admission are implemented. A fresh real build using the corrected finalizer completed installation, guest preparation, clone-ready shutdown, and qualification. Its fresh clone reached READY, passed package-inventory and identity checks, and stopped; the versioned prepared record was admitted. This is base qualification, not the full workspace/export acceptance path. |
-| Workspace volume | One alpha-owned 64 MiB ext4 volume was formatted in a zero-NIC VM and independently inspected. Its synthetic file retained its digest across an earlier stop/restart after manual remount. Public detach and attach moved this exact volume from a stopped original system clone to a separate replacement system clone without copying the disk. The replacement guest file manager opened the mounted 57-byte synthetic file and displayed its expected content; the known bytes match the previously recorded SHA-256. Public stops cleared exact generation Use while preserving the volume identity. Offline export qualification remains pending. |
+| Workspace volume | One alpha-owned 64 MiB ext4 volume was formatted in a zero-NIC VM and independently inspected. Its synthetic file retained its digest across an earlier stop/restart after manual remount. Public detach and attach moved this exact volume from a stopped original system clone to a separate replacement system clone without copying the disk. The replacement guest file manager opened the mounted 57-byte synthetic file and displayed its expected content. The corrected public stop released Use and left ext4 clean; source and export snapshot SHA-256 matched. |
 | Automatic mount and READY | The static generic guest helper resolves an exact FS UUID, mounts ext4 at a validated path, checks existing mounts and read-write state, and probes exact bindings. The host owner derives those bindings from admitted session/Use records, ensures them before READY, and repeats the bound probe for status. Full local Go tests, focused race tests, vet, and artifact checks passed at `5c84520`. The fresh original clone reached mount-bound READY in two generations; the separate replacement clone also reached mount-bound READY with the same reattached volume and later exposed the expected file in its GUI. Both are stopped now. |
-| Controlled export | Bounded receiver, exact stopped-volume snapshot, private helper capture, and selected publication have targeted tests. An isolated inspector previously returned a fixed file from a clean private ext4 copy with unchanged disk bytes. The first public managed-volume export reached a real zero-NIC inspector boot but failed safely: the current stopped volume has ext4 `needs_recovery`, so the guest emitted no stream and the receiver published no tree. A focused regression now rejects a stopped helper with fewer than 22 export bytes at capture. The failed transaction remains private for diagnosis; a successful public export is pending. |
-| Inspector bundle admission | A clean-source production bundle from the pinned ISO passed independent artifact checks and host admission with both synthetic and real journal-derived requests. Admission checks tracked source bytes, kernel/ISO pins, seven artifact digests and private metadata, deterministic appended guest/request initrd, and the signed helper's sole Virtualization entitlement. The first live export-mode VM stopped with zero NICs, but guest filesystem admission rejected the unclean volume. |
+| Controlled export | Bounded receiver, exact stopped-volume snapshot, private helper capture, and selected publication have targeted tests. After clean guest shutdown, a real public export published one selected 57-byte regular file into a new private directory. Its SHA-256 matched the known synthetic guest file; the durable journal read `published`, and the source and snapshot digests matched. Earlier dirty-volume and low-headroom attempts failed without publishing and remain private evidence. Inspected-phase recovery and hostile-exit qualification remain. |
+| Inspector bundle admission | A clean-source production bundle from the pinned ISO passed independent artifact checks and host admission with both synthetic and real journal-derived requests. Admission checks tracked source bytes, kernel/ISO pins, seven artifact digests and private metadata, deterministic appended guest/request initrd, and the signed helper's sole Virtualization entitlement. The first live export-mode VM rejected an unclean volume; a later fresh clean-volume run completed selected publication with zero-NIC inspector evidence. |
 | Example | `examples/v0.2-alpha-base.json` passed public recipe/ISO validation. It requests the Desktop source, a small package set, and one named workspace intent. |
 | Recipe-bound create | `session create` accepts exact recipe/ISO/guest definition/tool inputs, prepares or reuses a qualified base, and calls `CreateFromRevision`. A focused fixture and the real public command both selected the newly prepared revision without changing the domain current golden. A later public `alpha prepare` reused the admitted cache after verified redundant installer staging was retired, without creating an attempt journal or new Tart object. |
 
 Hosted CI is unavailable. Local checks above are source or explicitly described
-real-host checks; the full graphical, rebuild, and export
+real-host checks; the full graphical, rebuild, and failure-recovery
 acceptance path remains open.
 
 ## Current work
+
+The managed-volume shutdown correction at `7eeba47` now passes one real
+attached-volume public stop: the session and backend are consistently stopped,
+Use is released, and ext4 `needs_recovery` is clear. A fresh public export
+published the selected 57-byte synthetic file; host verification matched its
+known SHA-256 and confirmed that the durable journal is `published` and the
+source and snapshot digests agree. A preceding attempt stopped at the host
+headroom guard after inspector capture; its destination stayed empty and its
+snapshot-ready transaction is preserved. Removing only a rebuildable task Go
+cache restored headroom for the fresh run.
+
+Tart 2.32.1 still reports `stopped` for this running graphical guest after
+READY. Exact supervisor/Tart/Virtualization processes, the attached disk,
+guest IP, SSH port, and Tart window proved the guest was live. Status therefore
+reports false drift during such runs. Correcting this observed-state contract
+without accepting a false READY is the active implementation problem. The
+following paragraphs retain the implementation sequence; earlier pending
+statements describe their checkpoint at the time.
 
 The admitted prepared base has been reused by public recipe-bound create.
 Public start, fresh mount-bound READY, and stop succeeded twice with separate
@@ -132,15 +150,15 @@ the new capture regression rejects that false pass and removes its spool.
 Pinned Tart 2.32.1 source confirms that the previous `SIGINT` stop invoked an
 immediate VM stop. Normal supervised stop now asks the retained Tart child for
 guest OS shutdown, waits up to 15 seconds, and then uses the existing exact
-force-stop/reap path if necessary. This is a source-verified correction; a real
-managed-volume clean-shutdown result has not yet been observed.
+force-stop/reap path if necessary. The first correction alone had not reached
+attached-volume sessions because an outer handle wrapper hid that method.
 The attached-volume launcher wraps that Tart handle once more to retain disk
 locks through reap. That outer wrapper omitted the shutdown-request method,
 so attached-volume stops still took the immediate force path. A regression
 reproduced the missing method before the fix; the wrapper now forwards the
 request while retaining its disk locks until exact reap. Focused Tart,
-session-runtime, and supervisor tests plus targeted vet pass. The corrected
-attached-volume behavior still needs a real guest stop and filesystem check.
+session-runtime, and supervisor tests plus targeted vet pass. A real public
+stop then completed in 3.81 seconds and left the stopped volume ext4-clean.
 Three subsequent public starts of the attached synthetic-volume sandbox
 returned READY, but the next status reported Tart `stopped`. A bounded live
 diagnostic reproduced the contradiction: the exact supervisor and Tart child,
@@ -148,18 +166,18 @@ the Virtualization process holding the managed disk, the graphical Tart window,
 the guest IP, and SSH port 22 were all present while Tart `list` reported
 `stopped`. This matches an earlier Tart 2.32.1 observation on this host. Each
 generation was reconciled with the public exact stop; the volume Use was
-released, but ext4 still reports `needs_recovery`. Neither durable READY nor
-clean guest shutdown is qualified by these runs. Tart's lock-derived state
-must be reconciled against exact retained live evidence before lifecycle and
-export acceptance can resume. Private process IDs, paths, and disk evidence
-remain outside this document.
+released, but ext4 still reported `needs_recovery` at that point. Neither
+durable READY nor clean guest shutdown was qualified by those earlier runs.
+Tart's lock-derived state must be reconciled against exact retained live
+evidence before status and READY acceptance can complete. Private process IDs,
+paths, and disk evidence remain outside this document.
 Focused export tests and vet pass. Repository-wide Go tests and vet previously
 passed with host Unix socket access at `06466ee`; the default sandbox run
 could not bind test sockets, and the architecture guard was narrowed for the
 v0.2 export calls. The initial lifecycle correction passed the full local Go
 suite, focused Tart/runtime/supervisor race checks, and targeted vet. The outer
 managed-volume wrapper correction has only the focused checks recorded above.
-Real managed-volume qualification remains open. The earlier failed base
+Broader managed-volume acceptance remains open. The earlier failed base
 attempt was corrected and a fresh base built and qualified; failed attempts
 remain outside the prepared cache.
 
@@ -167,10 +185,8 @@ remain outside the prepared cache.
 
 1. Correct the observed-state/READY contract for Tart's false `stopped`
    report using exact live supervisor and guest evidence, then verify it on
-   the owned disposable sandbox. Qualify the now-forwarded bounded shutdown
-   request on the managed volume and verify a clean stopped filesystem
-   before repeating public export with a fresh transaction and destination.
-   Add explicit inspected-phase recovery and hostile-exit checks.
+   the owned disposable sandbox. Add explicit inspected-phase recovery and
+   hostile-exit checks to the now-successful public export path.
 2. Attach the retained volume to a second fresh sandbox after export, then
    verify its mount and content.
 3. Run the full integration checks and real acceptance matrix, and publish the
