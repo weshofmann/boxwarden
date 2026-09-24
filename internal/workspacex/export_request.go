@@ -35,6 +35,13 @@ func PrepareExportInspectorRequest(ctx context.Context, stateRoot string, domain
 		return PreparedExportInspectorRequest{}, err
 	}
 	defer held.Release()
+	return prepareExportInspectorRequestLocked(ctx, stateRoot, domainID, transactionID)
+}
+
+// The caller holds the exact export transaction lock across this read and any
+// subsequent helper operation. The public preparation method takes that lock
+// itself when only the request envelope is needed.
+func prepareExportInspectorRequestLocked(ctx context.Context, stateRoot string, domainID domain.ID, transactionID string) (PreparedExportInspectorRequest, error) {
 	journal, err := loadExportJournal(stateRoot, domainID, transactionID)
 	if err != nil {
 		return PreparedExportInspectorRequest{}, err
