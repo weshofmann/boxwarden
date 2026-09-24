@@ -102,6 +102,11 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   and its host-only key location. This restored actual host headroom without
   changing active Tart objects, workspace disks, or import state. Exact
   inventory and measurements are private.
+  The public Canonical installer ISO was separately copied to external
+  capacity, verified against its pinned digest, and removed from the internal
+  staging path after verification. It contains no private VM or credential
+  state and does not require encryption. The protected archive vault remains
+  private and encrypted.
 - A tracked, credential-free synthetic Node project and a draft operator
   [quickstart](alpha-quickstart.md) now describe exact build identity, private
   staging, public import, whole-directory export, and verification commands.
@@ -177,8 +182,9 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   command. Recipe execution remains disabled until those receipts exist.
 - Limits: retained import persistence, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh
-  acceptance remain open. An external capacity option is being checked; the
-  agent will recheck the guard before resuming stopped-volume qualification.
+  acceptance remain open. External capacity is available; a fresh disposable
+  baseline and clean stopped volume are still required for persistence
+  qualification.
 
 ## Verified checkpoints
 
@@ -196,7 +202,8 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
 | Recipe-bound create | `session create` accepts exact recipe/ISO/guest definition/tool inputs, prepares or reuses a qualified base, and binds the complete immutable recipe digest with the selected revision before clone. A focused fixture and an earlier real public command selected a prepared revision without changing the domain current golden; the new digest binding has source tests but no fresh real-host create run. A public `alpha prepare` reused the admitted cache after verified redundant installer staging was retired, without creating an attempt journal or new Tart object. |
 | System rebuild | The public `session rebuild` command accepts an exact admitted `--base` revision, complete recipe preparation inputs, or no new input to resume a pending journal. A full fake-backend transaction kept the session UUID and workspace attachment identity, reached fresh candidate READY, deleted only the journaled old system, and then no-oped for the selected base. Full local Go tests, vet, CLI build, and diff checks passed. One public no-volume Tart rebuild preserved the session UUID, transitioned the exact pin, reached repeated READY, retired the old object, cleared the journal, and stopped consistently. A later public rebuild with an attached ext4 volume preserved its identity and content, reached mount-bound READY, retired the old system, and stopped cleanly. That target was a distinct qualified Tart object with the same generic software image; a software-changing upgrade and failure recovery remain open. |
 
-Hosted `macos-26` CI passed at `df0da1c` and `4d2a6eb`. Local checks above
+Hosted `macos-26` CI passed through `b9e00e0`, including gofmt, full Go tests,
+race, vet, and build. Local checks above
 are source or explicitly described real-host checks; the full graphical,
 rebuild, and failure-recovery acceptance path remains open.
 
