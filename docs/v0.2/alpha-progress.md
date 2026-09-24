@@ -24,96 +24,31 @@ acceptance path remains open.
 
 ## Current work
 
-The corrected public recipe-bound create admitted one fresh prepared base and
-created a session from its exact revision. After verified redundant installer
-staging was removed, a repeated public prepare reused that cache. The public
-workspace attach bound the existing volume to the stopped session. Start,
-fresh READY status, stop, second start, fresh READY status, and second stop all
-succeeded. The two Use generation IDs differed and both stops cleared Use.
-Public recipe-bound create then made a separate stopped system clone from the
-admitted base. Public detach and attach moved the Available volume to it
-without copying the disk. The replacement reached fresh mount-bound READY;
-its public stop cleared Use. The volume remains attached and Available, and
-both system clones are stopped. READY includes the exact writable ext4 mount
-probe. A subsequent replacement boot opened the mounted synthetic file in
-the guest file manager; its displayed text and 57-byte size match the known
-payload whose SHA-256 was recorded before transfer. The session was stopped
-again. This checks content in the replacement guest; it is not an offline
-inspector or export qualification.
+The admitted prepared base has been reused by public recipe-bound create.
+Public start, fresh mount-bound READY, and stop succeeded twice with separate
+Use generations. The independent ext4 volume was detached from the stopped
+original clone and attached to a separate stopped replacement without copying
+or reformatting it. The replacement reached READY and opened the expected
+synthetic file in its graphical file manager; it stopped again and cleared Use.
+Both system clones are stopped and the volume remains Available and attached.
 
-The first replacement create input had an incorrect supplied OpenSSL digest;
-strict preflight rejected it before any attempt journal, session, or VM was
-created. The subsequent run used freshly observed digests for both tools and
-succeeded. This was an input error, not a qualified-build failure.
+A fresh isolated inspector probe read a private copy of that synthetic ext4
+volume through a restrictive read-only mount. The exact typed report, zero-NIC
+and stopped-VM checks, helper reap, and unchanged disk check passed. Earlier
+rejected attempts exposed a path-normalization false rejection and binary TTY
+output conversion; both were corrected and rechecked on fresh inputs. This
+qualifies the private-copy probe, not public stopped-volume export.
 
-The first synthetic-copy inspector preparation stopped at no-start preflight:
-Foundation aliased `/private/tmp` to `/tmp` in the new standalone disk gate.
-The gate now checks the exact supplied lexical path; a focused test verifies
-both hardlink rejection and valid one-link admission. No inspector VM started
-in that failed preparation.
-
-The next fresh synthetic-copy boot mounted and read the private ext4 copy and
-reported the expected file digest and size. The strict host parser correctly
-rejected the transport because hvc1 inserted one CR before an LF in the binary
-digest. The VM stopped, its helper was reaped, the disk stayed byte-identical,
-and the failed bundle is retained privately. The guest now disables TTY output
-processing before sending the typed stream; targeted Go tests, vet, ARM64
-cross-build, and Python tests passed. A fresh bundle then passed the exact
-573-byte typed report, zero-NIC/stopped/helper checks, and unchanged private
-disk SHA-256. The observed UUID, mount flags, 57-byte file size, and file
-digest match the expected synthetic volume. This qualifies the private copy
-probe, not controlled export of the managed volume.
-
-The export transaction design received a separate read-only review that found
-required changes: persist its journal after clearing the volume Pending
-marker, cap the snapshot and returned data, and publish receiver output only
-after VM stop,
-helper reap, zero-NIC proof, and an unchanged snapshot. The first source
-increment admits an `export-snapshot` Pending marker; a focused interrupted
-copy regression verifies that it blocks session start and detach. Snapshot
-creation, recovery, and public export are still in progress.
-
-The previous public recipe-bound attempt reached the generic base installer
-and guest preparation. Finalization then timed out after ten minutes waiting
-for the clone-ready marker. Its attempt journal records failure, and no session
-or prepared-cache record was
-admitted. This failed run is investigation evidence, not a qualification
-checkpoint or resumable build. Two bounded read-only, zero-network forensic
-boots confirmed that the fixed finalizer command was invoked before any
-cleanup, and that the installed helper digest differed from the finalizer's
-embedded pin. The finalizer pin now matches the installed, artifact-locked
-helper. Its existing real-artifact fixture failed before the correction and
-passed afterward; remaster, render, bootstrap, and recipe helper checks also
-passed. These are source checks, not real build qualification. The stopped
-failed VM was byte-verified into the private archive before its live object
-was retired; its journal and forensic reports remain.
-
-An earlier fresh attempt was canceled by the disk-reserve guard during
-installation. Its failed journal and verified private VM archive are retained.
-
-Exact obsolete alpha-owned r1 VMs and three old-helper r2 clones were retired
-after stopped, ownership, and workspace checks. The r2c system VM was archived
-and byte-verified privately before retirement; the independent workspace was
-detached through the public CLI and remains intact. Failed remastered installer
-ISOs are preserved as private exact block-map representations against the
-retained, digest-verified Canonical input. Each reconstructed stream matched
-its original SHA-256 digest after redundant staging copies were removed. Failed
-journals and other private diagnostics remain. The two older alpha builder
-installer ISOs are also retained as private, SHA-256-verified exact block maps
-against the pinned Canonical source. The admitted successful attempt's staged
-source and installer ISOs were likewise verified as an exact block map before
-and after their redundant copies were retired. Journals and qualification
-evidence remain. The current r2 golden VM and selection record are intact.
-Free space was about 41.5 GiB before the successful build and is about 29 GiB
-after staging retirement; read-only host doctor remains healthy.
-
-Automatic approval review rejected deletion of the alpha domain's current r2
-golden because ordinary legacy session creation still points to it. It remains
-stopped and intact. The protected historical VM and archive were untouched.
-
-Recipe-bound `session create` selected the exact admitted prepared revision
-without changing the domain's current golden. The legacy form still uses that
-current golden.
+An independent export design review found publication, recovery, and resource
+bounds that must be enforced. `af857ec` admits a durable `export-snapshot`
+Pending marker and verifies that interrupted copying blocks start and detach.
+The current increment adds a strict private transaction journal with exact
+identity, deterministic snapshot path, serialized phase changes, and bounded
+records. It is not yet connected to snapshot copying or Pending clearance.
+Snapshot copying, closed-stream inspection,
+crash recovery, and public export are still being implemented. The earlier
+failed base attempt was corrected and a fresh base built and qualified; failed
+attempts remain outside the prepared cache.
 
 ## Next actions
 
@@ -136,7 +71,6 @@ worker's files, and keep credentials, raw host inventory, VM disks, and private
 evidence out of Git and the PR. Never push or merge into `main`, force-update
 published history, or bypass checks.
 
-The private ownership manifest records exact live resources and evidence
-locations. Before any further VM mutation, verify that manifest against Tart,
-check host doctor, RAM, and the free-space floor. No human action is currently
-required; later account sign-in and subjective GUI acceptance belong to Wes.
+Before further VM mutation, verify owned resources, host doctor, RAM, and
+the free-space floor. No human action is currently required; later account
+sign-in and subjective GUI acceptance belong to Wes.

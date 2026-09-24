@@ -32,3 +32,18 @@ func TestExportSnapshotPendingBlocksStartAndDetachAfterCopyInterruption(t *testi
 		t.Fatalf("interrupted copy marker changed: %#v, %v", current, err)
 	}
 }
+
+func TestExportSnapshotPendingRequiresAvailableAttachedVolume(t *testing.T) {
+	root := privateRoot(t)
+	creating := fixtureRecord()
+	creating.Pending = &Pending{Kind: "export-snapshot", ID: testGeneration}
+	if err := SaveRecord(root, domain.ID("work"), creating); err == nil {
+		t.Fatal("creating workspace claimed an export copy")
+	}
+	available := creating
+	available.State = StateAvailable
+	available.Disk = &DiskIdentity{Device: 1, Inode: 2}
+	if err := SaveRecord(root, domain.ID("work"), available); err == nil {
+		t.Fatal("unattached workspace claimed an export copy")
+	}
+}

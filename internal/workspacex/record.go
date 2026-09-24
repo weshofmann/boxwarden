@@ -123,6 +123,9 @@ func validateRecord(expectedDomain domain.ID, record Record) error {
 		if !validUUID(record.Pending.ID) || !validPendingKind(record.Pending.Kind) {
 			return fmt.Errorf("invalid pending workspace operation")
 		}
+		if record.Pending.Kind == "export-snapshot" && (record.State != StateAvailable || record.Attachment == nil || record.Disk == nil) {
+			return fmt.Errorf("export snapshot requires an available attached workspace")
+		}
 	}
 	return nil
 }

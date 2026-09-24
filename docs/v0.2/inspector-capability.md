@@ -147,8 +147,10 @@ the qualified volume identity and ext4 header. It opens the exact source with
 durably creates a private export transaction journal keyed by a fresh UUID and
 persists the same ID as an `export-snapshot` Pending marker on the volume.
 The journal binds domain, volume, attached session and backend, selected paths,
-the intended destination parent identity and final name, private snapshot
-path, and phase. The host copies through the pinned descriptor while holding
+the intended destination parent identity and deterministic final name, the
+private snapshot path `exports/<transaction-id>/snapshot.raw` relative to the
+domain state root, and phase. Journal phase changes are serialized by an exact
+transaction lock. The host copies through the pinned descriptor while holding
 the volume lock, checks deadline and reserve during the copy, then verifies
 source identity/content and a distinct one-link snapshot inode, exact length,
 and SHA-256. It fsyncs snapshot bytes and its directory before atomically
