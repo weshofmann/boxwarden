@@ -111,6 +111,7 @@ type Owner struct {
 	runtimePath, tartPath, tartHome string
 	stopMu                          sync.Mutex
 	stopSent, graceSent             bool
+	stopRequest                     supervisor.StopRequest
 	waitOnce                        sync.Once
 	waitErr                         error
 }
@@ -721,6 +722,7 @@ func (o *Owner) RequestStop(ctx context.Context) error {
 		cancel()
 		if guestErr == nil {
 			o.graceSent = true
+			o.stopRequest = supervisor.StopRequestGuestAccepted
 			return nil
 		}
 	}
@@ -732,7 +734,24 @@ func (o *Owner) RequestStop(ctx context.Context) error {
 		return errors.Join(guestErr, err)
 	}
 	o.graceSent = true
+	if guestErr != nil {
+		o.stopRequest = supervisor.StopRequestTartFallback
+	} else {
+		o.stopRequest = supervisor.StopRequestTartOnly
+	}
 	return nil
+}
+
+// StopOutcome reports only observed request/control flow. It does not assert
+// that guest filesystems were cleanly unmounted.
+func (o *Owner) StopOutcome() supervisor.StopOutcome {
+	o.stopMu.Lock()
+	defer o.stopMu.Unlock()
+	request := o.stopRequest
+	if request == "" {
+		request = supervisor.StopRequestUnrequested
+	}
+	return supervisor.StopOutcome{Request: request, Forced: o.stopSent}
 }
 
 func (o *Owner) Stop(ctx context.Context) error {
