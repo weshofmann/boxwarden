@@ -17,7 +17,7 @@ with material acceptance gaps, not an alpha-ready release.
 | Import | The public command captured a bounded synthetic host tree and transferred it over pinned SFTP to an attached running workspace. Host readback matched. Its journal deliberately remains `transferring`; readback alone does not prove stopped-disk persistence. |
 | Controlled return | Selected files from clean stopped workspace snapshots were exported through a zero-NIC Linux inspector and bounded host receiver into new destinations. An `inspected` export resumed and published; a dirty ext4 snapshot was refused. Ambiguous post-final-rename recovery remains a manual evidence gate. |
 | Import verification | Source code compares a complete selected stopped export against the captured import and can advance an exact journal to `verified`. Focused tests and a separate source review passed. No real import has yet passed this stopped-disk verification. |
-| Shutdown correction | A fresh base carrying fixed guest poweroff qualified, but an attached empty workspace reproduced a dirty stop while the no-workspace control stopped promptly. A 120-second grace experiment also failed. The owner now passes exact bound workspace mounts to the helper, which verifies and unmounts them before queuing poweroff. The quiesce source and pinned helper passed targeted tests and hosted CI. On its freshly qualified base, one empty-volume stop was dirty; two more fresh empty-volume stops had clean ext4, one fast and one after the full grace. Public stop now records whether the guest request was acknowledged, Tart was used, and force stop was sent; it explicitly leaves workspace cleanliness unverified. A fresh public empty-volume trial reported Tart fallback plus force stop after 67.53 seconds; its stopped ext4 required recovery. Clean persistence is intermittent, not accepted. |
+| Shutdown correction | A fresh base carrying fixed guest poweroff qualified, but an attached empty workspace reproduced a dirty stop while the no-workspace control stopped promptly. A 120-second grace experiment also failed. The owner now passes exact bound workspace mounts to the helper, which verifies and unmounts them before queuing poweroff. The quiesce source and pinned helper passed targeted tests and hosted CI. On its freshly qualified base, one empty-volume stop was dirty; two more fresh empty-volume stops had clean ext4, one fast and one after the full grace. Public stop now records whether the guest request was acknowledged, Tart was used, and force stop was sent; it explicitly leaves workspace cleanliness unverified. A fresh public empty-volume trial reported Tart fallback plus force stop after 67.53 seconds; its stopped ext4 required recovery. Another fresh traced run identified guest UUID resolution failure and loss of the primary ext4 superblock after earlier verified formatting and mount-bound READY. Clean persistence is intermittent, not accepted. |
 | Host capacity | The stopped Tart store moved into an encrypted external APFS image. All 33 files matched byte for byte and by SHA-256 after remount; ownership, modes, extended attributes, and the 11 stopped VMs present at cutover matched. Doctor and disposable Tart create/clone/delete passed. A login/mount LaunchAgent remounted it without a prompt in a controlled test. The internal copy was retired, recovering 31.99 GiB immediately; an actual host reboot remains untested. |
 
 The quiesce source checkpoint `31399e5f05c089e87da82cf2bdc340ea7f059220`
@@ -73,6 +73,19 @@ stopped volume failed the independent clean-ext4 gate.
   `needs_recovery=true`. The VM and volume are preserved privately. The
   fallback result establishes that the pinned guest request did not return
   success; it does not yet identify why. No import persistence is claimed.
+- A separate fresh diagnostic session also reached mount-bound READY, then
+  developed persistent strict-SSH-probe drift before stop. Public stop reported
+  Tart fallback without force. A private bounded trace showed the guest helper
+  could not resolve the exact workspace filesystem UUID with `blkid`; it
+  failed before unmount. The format journal had earlier verified ext4 on the
+  same raw-file inode, but the stopped raw file had lost its primary ext4 magic
+  and UUID. The VM and volume remain private failed evidence. This is a live
+  volume identity-loss branch, with cause still unproven.
+- Pinned Tart 2.32.1 [selects cached I/O for Linux root disks](https://github.com/openai/tart/blob/2.32.1/Sources/tart/VM.swift)
+  to avoid filesystem corruption, while [additional file disks default to
+  automatic caching](https://github.com/openai/tart/blob/2.32.1/Sources/tart/Commands/Run.swift).
+  That difference is a testable hypothesis for the attached-volume failure,
+  not a demonstrated fix.
 - The external Tart migration recovered 31.99 GiB of unique internal space.
   If the encrypted image is unavailable, the unmounted
   Tart path is mode `000` and operations fail closed. Login and filesystem
@@ -92,8 +105,9 @@ stopped volume failed the independent clean-ext4 gate.
 
 ## Remaining acceptance
 
-1. Diagnose why the pinned guest request failed in the reproduced public
-   fallback branch, correct it,
+1. Test the additional-disk caching hypothesis on a fresh disposable volume
+   with read-only filesystem checks before launch and after stop. Correct the
+   verified failure class,
    qualify a new baseline, prove clean stopped ext4, then repeat public
    synthetic import, stopped export, and `workspace import verify`.
 2. Implement guest-only `once`, explicit `reconfigure`, `startup`, and `launch`
@@ -108,10 +122,12 @@ stopped volume failed the independent clean-ext4 gate.
 
 ## Next step and publication policy
 
-Preserve the failed diagnostic runs. Capture the pinned guest-request failure
-reason privately in a fresh bounded trial, then correct the failure class and
-retest from a new baseline. Continue using authoritative offline ext4
-inspection after every stopped-volume trial.
+Preserve the failed diagnostic runs. Compare a fresh source-bound volume with
+the same pinned Tart toolchain using explicit cached I/O for its additional
+disk, recording the ext4 header before launch and after stop. If the mode
+addresses the identity-loss branch, add a typed fixed backend option and
+qualification tests before claiming durability. Continue authoritative
+offline ext4 inspection after every stopped-volume trial.
 Continue durable per-action attempt records and tests as the next source
 increment. Publish each independently verified increment promptly on the alpha
 branch and keep the

@@ -1,5 +1,25 @@
 # Boxwarden v0.2 alpha decisions
 
+## Live workspace identity loss and caching experiment, 2026-09-24
+
+A separate fresh empty-volume run reached exact mount-bound READY, then
+developed persistent management-SSH readiness drift before stop. Public stop
+reported Tart fallback without force. A bounded private trace identified the
+guest rejection: `blkid` no longer resolved the exact filesystem UUID during
+shutdown verification, before unmount was attempted. The format journal had
+verified whole-device ext4 on the same raw-file inode; read-only inspection
+after stop found its primary ext4 magic and UUID zeroed. This finding changes
+the diagnostic order: preserving a mounted filesystem's identity while the VM
+runs precedes tuning the shutdown grace period.
+
+The pinned Tart source uses [cached I/O for a Linux root disk](https://github.com/openai/tart/blob/2.32.1/Sources/tart/VM.swift)
+with an explicit filesystem-corruption rationale, whereas [additional file
+disks default to automatic caching](https://github.com/openai/tart/blob/2.32.1/Sources/tart/Commands/Run.swift).
+An explicit cached additional-disk trial is the next bounded experiment. The
+different default is source evidence for a hypothesis, not proof that it
+caused this run's lost superblock or that cached mode solves it. Preserve the
+failed disk unmodified and check fresh disks before launch and after stop.
+
 ## Bounded public stop outcome, 2026-09-24
 
 The supervisor now returns a typed, exact-generation stop result. It records
