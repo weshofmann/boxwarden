@@ -37,6 +37,14 @@ There is no public rebuild command or candidate clone yet, and no real rebuild
 qualification is claimed. The next increment will add the locked journal
 producer and candidate clone preparation.
 
+The stopped rebuild reservation gate now holds all attached volume Use locks,
+the exact session lock, and the domain storage lock through the journal writer.
+It rechecks the session, attachments, backend stopped observation, and absence
+of Use or Pending before invoking that writer. Focused lock and refusal tests,
+the affected package tests, targeted vet, and diff checks pass. The producer
+will acquire the golden lock inside this gate and persist candidate intent
+before releasing it for cloning.
+
 The managed-volume shutdown correction at `7eeba47` now passes one real
 attached-volume public stop: the session and backend are consistently stopped,
 Use is released, and ext4 `needs_recovery` is clear. A fresh public export
