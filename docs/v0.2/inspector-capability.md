@@ -3,7 +3,8 @@
 The controlled-export acceptance gate remains closed. A bounded synthetic
 Virtualization.framework guest booted with no NIC, one read-only raw disk, and
 separate console/export serial channels. No workspace disk has been attached
-to this helper, and no ext4 data has been read.
+to this helper. The later copy probe read ext4 only from an independently
+created private synthetic copy.
 
 ## Fixed probe surface
 
@@ -106,8 +107,8 @@ a managed workspace inode. The path check uses the supplied lexical path
 because Foundation can alias `/private/tmp` to `/tmp` during normalization.
 `run_boot_probe.py` is the sole supported launcher:
 it binds the whole-disk digest, ext4 UUID, fixed-file expectation, and post-run
-disk identity. The source and focused tests are verified; a live `boot-copy`
-run is pending. This synthetic probe cannot name a managed workspace path or
+disk identity. The source, focused tests, and a live `boot-copy` run are
+verified. This synthetic probe cannot name a managed workspace path or
 write a host export directory.
 
 The first live copy boot reached guest shutdown with zero NICs, a stopped
@@ -117,8 +118,13 @@ report digest. The captured 574-byte stream differed from the expected
 Linux terminal output processing maps LF to CR-LF when `OPOST` and `ONLCR`
 are active. The guest now disables `OPOST` on its dedicated hvc1 data port
 and verifies the setting before writing binary frames. The failed run is
-retained as private evidence; a fresh live boot from corrected source is
-pending. The strict host parser remains unchanged.
+retained as private evidence. A fresh bundle built from the corrected source
+passed live: the host accepted the exact 573-byte typed stream, observed zero
+runtime NICs and a stopped VM, and reaped the helper. The guest reported only
+loopback, read-only block and ext4 mount state with
+`ro,noload,nodev,nosuid,noexec`, the bound filesystem UUID, and the known
+57-byte file digest. The private disk SHA-256 and inode stayed unchanged.
+The strict host parser remains unchanged.
 [Linux termios output flags](https://www.man7.org/linux/man-pages/man3/termios.3type.html).
 
 ## Inspector contract before export can open
@@ -141,10 +147,10 @@ stream through a dedicated serial channel to the bounded host receiver. The
 host does not mount the guest filesystem or expose a host tree to the guest.
 [Linux ext4 mount options](https://cdn.kernel.org/doc/html/latest/admin-guide/ext4.html).
 
-The next qualification must inspect a synthetic ext4 disk, prove the source
-remains byte-identical through normal and hostile exits, exercise receiver
-limits, and prove lock retention and crash recovery. Only then may the export
-acceptance gate be reconsidered.
+The synthetic ext4 copy passed a normal bounded boot and remained
+byte-identical. The next qualification must exercise hostile exits, receiver
+limits, and the managed-volume lock, pending state, and crash recovery. Only
+then may the export acceptance gate be reconsidered.
 
 ## Synthetic boot operator gate
 
@@ -152,8 +158,9 @@ Before any `--run`, the sole VM operator should run host-global
 `boxwarden doctor`, inventory all VMs and VM processes, verify no conflicting
 volume work, and preserve combined VM memory below half the physical host RAM.
 The probe itself uses two CPUs, 2 GiB RAM,
-one immutable 8 MiB synthetic read-only raw disk, two bounded output-only
-serial pipes, and zero NICs, sockets, shares, graphics, or audio. The runner
+one immutable 8 MiB zero or 64 MiB ext4 synthetic read-only raw disk, two
+bounded output-only serial pipes, and zero NICs, sockets, shares, graphics,
+or audio. The runner
 requires free space above `max(20 GiB, 10% filesystem capacity) + 64 MiB`.
 The host helper waits up to 15 seconds for start, 30 seconds for guest stop,
 then performs a bounded request/force-stop sequence; the launcher has an
