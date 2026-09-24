@@ -72,18 +72,27 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   It reports `readback-matched` with journal phase `transferring`, without
   claiming durable guest persistence. Focused app, architecture, supervisor,
   workspace, import, and CLI package tests, targeted vet, CLI build, and diff
-  check pass. No real guest project transfer has yet been performed.
-- CI repair in progress: the formatting gate passed after `5183b8b`, then
+  check pass. A real alpha-owned sandbox later reached exact-generation READY
+  with an attached synthetic workspace; the public command imported two
+  private synthetic files (86 bytes total) and returned a matching host
+  readback. A controlled stop released workspace Use. This qualifies live
+  transfer and readback, not retained-disk persistence.
+- CI repair complete: the formatting gate passed after `5183b8b`, then
   the Ubuntu job exposed Darwin-only ACL and file-identity checks plus three
   missing retained-owner selector admissions. The deterministic job now
   targets hosted `macos-26`, and the architecture guard admits only those
-  selectors. The full local Go test and race suites, vet, and CLI build pass;
-  the hosted rerun is pending. This is source verification, not real-host
-  qualification.
-- Next: exercise one real synthetic guest transfer and readback through the
-  public command, then define the durable verified journal gate. Fresh
-  source-tracked acceptance follows.
-- Limits: CI rerun, software-changing rebuild, ambiguous export final-rename
+  selectors. Hosted CI passed all steps at `df0da1c` and `4d2a6eb`, including
+  gofmt, full Go tests, race, vet, and build. This is source verification.
+- Persistence check pending: a selected stopped-volume export of the two
+  imported files refused before creating a transaction because the host was
+  below the export headroom reserve. The workspace is stopped and attached,
+  with no active Use or Pending marker; the import journal is `transferring`.
+  Private evidence records the exact transaction and refusal. The guard was
+  not bypassed, and no durable verified phase is claimed.
+- Next: implement an exact stopped-volume persistence gate, obtain safe host
+  headroom for the independent readback, then run fresh source-tracked
+  acceptance.
+- Limits: retained import persistence, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh
   acceptance remain open. No human action is currently needed.
 
@@ -103,8 +112,7 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
 | Recipe-bound create | `session create` accepts exact recipe/ISO/guest definition/tool inputs, prepares or reuses a qualified base, and calls `CreateFromRevision`. A focused fixture and the real public command both selected the newly prepared revision without changing the domain current golden. A later public `alpha prepare` reused the admitted cache after verified redundant installer staging was retired, without creating an attempt journal or new Tart object. |
 | System rebuild | The public `session rebuild` command accepts an exact admitted `--base` revision, complete recipe preparation inputs, or no new input to resume a pending journal. A full fake-backend transaction kept the session UUID and workspace attachment identity, reached fresh candidate READY, deleted only the journaled old system, and then no-oped for the selected base. Full local Go tests, vet, CLI build, and diff checks passed. One public no-volume Tart rebuild preserved the session UUID, transitioned the exact pin, reached repeated READY, retired the old object, cleared the journal, and stopped consistently. A later public rebuild with an attached ext4 volume preserved its identity and content, reached mount-bound READY, retired the old system, and stopped cleanly. That target was a distinct qualified Tart object with the same generic software image; a software-changing upgrade and failure recovery remain open. |
 
-Hosted CI is active. The prior Ubuntu job failed on Darwin-specific tests;
-the `macos-26` correction is awaiting its hosted rerun. Local checks above
+Hosted `macos-26` CI passed at `df0da1c` and `4d2a6eb`. Local checks above
 are source or explicitly described real-host checks; the full graphical,
 rebuild, and failure-recovery acceptance path remains open.
 
@@ -564,7 +572,7 @@ acceptance run and GUI/provider sign-in checks.
    reattachment and delete qualification used guest-created synthetic files.
 4. Run the fresh real acceptance matrix and publish the runnable build, exact
    source SHA, quickstart, synthetic demo, and limits. The full local Go suite,
-   vet, and CLI build have passed; the corrected hosted CI run remains pending.
+   vet, and CLI build have passed; hosted CI also passed at `4d2a6eb`.
 
 ## Publication and operational policy
 

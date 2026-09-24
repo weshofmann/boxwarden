@@ -263,3 +263,14 @@ The command's result says `readback-matched` and leaves the journal in
 `transferring`, because remote file fsync and host readback establish matching
 bytes at that moment but do not establish durable guest directory state after
 a crash. A separate verified-phase gate will require its own evidence.
+
+## Import persistence qualification, 2026-09-24
+
+The real public import matched a host readback while the guest was running.
+A controlled stop then released the volume Use, but an independent selected
+export refused at its host headroom gate before creating a transaction. Keep
+the import journal in `transferring` and the disk intact. The verified phase
+must compare the captured source to a selected read from the stopped retained
+volume, bind the exact disk and export transaction, and reject ambiguous or
+incomplete export results. Do not weaken the existing export reserve to make
+this qualification pass.
