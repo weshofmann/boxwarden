@@ -15,10 +15,23 @@ runs precedes tuning the shutdown grace period.
 The pinned Tart source uses [cached I/O for a Linux root disk](https://github.com/openai/tart/blob/2.32.1/Sources/tart/VM.swift)
 with an explicit filesystem-corruption rationale, whereas [additional file
 disks default to automatic caching](https://github.com/openai/tart/blob/2.32.1/Sources/tart/Commands/Run.swift).
-An explicit cached additional-disk trial is the next bounded experiment. The
-different default is source evidence for a hypothesis, not proof that it
-caused this run's lost superblock or that cached mode solves it. Preserve the
-failed disk unmodified and check fresh disks before launch and after stop.
+An explicit cached additional-disk trial was selected as a bounded experiment.
+The different default is source evidence for a hypothesis, not proof that it
+caused this run's lost superblock. Preserve the failed disk unmodified and
+check fresh disks before launch and after stop.
+
+The first controlled cached-disk trial used the same pinned Tart toolchain and
+an independent 64 MiB ext4 volume. The raw inode had a clean ext4 magic and
+UUID before launch and after attachment. The guest remained mount-bound READY
+through a roughly one-minute dwell, then public stop reported
+`request=guest_accepted forced=false` in 7.89 seconds. After exact stopped
+proof, the same inode still had the expected UUID, clean state, and no journal
+recovery or orphan flag. This result and Tart's Linux root-disk rationale
+justify pinning `caching=cached` for Boxwarden's managed writable ext4 disks.
+The backend preserves a single exact `--disk` argv element and Tart's default
+full synchronization; no arbitrary disk option is exposed. Repeated fresh
+volumes and stopped synthetic import still determine whether the durability
+gate is satisfied. One clean run does not establish general reliability.
 
 ## Bounded public stop outcome, 2026-09-24
 
