@@ -198,6 +198,23 @@ type osProcessHandle struct {
 	releaseProcess func() error
 }
 
+func (h *osProcessHandle) RetainedChildLive() bool {
+	if h == nil || h.process == nil {
+		return false
+	}
+	h.stopMu.Lock()
+	defer h.stopMu.Unlock()
+	if h.reaped || h.authorityLost || h.done == nil {
+		return false
+	}
+	select {
+	case <-h.done:
+		return false
+	default:
+		return true
+	}
+}
+
 // RequestStop asks the exact retained Tart child to request guest OS shutdown.
 // It never substitutes for Stop: a noncooperating guest still needs a bounded
 // process-group SIGINT followed by the normal exact reap.

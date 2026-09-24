@@ -81,6 +81,26 @@ func TestOwnedProcessUsesRealDirectChildWait(t *testing.T) {
 	}
 }
 
+func TestRetainedChildLivenessEndsOnExactReapOrLostAuthority(t *testing.T) {
+	for _, lost := range []bool{false, true} {
+		handle := &osProcessHandle{process: &os.Process{Pid: 4242}, done: make(chan struct{})}
+		if !handle.RetainedChildLive() {
+			t.Fatal("newly retained child was not live")
+		}
+		handle.stopMu.Lock()
+		if lost {
+			handle.authorityLost = true
+		} else {
+			handle.reaped = true
+		}
+		close(handle.done)
+		handle.stopMu.Unlock()
+		if handle.RetainedChildLive() {
+			t.Fatalf("retained child reported live after reap/lost authority (lost=%t)", lost)
+		}
+	}
+}
+
 func TestAmbiguousOwnedWaitPreservesScratchAndRefusesLateSignal(t *testing.T) {
 	for name, poll := range map[string]func(int) (int, syscall.WaitStatus, error){
 		"ECHILD":    func(int) (int, syscall.WaitStatus, error) { return -1, 0, syscall.ECHILD },

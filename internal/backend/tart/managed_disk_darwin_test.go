@@ -104,11 +104,34 @@ func TestLauncherReleasesManagedDiskAfterFailedSpawn(t *testing.T) {
 type guestRequestProcessHandle struct {
 	processHandleFake
 	requests int
+	live     bool
 }
 
 func (h *guestRequestProcessHandle) RequestStop(context.Context) error {
 	h.requests++
 	return nil
+}
+
+func (h *guestRequestProcessHandle) RetainedChildLive() bool { return h.live }
+
+func TestManagedDiskHandleForwardsRetainedChildLiveness(t *testing.T) {
+	request, _, _ := tartManagedDiskFixture(t)
+	child := &guestRequestProcessHandle{live: true}
+	handle, err := newLauncher(validLaunchConfig(), &recordingProcessStarter{handle: child}).Start(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveness, ok := handle.(interface{ RetainedChildLive() bool })
+	if !ok || !liveness.RetainedChildLive() {
+		t.Fatal("managed disk and scratch wrappers hid retained child liveness")
+	}
+	child.live = false
+	if liveness.RetainedChildLive() {
+		t.Fatal("wrapper reported reaped child live")
+	}
+	if err := handle.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestManagedDiskHandleForwardsGuestShutdownWithoutReleasingLease(t *testing.T) {

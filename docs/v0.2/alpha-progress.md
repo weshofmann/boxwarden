@@ -171,6 +171,12 @@ durable READY nor clean guest shutdown was qualified by those earlier runs.
 Tart's lock-derived state must be reconciled against exact retained live
 evidence before status and READY acceptance can complete. Private process IDs,
 paths, and disk evidence remain outside this document.
+An independent source review scoped the correction to exact retained-child
+liveness plus fresh bound guest checks; it warned that a contradictory Tart
+listing never proves a VM stopped. The Tart direct-child handle now exposes a
+read-only liveness signal through both scratch and managed-disk wrappers,
+with focused tests for reaped and unprovable children. READY and status do not
+yet consume that signal, so the false-stopped behavior remains open.
 Focused export tests and vet pass. Repository-wide Go tests and vet previously
 passed with host Unix socket access at `06466ee`; the default sandbox run
 could not bind test sockets, and the architecture guard was narrowed for the

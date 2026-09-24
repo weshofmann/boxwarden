@@ -24,6 +24,11 @@ type managedDiskHandle struct {
 	disks []*backend.ManagedDiskLifetime
 }
 
+func (h *managedDiskHandle) RetainedChildLive() bool {
+	liveness, ok := h.Handle.(backend.RetainedChildLiveness)
+	return ok && liveness.RetainedChildLive()
+}
+
 func (h *managedDiskHandle) RequestStop(ctx context.Context) error {
 	requester, ok := h.Handle.(interface{ RequestStop(context.Context) error })
 	if !ok {

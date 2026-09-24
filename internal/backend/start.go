@@ -24,6 +24,13 @@ type Handle interface {
 	Wait(context.Context) error
 }
 
+// RetainedChildLiveness is optional evidence from the exact direct-child
+// handle. It never reconstructs ownership from a persisted PID or a backend
+// listing, and false means exited or unprovable rather than safely stopped.
+type RetainedChildLiveness interface {
+	RetainedChildLive() bool
+}
+
 // Starter launches one existing backend object with its fixed adapter policy.
 type Starter interface {
 	Start(context.Context, StartRequest) (Handle, error)
