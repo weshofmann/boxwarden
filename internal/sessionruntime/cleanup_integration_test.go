@@ -93,16 +93,16 @@ func TestAbandonedSnapshotObservationDoesNotStarveExactStop(t *testing.T) {
 			requirePostWriteReadCompletion(t, result.err)
 			break
 		}
-		// The observer and connection share an expiry. If observer
-		// cancellation wins, the server can return its exact fail-closed
-		// snapshot before the connection deadline wins the client read.
+		// The observation deadline reserves time for a response. A canceled
+		// observer may reply before the socket expires, but none of its late
+		// readiness flags may become fresh evidence.
 		snapshot := result.snapshot
 		if snapshot.Binding != f.request.Binding ||
-			snapshot.BackendRunning || !snapshot.SerialHealthy || snapshot.PinPresent ||
+			snapshot.BackendRunning || snapshot.SerialHealthy || snapshot.PinPresent ||
 			snapshot.CertificateCurrent || snapshot.ProbeOK || snapshot.ZoneMatches ||
-			snapshot.Diagnostic != "exact backend observation failed" ||
+			snapshot.Diagnostic != "snapshot observation expired" ||
 			snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.Before(snapshotStartedAt) || snapshot.ObservedAt.After(time.Now()) {
-			t.Fatalf("active snapshot at expiry = %#v, want fresh exact-bound fail-closed state with healthy serial", snapshot)
+			t.Fatalf("active snapshot at expiry = %#v, want fresh exact-bound non-ready state", snapshot)
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("snapshot client did not enforce its RPC budget")

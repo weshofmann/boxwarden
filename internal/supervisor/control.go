@@ -198,7 +198,21 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 		return
 	}
 	response := controlResponse{Version: 1, Binding: binding}
-	operationCtx, cancelOperation := context.WithDeadline(ctx, effectiveDeadline)
+	observationDeadline := effectiveDeadline
+	if request.Action == "snapshot" {
+		// A failed SSH probe may use its full context. Leave bounded time to
+		// return a non-ready snapshot before the client's socket expires.
+		remaining := time.Until(effectiveDeadline)
+		if remaining <= 0 {
+			return
+		}
+		reserve := remaining / 4
+		if reserve > 500*time.Millisecond {
+			reserve = 500 * time.Millisecond
+		}
+		observationDeadline = effectiveDeadline.Add(-reserve)
+	}
+	operationCtx, cancelOperation := context.WithDeadline(ctx, observationDeadline)
 	defer cancelOperation()
 	if request.Action == "bootstrap" {
 		if err := owner.Bootstrap(operationCtx); err != nil {
@@ -240,6 +254,11 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 		}
 	}
 	response.Snapshot = owner.Snapshot(operationCtx)
+	if request.Action == "snapshot" && operationCtx.Err() != nil {
+		// The reply reserve must never turn a late positive observation into
+		// fresh READY evidence. Return an explicit non-ready snapshot instead.
+		response.Snapshot = Snapshot{Binding: binding, Diagnostic: "snapshot observation expired"}
+	}
 	exactAfterBinding := response.Snapshot.Binding == binding
 	response.Snapshot.Binding = binding
 	response.Snapshot.ObservedAt = time.Now().UTC()

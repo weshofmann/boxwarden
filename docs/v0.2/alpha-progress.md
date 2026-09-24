@@ -49,6 +49,17 @@ false-stopped path on a real VM. The following paragraphs retain the
 implementation sequence; earlier pending statements describe their
 checkpoint at the time.
 
+The snapshot control request previously gave the guest probe and Unix socket
+the same two-second absolute deadline. A slow or unreachable SSH endpoint
+could consume that entire interval, leaving no time to return a non-ready
+snapshot; a focused regression reproduced the missing response. The server
+now reserves up to 500 milliseconds within the caller's deadline for its
+reply and demotes an observation that finishes after its own deadline; a
+regression failed when a canceled observer returned READY, then passed after
+the demotion. Focused supervisor/runtime/app tests and targeted vet pass. This
+corrects failure reporting; the guest SSH loss itself remains unexplained,
+and the real failed run is not requalified.
+
 The admitted prepared base has been reused by public recipe-bound create.
 Public start, fresh mount-bound READY, and stop succeeded twice with separate
 Use generations. The independent ext4 volume was detached from the stopped

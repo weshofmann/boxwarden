@@ -517,12 +517,16 @@ func timePointer(value time.Time) *time.Time { return &value }
 type expiringSnapshotRuntime struct {
 	runtimeFixture
 	observing, canceled chan struct{}
+	readyOnCancellation bool
 }
 
 func (o *expiringSnapshotRuntime) Snapshot(ctx context.Context) Snapshot {
 	close(o.observing)
 	<-ctx.Done()
 	close(o.canceled)
+	if o.readyOnCancellation {
+		return Snapshot{Binding: o.binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true}
+	}
 	return Snapshot{Binding: o.binding}
 }
 
@@ -557,6 +561,46 @@ func TestControlSnapshotUsesClientAbsoluteExpiry(t *testing.T) {
 	case <-owner.canceled:
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("snapshot observer received a fresh server timeout instead of its client expiry")
+	}
+	<-served
+}
+
+func TestControlSnapshotReturnsNonReadyBeforeClientExpiryWhenObserverTimesOut(t *testing.T) {
+	binding := minimalRequest(t).Binding
+	owner := &expiringSnapshotRuntime{
+		runtimeFixture:      runtimeFixture{binding: binding, done: make(chan struct{})},
+		observing:           make(chan struct{}),
+		canceled:            make(chan struct{}),
+		readyOnCancellation: true,
+	}
+	server, client := net.Pipe()
+	defer client.Close()
+	served := make(chan struct{})
+	go func() {
+		handleControl(context.Background(), server, binding, owner, func() error { return owner.Stop(context.Background()) })
+		close(served)
+	}()
+	expiresAt := time.Now().Add(time.Second)
+	if err := client.SetDeadline(expiresAt); err != nil {
+		t.Fatal(err)
+	}
+	request, err := json.Marshal(controlRequest{Version: 1, Action: "snapshot", Binding: binding, ExpiresAt: expiresAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFrame(client, request); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := readBounded(client)
+	if err != nil {
+		t.Fatalf("observer used whole RPC deadline without response: %v", err)
+	}
+	var response controlResponse
+	if err := decodeExact(encoded, &response); err != nil || response.Binding != binding || response.Snapshot.Binding != binding ||
+		response.Snapshot.BackendRunning || response.Snapshot.SerialHealthy || response.Snapshot.PinPresent ||
+		response.Snapshot.CertificateCurrent || response.Snapshot.ProbeOK || response.Snapshot.ZoneMatches ||
+		response.Snapshot.Diagnostic != "snapshot observation expired" {
+		t.Fatalf("non-ready timeout response = %+v, %v", response, err)
 	}
 	<-served
 }
