@@ -134,6 +134,13 @@ immediate VM stop. Normal supervised stop now asks the retained Tart child for
 guest OS shutdown, waits up to 15 seconds, and then uses the existing exact
 force-stop/reap path if necessary. This is a source-verified correction; a real
 managed-volume clean-shutdown result has not yet been observed.
+The attached-volume launcher wraps that Tart handle once more to retain disk
+locks through reap. That outer wrapper omitted the shutdown-request method,
+so attached-volume stops still took the immediate force path. A regression
+reproduced the missing method before the fix; the wrapper now forwards the
+request while retaining its disk locks until exact reap. Focused Tart,
+session-runtime, and supervisor tests plus targeted vet pass. The corrected
+attached-volume behavior still needs a real guest stop and filesystem check.
 Three subsequent public starts of the attached synthetic-volume sandbox
 returned READY, but the next status reported Tart `stopped`. A bounded live
 diagnostic reproduced the contradiction: the exact supervisor and Tart child,
@@ -149,8 +156,9 @@ remain outside this document.
 Focused export tests and vet pass. Repository-wide Go tests and vet previously
 passed with host Unix socket access at `06466ee`; the default sandbox run
 could not bind test sockets, and the architecture guard was narrowed for the
-v0.2 export calls. The lifecycle correction passed the full local Go suite,
-focused Tart/runtime/supervisor race checks, and targeted vet.
+v0.2 export calls. The initial lifecycle correction passed the full local Go
+suite, focused Tart/runtime/supervisor race checks, and targeted vet. The outer
+managed-volume wrapper correction has only the focused checks recorded above.
 Real managed-volume qualification remains open. The earlier failed base
 attempt was corrected and a fresh base built and qualified; failed attempts
 remain outside the prepared cache.
@@ -159,8 +167,8 @@ remain outside the prepared cache.
 
 1. Correct the observed-state/READY contract for Tart's false `stopped`
    report using exact live supervisor and guest evidence, then verify it on
-   the owned disposable sandbox. Determine why the bounded stop leaves the
-   managed ext4 volume recovery-required; verify a clean stopped volume
+   the owned disposable sandbox. Qualify the now-forwarded bounded shutdown
+   request on the managed volume and verify a clean stopped filesystem
    before repeating public export with a fresh transaction and destination.
    Add explicit inspected-phase recovery and hostile-exit checks.
 2. Attach the retained volume to a second fresh sandbox after export, then

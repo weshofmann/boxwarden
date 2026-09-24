@@ -3,6 +3,7 @@ package tart
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 )
@@ -21,6 +22,14 @@ func closeManagedDiskLifetimes(disks []*backend.ManagedDiskLifetime) error {
 type managedDiskHandle struct {
 	backend.Handle
 	disks []*backend.ManagedDiskLifetime
+}
+
+func (h *managedDiskHandle) RequestStop(ctx context.Context) error {
+	requester, ok := h.Handle.(interface{ RequestStop(context.Context) error })
+	if !ok {
+		return fmt.Errorf("owned Tart handle cannot request guest shutdown")
+	}
+	return requester.RequestStop(ctx)
 }
 
 func (h *managedDiskHandle) Wait(ctx context.Context) error {

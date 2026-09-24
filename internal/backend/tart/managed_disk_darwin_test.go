@@ -100,3 +100,41 @@ func TestLauncherReleasesManagedDiskAfterFailedSpawn(t *testing.T) {
 		t.Fatal("failed spawn retained volume lock")
 	}
 }
+
+type guestRequestProcessHandle struct {
+	processHandleFake
+	requests int
+}
+
+func (h *guestRequestProcessHandle) RequestStop(context.Context) error {
+	h.requests++
+	return nil
+}
+
+func TestManagedDiskHandleForwardsGuestShutdownWithoutReleasingLease(t *testing.T) {
+	request, _, held := tartManagedDiskFixture(t)
+	processHandle := &guestRequestProcessHandle{}
+	handle, err := newLauncher(validLaunchConfig(), &recordingProcessStarter{handle: processHandle}).Start(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requester, ok := handle.(interface{ RequestStop(context.Context) error })
+	if !ok {
+		t.Fatal("managed disk handle hides the retained Tart guest shutdown request")
+	}
+	if err := requester.RequestStop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if processHandle.requests != 1 {
+		t.Fatalf("guest shutdown requests = %d, want 1", processHandle.requests)
+	}
+	if !held.MatchesScope("volume-work-" + testDiskVolume) {
+		t.Fatal("guest shutdown request released volume lock before exact reap")
+	}
+	if err := handle.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if held.MatchesScope("volume-work-" + testDiskVolume) {
+		t.Fatal("volume lock retained after exact reap")
+	}
+}
