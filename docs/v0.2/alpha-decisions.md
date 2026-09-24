@@ -33,6 +33,14 @@ left ext4 requiring recovery. The explicit unmount did not establish clean
 persistence. The host must surface whether the bound guest request failed or
 was accepted before another source correction is selected.
 
+Two additional fresh empty-volume sessions on the same base used an isolated
+host-only trace of the existing request result. Both guest requests were
+acknowledged within half a second and both stopped ext4 headers were clean.
+One VM exited quickly; the other remained until the 60-second grace elapsed,
+consistent with a later force stop. The first dirty outcome was untraced, so
+its guest request result is unknown. A clean workspace can coexist with a
+stalled poweroff; reporting only `stopped` loses that important distinction.
+
 ## Bound guest shutdown before Tart force stop, 2026-09-24
 
 A new recipe-bound sandbox with a newly formatted ext4 workspace reached

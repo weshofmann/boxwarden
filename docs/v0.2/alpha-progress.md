@@ -17,7 +17,7 @@ with material acceptance gaps, not an alpha-ready release.
 | Import | The public command captured a bounded synthetic host tree and transferred it over pinned SFTP to an attached running workspace. Host readback matched. Its journal deliberately remains `transferring`; readback alone does not prove stopped-disk persistence. |
 | Controlled return | Selected files from clean stopped workspace snapshots were exported through a zero-NIC Linux inspector and bounded host receiver into new destinations. An `inspected` export resumed and published; a dirty ext4 snapshot was refused. Ambiguous post-final-rename recovery remains a manual evidence gate. |
 | Import verification | Source code compares a complete selected stopped export against the captured import and can advance an exact journal to `verified`. Focused tests and a separate source review passed. No real import has yet passed this stopped-disk verification. |
-| Shutdown correction | A fresh base carrying fixed guest poweroff qualified, but an attached empty workspace alone reproduced a dirty stop while the no-workspace control stopped promptly. A 120-second grace experiment also failed. The owner now passes exact bound workspace mounts to the helper, which verifies and unmounts them before queuing poweroff. The new source and pinned helper passed targeted tests and hosted CI; a second freshly qualified base carrying them still took the full stop grace and left ext4 requiring recovery. Clean stopped-disk persistence remains unverified. |
+| Shutdown correction | A fresh base carrying fixed guest poweroff qualified, but an attached empty workspace reproduced a dirty stop while the no-workspace control stopped promptly. A 120-second grace experiment also failed. The owner now passes exact bound workspace mounts to the helper, which verifies and unmounts them before queuing poweroff. The new source and pinned helper passed targeted tests and hosted CI. On its freshly qualified base, one empty-volume stop was dirty; two more fresh empty-volume stops had clean ext4, one fast and one after the full grace. Clean persistence is intermittent, not accepted. |
 | Host capacity | The stopped Tart store moved into an encrypted external APFS image. All 33 files matched byte for byte and by SHA-256 after remount; ownership, modes, extended attributes, and the 11 stopped VMs present at cutover matched. Doctor and disposable Tart create/clone/delete passed. A login/mount LaunchAgent remounted it without a prompt in a controlled test. The internal copy was retired, recovering 31.99 GiB immediately; an actual host reboot remains untested. |
 
 The quiesce source checkpoint `31399e5f05c089e87da82cf2bdc340ea7f059220`
@@ -49,6 +49,14 @@ stop.
   had `needs_recovery`; no import was involved. Its VM and volume are retained
   privately without restart or repair. The host currently does not expose
   whether the guest unmount request failed or shutdown later timed out.
+- Two further fresh empty-volume trials from that same base used an isolated
+  host-only private trace, with no guest or stop-decision change. Both pinned
+  guest shutdown requests were acknowledged in under half a second, and both
+  stopped ext4 headers were clean. One VM exited in about six seconds; the
+  other took roughly 63 seconds, consistent with the force-stop path after
+  the grace window. The first dirty stop had no trace, so its request outcome
+  remains unknown. The trace patch is retained only in private evidence and
+  was removed from the worker checkout.
 - The external Tart migration recovered 31.99 GiB of unique internal space.
   If the encrypted image is unavailable, the unmounted
   Tart path is mode `000` and operations fail closed. Login and filesystem
@@ -68,10 +76,11 @@ stop.
 
 ## Remaining acceptance
 
-1. Distinguish guest request/unmount failure from a later shutdown timeout
-   with bounded private diagnostics. Correct the actual failure, qualify a
-   new baseline, prove clean stopped ext4, then repeat public synthetic import,
-   stopped export, and `workspace import verify`.
+1. Surface bound guest request and forced-stop outcomes through the public
+   lifecycle without treating a stopped VM as proof of clean ext4. Capture the
+   intermittent dirty branch, correct it, qualify a new baseline, prove clean
+   stopped ext4, then repeat public synthetic import, stopped export, and
+   `workspace import verify`.
 2. Implement guest-only `once`, explicit `reconfigure`, `startup`, and `launch`
    actions with bounded durable attempts, visible retry/skip, and truthful
    failure or waiting-for-sign-in states.
@@ -84,9 +93,9 @@ stop.
 
 ## Next step and publication policy
 
-Preserve the failed diagnostic runs. Add bounded stop-path diagnostics so the
-next fresh empty-volume trial can identify whether the pinned guest request
-or the later poweroff failed, then correct and retest from a new baseline.
+Preserve the failed diagnostic runs. Add bounded public stop outcome reporting
+so the next dirty trial identifies whether its pinned guest request failed or
+poweroff stalled, then correct and retest from a new baseline.
 Continue durable per-action attempt records and tests as the next source
 increment. Publish each independently verified increment promptly on the alpha
 branch and keep the
