@@ -110,6 +110,17 @@ disk identity. The source and focused tests are verified; a live `boot-copy`
 run is pending. This synthetic probe cannot name a managed workspace path or
 write a host export directory.
 
+The first live copy boot reached guest shutdown with zero NICs, a stopped
+helper, and an unchanged synthetic disk, but the host rejected its binary
+report digest. The captured 574-byte stream differed from the expected
+573-byte BWEX stream by one CR inserted before an LF inside the digest.
+Linux terminal output processing maps LF to CR-LF when `OPOST` and `ONLCR`
+are active. The guest now disables `OPOST` on its dedicated hvc1 data port
+and verifies the setting before writing binary frames. The failed run is
+retained as private evidence; a fresh live boot from corrected source is
+pending. The strict host parser remains unchanged.
+[Linux termios output flags](https://www.man7.org/linux/man-pages/man3/termios.3type.html).
+
 ## Inspector contract before export can open
 
 Use a separately admitted signed helper and digest-pinned ARM64 kernel and

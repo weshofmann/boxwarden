@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unsafe"
 )
 
 type bootReport struct {
@@ -164,6 +165,10 @@ func runProof() error {
 	if err != nil {
 		return err
 	}
+	if err := disableOutputProcessing(dataPort.Fd()); err != nil {
+		_ = dataPort.Close()
+		return err
+	}
 	if err := writeReport(dataPort, transaction, body); err != nil {
 		_ = dataPort.Close()
 		return err
@@ -172,6 +177,26 @@ func runProof() error {
 		return err
 	}
 	consoleLine("alpha inspector synthetic proof sent")
+	return nil
+}
+
+func disableOutputProcessing(fd uintptr) error {
+	var settings syscall.Termios
+	_, _, code := syscall.Syscall(syscall.SYS_IOCTL, fd, uintptr(syscall.TCGETS), uintptr(unsafe.Pointer(&settings)))
+	if code != 0 {
+		return fmt.Errorf("read data serial termios: %w", code)
+	}
+	// hvc1 is a TTY: OPOST/ONLCR can insert CR before LF anywhere in a
+	// binary digest. Only this dedicated data port carries the BWEX stream.
+	settings.Oflag &^= syscall.OPOST
+	_, _, code = syscall.Syscall(syscall.SYS_IOCTL, fd, uintptr(syscall.TCSETS), uintptr(unsafe.Pointer(&settings)))
+	if code != 0 {
+		return fmt.Errorf("set binary data serial termios: %w", code)
+	}
+	_, _, code = syscall.Syscall(syscall.SYS_IOCTL, fd, uintptr(syscall.TCGETS), uintptr(unsafe.Pointer(&settings)))
+	if code != 0 || settings.Oflag&syscall.OPOST != 0 {
+		return fmt.Errorf("verify binary data serial termios: ioctl=%v, output_flags=%#x", code, settings.Oflag)
+	}
 	return nil
 }
 
