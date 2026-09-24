@@ -120,8 +120,17 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   because the host is now below the production disk reserve used by unrelated
   capture fixtures. A separate source-only review found no concrete Critical
   or Important issue in the published stopped-import verification path.
+- Recipe execution gate: the public recipe check and production preparation
+  path now reject `once`, `reconfigure`, `startup`, and `launch` actions while
+  those session phases have no executor. The general parser still admits the
+  planned format for source inspection. Focused recipe, CLI, and recipe-check
+  tests plus targeted vet, formatting, and diff checks passed. A broader local
+  app package run stopped in an unrelated workspace fixture at the host disk
+  reserve; no full-suite result is claimed for this checkpoint. Session intent
+  binding and phase execution are the current source work.
 - Next: obtain safe host headroom for an independent whole-directory export,
-  run the public verify command on that result, then run fresh source-tracked
+  run the public verify command on that result, and implement immutable recipe
+  intent binding before session phase execution. Then run fresh source-tracked
   acceptance.
 - Limits: retained import persistence, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh

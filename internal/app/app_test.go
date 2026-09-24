@@ -304,6 +304,20 @@ func TestAlphaRecipeCheckRequiresExactDomainAndInstaller(t *testing.T) {
 	}
 }
 
+func TestAlphaRecipeCheckRejectsUnexecutedSessionActions(t *testing.T) {
+	configPath, _ := writeV2DomainFixture(t, "alpha")
+	recipePath := filepath.Join(t.TempDir(), "recipe.json")
+	data := `{"version":1,"source":{"kind":"ubuntu-24.04.4-desktop-arm64","sha256":"c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"},"machine":{"cpus":4,"memory_mib":4096,"system_disk_gib":30},"steps":[{"id":"setup","phase":"once","argv":["/bin/true"]}]}`
+	if err := os.WriteFile(recipePath, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	args := []string{"--config", configPath, "--domain", "alpha", "alpha", "recipe", "check", "--recipe", recipePath, "--iso", filepath.Join(t.TempDir(), "absent.iso")}
+	if err := Run(context.Background(), args, Options{Output: &output}); err == nil || !strings.Contains(err.Error(), "once") || output.Len() != 0 {
+		t.Fatalf("unexecuted session action accepted or hidden: err=%v output=%q", err, output.String())
+	}
+}
+
 func TestAlphaPrepareRoutesExactDomainAndReportsOnlyPassingCacheReceipt(t *testing.T) {
 	configPath, _ := writeV2DomainFixture(t, "alpha")
 	loaded, err := config.Load(configPath)

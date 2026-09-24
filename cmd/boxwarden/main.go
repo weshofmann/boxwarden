@@ -94,7 +94,7 @@ func publicOptions(output io.Writer) app.Options {
 			if err != nil || admitted != selected {
 				return basebuild.PreparedResult{}, fmt.Errorf("alpha preparation requires exact configured domain")
 			}
-			value, err := recipe.Load(input.RecipePath)
+			value, err := recipe.LoadRunnable(input.RecipePath)
 			if err != nil {
 				return basebuild.PreparedResult{}, fmt.Errorf("load alpha recipe: %w", err)
 			}

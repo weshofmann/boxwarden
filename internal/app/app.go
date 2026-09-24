@@ -166,7 +166,7 @@ func Run(ctx context.Context, args []string, options Options) error {
 		}
 		return writeAlphaPrepared(options.Output, selectedDomain, result)
 	case commandAlphaRecipeCheck:
-		if _, err := recipe.Load(command.recipePath); err != nil {
+		if _, err := recipe.LoadRunnable(command.recipePath); err != nil {
 			return fmt.Errorf("check alpha recipe: %w", err)
 		}
 		if err := recipe.VerifyISO(command.isoPath); err != nil {

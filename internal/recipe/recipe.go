@@ -131,6 +131,24 @@ func Load(filename string) (Recipe, error) {
 	return value, nil
 }
 
+// LoadRunnable admits only actions the current alpha lifecycle executes.
+// Load remains available for inspecting the full planned recipe format.
+func LoadRunnable(filename string) (Recipe, error) {
+	value, err := Load(filename)
+	if err != nil {
+		return Recipe{}, err
+	}
+	for _, step := range value.Steps {
+		if step.Phase != "prepare" {
+			return Recipe{}, fmt.Errorf("recipe phase %q is unsupported until session execution is available", step.Phase)
+		}
+	}
+	if len(value.Launch) != 0 {
+		return Recipe{}, errors.New("recipe launch actions are unsupported until session execution is available")
+	}
+	return value, nil
+}
+
 func (r Recipe) validate() error {
 	if r.Version != 1 || r.Source.Kind != sourceKind || r.Source.SHA256 != sourceSHA256 {
 		return fmt.Errorf("unsupported recipe version or installer source")

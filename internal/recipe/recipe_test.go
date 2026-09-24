@@ -57,6 +57,28 @@ func TestLoadSupportedRecipeKeepsGuestOperationsExplicit(t *testing.T) {
 	}
 }
 
+func TestLoadRunnableRejectsSessionActionsUntilExecutorExists(t *testing.T) {
+	prepareOnly := strings.Replace(validRecipe, `"phase": "once"`, `"phase": "prepare"`, 1)
+	prepareOnly = strings.Replace(prepareOnly, `"launch": [
+    {"id": "chatgpt", "argv": ["/usr/bin/chatgpt"]}
+  ]`, `"launch": []`, 1)
+	if _, err := LoadRunnable(writeRecipe(t, prepareOnly)); err != nil {
+		t.Fatalf("prepare-only recipe rejected: %v", err)
+	}
+	for name, input := range map[string]string{
+		"once":        strings.Replace(prepareOnly, `"phase": "prepare"`, `"phase": "once"`, 1),
+		"reconfigure": strings.Replace(prepareOnly, `"phase": "prepare"`, `"phase": "reconfigure"`, 1),
+		"startup":     strings.Replace(prepareOnly, `"phase": "prepare"`, `"phase": "startup"`, 1),
+		"launch":      strings.Replace(prepareOnly, `"launch": []`, `"launch": [{"id":"chatgpt","argv":["/usr/bin/chatgpt"]}]`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := LoadRunnable(writeRecipe(t, input)); err == nil || !strings.Contains(err.Error(), name) {
+				t.Fatalf("unsupported %s action accepted or unreported: %v", name, err)
+			}
+		})
+	}
+}
+
 func TestLoadRejectsAmbiguousOrUnsupportedRecipe(t *testing.T) {
 	for name, input := range map[string]string{
 		"duplicate-field": strings.Replace(validRecipe, `"version": 1,`, `"version": 1, "version": 2,`, 1),
