@@ -65,10 +65,17 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   an exact-generation, host-key-pinned SFTP batch read its remote working
   directory successfully. The sandbox was stopped again. No project file was
   transferred; this is a capability probe, not ingress qualification.
+- CI repair in progress: the formatting gate passed after `5183b8b`, then
+  the Ubuntu job exposed Darwin-only ACL and file-identity checks plus three
+  missing retained-owner selector admissions. The deterministic job now
+  targets hosted `macos-26`, and the architecture guard admits only those
+  selectors. The full local Go test and race suites, vet, and CLI build pass;
+  the hosted rerun is pending. This is source verification, not real-host
+  qualification.
 - Next: add the narrow public capture/begin/transfer command, exercise one
   real synthetic guest transfer and readback, then define the durable verified
   journal gate. Fresh source-tracked acceptance follows.
-- Limits: hosted CI, software-changing rebuild, ambiguous export final-rename
+- Limits: CI rerun, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh
   acceptance remain open. No human action is currently needed.
 
@@ -88,9 +95,10 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
 | Recipe-bound create | `session create` accepts exact recipe/ISO/guest definition/tool inputs, prepares or reuses a qualified base, and calls `CreateFromRevision`. A focused fixture and the real public command both selected the newly prepared revision without changing the domain current golden. A later public `alpha prepare` reused the admitted cache after verified redundant installer staging was retired, without creating an attempt journal or new Tart object. |
 | System rebuild | The public `session rebuild` command accepts an exact admitted `--base` revision, complete recipe preparation inputs, or no new input to resume a pending journal. A full fake-backend transaction kept the session UUID and workspace attachment identity, reached fresh candidate READY, deleted only the journaled old system, and then no-oped for the selected base. Full local Go tests, vet, CLI build, and diff checks passed. One public no-volume Tart rebuild preserved the session UUID, transitioned the exact pin, reached repeated READY, retired the old object, cleared the journal, and stopped consistently. A later public rebuild with an attached ext4 volume preserved its identity and content, reached mount-bound READY, retired the old system, and stopped cleanly. That target was a distinct qualified Tart object with the same generic software image; a software-changing upgrade and failure recovery remain open. |
 
-Hosted CI is unavailable. Local checks above are source or explicitly described
-real-host checks; the full graphical, rebuild, and failure-recovery
-acceptance path remains open.
+Hosted CI is active. The prior Ubuntu job failed on Darwin-specific tests;
+the `macos-26` correction is awaiting its hosted rerun. Local checks above
+are source or explicitly described real-host checks; the full graphical,
+rebuild, and failure-recovery acceptance path remains open.
 
 ## Current work
 
@@ -548,7 +556,7 @@ acceptance run and GUI/provider sign-in checks.
    reattachment and delete qualification used guest-created synthetic files.
 4. Run the fresh real acceptance matrix and publish the runnable build, exact
    source SHA, quickstart, synthetic demo, and limits. The full local Go suite,
-   vet, and CLI build have passed; hosted CI remains unavailable.
+   vet, and CLI build have passed; the corrected hosted CI run remains pending.
 
 ## Publication and operational policy
 

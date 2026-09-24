@@ -464,7 +464,7 @@ func allowedFoundationSelector(path, foundation, selector string) bool {
 		switch foundation {
 		case "sshx":
 			switch selector {
-			case "Certificate", "Connection", "PackageVersion", "GuestIdentity", "WorkspaceMount", "ProbeRequest", "ProbeResult", "ReadZoneRequest", "EnsureClientKey", "NewCertificateIssuer", "NewClient", "WriteKnownHosts", "RenewalRequired", "CleanupGenerationCredentials":
+			case "Certificate", "Connection", "PackageVersion", "GuestIdentity", "WorkspaceMount", "ImportReceipt", "ProbeRequest", "ProbeResult", "ReadZoneRequest", "EnsureClientKey", "NewCertificateIssuer", "NewClient", "NewSFTPClient", "WriteKnownHosts", "RenewalRequired", "CleanupGenerationCredentials":
 				return true
 			}
 		case "timezonex":
@@ -473,6 +473,9 @@ func allowedFoundationSelector(path, foundation, selector string) bool {
 				return true
 			}
 		}
+	}
+	if path == "internal/sessionruntime/import_owner.go" && foundation == "sshx" && selector == "WorkspaceMount" {
+		return true // Retained owner compares only its already admitted launch mounts.
 	}
 	if path != "internal/sessionruntime/owner.go" {
 		if foundation == "guestproto" && (selector == "Association" || selector == "EncodeSerialFrame" || selector == "Version") {

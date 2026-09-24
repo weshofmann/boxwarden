@@ -243,3 +243,13 @@ gate refuses to replace it; automatic cleanup or adoption would make an
 unverified stream authoritative. This case requires an attended check of the
 helper/process state and exact private file before any manual cleanup. The
 public retry does not clear a workspace's snapshot-copy Pending marker.
+
+## Deterministic CI host and import owner boundary, 2026-09-24
+
+The source verification job runs on hosted `macos-26` because the production
+host's private ACL and file-identity contracts are Darwin-specific. These
+tests are deterministic source checks; actual Tart/Softnet, GUI, credentials,
+and destructive lifecycle qualification remain on the attended alpha host.
+The architecture guard admits only the retained import owner's pinned SFTP
+receipt/client selectors and launch-mount type needed by that narrow control
+action. It does not open a general transport or backend seam.
