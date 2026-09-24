@@ -428,6 +428,15 @@ func verifyKnownHostsPin(connection Connection) error {
 }
 
 func sshArguments(connection Connection) []string {
+	arguments := strictOpenSSHArguments(connection)
+	arguments = append(arguments, "-p", strconv.Itoa(int(connection.Port)), "boxwarden@"+connection.Address, "/usr/bin/sudo", "-n", "--", guestManagementHelper, "management")
+	return arguments
+}
+
+// strictOpenSSHArguments is shared by the fixed management helper and the
+// bounded SFTP importer so neither transport can silently weaken host-key or
+// credential policy.
+func strictOpenSSHArguments(connection Connection) []string {
 	options := []string{
 		"IdentityFile=" + sshQuotedPath(connection.IdentityFile),
 		"HostKeyAlias=" + HostKeyAlias(connection.Binding.SessionID), "UserKnownHostsFile=" + sshQuotedPath(connection.KnownHostsFile),
@@ -443,7 +452,6 @@ func sshArguments(connection Connection) []string {
 	for _, option := range options {
 		arguments = append(arguments, "-o", option)
 	}
-	arguments = append(arguments, "-p", strconv.Itoa(int(connection.Port)), "boxwarden@"+connection.Address, "/usr/bin/sudo", "-n", "--", guestManagementHelper, "management")
 	return arguments
 }
 

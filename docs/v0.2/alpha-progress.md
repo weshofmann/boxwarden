@@ -24,13 +24,13 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   CLI build, and `git diff --check` pass for this source checkpoint. The
   separate reviewer rechecked the corrected deletion path.
 - In progress: explicit bounded synthetic host-project ingress into an
-  independent workspace. A private host-source snapshot primitive now accepts
+  independent workspace. A private host-source snapshot primitive accepts
   only an owner-controlled tree with bounded regular files and safe names,
   captures exact digests, and publishes without replacing an existing
   transaction directory. Targeted import tests and vet pass; a separate
   source-only rereview found no remaining Critical/Important defect. No public
   ingress command exists yet.
-- Implemented for the next checkpoint: readmission rehashes every captured
+- Complete source foundation: readmission rehashes every captured
   file and requires exact manifest membership. A durable import journal has
   only `captured` and `transferring` phases, with atomic creation and exact
   retry after uncertain directory sync. `BeginImport` binds the capture to a
@@ -38,15 +38,26 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   supervisor READY snapshot under transition, session, and storage locks.
   Changed-package tests and vet pass; a separate read-only rereview found no
   remaining Critical/Important defect in this reservation foundation.
-  Transfer, readback, and a verified phase are not implemented or claimed.
+  Transfer and a verified phase were not part of that reservation checkpoint.
+- Implemented at this checkpoint: a private pinned SFTP transport re-admits
+  the snapshot, uploads only bounded captured files with remote file fsync
+  requests, reads each file back into a private host tree, and returns a
+  receipt only when the canonical manifest and all bytes match. It uses the
+  qualified macOS client's batch syntax and shares the strict SSH host-key,
+  certificate, and forwarding policy. Focused `internal/sshx` tests and vet
+  pass; an actual local OpenSSH SFTP server completed the batch upload and
+  readback. A separate reviewer found no remaining Critical/Important defect
+  in this private transport. No guest file transfer or durable verified
+  journal phase is claimed. Remote file fsync and readback do not alone prove
+  directory persistence after a guest crash.
 - Transport probe: the exact alpha-owned disposable sandbox reached READY;
   an exact-generation, host-key-pinned SFTP batch read its remote working
   directory successfully. The sandbox was stopped again. No project file was
   transferred; this is a capability probe, not ingress qualification.
-- Next: transfer the re-admitted synthetic snapshot over pinned SFTP while
-  retaining the exact transition binding, measure bounded host readback, then
-  add a verified journal phase and public command. Fresh source-tracked
-  acceptance follows.
+- Next: wire the transport to the retained supervisor's current-generation
+  connection under the exact transition binding, perform a real synthetic
+  transfer and readback, then define the durable verified journal gate and
+  public command. Fresh source-tracked acceptance follows.
 - Limits: hosted CI, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh
   acceptance remain open. No human action is currently needed.
