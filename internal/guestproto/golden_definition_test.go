@@ -10,21 +10,21 @@ import (
 // The image starts with conservative guest defaults while the live bootstrap
 // only requires the CA/principal settings needed by Boxwarden management.
 var goldenSSHD = map[string]string{
-	"pubkeyauthentication": "yes",
-	"trustedusercakeys": "/etc/ssh/boxwarden/active/trusted-user-ca.pub",
-	"authorizedprincipalsfile": "/etc/ssh/boxwarden/active/authorized_principals/%u",
-	"authorizedkeysfile": ".ssh/authorized_keys",
-	"permituserenvironment": "no",
-	"permituserrc": "no",
-	"passwordauthentication": "no",
+	"pubkeyauthentication":         "yes",
+	"trustedusercakeys":            "/etc/ssh/boxwarden/active/trusted-user-ca.pub",
+	"authorizedprincipalsfile":     "/etc/ssh/boxwarden/active/authorized_principals/%u",
+	"authorizedkeysfile":           ".ssh/authorized_keys",
+	"permituserenvironment":        "no",
+	"permituserrc":                 "no",
+	"passwordauthentication":       "no",
 	"kbdinteractiveauthentication": "no",
-	"permitrootlogin": "no",
-	"x11forwarding": "no",
-	"allowagentforwarding": "no",
-	"allowtcpforwarding": "no",
-	"allowstreamlocalforwarding": "no",
-	"gatewayports": "no",
-	"permittunnel": "no",
+	"permitrootlogin":              "no",
+	"x11forwarding":                "no",
+	"allowagentforwarding":         "no",
+	"allowtcpforwarding":           "no",
+	"allowstreamlocalforwarding":   "no",
+	"gatewayports":                 "no",
+	"permittunnel":                 "no",
 }
 
 // A golden built from autoinstall must satisfy the same effective sshd contract

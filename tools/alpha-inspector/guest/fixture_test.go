@@ -67,10 +67,10 @@ func TestExt4IdentityRequiresMagicUUIDJournalExtentsAndCleanState(t *testing.T) 
 		}
 	}
 	for name, mutate := range map[string]func([]byte){
-		"error state": func(sb []byte) { sb[0x3a] = 0x03 },
-		"orphan state": func(sb []byte) { sb[0x3a] = 0x05 },
+		"error state":      func(sb []byte) { sb[0x3a] = 0x03 },
+		"orphan state":     func(sb []byte) { sb[0x3a] = 0x05 },
 		"journal recovery": func(sb []byte) { sb[0x60] |= 0x04 },
-		"orphan recovery": func(sb []byte) { sb[0x66] |= 0x01 },
+		"orphan recovery":  func(sb []byte) { sb[0x66] |= 0x01 },
 	} {
 		broken := bytes.Clone(superblock)
 		mutate(broken)
