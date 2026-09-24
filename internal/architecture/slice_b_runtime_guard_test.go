@@ -477,7 +477,16 @@ func allowedFoundationSelector(path, foundation, selector string) bool {
 			return false
 		}
 		if foundation == "sshx" && (selector == "Binding" || selector == "HostKeyPin" || selector == "NewPinStore" || selector == "ObservedHostKey") {
-			return false
+			// Reviewed in docs/v0.2/alpha-decisions.md: rebuild may read
+			// the exact old pin witness; only the owner may mutate the pin.
+			switch path {
+			case "internal/session/rebuild.go", "internal/session/rebuild_journal.go":
+				return selector == "Binding" || selector == "HostKeyPin"
+			case "internal/sessionruntime/rebuild.go":
+				return selector == "NewPinStore"
+			default:
+				return false
+			}
 		}
 	}
 	return allowed[foundation][selector]
@@ -488,7 +497,7 @@ func allowedLifecycleCall(path, name string) bool {
 	case "Bootstrap":
 		return path == "internal/sessionruntime/owner.go" || path == "internal/supervisor/control.go" || path == "internal/supervisor/exact.go"
 	case "Admit", "Load", "NewPinStore":
-		return path == "internal/sessionruntime/owner.go"
+		return path == "internal/sessionruntime/owner.go" || name == "NewPinStore" && path == "internal/sessionruntime/rebuild.go"
 	case "NewAddressResolver", "NewCertificateIssuer", "NewClient", "WriteKnownHosts", "Issue", "Resolve", "Probe", "Converge", "ReadZone":
 		return path == "internal/sessionruntime/owner.go"
 	default:

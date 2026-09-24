@@ -72,6 +72,7 @@ func publicOptions(output io.Writer) app.Options {
 		SessionStopperFactory: func(loaded config.Config, selected config.Domain, path string) (app.SessionStopper, error) {
 			return sessionruntime.NewStarter(loaded, selected, path)
 		},
+		AlphaRebuild: sessionruntime.Rebuild,
 		StatusSnapshotFactory: func(loaded config.Config, selected config.Domain) (app.StatusSnapshotReader, error) {
 			configured, err := loaded.Domain(string(selected.ID))
 			if err != nil || configured != selected {

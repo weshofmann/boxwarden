@@ -364,6 +364,75 @@ func TestRecipeSessionCreateRejectsIncompleteOrInvalidReceiptBeforeClone(t *test
 	}
 }
 
+func TestSessionRebuildRoutesExactBaseAndJournalResume(t *testing.T) {
+	configPath := writeStatusFixture(t, "work", "dev")
+	selectedRoot := filepath.Dir(configPath)
+	called := 0
+	var output bytes.Buffer
+	rebuild := func(_ context.Context, loaded config.Config, selected config.Domain, path, name, revision string) (session.Record, error) {
+		called++
+		if path != configPath || name != "dev" || selected.ID != "work" || selected.StateRoot != selectedRoot {
+			t.Fatalf("rebuild routed to foreign authority: %q %q %+v", path, name, selected)
+		}
+		if _, err := loaded.Domain("work"); err != nil {
+			t.Fatal(err)
+		}
+		if called == 1 && revision != "golden-work-r2" || called == 2 && revision != "" {
+			t.Fatalf("rebuild revision %d = %q", called, revision)
+		}
+		return session.Record{Domain: "work", Name: "dev", IntendedState: session.StateRunning, GoldenRevision: "golden-work-r2"}, nil
+	}
+	base := []string{"--config", configPath, "--domain", "work", "session", "rebuild"}
+	if err := Run(context.Background(), append(append([]string(nil), base...), "--base", "golden-work-r2", "dev"), Options{AlphaRebuild: rebuild, Output: &output}); err != nil || called != 1 || !strings.Contains(output.String(), "base: golden-work-r2\n") {
+		t.Fatalf("explicit rebuild = %q, %v, calls=%d", output.String(), err, called)
+	}
+	output.Reset()
+	if err := Run(context.Background(), append(append([]string(nil), base...), "dev"), Options{AlphaRebuild: rebuild, Output: &output}); err != nil || called != 2 {
+		t.Fatalf("journal resume routing = %q, %v, calls=%d", output.String(), err, called)
+	}
+	for _, args := range [][]string{
+		{"--config", configPath, "session", "rebuild", "--base", "golden-work-r2", "dev"},
+		append(append([]string(nil), base...), "--base", "--all", "dev"),
+		append(append([]string(nil), base...), "--base", "golden-work-r2", "--recipe", "recipe.json", "dev"),
+	} {
+		if err := Run(context.Background(), args, Options{AlphaRebuild: rebuild, Output: &bytes.Buffer{}}); err == nil || called != 2 {
+			t.Fatalf("invalid rebuild reached mutation: %v, calls=%d", err, called)
+		}
+	}
+}
+
+func TestSessionRebuildRecipeRequiresQualifiedPreparedReceipt(t *testing.T) {
+	configPath, selected := writeV2DomainFixture(t, "alpha")
+	root := t.TempDir()
+	input := AlphaPrepareInput{RecipePath: filepath.Join(root, "recipe.json"), ISOPath: filepath.Join(root, "ubuntu.iso"), GuestDefinitionRoot: filepath.Join(root, "guest"), OpenSSLPath: "/usr/bin/openssl", OpenSSLSHA256: strings.Repeat("a", 64), XorrisoPath: "/usr/bin/xorriso", XorrisoSHA256: strings.Repeat("b", 64)}
+	args := []string{"--config", configPath, "--domain", "alpha", "session", "rebuild", "--recipe", input.RecipePath, "--iso", input.ISOPath, "--guest-definition", input.GuestDefinitionRoot, "--openssl", input.OpenSSLPath, "--openssl-sha256", input.OpenSSLSHA256, "--xorriso", input.XorrisoPath, "--xorriso-sha256", input.XorrisoSHA256, "dev"}
+	prepared := "boxwarden-alpha-base-prepared"
+	valid := basebuild.PreparedResult{Disposition: basebuild.PreparedReused, Record: basebuild.PreparedRecord{Version: 2, CandidateID: prepared, CandidateIdentity: strings.Repeat("c", 64), PreparationKey: strings.Repeat("d", 64), AttemptDirectory: filepath.Join(selected.StateRoot, "prepared-attempts", "attempt-1"), Qualification: basebuild.QualificationReceipt{CandidateID: prepared, PreparationKey: strings.Repeat("d", 64), CloneID: "boxwarden-alpha-qualified-clone", EvidenceSHA256: strings.Repeat("e", 64), BOMSHA256: strings.Repeat("f", 64), Passed: true}}}
+	called := 0
+	rebuild := func(_ context.Context, _ config.Config, got config.Domain, _ string, name, revision string) (session.Record, error) {
+		called++
+		if got != selected || name != "dev" || revision != prepared {
+			t.Fatalf("rebuild did not use exact prepared receipt: %+v %q %q", got, name, revision)
+		}
+		return session.Record{Domain: "alpha", Name: "dev", IntendedState: session.StateRunning, GoldenRevision: prepared}, nil
+	}
+	if err := Run(context.Background(), args, Options{AlphaPrepare: func(_ context.Context, _ config.Config, got config.Domain, _ string, received AlphaPrepareInput) (basebuild.PreparedResult, error) {
+		if got != selected || received != input {
+			t.Fatalf("wrong preparation input: %+v %+v", got, received)
+		}
+		return valid, nil
+	}, AlphaRebuild: rebuild, Output: &bytes.Buffer{}}); err != nil || called != 1 {
+		t.Fatalf("qualified recipe rebuild = %v, calls=%d", err, called)
+	}
+	invalid := valid
+	invalid.Record.Qualification.Passed = false
+	if err := Run(context.Background(), args, Options{AlphaPrepare: func(context.Context, config.Config, config.Domain, string, AlphaPrepareInput) (basebuild.PreparedResult, error) {
+		return invalid, nil
+	}, AlphaRebuild: rebuild, Output: &bytes.Buffer{}}); err == nil || called != 1 {
+		t.Fatalf("invalid receipt reached rebuild: %v, calls=%d", err, called)
+	}
+}
+
 func TestBackendFactoryIsUnreachableForInvalidInputAndOtherCommands(t *testing.T) {
 	path, _ := writeV2DomainFixture(t, "work")
 	for _, args := range [][]string{

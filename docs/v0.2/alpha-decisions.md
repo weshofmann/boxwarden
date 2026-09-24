@@ -185,3 +185,25 @@ the requested revision is persisted before cloning, and a retry naming another
 revision is rejected. Existing `golden register` and `session create` keep
 their v0.1 current-pointer behavior. The new source seam has focused tests and
 an independent static review; public recipe composition remains pending.
+
+## Rebuild SSH foundation boundary, 2026-09-24
+
+The existing architecture guard admits `sshx.Binding`, `sshx.HostKeyPin`, and
+`sshx.NewPinStore` only in the detached runtime owner. Rebuild adds one other
+trusted-host use: the common session service reads the exact old pin under its
+journaled binding, validates the whole pin record, and stores its digest before
+candidate reservation. The journal validates that same binding and digest on
+retry. Production composition constructs a domain-scoped pin store and passes
+only its `Load` interface to the common service. The detached owner remains
+the sole path that admits a new pin or performs the journal-bound transition
+during serial bootstrap.
+
+Review of the new paths: permit only `Binding` and `HostKeyPin` in
+`internal/session/rebuild.go` and `internal/session/rebuild_journal.go`, and
+only `NewPinStore` in `internal/sessionruntime/rebuild.go`. Keep `Admit`,
+`TransitionRebuild`, and guest-observed key handling confined to the detached
+owner and `sshx` implementation. The guard should continue rejecting these
+selectors in other composition files. This narrow exception carries no pin
+write capability into the common service; its failure mode is refusal to
+reserve or resume a candidate when old pin bytes differ. The architecture
+guard's production-tree test must pass before publishing the public command.

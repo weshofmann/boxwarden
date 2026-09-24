@@ -53,6 +53,8 @@ type SessionStopper interface {
 
 type SessionStopperFactory func(config.Config, config.Domain, string) (SessionStopper, error)
 
+type AlphaRebuildFunc func(context.Context, config.Config, config.Domain, string, string, string) (session.Record, error)
+
 // StatusSnapshotReader is read-only evidence from one exact live supervisor.
 // A backend process observation or persisted success cannot substitute for it.
 type StatusSnapshotReader interface {
@@ -89,6 +91,7 @@ type Options struct {
 	SessionStopperFactory SessionStopperFactory
 	StatusSnapshotFactory StatusSnapshotFactory
 	AlphaPrepare          AlphaPrepareFunc
+	AlphaRebuild          AlphaRebuildFunc
 	AlphaExport           AlphaExportFunc
 	Output                io.Writer
 }
@@ -306,6 +309,33 @@ func Run(ctx context.Context, args []string, options Options) error {
 			return fmt.Errorf("stop session: %w", err)
 		}
 		return writeStoppedSession(options.Output, record)
+	case commandSessionRebuild:
+		if _, err := session.ParseName(command.name); err != nil {
+			return err
+		}
+		revision := command.rebuildBase
+		if command.recipeCreate {
+			if options.AlphaPrepare == nil {
+				return errors.New("alpha base preparer is required for recipe rebuild")
+			}
+			prepared, prepareErr := options.AlphaPrepare(ctx, loaded, selectedDomain, command.configPath, command.alphaPrepare)
+			if prepareErr != nil {
+				return fmt.Errorf("prepare rebuild base: %w", prepareErr)
+			}
+			if err := validateAlphaPrepared(selectedDomain, prepared); err != nil {
+				return err
+			}
+			revision = prepared.Record.CandidateID
+		}
+		if options.AlphaRebuild == nil {
+			return errors.New("alpha rebuilder is required")
+		}
+		rebuilt, err := options.AlphaRebuild(ctx, loaded, selectedDomain, command.configPath, command.name, revision)
+		if err != nil {
+			return fmt.Errorf("rebuild session: %w", err)
+		}
+		_, err = fmt.Fprintf(options.Output, "domain: %s\nsession: %s\nstate: %s\nbase: %s\n", rebuilt.Domain, rebuilt.Name, rebuilt.IntendedState, rebuilt.GoldenRevision)
+		return err
 	case commandWorkspaceAttach:
 		if options.Observer == nil {
 			return errors.New("backend observer is required")
@@ -349,6 +379,7 @@ const (
 	commandSessionCreate
 	commandSessionStart
 	commandSessionStop
+	commandSessionRebuild
 	commandInit
 	commandDoctor
 	commandDomainInit
@@ -370,6 +401,7 @@ type parsedCommand struct {
 	alphaPrepare AlphaPrepareInput
 	alphaExport  AlphaExportInput
 	recipeCreate bool
+	rebuildBase  string
 	volumeID     string
 	mountPath    string
 }
@@ -506,6 +538,36 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 	if len(remaining) == 3 && remaining[0] == "session" && remaining[1] == "stop" {
 		base.kind = commandSessionStop
 		base.name = remaining[2]
+		return base, nil
+	}
+	if len(remaining) >= 3 && remaining[0] == "session" && remaining[1] == "rebuild" {
+		rebuildSet := flag.NewFlagSet("session rebuild", flag.ContinueOnError)
+		rebuildSet.SetOutput(io.Discard)
+		baseRevision := rebuildSet.String("base", "", "exact admitted replacement base revision")
+		input := AlphaPrepareInput{}
+		bindAlphaPrepareFlags(rebuildSet, &input)
+		if err := rebuildSet.Parse(remaining[2:]); err != nil {
+			return parsedCommand{}, fmt.Errorf("parse session rebuild: %w", err)
+		}
+		if len(rebuildSet.Args()) != 1 {
+			return parsedCommand{}, errors.New("session rebuild requires one validated session name")
+		}
+		hasRecipe := hasAlphaPrepareFlags(rebuildSet)
+		if *baseRevision != "" && hasRecipe {
+			return parsedCommand{}, errors.New("session rebuild accepts either --base or recipe inputs")
+		}
+		if *baseRevision != "" {
+			if err := backend.ValidateObjectID(*baseRevision); err != nil {
+				return parsedCommand{}, fmt.Errorf("invalid rebuild base: %w", err)
+			}
+		}
+		if hasRecipe {
+			if err := validAlphaPrepareInput(input); err != nil {
+				return parsedCommand{}, err
+			}
+		}
+		base.kind, base.name, base.rebuildBase = commandSessionRebuild, rebuildSet.Args()[0], *baseRevision
+		base.recipeCreate, base.alphaPrepare = hasRecipe, input
 		return base, nil
 	}
 	if len(remaining) >= 3 && remaining[0] == "workspace" && remaining[1] == "attach" {
