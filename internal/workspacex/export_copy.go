@@ -29,14 +29,15 @@ const exportCopyBufferBytes = 1 << 20
 // Failure after reservation deliberately leaves Pending and journal evidence
 // for a separate exact recovery operation.
 func CreateExportSnapshot(ctx context.Context, stateRoot string, domainID domain.ID, volumeID, destinationParent string, selected []string, observer backend.Observer) (ExportJournal, error) {
-	return createExportSnapshot(ctx, stateRoot, domainID, volumeID, destinationParent, selected, observer, copyExportSnapshot)
+	return createExportSnapshot(ctx, stateRoot, domainID, volumeID, destinationParent, selected, observer, copyExportSnapshot, checkExportHeadroom)
 }
 
 type exportCopier func(context.Context, string, workspaceformat.Request, *os.File, *os.Root, ExportJournal) (ExportSnapshot, error)
+type exportHeadroomChecker func(...*os.File) error
 
-func createExportSnapshot(ctx context.Context, stateRoot string, domainID domain.ID, volumeID, destinationParent string, selected []string, observer backend.Observer, copier exportCopier) (result ExportJournal, err error) {
-	if copier == nil {
-		return ExportJournal{}, fmt.Errorf("nil export copier")
+func createExportSnapshot(ctx context.Context, stateRoot string, domainID domain.ID, volumeID, destinationParent string, selected []string, observer backend.Observer, copier exportCopier, headroom exportHeadroomChecker) (result ExportJournal, err error) {
+	if copier == nil || headroom == nil {
+		return ExportJournal{}, fmt.Errorf("missing export copier or headroom checker")
 	}
 	if !validUUID(volumeID) {
 		return ExportJournal{}, fmt.Errorf("invalid export volume ID")
@@ -94,7 +95,7 @@ func createExportSnapshot(ctx context.Context, stateRoot string, domainID domain
 		return ExportJournal{}, err
 	}
 	defer stateDir.Close()
-	if err := checkExportHeadroom(stateDir, parent); err != nil {
+	if err := headroom(stateDir, parent); err != nil {
 		return ExportJournal{}, err
 	}
 	id, err := newExportUUID()

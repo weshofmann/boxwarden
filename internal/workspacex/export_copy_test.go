@@ -16,13 +16,17 @@ import (
 	"github.com/weshofmann/boxwarden/internal/workspaceformat"
 )
 
+// Synthetic workflow tests exercise transaction behavior independently of host disk occupancy.
+func allowSyntheticExportHeadroom(...*os.File) error          { return nil }
+func syntheticExportReceiverReserve(*os.File) (uint64, error) { return 1, nil }
+
 func TestCreateExportSnapshotCopiesStoppedQualifiedVolumeBeforeReleasingPending(t *testing.T) {
 	root, stopped := stoppedLaunchFixture(t)
 	parent := t.TempDir()
 	if err := os.Chmod(parent, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	journal, err := CreateExportSnapshot(context.Background(), root, domain.ID("work"), testVolumeID, parent, []string{"project/report.txt"}, stoppedObserver{state: backend.ObjectStopped, object: stopped.Backend.ObjectID})
+	journal, err := createExportSnapshot(context.Background(), root, domain.ID("work"), testVolumeID, parent, []string{"project/report.txt"}, stoppedObserver{state: backend.ObjectStopped, object: stopped.Backend.ObjectID}, copyExportSnapshot, allowSyntheticExportHeadroom)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,6 +52,33 @@ func TestCreateExportSnapshotCopiesStoppedQualifiedVolumeBeforeReleasingPending(
 	stored, err := loadExportJournal(root, domain.ID("work"), journal.ID)
 	if err != nil || stored.Phase != ExportSnapshotReady || stored.Snapshot == nil {
 		t.Fatalf("durable snapshot state = %#v, %v", stored, err)
+	}
+}
+
+func TestCreateExportSnapshotRejectsHeadroomBeforeTransaction(t *testing.T) {
+	root, stopped := stoppedLaunchFixture(t)
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	refused := errors.New("synthetic capacity refusal")
+	_, err := createExportSnapshot(context.Background(), root, domain.ID("work"), testVolumeID, parent, []string{"project/report.txt"},
+		stoppedObserver{state: backend.ObjectStopped, object: stopped.Backend.ObjectID},
+		copyExportSnapshot, func(dirs ...*os.File) error {
+			if len(dirs) != 2 {
+				t.Fatalf("headroom check saw %d directories, want state and destination", len(dirs))
+			}
+			return refused
+		})
+	if !errors.Is(err, refused) {
+		t.Fatalf("headroom refusal = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "exports")); !os.IsNotExist(err) {
+		t.Fatalf("headroom refusal created export state: %v", err)
+	}
+	volume, err := LoadRecord(root, domain.ID("work"), testVolumeID)
+	if err != nil || volume.Pending != nil || volume.Use != nil {
+		t.Fatalf("headroom refusal reserved workspace: %#v, %v", volume, err)
 	}
 }
 
@@ -148,7 +179,7 @@ func TestInterruptedExportCopyRetainsPendingAndJournal(t *testing.T) {
 			cancel()
 			<-guarded.Done()
 			return ExportSnapshot{}, guarded.Err()
-		})
+		}, allowSyntheticExportHeadroom)
 	if err == nil {
 		t.Fatalf("copy interruption = %v", err)
 	}
@@ -219,7 +250,7 @@ func TestRecoverInterruptedExportCopyRequiresStopAndClearsExactPending(t *testin
 				return ExportSnapshot{}, err
 			}
 			return ExportSnapshot{}, errors.New("injected copy failure")
-		})
+		}, allowSyntheticExportHeadroom)
 	if err == nil {
 		t.Fatal("injected copy failure was accepted")
 	}
@@ -279,7 +310,7 @@ func TestRecoverReadyExportSnapshotRechecksBytesBeforePendingClear(t *testing.T)
 				t.Fatal(err)
 			}
 			observer := stoppedObserver{state: backend.ObjectStopped, object: stopped.Backend.ObjectID}
-			journal, err := CreateExportSnapshot(context.Background(), root, domain.ID("work"), testVolumeID, parent, []string{"project/report.txt"}, observer)
+			journal, err := createExportSnapshot(context.Background(), root, domain.ID("work"), testVolumeID, parent, []string{"project/report.txt"}, observer, copyExportSnapshot, allowSyntheticExportHeadroom)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -332,7 +363,7 @@ func TestRecoverExportCopyAfterCleanupBeforeAbortJournal(t *testing.T) {
 				return ExportSnapshot{}, err
 			}
 			return ExportSnapshot{}, errors.New("injected copy failure")
-		})
+		}, allowSyntheticExportHeadroom)
 	if err == nil {
 		t.Fatal("injected copy failure was accepted")
 	}

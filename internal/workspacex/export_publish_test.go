@@ -120,7 +120,7 @@ func TestPublishCapturedExportSelectedTreeAndInspectedFailure(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			path, err := PublishCapturedExport(context.Background(), root, domain.ID("work"), journal.ID, captured)
+			path, err := publishCapturedExport(context.Background(), root, domain.ID("work"), journal.ID, captured, allowSyntheticExportHeadroom, syntheticExportReceiverReserve)
 			stored, loadErr := loadExportJournal(root, domain.ID("work"), journal.ID)
 			if loadErr != nil {
 				t.Fatal(loadErr)
@@ -146,7 +146,7 @@ func TestPublishCapturedExportSelectedTreeAndInspectedFailure(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					path, err := PublishCapturedExport(context.Background(), root, domain.ID("work"), journal.ID, retry)
+					path, err := publishCapturedExport(context.Background(), root, domain.ID("work"), journal.ID, retry, allowSyntheticExportHeadroom, syntheticExportReceiverReserve)
 					if err != nil || path != filepath.Join(destination, exportTransactionHex(journal.ID)) {
 						t.Fatalf("inspected retry publication = %q, %v", path, err)
 					}

@@ -76,7 +76,7 @@ func TestResumeSelectedWorkspaceFromInspectedJournal(t *testing.T) {
 		if err != nil {
 			return got, "", err
 		}
-		path, err := PublishCapturedExport(ctx, root, "work", j.ID, captured)
+		path, err := publishCapturedExport(ctx, root, "work", j.ID, captured, allowSyntheticExportHeadroom, syntheticExportReceiverReserve)
 		if err != nil {
 			return got, path, err
 		}

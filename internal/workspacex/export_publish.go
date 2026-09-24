@@ -19,7 +19,14 @@ import (
 // publication, and the final journal phase. A failure after receiver rename
 // returns the exact final path with an error and leaves inspected state for
 // explicit recovery; a retry may never overwrite that path.
-func PublishCapturedExport(ctx context.Context, stateRoot string, domainID domain.ID, transactionID string, captured exportx.CapturedInspectorStream) (publishedPath string, err error) {
+func PublishCapturedExport(ctx context.Context, stateRoot string, domainID domain.ID, transactionID string, captured exportx.CapturedInspectorStream) (string, error) {
+	return publishCapturedExport(ctx, stateRoot, domainID, transactionID, captured, checkExportHeadroom, exportReceiverReserve)
+}
+
+func publishCapturedExport(ctx context.Context, stateRoot string, domainID domain.ID, transactionID string, captured exportx.CapturedInspectorStream, headroom exportHeadroomChecker, reserve func(*os.File) (uint64, error)) (publishedPath string, err error) {
+	if headroom == nil || reserve == nil {
+		return "", fmt.Errorf("missing export capacity check")
+	}
 	if captured.Stream == nil {
 		return "", fmt.Errorf("export publication requires a captured private stream")
 	}
@@ -51,10 +58,10 @@ func PublishCapturedExport(ctx context.Context, stateRoot string, domainID domai
 	if identity != journal.Destination {
 		return "", fmt.Errorf("export destination parent identity changed")
 	}
-	if err := checkExportHeadroom(parent); err != nil {
+	if err := headroom(parent); err != nil {
 		return "", err
 	}
-	minimumFree, err := exportReceiverReserve(parent)
+	minimumFree, err := reserve(parent)
 	if err != nil {
 		return "", err
 	}

@@ -447,6 +447,19 @@ superblock was clean with no `needs_recovery`. No source code or full suite
 changed for this real-host qualification. The distinct base object reused an
 already qualified software image; software-changing rebuild remains open.
 
+The first full Go-suite run at this checkpoint failed in synthetic export
+tests because their production disk-headroom preflight read this host's free
+space near the floor plus 3 GiB threshold. The failure occurred before the
+small test transactions began; it did not indicate a changed export result.
+The public snapshot and publication entry points still bind the real capacity
+checks. Their internal test path now supplies a controlled capacity check and
+receiver reserve for synthetic state-machine fixtures, and a targeted test
+proves capacity refusal leaves no transaction or workspace reservation.
+After this correction, `GOTOOLCHAIN=local go test -count=1 ./...`,
+`go vet ./...`, a CLI build, and `git diff --check` passed locally. This is a
+full source-suite result, separate from the remaining fresh real-host
+acceptance run and GUI/provider sign-in checks.
+
 ## Next actions
 
 1. Diagnose the intermittent attached-volume readiness loss and 15-second
@@ -464,8 +477,9 @@ already qualified software image; software-changing rebuild remains open.
    guest SSH loss and false-stopped qualification remain open.
 2. Qualify or explicitly defer ambiguous post-final-rename export recovery;
    an occupied final directory still requires manual reconciliation.
-3. Run the full integration checks and real acceptance matrix, and publish the
-   runnable build, exact source SHA, quickstart, synthetic demo, and limits.
+3. Run the fresh real acceptance matrix and publish the runnable build, exact
+   source SHA, quickstart, synthetic demo, and limits. The full local Go suite,
+   vet, and CLI build have passed; hosted CI remains unavailable.
 
 ## Publication and operational policy
 
