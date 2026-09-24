@@ -280,6 +280,10 @@ digests, signed helper, ARM64 guest type, and appended members passed
 independent checks. The request was a synthetic private test request.
 Control-plane admission against a real journal and a live export boot remain
 pending.
+The bundle manifest now records every tracked inspector build input and its
+SHA-256. The future admission gate must match both the exact input inventory
+and bytes in a clean checkout; `source_commit` remains provenance. A
+test-only full build carried 16 such inputs, all independently rechecked.
 
 Inside the isolated Linux guest, validate the expected whole-device ext4 UUID
 and mount with `ro,noload,nodev,nosuid,noexec`. Linux documents that plain

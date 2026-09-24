@@ -58,6 +58,18 @@ package/application BOM, exact backend object observation, and fresh clone
 qualification. A changed package source or version must invalidate or
 requalify that cache entry explicitly.
 
+## Export inspector bundle source identity, 2026-09-24
+
+The private inspector bundle records its clean source commit for provenance
+and exact SHA-256 digests for every tracked build input: Go module and guest
+sources, Swift helper, initramfs and kernel packers, entitlement, and builder.
+Admission must compare the complete tracked input inventory and bytes with
+the current clean checkout. A docs-only progress commit does not change the
+bundle's executable inputs; requiring its manifest commit to equal HEAD would
+invalidate a qualified bundle after every such checkpoint. Changing or adding
+an input requires rebuilding and requalifying. The manifest's `test-only-
+uncommitted` qualification is never admissible for production launch.
+
 ## Tart scratch and exact-generation ownership, 2026-09-23
 
 The first public alpha session start failed before serial bootstrap. Tart

@@ -96,6 +96,11 @@ passed from published `b51d900`; its source and ISO pins, seven file
 digests, signed helper, ARM64 guest type, and appended guest/request members
 were independently checked. It used a synthetic private request.
 Control-plane artifact admission and live export boot remain pending.
+The builder now also records the exact inventory and digests of 16 tracked
+inspector build inputs. A test-only full build passed, and an independent
+check matched every recorded input to the current source. This allows a
+docs-only progress commit without invalidating executable artifact identity;
+clean-source bundle admission must enforce the complete input set.
 Real managed-volume qualification remains open. The earlier failed base
 attempt was corrected and a fresh base built and qualified; failed attempts
 remain outside the prepared cache.

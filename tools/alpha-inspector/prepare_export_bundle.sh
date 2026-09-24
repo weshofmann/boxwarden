@@ -89,18 +89,20 @@ codesign --force --sign - --entitlements "$script_dir/virtualization.entitlement
   "$output_dir/alpha-inspector"
 codesign --verify --strict "$output_dir/alpha-inspector"
 
-python3 - "$output_dir" "$source_commit" "$expected_iso" "$qualification" <<'PY'
+python3 - "$output_dir" "$repo_root" "$source_commit" "$expected_iso" "$qualification" <<'PY'
 import hashlib
 import json
 import os
 from pathlib import Path
 import plistlib
 import shutil
+import stat
 import subprocess
 import sys
 
 root = Path(sys.argv[1])
-source_commit, iso_digest, qualification = sys.argv[2:]
+source_root = Path(sys.argv[2])
+source_commit, iso_digest, qualification = sys.argv[3:]
 runner = root / "alpha-inspector"
 result = subprocess.run(
     ["codesign", "-d", "--entitlements", ":-", str(runner)],
@@ -119,13 +121,40 @@ def digest(path):
 names = ("casper/vmlinuz", "casper/initrd", "kernel-image", "alpha-probe",
          "inspector-initrd", "alpha-inspector", "request.json")
 files = {name: digest(root / name) for name in names}
+required_sources = {
+    "go.mod", "tools/alpha-inspector/main.swift",
+    "tools/alpha-inspector/boot.swift",
+    "tools/alpha-inspector/virtualization.entitlements",
+    "tools/alpha-inspector/pack_initramfs.py",
+    "tools/alpha-inspector/kernel_image.py",
+    "tools/alpha-inspector/prepare_export_bundle.sh",
+}
+tracked = subprocess.run(
+    ["git", "-C", str(source_root), "ls-files", "-z", "--", *sorted(required_sources),
+     "tools/alpha-inspector/guest"], capture_output=True, check=True, timeout=10,
+).stdout
+source_names = [os.fsdecode(name) for name in tracked.split(b"\x00") if name]
+if (len(source_names) > 64 or len(source_names) != len(set(source_names))
+        or not required_sources.issubset(source_names)
+        or not any(name.startswith("tools/alpha-inspector/guest/") for name in source_names)
+        or any(not (name in required_sources or
+                    name.startswith("tools/alpha-inspector/guest/") and name.endswith(".go"))
+               for name in source_names)):
+    raise SystemExit("inspector tracked source inventory differs from build inputs")
+source_inputs = {}
+for name in source_names:
+    path = source_root / name
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise SystemExit("inspector tracked source is not a one-link regular file")
+    source_inputs[name] = digest(path)
 if (files["casper/vmlinuz"] != "000d59171b8e49f31f55c0d52123571ca8963718220fa8bacee1d65fdcbad617"
         or files["kernel-image"] != "a1586ff3cb7ced7c40dcb0aba5bf320ebb94a46d1a6505eb03157a8f9525632d"):
     raise SystemExit("inspector kernel digest differs from verified source")
 manifest = {
     "version": 1, "source_commit": source_commit, "iso_sha256": iso_digest,
     "files": files, "runner_entitlements": {"com.apple.security.virtualization": True},
-    "qualification": qualification,
+    "qualification": qualification, "source_inputs": source_inputs,
 }
 descriptor = os.open(root / "manifest.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
 with os.fdopen(descriptor, "w", encoding="utf-8") as output:
