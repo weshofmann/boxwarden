@@ -754,6 +754,37 @@ func TestOwnerRequestsGuestShutdownBeforeBoundedForceStop(t *testing.T) {
 	}
 }
 
+func TestOwnerRequestsPinnedGuestShutdownWithTartFallback(t *testing.T) {
+	binding := sshx.Binding{Domain: "alpha", SessionID: "123e4567-e89b-42d3-a456-426614174000", BackendKind: "tart", BackendObject: "workstation"}
+	for _, failed := range []bool{false, true} {
+		handle := &guestStopHandle{}
+		calls := 0
+		client := &readyClient{shutdown: func(connection sshx.Connection) error {
+			calls++
+			if connection.Binding != binding {
+				t.Errorf("shutdown binding = %+v", connection.Binding)
+			}
+			if failed {
+				return errors.New("SSH failed after an ambiguous shutdown request")
+			}
+			return nil
+		}}
+		owner := &Owner{handle: handle, active: true, readyEstablished: true, sshBinding: binding, connection: sshx.Connection{Binding: binding}, deps: dependencies{client: client}}
+		if err := owner.RequestStop(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if calls != 1 || handle.stops != 0 {
+			t.Fatalf("guest calls=%d force stops=%d", calls, handle.stops)
+		}
+		if failed && handle.requests != 1 || !failed && handle.requests != 0 {
+			t.Fatalf("Tart request count = %d; SSH failed=%t", handle.requests, failed)
+		}
+		if err := owner.RequestStop(context.Background()); err != nil || calls != 1 {
+			t.Fatalf("duplicate shutdown = %v; guest calls=%d", err, calls)
+		}
+	}
+}
+
 func TestCancellationOrPoisonAfterHandleStillReapsAndCloses(t *testing.T) {
 	for _, failure := range []string{"cancel", "poison"} {
 		t.Run(failure, func(t *testing.T) {

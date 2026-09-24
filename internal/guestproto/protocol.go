@@ -187,7 +187,7 @@ func (r ManagementRequest) Validate() error {
 		if r.Zone != "" || len(r.Packages) != 0 || len(r.Workspaces) == 0 || !validWorkspaces(r.Workspaces) {
 			return fmt.Errorf("invalid workspace mount request")
 		}
-	case "read_zone", "inspect_identity":
+	case "read_zone", "inspect_identity", "request_shutdown":
 		if r.Zone != "" || len(r.Packages) != 0 || len(r.Workspaces) != 0 {
 			return fmt.Errorf("management request has unexpected parameters")
 		}

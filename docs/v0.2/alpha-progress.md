@@ -186,16 +186,29 @@ work after 2026-10-03 14:44 UTC and leave a resumable handoff if unfinished.
   no export was attempted and no durable import verification is claimed. This
   reproduces dirty shutdown from a fresh baseline and makes guest shutdown
   behavior the immediate qualification blocker.
-- Next: determine why an exact controlled stop fails to leave the attached
-  ext4 volume clean, correct that path, then repeat import, export, and public
-  verification from another fresh disposable baseline. Add durable per-action
-  attempts and receipts before enabling recipe execution. Recipe execution
-  remains disabled until those receipts exist.
+- Source stop correction: the retained owner now asks the exact pinned guest
+  helper to enqueue one fixed systemd poweroff before falling back to Tart's
+  virtual power request. The bound helper accepts no command parameters;
+  systemd enqueue is never treated as proof of VM exit or clean storage. The
+  guest helper artifact and installer/finalizer digests were updated together.
+  Stop budgets now include a bounded management request, up to 60 seconds for
+  guest shutdown, and a distinct exact force-stop window. The changed guest,
+  SSH shutdown, runtime, supervisor, helper-artifact, base-build, and
+  architecture checks passed with targeted vet, shell syntax, and diff checks.
+  The complete SSH package could not pass its unrelated SFTP fixtures because
+  the internal host disk reserve was reached; those tests are not claimed as
+  passed. This source correction needs a newly built, qualified generic base
+  and a fresh real-host stop before it can be called effective.
+- Next: recover sufficient internal build headroom without deleting failed
+  evidence, build and qualify the updated generic base, then repeat synthetic
+  import, stopped export, and public verification from another fresh baseline.
+  Add durable per-action attempts and receipts before enabling recipe
+  execution. Recipe execution remains disabled until those receipts exist.
 - Limits: retained import persistence, software-changing rebuild, ambiguous export final-rename
   recovery, intermittent dirty stop, GUI agent interface, and final fresh
-  acceptance remain open. External capacity is available; a fresh disposable
-  baseline and clean stopped volume are still required for persistence
-  qualification.
+  acceptance remain open. External capacity is available, but internal
+  state/build headroom is again below the production reserve after the fresh
+  diagnostic VM; capacity must be planned before a new base build.
 
 ## Verified checkpoints
 

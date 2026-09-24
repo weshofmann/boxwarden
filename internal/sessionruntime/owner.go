@@ -49,6 +49,7 @@ type managementClient interface {
 	timezonex.ZoneClient
 	Probe(context.Context, sshx.Connection, sshx.ProbeRequest) (sshx.ProbeResult, error)
 	EnsureWorkspaces(context.Context, sshx.Connection, []sshx.WorkspaceMount) error
+	RequestShutdown(context.Context, sshx.Connection) error
 	InspectPackages(context.Context, sshx.Connection, []string) ([]sshx.PackageVersion, error)
 	InspectIdentity(context.Context, sshx.Connection) (sshx.GuestIdentity, error)
 }
@@ -687,13 +688,16 @@ func (o *Owner) Snapshot(ctx context.Context) supervisor.Snapshot {
 	return snapshot
 }
 
-// RequestStop asks the retained backend handle to let the guest OS shut down.
-// The supervisor observes actual reap and sends a bounded force stop if the
-// guest does not cooperate; this request grants no guest authority over state.
+// RequestStop first asks the exact pinned guest helper to enqueue poweroff.
+// Older or unreachable guests fall back to Tart's virtual power-button
+// request. Neither acknowledgment proves shutdown: the supervisor waits for
+// the retained handle to reap, then sends a bounded force stop if necessary.
 func (o *Owner) RequestStop(ctx context.Context) error {
 	o.mu.Lock()
 	handle := o.handle
 	cancelMaintenance := o.maintenanceCancel
+	connection, binding := o.connection, o.sshBinding
+	client, guestReady := o.deps.client, o.active && o.readyEstablished
 	o.mu.Unlock()
 	if handle == nil {
 		return fmt.Errorf("runtime handle is unavailable")
@@ -709,12 +713,22 @@ func (o *Owner) RequestStop(ctx context.Context) error {
 	if o.graceSent || o.stopSent {
 		return nil
 	}
+	var guestErr error
+	if guestReady && client != nil && connection.Binding == binding {
+		requestCtx, cancel := context.WithTimeout(ctx, supervisor.GuestShutdownRequestTimeout)
+		guestErr = client.RequestShutdown(requestCtx, connection)
+		cancel()
+		if guestErr == nil {
+			o.graceSent = true
+			return nil
+		}
+	}
 	requester, ok := handle.(interface{ RequestStop(context.Context) error })
 	if !ok {
-		return fmt.Errorf("backend handle cannot request guest shutdown")
+		return errors.Join(guestErr, fmt.Errorf("backend handle cannot request guest shutdown"))
 	}
 	if err := requester.RequestStop(ctx); err != nil {
-		return err
+		return errors.Join(guestErr, err)
 	}
 	o.graceSent = true
 	return nil

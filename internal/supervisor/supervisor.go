@@ -106,7 +106,7 @@ func Run(ctx context.Context, path string, owner RuntimeOwner) error {
 	graceRequested := false
 	var lastStopErr error
 	stop := func() error {
-		waitCtx, cancel := context.WithTimeout(context.Background(), lifecycleTimeout+gracefulStopTimeout)
+		waitCtx, cancel := context.WithTimeout(context.Background(), lifecycleTimeout+GuestShutdownRequestTimeout+gracefulStopTimeout)
 		defer cancel()
 		stopMu.Lock()
 		defer stopMu.Unlock()
@@ -247,7 +247,7 @@ func (detachedLauncher) Launch(ctx context.Context, request LaunchRequest) error
 		// A started supervisor owns cleanup: ask it to stop, never reconstruct or
 		// signal backend process identities from disk. If control is unavailable,
 		// retain the detached child for subsequent exact-generation reconciliation.
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), lifecycleTimeout+gracefulStopTimeout+controlIOTimeout)
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), lifecycleTimeout+GuestShutdownRequestTimeout+gracefulStopTimeout+controlIOTimeout)
 		stopErr := client.Stop(stopCtx, request.Binding)
 		stopCancel()
 		return errors.Join(err, stopErr)

@@ -75,6 +75,49 @@ func TestManagementIdentityInspectionAcceptsNoCallerParameters(t *testing.T) {
 	}
 }
 
+func TestManagementShutdownHasNoCallerParametersAndEnqueuesPoweroff(t *testing.T) {
+	request := ManagementRequest{Version: Version, Kind: "request_shutdown", Association: testRequest().Association}
+	if err := request.Validate(); err != nil {
+		t.Fatalf("fixed shutdown rejected: %v", err)
+	}
+	for _, mutate := range []func(*ManagementRequest){
+		func(r *ManagementRequest) { r.Zone = "America/Denver" },
+		func(r *ManagementRequest) { r.Packages = []string{"git"} },
+		func(r *ManagementRequest) {
+			r.Workspaces = []WorkspaceMount{{VolumeID: "00112233-4455-4677-8899-aabbccddeeff", FilesystemUUID: "10213243-5465-4768-899a-bbccddeeff00", MountPath: "/home/boxwarden/workspaces/project"}}
+		},
+	} {
+		changed := request
+		mutate(&changed)
+		if err := changed.Validate(); err == nil {
+			t.Fatalf("shutdown accepted caller parameters: %+v", changed)
+		}
+	}
+	b, _ := testBootstrapper(t)
+	if _, err := b.Serial(context.Background(), testRequest()); err != nil {
+		t.Fatal(err)
+	}
+	result, err := b.Management(context.Background(), request)
+	if err != nil || string(result) != `{"version":1,"ok":true}` {
+		t.Fatalf("shutdown result = %s, %v", result, err)
+	}
+	calls := b.Runner.(*fakeRunner).calls
+	if got := calls[len(calls)-1]; !slices.Equal(got, []string{"/usr/bin/systemctl", "--no-block", "--no-wall", "--ignore-inhibitors", "poweroff"}) {
+		t.Fatalf("shutdown argv = %#v", got)
+	}
+	runner := b.Runner.(*fakeRunner)
+	before := len(runner.calls)
+	foreign := request
+	foreign.BackendObject = "foreign-system"
+	if _, err := b.Management(context.Background(), foreign); err == nil || len(runner.calls) != before {
+		t.Fatalf("foreign binding reached shutdown runner: %v", err)
+	}
+	runner.err = fmt.Errorf("systemd refused poweroff")
+	if _, err := b.Management(context.Background(), request); err == nil {
+		t.Fatal("failed poweroff was acknowledged")
+	}
+}
+
 func TestInspectIdentityRejectsBuildResidueAndReportsFreshMachineIdentity(t *testing.T) {
 	root := t.TempDir()
 	for _, directory := range []string{"etc", "var/lib/boxwarden"} {

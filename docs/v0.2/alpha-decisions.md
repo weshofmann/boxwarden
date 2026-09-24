@@ -1,5 +1,37 @@
 # Boxwarden v0.2 alpha decisions
 
+## Bound guest shutdown before Tart force stop, 2026-09-24
+
+A new recipe-bound sandbox with a newly formatted ext4 workspace reached
+mount-bound READY and matched a public synthetic import readback, but its
+roughly 18-second public stop left ext4 requiring recovery. Tart 2.32.1 maps
+the supervisor's `SIGUSR2` to Virtualization.framework `requestStop()`. A
+successful signal proves only delivery to Tart; it does not prove that Ubuntu
+Desktop started shutdown. The prior 15-second grace then allows a Tart
+`SIGINT` force stop while the guest may still own a mounted volume.
+
+The exact-generation supervisor first sends one fixed `request_shutdown`
+operation over its already pinned management SSH connection. The bound guest
+helper admits no caller-selected command or parameters and, as root, enqueues
+`systemctl --no-block --no-wall --ignore-inhibitors poweroff`. The systemd
+reply is only enqueue evidence. If the SSH request is unavailable or
+ambiguous, the retained Tart handle receives its existing `SIGUSR2` request.
+The owner still waits for actual child reap, with a bounded 60-second grace
+before exact process-group force stop. A hostile or hung guest can still leave
+ext4 dirty; stopped-volume export and import verification continue to require
+an independently clean ext4 header and matching retained bytes. No guest
+response grants authority to release a live volume lock or report READY.
+
+The pinned guest helper artifact, installer lock, and finalizer pin change
+together. Existing clones with the older helper fall back to Tart; a fresh
+generic base build and qualification are required before this path is called
+real-host verified. The longer grace increases worst-case stop latency but
+avoids a predictable 15-second hard stop during an ordinary desktop shutdown.
+
+Sources: [Tart 2.32.1 signal handling](https://github.com/openai/tart/blob/2.32.1/Sources/tart/Commands/Run.swift),
+[systemd poweroff semantics](https://manpages.ubuntu.com/manpages/noble/man7/systemd.special.7.html),
+and [systemd inhibitor behavior](https://www.freedesktop.org/software/systemd/man/250/systemd-inhibit.html).
+
 ## Immutable recipe intent at session and rebuild boundaries, 2026-09-24
 
 The reusable base preparation key intentionally omits session-only actions and

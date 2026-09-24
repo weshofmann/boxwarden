@@ -22,7 +22,8 @@ const lifecycleTimeout = 5 * time.Second
 
 // Stop has an additional bounded window for a cooperative guest shutdown.
 // The exact owner still sends a force stop if the guest does not exit.
-const gracefulStopTimeout = 15 * time.Second
+const GuestShutdownRequestTimeout = 5 * time.Second
+const gracefulStopTimeout = 60 * time.Second
 
 // Includes serialx's 3m login wait, 30s exchange, and one bounded backend
 // observation for the response snapshot.
@@ -228,7 +229,7 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 	} else if request.Action == "ready" {
 		serverDeadline = acceptedAt.Add(readyTimeout)
 	} else if request.Action == "stop" {
-		serverDeadline = acceptedAt.Add(lifecycleTimeout + gracefulStopTimeout + controlIOTimeout)
+		serverDeadline = acceptedAt.Add(lifecycleTimeout + GuestShutdownRequestTimeout + gracefulStopTimeout + controlIOTimeout)
 	} else if request.Action == "inspect_packages" || request.Action == "inspect_identity" {
 		serverDeadline = acceptedAt.Add(inspectTimeout)
 	} else if request.Action == "transfer_import" {
@@ -563,7 +564,7 @@ func (c *Client) callRequest(ctx context.Context, binding Binding, requestBody c
 	} else if action == "ready" {
 		timeout = readyTimeout
 	} else if action == "stop" {
-		timeout += lifecycleTimeout + gracefulStopTimeout
+		timeout += lifecycleTimeout + GuestShutdownRequestTimeout + gracefulStopTimeout
 	} else if action == "inspect_packages" || action == "inspect_identity" {
 		timeout = inspectTimeout
 	} else if action == "transfer_import" {

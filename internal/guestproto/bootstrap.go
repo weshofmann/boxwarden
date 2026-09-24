@@ -202,6 +202,13 @@ func (b *Bootstrapper) Management(ctx context.Context, request ManagementRequest
 		return b.inspectPackages(ctx, request.Packages)
 	case "inspect_identity":
 		return b.inspectIdentity()
+	case "request_shutdown":
+		// This only confirms that systemd accepted the fixed poweroff job.
+		// The trusted host still waits for its retained Tart child to exit.
+		if _, err := b.Runner.Run(ctx, "/usr/bin/systemctl", "--no-block", "--no-wall", "--ignore-inhibitors", "poweroff"); err != nil {
+			return nil, fmt.Errorf("enqueue guest poweroff: %w", err)
+		}
+		return []byte(`{"version":1,"ok":true}`), nil
 	}
 	return nil, fmt.Errorf("unsupported management request")
 }
