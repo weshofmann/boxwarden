@@ -299,13 +299,27 @@ prototype with material acceptance gaps, not an alpha-ready release.
   this source head.
 - The latest operation check found about 78 GiB free on internal Data; the
   qualification state still had about 114 GiB free. The old capacity blocker
-  remains cleared. Next: qualify the tracked ChatGPT recipe and ordered guest
-  actions through a fresh public VM, then rebuild/reattach/export and repeat
-  the complete synthetic workflow.
+  remains cleared. The next public preparation attempt is recorded below.
+
+## Current qualification result
+
+- From clean published `3bec60d`, the public ChatGPT `alpha prepare` reached
+  the 90-minute installed-guest marker deadline. It returned a serial wait
+  timeout while Ubuntu Desktop still displayed `Copying files...`. The VM disk
+  continued receiving writes near the deadline, so the visible page alone
+  does not establish the cause. The attempt journal records failure during
+  `installer-running`; the builder stopped the exact candidate and exited.
+  Its failed VM, journal, and logs are retained as private evidence. This
+  attempt did **not** qualify a reusable base or ChatGPT installation.
+- After the failure, internal Data had about 73 GiB free, the qualification
+  state 107 GiB, and the Tart store 262 GiB. Disk headroom is not the current
+  blocker. Current work is read-only diagnosis of the stopped candidate and
+  installer evidence before changing inputs or starting a fresh attempt.
 
 ## Remaining acceptance
 
-1. Qualify the pinned ChatGPT prepare step and ordered `once` and `startup`
+1. Diagnose the timed-out ChatGPT base preparation, correct the identified
+   cause, then qualify its pinned prepare step and ordered `once` and `startup`
    phases in fresh public real-VM flows after current source gates pass;
    then design graphical-session handling for `launch` and waiting-for-sign-in
    behavior.
