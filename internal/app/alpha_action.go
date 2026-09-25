@@ -32,6 +32,38 @@ func validAlphaActionID(value string) bool {
 	return true
 }
 
+func writeAlphaActionList(output io.Writer, selected config.Domain, name string, attempts []session.ActionAttempt) error {
+	for _, attempt := range attempts {
+		if attempt.Domain != selected.ID || attempt.SessionName != name || !alphaCreateUUID(attempt.AttemptID) ||
+			!validAlphaActionID(attempt.ActionID) {
+			return fmt.Errorf("listed action differs from selected session")
+		}
+		if attempt.State == session.ActionAttemptSucceeded && !lowerSHA(attempt.ReceiptSHA256) {
+			return fmt.Errorf("listed successful action lacks receipt digest")
+		}
+	}
+	if _, err := fmt.Fprintf(output, "domain: %s\nsession: %s\nattempts: %d\n", selected.ID, name, len(attempts)); err != nil {
+		return err
+	}
+	for _, attempt := range attempts {
+		if _, err := fmt.Fprintf(output, "attempt: %s\naction: %s/%s\nstate: %s\n",
+			attempt.AttemptID, attempt.ActionPhase, attempt.ActionID, attempt.State); err != nil {
+			return err
+		}
+		if attempt.State == session.ActionAttemptSucceeded {
+			if _, err := fmt.Fprintf(output, "receipt-sha256: %s\n", attempt.ReceiptSHA256); err != nil {
+				return err
+			}
+		} else if attempt.State == session.ActionAttemptReserved || attempt.State == session.ActionAttemptIndeterminate {
+			if _, err := fmt.Fprintf(output, "recovery: if the same generation is READY, session action retry %s %s; to skip, stop the session first, then session action skip %s %s\n",
+				attempt.AttemptID, name, attempt.AttemptID, name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func writeAlphaAction(output io.Writer, selected config.Domain, input AlphaActionInput, result session.ActionAttempt, operationErr error) error {
 	if result.AttemptID == "" {
 		if operationErr == nil {

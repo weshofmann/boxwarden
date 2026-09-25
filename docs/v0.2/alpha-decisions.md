@@ -610,3 +610,14 @@ intent binds its argv to the session. `once` and `startup` stay rejected until
 ordered lifecycle execution and pending-setup reporting exist. `launch` also
 stays rejected until the guest graphical-session contract is designed. This
 source admission is not a real-VM execution claim.
+
+## Recoverable action attempt discovery, 2026-09-25
+
+The public alpha `session action list <session>` reads the selected session's
+bounded durable attempt journal under its ordinary lock. It rechecks each
+entry against the exact domain, session UUID, stored recipe, and canonical
+attempt before reporting it. Unexpected entries fail closed. This lets an
+operator find a reserved or indeterminate attempt after the original client
+loses its output without scanning private state or inventing a new attempt.
+Listing is observation only: it does not retry, skip, infer guest execution,
+or turn stored readiness into current READY.

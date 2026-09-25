@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/recipe"
 )
@@ -44,6 +46,30 @@ func actionAttemptFixture(t *testing.T) (string, ActionAttempt) {
 		ActionID: "configure-agent", ActionPhase: "once",
 		AttemptID: "00112233-4455-4677-8899-aabbccddeeff",
 		State:     ActionAttemptReserved,
+	}
+}
+
+func TestListActionAttemptsExposesExactJournalAndRejectsUnexpectedEntries(t *testing.T) {
+	root, attempt := actionAttemptFixture(t)
+	selected := config.Domain{ID: attempt.Domain, StateRoot: root}
+	if got, err := ListActionAttempts(context.Background(), selected, attempt.SessionName); err != nil || len(got) != 0 {
+		t.Fatalf("empty attempt list = %+v, %v", got, err)
+	}
+	if err := ReserveActionAttempt(root, attempt); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ListActionAttempts(context.Background(), selected, attempt.SessionName); err != nil || len(got) != 1 || got[0] != attempt {
+		t.Fatalf("listed attempt = %+v, %v", got, err)
+	}
+	if _, err := ListActionAttempts(context.Background(), config.Domain{ID: "personal", StateRoot: root}, attempt.SessionName); err == nil {
+		t.Fatal("foreign domain read the action journal")
+	}
+	unexpected := filepath.Join(root, "action-attempts", attempt.SessionID, "unexpected")
+	if err := os.WriteFile(unexpected, []byte("unexpected"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ListActionAttempts(context.Background(), selected, attempt.SessionName); err == nil || len(got) != 0 {
+		t.Fatalf("unexpected action entry was hidden: %+v, %v", got, err)
 	}
 }
 

@@ -8,8 +8,59 @@ import (
 	"testing"
 
 	"github.com/weshofmann/boxwarden/internal/config"
+	"github.com/weshofmann/boxwarden/internal/recipe"
 	"github.com/weshofmann/boxwarden/internal/session"
 )
+
+func TestAlphaActionListRecoversAttemptIDFromExactSessionJournal(t *testing.T) {
+	configPath, selected := writeV2DomainFixture(t, "alpha")
+	value := recipe.Recipe{Version: 1,
+		Source:  recipe.Source{Kind: "ubuntu-24.04.4-desktop-arm64", SHA256: "c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"},
+		Machine: recipe.Machine{CPUs: 4, MemoryMiB: 4096, SystemDiskGiB: 30},
+		Steps:   []recipe.Step{{ID: "probe", Phase: "reconfigure", Argv: []string{"/usr/bin/true"}}},
+	}
+	digest, err := session.PublishRecipeIntent(selected.StateRoot, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := session.Record{Version: 2, Domain: selected.ID, Name: "dev",
+		ID: "13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0", Mode: session.ModeClean,
+		IntendedState: session.StateRunning, Backend: session.BackendRef{Kind: "tart", ObjectID: "boxwarden-alpha-dev"},
+		GoldenRevision: "golden-r1", RecipeIntentDigest: digest,
+		StartGeneration: "00000000-0000-4000-8000-000000000003",
+		Readiness:       session.ReadinessRecord{Status: session.ReadinessReady}}
+	if err := session.SaveRecord(selected.StateRoot, selected.ID, record); err != nil {
+		t.Fatal(err)
+	}
+	attempt := session.ActionAttempt{Version: 1, Domain: selected.ID, SessionName: "dev", SessionID: record.ID,
+		BackendObject: record.Backend.ObjectID, Generation: record.StartGeneration, RecipeDigest: digest,
+		ActionID: "probe", ActionPhase: "reconfigure", AttemptID: "00112233-4455-4677-8899-aabbccddeeff",
+		State: session.ActionAttemptReserved}
+	if err := session.ReserveActionAttempt(selected.StateRoot, attempt); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	args := []string{"--config", configPath, "--domain", "alpha", "session", "action", "list", "dev"}
+	if err := Run(t.Context(), args, Options{Output: &output}); err != nil ||
+		!strings.Contains(output.String(), "attempt: "+attempt.AttemptID+"\n") ||
+		!strings.Contains(output.String(), "action: reconfigure/probe\n") ||
+		!strings.Contains(output.String(), "state: reserved\n") {
+		t.Fatalf("list did not recover exact attempt: output=%q error=%v", output.String(), err)
+	}
+	output.Reset()
+	if err := Run(t.Context(), append(args[:7], "missing"), Options{Output: &output}); err == nil || output.Len() != 0 {
+		t.Fatalf("missing session action journal was shown: output=%q error=%v", output.String(), err)
+	}
+}
+
+func TestAlphaActionListRejectsForeignEntryBeforePrinting(t *testing.T) {
+	var output bytes.Buffer
+	selected := config.Domain{ID: "alpha"}
+	attempt := session.ActionAttempt{Domain: "work", SessionName: "dev", AttemptID: "00112233-4455-4677-8899-aabbccddeeff", ActionID: "probe"}
+	if err := writeAlphaActionList(&output, selected, "dev", []session.ActionAttempt{attempt}); err == nil || output.Len() != 0 {
+		t.Fatalf("foreign action printed partial list: output=%q error=%v", output.String(), err)
+	}
+}
 
 func TestAlphaActionCommandsRouteExactIntentAndReportOutcome(t *testing.T) {
 	configPath, selected := writeV2DomainFixture(t, "alpha")

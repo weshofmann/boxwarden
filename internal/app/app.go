@@ -157,6 +157,15 @@ func Run(ctx context.Context, args []string, options Options) error {
 	}
 
 	switch command.kind {
+	case commandAlphaActionList:
+		if selectedDomain.ID != "alpha" {
+			return errors.New("v0.2 session actions are limited to the explicit alpha domain")
+		}
+		attempts, err := session.ListActionAttempts(ctx, selectedDomain, command.name)
+		if err != nil {
+			return fmt.Errorf("list exact session actions: %w", err)
+		}
+		return writeAlphaActionList(options.Output, selectedDomain, command.name, attempts)
 	case commandAlphaAction:
 		if selectedDomain.ID != "alpha" {
 			return errors.New("v0.2 session actions are limited to the explicit alpha domain")
@@ -493,6 +502,7 @@ const (
 	commandWorkspaceImport
 	commandWorkspaceImportVerify
 	commandAlphaAction
+	commandAlphaActionList
 )
 
 type parsedCommand struct {
@@ -606,6 +616,16 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		return base, nil
 	}
 	if len(remaining) >= 3 && remaining[0] == "session" && remaining[1] == "action" {
+		if remaining[2] == "list" {
+			if len(remaining) != 4 {
+				return parsedCommand{}, errors.New("session action list requires <session>")
+			}
+			if _, err := session.ParseName(remaining[3]); err != nil {
+				return parsedCommand{}, err
+			}
+			base.kind, base.name = commandAlphaActionList, remaining[3]
+			return base, nil
+		}
 		input := AlphaActionInput{Operation: remaining[2]}
 		switch input.Operation {
 		case "run":
@@ -847,7 +867,7 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.kind, base.alphaExport = commandWorkspaceExport, input
 		return base, nil
 	}
-	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] [--recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256] <session>, session start <session>, session stop <session>, session delete <stopped-session>, session rebuild [--base REVISION | recipe inputs] <session>, session status <session>, session action run once|reconfigure|startup <action-id> <running-session>, session action retry|skip <attempt-uuid> <session>, workspace create --bundle PATH --source-root PATH --filesystem-uuid UUID --size-mib N <new-volume-uuid>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, workspace import --source PATH <volume-uuid> <running-session>, workspace import resume --volume UUID --session NAME <transaction-uuid>, workspace import verify --export UUID <transaction-uuid>, workspace export --destination PATH --select RELATIVE [--select RELATIVE...] --source-root PATH --iso PATH --go PATH <volume-uuid>, workspace export resume --source-root PATH --iso PATH --go PATH <transaction-uuid>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
+	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] [--recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256] <session>, session start <session>, session stop <session>, session delete <stopped-session>, session rebuild [--base REVISION | recipe inputs] <session>, session status <session>, session action run once|reconfigure|startup <action-id> <running-session>, session action retry|skip <attempt-uuid> <session>, session action list <session>, workspace create --bundle PATH --source-root PATH --filesystem-uuid UUID --size-mib N <new-volume-uuid>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, workspace import --source PATH <volume-uuid> <running-session>, workspace import resume --volume UUID --session NAME <transaction-uuid>, workspace import verify --export UUID <transaction-uuid>, workspace export --destination PATH --select RELATIVE [--select RELATIVE...] --source-root PATH --iso PATH --go PATH <volume-uuid>, workspace export resume --source-root PATH --iso PATH --go PATH <transaction-uuid>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
 }
 
 func writeWorkspaceAttachment(output io.Writer, record workspacex.Record, state string) error {

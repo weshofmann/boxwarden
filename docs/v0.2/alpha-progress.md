@@ -124,8 +124,13 @@ prototype with material acceptance gaps, not an alpha-ready release.
   remain private evidence; the VM was stopped through the public path. A
   source fixture reproduced that defect and now verifies the private mode and
   refusal of a public directory. A corrected fresh base and real-VM action
-  trial remain pending. Internal free capacity is monitored before expensive
-  host trials; no further cleanup is planned.
+  trial remain pending. [Hosted CI for the source correction](https://github.com/weshofmann/boxwarden/actions/runs/36088089572)
+  passed its full deterministic matrix. The corrected fresh preparation is in
+  its installer phase. A public read-only action list now reports bounded,
+  exact session attempts and recovery commands after client output loss; its
+  source tests and one read of the retained failed attempt passed locally.
+  Hosted CI for the list increment remains pending. Internal free capacity is
+  monitored before expensive host trials; no further cleanup is planned.
 
 ## Remaining acceptance
 

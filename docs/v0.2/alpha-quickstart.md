@@ -55,7 +55,14 @@ command:
   --mount /home/boxwarden/workspaces/project "$VOLUME_UUID" "$SESSION"
 "$BW" --config "$CONFIG" --domain alpha session start "$SESSION"
 "$BW" --config "$CONFIG" --domain alpha session status "$SESSION"
+"$BW" --config "$CONFIG" --domain alpha session action list "$SESSION"
 ```
+
+The action list reads the exact session's durable attempt journal. If an
+explicit `reconfigure` command was interrupted before its UUID was recorded
+by the caller, list it here before choosing `session action retry` in the same
+READY generation or stopping and using `session action skip`. An
+`indeterminate` entry does not prove whether the guest command ran.
 
 Stage a private copy of the tracked synthetic project outside Boxwarden
 state. `PRIVATE_SOURCE` must be a new absolute directory owned by the current
