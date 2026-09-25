@@ -46,6 +46,7 @@ func TestSliceCPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
 		{"package report outside runtime owner", "internal/backend/start.go", `package backend; import trust "github.com/weshofmann/boxwarden/internal/sshx"; var _ trust.PackageVersion`, "unapproved foundation selector"},
 		{"workspace mount binding outside runtime owner", "internal/backend/start.go", `package backend; import trust "github.com/weshofmann/boxwarden/internal/sshx"; var _ trust.WorkspaceMount`, "unapproved foundation selector"},
 		{"renamed bootstrap wrapper", "internal/lifecycle/start.go", `package lifecycle; import serialtransport "github.com/weshofmann/boxwarden/internal/serialx"; func f() { serialtransport.RunBootstrap() }`, "unapproved foundation selector"},
+		{"action protocol outside session boundary", "internal/backend/start.go", `package backend; import protocol "github.com/weshofmann/boxwarden/internal/guestproto"; var _ protocol.ActionRequest`, "unauthorized Slice C import"},
 		{"installer serial outside builder", "internal/backend/start.go", `package backend; import serialtransport "github.com/weshofmann/boxwarden/internal/serialx"; func f() { serialtransport.CreateInstallerRuntime() }`, "unapproved foundation selector"},
 		{"blank foundation import", "internal/backend/start.go", `package backend; import _ "github.com/weshofmann/boxwarden/internal/sshx"`, "unsupported foundation import"},
 		{"dot foundation import", "internal/lifecycle/start.go", `package lifecycle; import . "github.com/weshofmann/boxwarden/internal/serialx"`, "unsupported foundation import"},
@@ -103,6 +104,15 @@ func f(ctx context.Context, expectation struct{ Manifest struct{ Operator string
 		{"host admission manifest", "internal/hostx/manifest.go", `package hostx; type Manifest struct{ Operator string }`},
 		{"ephemeral process argument", "internal/backend/tart/process_group_darwin.go", `package tart; func request(processID int) { _ = processID }`},
 		{"guest trust foundation", "internal/guestproto/bootstrap.go", `package guestproto; type bindingManifest struct{ Domain string }`},
+		{"session action protocol", "internal/session/action_service.go", `package session
+import protocol "github.com/weshofmann/boxwarden/internal/guestproto"
+var _ = protocol.ActionRequest{Version: protocol.Version, Association: protocol.Association{}}
+var _ = protocol.ActionReceipt{}
+func f(r protocol.ActionRequest, receipt protocol.ActionReceipt) { _, _, _ = protocol.EncodeActionRequest(r); _, _ = protocol.EncodeActionReceipt(r, receipt) }`},
+		{"owner action admission protocol", "internal/sessionruntime/action_owner.go", `package sessionruntime
+import protocol "github.com/weshofmann/boxwarden/internal/guestproto"
+var _ = protocol.ActionRequest{Association: protocol.Association{}}
+func f(r protocol.ActionRequest) { _, _, _ = protocol.EncodeActionRequest(r) }`},
 		{"serial protocol foundation", "internal/serialx/runtime.go", `package serialx
 import protocol "github.com/weshofmann/boxwarden/internal/guestproto"
 var _ = protocol.MaxRequestBytes
@@ -250,7 +260,9 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 		if composition && strings.HasSuffix(importPath, "/internal/timezonex") && path != "internal/sessionruntime/owner.go" {
 			p.add(path, "deferred Slice D import", importPath)
 		}
-		if composition && !serialFoundation && strings.HasSuffix(importPath, "/internal/guestproto") && path != "internal/sessionruntime/owner.go" {
+		if composition && !serialFoundation && strings.HasSuffix(importPath, "/internal/guestproto") &&
+			path != "internal/sessionruntime/owner.go" && path != "internal/session/action_service.go" &&
+			path != "internal/sessionruntime/action_owner.go" {
 			p.add(path, "unauthorized Slice C import", importPath)
 		}
 	}
@@ -426,6 +438,20 @@ func sliceBFoundation(importPath string) (string, bool) {
 }
 
 func allowedFoundationSelector(path, foundation, selector string) bool {
+	if foundation == "guestproto" {
+		switch path {
+		case "internal/session/action_service.go":
+			switch selector {
+			case "ActionRequest", "ActionReceipt", "Association", "Version", "EncodeActionRequest", "EncodeActionReceipt":
+				return true
+			}
+		case "internal/sessionruntime/action_owner.go":
+			switch selector {
+			case "ActionRequest", "Association", "EncodeActionRequest":
+				return true
+			}
+		}
+	}
 	if foundation == "serialx" && selector == "CreateInstallerRuntime" {
 		return path == "internal/basebuild/installer_launcher.go"
 	}
