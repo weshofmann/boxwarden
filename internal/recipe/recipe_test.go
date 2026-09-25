@@ -41,9 +41,13 @@ func TestTrackedChatGPTRecipeUsesPinnedGuestPreparation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tracked ChatGPT recipe is not runnable: %v", err)
 	}
-	if len(recipe.Steps) != 1 || recipe.Steps[0].Phase != "prepare" ||
+	if len(recipe.Steps) != 2 || recipe.Steps[0].Phase != "prepare" ||
 		len(recipe.Steps[0].Argv) != 1 || recipe.Steps[0].Argv[0] != "/usr/local/libexec/boxwarden-install-pinned-chatgpt" {
 		t.Fatalf("tracked ChatGPT preparation changed: %+v", recipe.Steps)
+	}
+	if recipe.Steps[1].Phase != "startup" || len(recipe.Steps[1].Argv) != 1 ||
+		recipe.Steps[1].Argv[0] != "/usr/local/libexec/boxwarden-launch-chatgpt" {
+		t.Fatalf("tracked ChatGPT startup changed: %+v", recipe.Steps)
 	}
 }
 

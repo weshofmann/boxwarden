@@ -56,10 +56,12 @@ helper="${guest_dir}/artifacts/boxwarden-guest-bootstrap"
 finalizer="${guest_dir}/finalize-golden.sh"
 recipe_helper="${guest_dir}/recipe-prepare.py"
 chatgpt_installer="${guest_dir}/install-pinned-chatgpt.py"
+chatgpt_launcher="${guest_dir}/launch-chatgpt.py"
 for required in "$helper" /boxwarden-artifacts/boxwarden-guest-bootstrap \
   "$finalizer" /boxwarden-artifacts/finalize-golden.sh \
   "$recipe_helper" /boxwarden-artifacts/recipe-prepare.py \
   "$chatgpt_installer" /boxwarden-artifacts/install-pinned-chatgpt.py \
+  "$chatgpt_launcher" /boxwarden-artifacts/launch-chatgpt.py \
   "$preparation" /boxwarden-artifacts/recipe-prepare.json /autoinstall.yaml; do
   grep -Fxq -- "$required" "$log" || fail "ISO did not map ${required}"
 done
@@ -67,6 +69,7 @@ expected_digest="$(shasum -a 256 "$finalizer" | awk '{print $1}')"
 grep -Fq "'${expected_digest}'" "$mapped" || fail 'mapped autoinstall is not bound to finalizer bytes'
 grep -Fq "'$(shasum -a 256 "$recipe_helper" | awk '{print $1}')'" "$mapped" || fail 'mapped autoinstall is not bound to recipe helper bytes'
 grep -Fq "'$(shasum -a 256 "$chatgpt_installer" | awk '{print $1}')'" "$mapped" || fail 'mapped autoinstall is not bound to ChatGPT installer bytes'
+grep -Fq "'$(shasum -a 256 "$chatgpt_launcher" | awk '{print $1}')'" "$mapped" || fail 'mapped autoinstall is not bound to ChatGPT launcher bytes'
 grep -Fq "'$(shasum -a 256 "$preparation" | awk '{print $1}')'" "$mapped" || fail 'mapped autoinstall is not bound to recipe payload bytes'
 ! grep -Fq __BOXWARDEN_ "$mapped" || fail 'mapped autoinstall retains a build placeholder'
 

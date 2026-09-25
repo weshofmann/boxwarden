@@ -690,3 +690,13 @@ say browser actions are available there while control of other desktop apps
 is not. Alpha acceptance must distinguish successful installation and visible
 launch from full desktop Computer Use. Native Wayland remains experimental in
 the vendor guide; its default XWayland path is the initial launch candidate.
+
+The source-tracked alpha startup helper uses the existing guest-only action
+channel to ask the active workstation user manager for a transient ChatGPT
+service. It checks `graphical-session.target`, the user's runtime bus, and a
+display variable before invoking the exact packaged executable. Ubuntu 24.04's
+[`systemd-run` manual](https://manpages.ubuntu.com/manpages/noble/man1/systemd-run.1.html)
+distinguishes `Type=exec` process start from a simple fork; the helper uses
+that stronger process-start result. The action receipt does not assert that a
+window rendered or that authentication is complete. Both require real guest
+observation, and the launch path may need adjustment after that evidence.

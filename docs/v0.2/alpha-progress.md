@@ -184,6 +184,13 @@ prototype with material acceptance gaps, not an alpha-ready release.
   The internal Data volume is now about 12 GiB free. Per the operator's
   direction, no further VM or temporary-file cleanup is planned; large host
   qualification remains deferred until sufficient headroom is available.
+- The same recipe now has a `startup` helper that requires an active graphical
+  user manager and requests the exact packaged ChatGPT executable as a
+  transient user service. It checks the session bus and display environment,
+  and avoids submitting a second launch when its unit is already active.
+  Synthetic helper and ISO-binding tests are passing locally. A successful
+  process request cannot establish a visible window or sign-in readiness;
+  those remain real-VM acceptance items.
 
 ## Remaining acceptance
 

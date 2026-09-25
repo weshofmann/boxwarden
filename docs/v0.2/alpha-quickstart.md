@@ -42,10 +42,14 @@ session and workspace fresh names and UUIDs. Global flags precede the
 command:
 
 The optional `examples/v0.2-alpha-chatgpt.json` recipe adds a pinned official
-ARM64 ChatGPT package as a `prepare` step. Its helper checks the downloaded
-bytes, Debian package identity, and installed identity, and disables the
-package's optional apt source. This source path has targeted checks, but the
-ChatGPT recipe has not yet passed real-VM build or graphical acceptance.
+ARM64 ChatGPT package as a `prepare` step and requests a guest-side graphical
+launch on `startup`. The installer checks downloaded bytes, Debian package
+identity, and installed identity, and disables the package's optional apt
+source. The launcher requires the workstation's active graphical user manager
+and asks it to start the package executable. Its checked command only proves
+that the user manager accepted the process; a usable visible window and
+waiting-for-sign-in state require separate VM acceptance. This recipe has not
+yet passed a real-VM build or graphical acceptance.
 
 ```sh
 "$BW" --config "$CONFIG" doctor

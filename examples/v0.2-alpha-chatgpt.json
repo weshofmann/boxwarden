@@ -15,6 +15,11 @@
       "id": "install-chatgpt",
       "phase": "prepare",
       "argv": ["/usr/local/libexec/boxwarden-install-pinned-chatgpt"]
+    },
+    {
+      "id": "open-chatgpt",
+      "phase": "startup",
+      "argv": ["/usr/local/libexec/boxwarden-launch-chatgpt"]
     }
   ],
   "workspaces": [
