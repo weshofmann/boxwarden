@@ -181,7 +181,7 @@ prototype with material acceptance gaps, not an alpha-ready release.
   helper tests, the fake-ISO mapping check, recipe and basebuild package tests,
   shell syntax, and diff checks passed locally. This is source verification:
   no guest installation, dependency resolution, or graphical launch has passed.
-  The internal Data volume is now about 12 GiB free. Per the operator's
+  The internal Data volume was about 12 GiB free at that checkpoint. Per the operator's
   direction, no further VM or temporary-file cleanup is planned; large host
   qualification remains deferred until sufficient headroom is available.
 - The same recipe now has a `startup` helper that requires an active graphical
@@ -211,6 +211,12 @@ prototype with material acceptance gaps, not an alpha-ready release.
   tests, vet, and CLI build. The local `go build ./...` command is inapplicable
   on Darwin to Linux-only guest command packages, which were cross-built
   separately.
+- [Hosted CI for the verification-record checkpoint `9336d35`](https://github.com/weshofmann/boxwarden/actions/runs/36095116531)
+  also passed its full deterministic matrix. A later read-only capacity check
+  found about 11 GiB free on the internal Data volume, while the mounted alpha
+  qualification state and Tart store had about 114 GiB and 271 GiB free on
+  external volumes. The internal decline keeps new VM and export attempts
+  paused under the mission's host-space floor. No further cleanup is planned.
 
 ## Remaining acceptance
 
