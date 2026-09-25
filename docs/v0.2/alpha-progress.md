@@ -217,6 +217,14 @@ prototype with material acceptance gaps, not an alpha-ready release.
   qualification state and Tart store had about 114 GiB and 271 GiB free on
   external volumes. The internal decline keeps new VM and export attempts
   paused under the mission's host-space floor. No further cleanup is planned.
+- A static dependency audit compared all 46 direct `Depends` clauses in the
+  pinned official ChatGPT ARM64 package with [Canonical's Ubuntu 24.04 ARM64
+  `main` package index](https://ports.ubuntu.com/ubuntu-ports/dists/noble/main/binary-arm64/Packages.xz).
+  Each clause has a named package or virtual provider;
+  the renamed `t64` libraries provide the required older package names.
+  This does not prove full apt dependency closure, installation, or GUI launch.
+  The internal Data volume remained at about 12 GiB free at this check, so
+  real-VM qualification and stopped-volume export remain paused.
 
 ## Remaining acceptance
 
