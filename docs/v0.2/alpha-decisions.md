@@ -592,6 +592,21 @@ service, rather than the command parser, re-admits the stored recipe and
 durable session binding. An uncertain run prints its durable attempt UUID and
 the permitted recovery commands; a successful result prints a receipt digest
 only after the service checked it. The CLI rejects a callback's empty or
-foreign result instead of reporting success. Normal recipe loading remains
-closed to action-bearing recipes until the revised generic helper is built
-and qualified on a fresh real VM.
+foreign result instead of reporting success. At this checkpoint, normal
+recipe loading still rejected action-bearing recipes while a fresh generic
+helper qualification was being prepared.
+
+## Explicit reconfigure recipe admission, 2026-09-25
+
+The runnable recipe loader now admits `reconfigure` steps alongside reusable
+`prepare` steps. Reconfiguration runs only when an operator names a specific
+step through the public action command; it has no automatic start or replay
+semantics. It selects a predeclared step from immutable session intent, and a
+second attempt for that step in the same start generation is refused. The
+command journals the exact attempt before guest execution and
+exposes explicit retry and stopped-session skip for an uncertain outcome.
+The reusable base key excludes this per-session step, while the full recipe
+intent binds its argv to the session. `once` and `startup` stay rejected until
+ordered lifecycle execution and pending-setup reporting exist. `launch` also
+stays rejected until the guest graphical-session contract is designed. This
+source admission is not a real-VM execution claim.

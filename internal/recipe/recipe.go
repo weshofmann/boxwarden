@@ -131,15 +131,16 @@ func Load(filename string) (Recipe, error) {
 	return value, nil
 }
 
-// LoadRunnable admits only actions the current alpha lifecycle executes.
-// Load remains available for inspecting the full planned recipe format.
+// LoadRunnable admits only actions the current alpha commands can execute.
+// Reconfigure remains explicit; automatic once/startup and graphical launch
+// require their own lifecycle integration. Load can inspect the full format.
 func LoadRunnable(filename string) (Recipe, error) {
 	value, err := Load(filename)
 	if err != nil {
 		return Recipe{}, err
 	}
 	for _, step := range value.Steps {
-		if step.Phase != "prepare" {
+		if step.Phase != "prepare" && step.Phase != "reconfigure" {
 			return Recipe{}, fmt.Errorf("recipe phase %q is unsupported until session execution is available", step.Phase)
 		}
 	}

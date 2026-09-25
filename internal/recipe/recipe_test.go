@@ -133,7 +133,7 @@ func TestLoadSupportedRecipeKeepsGuestOperationsExplicit(t *testing.T) {
 	}
 }
 
-func TestLoadRunnableRejectsSessionActionsUntilExecutorExists(t *testing.T) {
+func TestLoadRunnableAdmitsExplicitReconfigureOnly(t *testing.T) {
 	prepareOnly := strings.Replace(validRecipe, `"phase": "once"`, `"phase": "prepare"`, 1)
 	prepareOnly = strings.Replace(prepareOnly, `"launch": [
     {"id": "chatgpt", "argv": ["/usr/bin/chatgpt"]}
@@ -141,11 +141,14 @@ func TestLoadRunnableRejectsSessionActionsUntilExecutorExists(t *testing.T) {
 	if _, err := LoadRunnable(writeRecipe(t, prepareOnly)); err != nil {
 		t.Fatalf("prepare-only recipe rejected: %v", err)
 	}
+	reconfigure := strings.Replace(prepareOnly, `"phase": "prepare"`, `"phase": "reconfigure"`, 1)
+	if got, err := LoadRunnable(writeRecipe(t, reconfigure)); err != nil || len(got.Steps) != 1 || got.Steps[0].Phase != "reconfigure" {
+		t.Fatalf("explicit reconfigure recipe was not admitted: steps=%+v err=%v", got.Steps, err)
+	}
 	for name, input := range map[string]string{
-		"once":        strings.Replace(prepareOnly, `"phase": "prepare"`, `"phase": "once"`, 1),
-		"reconfigure": strings.Replace(prepareOnly, `"phase": "prepare"`, `"phase": "reconfigure"`, 1),
-		"startup":     strings.Replace(prepareOnly, `"phase": "prepare"`, `"phase": "startup"`, 1),
-		"launch":      strings.Replace(prepareOnly, `"launch": []`, `"launch": [{"id":"chatgpt","argv":["/usr/bin/chatgpt"]}]`, 1),
+		"once":    strings.Replace(prepareOnly, `"phase": "prepare"`, `"phase": "once"`, 1),
+		"startup": strings.Replace(prepareOnly, `"phase": "prepare"`, `"phase": "startup"`, 1),
+		"launch":  strings.Replace(prepareOnly, `"launch": []`, `"launch": [{"id":"chatgpt","argv":["/usr/bin/chatgpt"]}]`, 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := LoadRunnable(writeRecipe(t, input)); err == nil || !strings.Contains(err.Error(), name) {

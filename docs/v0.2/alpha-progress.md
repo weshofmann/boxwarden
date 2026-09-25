@@ -108,10 +108,12 @@ prototype with material acceptance gaps, not an alpha-ready release.
   vet, all-package compilation, CLI build, gofmt, and diff checks passed
   locally; [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36084558094)
   passed. The existing qualified generic base predates
-  this helper. Normal recipe admission and real-VM qualification remain.
-  Public recipes still reject `once`, `reconfigure`,
-  `startup`, and `launch`. The helper also refuses desktop `launch` until its
-  graphical environment is designed.
+  this helper. Explicit `reconfigure` steps are now admitted by the runnable
+  recipe loader because they have an explicit public command and durable
+  recovery route. Targeted recipe and app tests passed locally; hosted CI and
+  real-VM action execution remain. Public recipes still reject `once`,
+  `startup`, and `launch` until lifecycle sequencing exists. The helper also
+  refuses desktop `launch` until its graphical environment is designed.
 - A separate encrypted external qualification state passed host doctor,
   domain-CA initialization, exact installer and auxiliary-tool checks. A fresh
   preparation attempt from the published source is copying installer files;
@@ -122,9 +124,9 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Remaining acceptance
 
-1. Rebuild and qualify a new generic base, then enable action-bearing public
-   recipes and guest-only `once`, explicit
-   `reconfigure`, `startup`, and `launch` with visible retry/skip and truthful
+1. Rebuild and qualify a new generic base, prove explicit guest-only
+   `reconfigure`, then implement `once`, `startup`, and `launch` with visible
+   retry/skip and truthful
    failure or waiting-for-sign-in states.
 2. Qualify a software-changing rebuild, replacement-sandbox reattachment,
    desktop application launch, and the complete public synthetic workflow
