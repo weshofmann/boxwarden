@@ -137,6 +137,16 @@ prototype with material acceptance gaps, not an alpha-ready release.
   passed its deterministic matrix. Internal free capacity was about 26 GiB
   after the action trial, close to the earlier 25.8 GiB stopped-export guard.
   Recheck before any export; no further cleanup is planned.
+- A source-only automatic-action planner now derives ordered `once` then
+  `startup` steps from the exact recipe and durable attempt journal. It
+  recognizes successful or deliberately skipped steps at the correct system
+  and generation, and blocks unresolved attempts or out-of-order completion.
+  Session and architecture tests, the session race test, vet, gofmt, and diff
+  checks passed locally; hosted CI remains. `session start` does not invoke
+  this planner yet.
+- At the latest capacity check, the internal Data volume had about 16 GiB
+  available, below the stopped-export guard. Host export and other large VM
+  operations are deferred until headroom is restored; source work continues.
 
 ## Remaining acceptance
 

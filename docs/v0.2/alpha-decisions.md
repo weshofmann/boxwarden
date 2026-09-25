@@ -621,3 +621,17 @@ operator find a reserved or indeterminate attempt after the original client
 loses its output without scanning private state or inventing a new attempt.
 Listing is observation only: it does not retry, skip, infer guest execution,
 or turn stored readiness into current READY.
+
+## Ordered automatic-action plan, 2026-09-25
+
+The first source increment for automatic setup derives a plan from an exact
+running session, its immutable recipe, and the validated durable attempt
+journal. It orders all `once` steps before `startup`, preserving declaration
+order within each phase. A completed or deliberately skipped `once` step is
+recognized only on the same system; a `startup` completion applies only to the
+current start generation. An unresolved attempt on that system, including an
+explicit reconfigure step or a prior-generation startup step, blocks new
+automatic execution until explicit recovery. A later completed step cannot
+hide a missing predecessor. The planner does not execute guest code or change
+public recipe admission; the post-start orchestrator and status reporting are
+separate increments.
