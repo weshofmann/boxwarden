@@ -583,3 +583,15 @@ success receipt and makes no claim that the command did not run. It remains a
 prior attempt for same-system `once` replay prevention. Repeating the exact
 skip is idempotent; a successful action cannot later be relabeled skipped.
 Public exposure and workflow sequencing remain to be implemented.
+
+## Public alpha action controls, 2026-09-25
+
+The alpha-only CLI exposes an explicitly selected `session action run` step,
+an exact attempt UUID `retry`, and a stopped-session `skip`. The common
+service, rather than the command parser, re-admits the stored recipe and
+durable session binding. An uncertain run prints its durable attempt UUID and
+the permitted recovery commands; a successful result prints a receipt digest
+only after the service checked it. The CLI rejects a callback's empty or
+foreign result instead of reporting success. Normal recipe loading remains
+closed to action-bearing recipes until the revised generic helper is built
+and qualified on a fresh real VM.

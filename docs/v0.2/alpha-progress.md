@@ -99,9 +99,16 @@ prototype with material acceptance gaps, not an alpha-ready release.
   records no success receipt and does not assert that the guest command never
   ran; the prior attempt still blocks same-system `once` replay. The session
   package, focused race and architecture tests, vet, all-package compilation,
-  gofmt, and diff checks passed locally for this increment; hosted CI is
-  pending. The existing qualified generic base predates this helper. Public
-  commands and real-VM qualification remain. Public recipes still reject `once`, `reconfigure`,
+  gofmt, and diff checks passed locally for this increment;
+  [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36083799557)
+  passed. Alpha-only public `session action run|retry|skip` commands now route
+  to the exact controller and journal service. An uncertain result reports its
+  attempt UUID and recovery commands; successful output requires a receipt
+  digest. Full app, CLI, and architecture packages, focused app race tests,
+  vet, all-package compilation, CLI build, gofmt, and diff checks passed
+  locally; hosted CI is pending. The existing qualified generic base predates
+  this helper. Normal recipe admission and real-VM qualification remain.
+  Public recipes still reject `once`, `reconfigure`,
   `startup`, and `launch`. The helper also refuses desktop `launch` until its
   graphical environment is designed.
 - Internal free capacity was about 30 GiB at the latest check.
@@ -111,8 +118,8 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Remaining acceptance
 
-1. Complete the public action route, then
-   rebuild and qualify a new generic base. Enable guest-only `once`, explicit
+1. Rebuild and qualify a new generic base, then enable action-bearing public
+   recipes and guest-only `once`, explicit
    `reconfigure`, `startup`, and `launch` with visible retry/skip and truthful
    failure or waiting-for-sign-in states.
 2. Qualify a software-changing rebuild, replacement-sandbox reattachment,
