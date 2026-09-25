@@ -272,10 +272,36 @@ prototype with material acceptance gaps, not an alpha-ready release.
   Replacement helper bundles and fresh synthetic helper VM runs are pending.
 - Review also confirmed an unbounded guest-controlled SFTP readback into host
   staging, a stopped-candidate rebuild recovery gap, and crash-left action
-  attempt temporaries that block public recovery discovery. Corrections are in
-  progress and remain unpublished until each path is verified and reviewed.
-  Import and affected formatter/inspector operations are held from new real-VM
-  acceptance until their boundary fixes and helper qualification pass.
+  attempt temporaries that block public recovery discovery. Their reviewed
+  source corrections and helper trials are recorded below; real guest import,
+  rebuild recovery, and controlled export still need acceptance.
+
+## Reviewed corrections and fresh helper qualification
+
+- The three source corrections are now published: `04a587a` preserves exact
+  published action-attempt authority across an interrupted temporary write;
+  `c0ba7d8` caps pinned SFTP import readback before writing host staging;
+  `227fa7b` resumes only the exact stopped rebuild candidate in Ready or
+  Retiring, with established pin and recipe binding. Independent delta reviews
+  found no remaining Important/Critical production defect in those paths.
+  Targeted tests, `go test -count=1 ./...`, `go vet ./...`, and [hosted CI at
+  `227fa7b`](https://github.com/weshofmann/boxwarden/actions/runs/36159944944)
+  passed. The review ledger records the tests and remaining real-host gates.
+- Signed formatter and inspector helpers were rebuilt from clean published
+  `227fa7b` with pinned inputs. One fresh no-NIC formatter VM trial produced a
+  clean ext4 volume with the requested UUID; the host checked the unchanged raw
+  identity, ext4 header, stopped VM, and reaped helper. One fresh no-NIC,
+  read-only zero-disk inspector VM trial reported stopped/reaped state, a
+  bounded stream, and unchanged disk bytes. The private logs and raw images
+  were moved from temporary storage to the approved evidence archive and
+  verified byte-for-byte. These synthetic trials verify the corrected helper
+  boot paths; controlled export of a stopped workspace remains untested at
+  this source head.
+- The latest operation check found about 78 GiB free on internal Data; the
+  qualification state still had about 114 GiB free. The old capacity blocker
+  remains cleared. Next: qualify the tracked ChatGPT recipe and ordered guest
+  actions through a fresh public VM, then rebuild/reattach/export and repeat
+  the complete synthetic workflow.
 
 ## Remaining acceptance
 
