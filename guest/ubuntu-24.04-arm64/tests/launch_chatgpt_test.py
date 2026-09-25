@@ -35,13 +35,25 @@ class ChatGPTLaunchTests(unittest.TestCase):
 
     def test_missing_session_bus_prevents_launch(self):
         with mock.patch.object(launcher, "RUNTIME_ROOT", self.runtime_root), \
+             mock.patch.object(launcher, "READY_TIMEOUT", 0), \
              mock.patch.object(launcher.subprocess, "run") as run:
             with self.assertRaisesRegex(RuntimeError, "bus"):
                 launcher.launch()
         run.assert_not_called()
 
+    def test_unsafe_runtime_directory_fails_without_waiting(self):
+        self.runtime.chmod(0o755)
+        with mock.patch.object(launcher, "RUNTIME_ROOT", self.runtime_root), \
+             mock.patch.object(launcher.time, "sleep") as sleep, \
+             mock.patch.object(launcher.subprocess, "run") as run:
+            with self.assertRaisesRegex(RuntimeError, "unsafe"):
+                launcher.launch()
+        sleep.assert_not_called()
+        run.assert_not_called()
+
     def test_inactive_graphical_session_prevents_launch(self):
         with self.bus_patch(), mock.patch.object(launcher, "RUNTIME_ROOT", self.runtime_root), \
+             mock.patch.object(launcher, "READY_TIMEOUT", 0), \
              mock.patch.object(launcher.subprocess, "run", return_value=mock.Mock(returncode=3, stdout="")) as run:
             with self.assertRaisesRegex(RuntimeError, "graphical session"):
                 launcher.launch()
@@ -83,6 +95,7 @@ class ChatGPTLaunchTests(unittest.TestCase):
             return mock.Mock(returncode=0, stdout="")
 
         with self.bus_patch(), mock.patch.object(launcher, "RUNTIME_ROOT", self.runtime_root), \
+             mock.patch.object(launcher, "READY_TIMEOUT", 0), \
              mock.patch.object(launcher.subprocess, "run", side_effect=run):
             with self.assertRaisesRegex(RuntimeError, "display"):
                 launcher.launch()
@@ -101,6 +114,30 @@ class ChatGPTLaunchTests(unittest.TestCase):
              mock.patch.object(launcher.subprocess, "run", side_effect=run):
             launcher.launch()
         self.assertEqual(len(calls), 3)
+
+    def test_desktop_that_appears_after_management_ready_launches_once(self):
+        calls = []
+        checks = 0
+
+        def run(argv, **_):
+            nonlocal checks
+            calls.append(argv)
+            if argv[-1] == "graphical-session.target":
+                checks += 1
+                return mock.Mock(returncode=3 if checks == 1 else 0, stdout="")
+            if argv[2] == "show-environment":
+                return mock.Mock(returncode=0, stdout="DISPLAY=:0\n")
+            if argv[-1] == "boxwarden-chatgpt.service":
+                return mock.Mock(returncode=3, stdout="")
+            return mock.Mock(returncode=0, stdout="")
+
+        with self.bus_patch(), mock.patch.object(launcher, "RUNTIME_ROOT", self.runtime_root), \
+             mock.patch.object(launcher.subprocess, "run", side_effect=run), \
+             mock.patch.object(launcher.time, "sleep") as sleep:
+            launcher.launch()
+        self.assertEqual(checks, 2)
+        sleep.assert_called_once()
+        self.assertEqual(sum(argv[0] == "/usr/bin/systemd-run" for argv in calls), 1)
 
 
 if __name__ == "__main__":

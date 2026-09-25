@@ -5,10 +5,18 @@ import os
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
 RUNTIME_ROOT = Path("/run/user")
+READY_TIMEOUT = 90
+
+
+class DesktopNotReady(RuntimeError):
+    pass
+
+
 RUN_ENV = {
     "PATH": "/usr/local/bin:/usr/bin:/bin",
     "HOME": "/home/boxwarden",
@@ -27,14 +35,14 @@ def desktop_environment():
     try:
         details = runtime.lstat()
     except OSError as exc:
-        raise RuntimeError("workstation runtime directory is unavailable") from exc
+        raise DesktopNotReady("workstation runtime directory is unavailable") from exc
     if not stat.S_ISDIR(details.st_mode) or details.st_uid != uid or stat.S_IMODE(details.st_mode) != 0o700:
         raise RuntimeError("workstation runtime directory is unavailable or unsafe")
     bus = runtime / "bus"
     try:
         details = bus.lstat()
     except OSError as exc:
-        raise RuntimeError("workstation session bus is unavailable") from exc
+        raise DesktopNotReady("workstation session bus is unavailable") from exc
     if not stat.S_ISSOCK(details.st_mode) or details.st_uid != uid:
         raise RuntimeError("workstation session bus is unavailable or unsafe")
     environment = dict(RUN_ENV)
@@ -50,18 +58,29 @@ def run_checked(argv, environment, capture=False):
 
 
 def launch():
-    environment = desktop_environment()
-    graphical = run_checked(["/usr/bin/systemctl", "--user", "is-active", "--quiet",
-                             "graphical-session.target"], environment)
-    if graphical.returncode != 0:
-        raise RuntimeError("workstation graphical session is not active")
-    manager = run_checked(["/usr/bin/systemctl", "--user", "show-environment"],
-                          environment, capture=True)
-    if manager.returncode != 0 or len(manager.stdout) > 16384:
-        raise RuntimeError("graphical session environment is unavailable")
-    if not any(line.startswith(("DISPLAY=", "WAYLAND_DISPLAY=")) and line.partition("=")[2]
-               for line in manager.stdout.splitlines()):
-        raise RuntimeError("graphical display is absent from the user manager")
+    deadline = time.monotonic() + READY_TIMEOUT
+    while True:
+        try:
+            environment = desktop_environment()
+            graphical = run_checked(["/usr/bin/systemctl", "--user", "is-active", "--quiet",
+                                     "graphical-session.target"], environment)
+            if graphical.returncode != 0:
+                raise DesktopNotReady("workstation graphical session is not active")
+            manager = run_checked(["/usr/bin/systemctl", "--user", "show-environment"],
+                                  environment, capture=True)
+            if len(manager.stdout) > 16384:
+                raise RuntimeError("graphical session environment exceeds bound")
+            if manager.returncode != 0:
+                raise DesktopNotReady("graphical session environment is unavailable")
+            if not any(line.startswith(("DISPLAY=", "WAYLAND_DISPLAY=")) and line.partition("=")[2]
+                       for line in manager.stdout.splitlines()):
+                raise DesktopNotReady("graphical display is absent from the user manager")
+            break
+        except DesktopNotReady as exc:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError(str(exc)) from exc
+            time.sleep(min(2, remaining))
     current = run_checked(["/usr/bin/systemctl", "--user", "is-active", "--quiet",
                            "boxwarden-chatgpt.service"], environment)
     if current.returncode == 0:

@@ -191,6 +191,10 @@ prototype with material acceptance gaps, not an alpha-ready release.
   Synthetic helper and ISO-binding tests are passing locally. A successful
   process request cannot establish a visible window or sign-in readiness;
   those remain real-VM acceptance items.
+- The launcher now waits up to 90 seconds when management becomes READY before
+  the graphical session, bus, or display is available. Unsafe runtime metadata
+  still fails immediately. Seven synthetic launcher tests and the fake-ISO
+  source mapping check passed locally; the ordering is not yet VM-qualified.
 
 ## Remaining acceptance
 

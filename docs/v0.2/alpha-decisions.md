@@ -700,3 +700,7 @@ distinguishes `Type=exec` process start from a simple fork; the helper uses
 that stronger process-start result. The action receipt does not assert that a
 window rendered or that authentication is complete. Both require real guest
 observation, and the launch path may need adjustment after that evidence.
+Management readiness and graphical login are independent: the helper waits up
+to 90 seconds for an ordinary session startup delay before the action can
+become indeterminate, while unsafe runtime directory or bus metadata fails
+immediately.
