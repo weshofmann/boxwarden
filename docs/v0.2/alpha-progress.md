@@ -338,10 +338,23 @@ prototype with material acceptance gaps, not an alpha-ready release.
   two-hour ceiling around three separately bounded commands (30 minutes
   each; the pinned ChatGPT installer remains bounded to 20 minutes inside
   its command). Targeted basebuild, app, and recipe Go tests, 15 guest Python
-  tests, fake-ISO mapping, gofmt, and diff checks passed locally. This is
-  source verification, not a successful real installer. The next step is to
-  publish this correction, build the exact source, and start a fresh public
-  candidate with a new attempt ID; the failed candidate will not be resumed.
+  tests, fake-ISO mapping, gofmt, and diff checks passed locally. [Hosted CI
+  for `cc1cdb9`](https://github.com/weshofmann/boxwarden/actions/runs/36176930131)
+  passed its deterministic matrix. This is source verification, not a
+  successful real installer.
+- A private binary built from clean published `cc1cdb9` passed host doctor
+  and the public tracked ChatGPT recipe/ISO check. Two fresh invocations were
+  rejected before VM creation: the first supplied Homebrew's symlinked
+  `xorriso`, and the second supplied macOS LibreSSL without the required
+  SHA-512 crypt mode. An attempted detached shell run ended with its command
+  session before creating an attempt directory. The current retained command
+  session uses exact checked regular OpenSSL and xorriso executables. Its
+  fresh attempt is `installer-running` with an exact live Tart child; the
+  previous timed-out candidate remains stopped and immutable. No prepared
+  ChatGPT base is yet qualified. At the latest check, internal Data had about
+  74 GiB free, qualification state 97 GiB, and Tart store 261 GiB. Next:
+  observe the installed-guest marker and recipe step, then require
+  finalization and independent-clone qualification before cache admission.
 
 ## Remaining acceptance
 
