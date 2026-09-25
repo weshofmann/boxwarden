@@ -52,12 +52,17 @@ prototype with material acceptance gaps, not an alpha-ready release.
   static-helper reproducibility, and golden source fixtures passed. An earlier
   hosted run caught a stale static helper artifact after the protocol source
   changed; the [coherent artifact correction passed hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36078574683).
-  Hosted CI for the newer executor checkpoint is pending. The existing
-  qualified generic base predates this helper. Fresh READY admission,
-  host-side pinned SSH invocation and receipt checking, explicit retry/skip,
-  and real-VM qualification remain. Public recipes still reject `once`,
-  `reconfigure`, `startup`, and `launch`; desktop `launch` also refuses in the
-  helper until its graphical environment is designed.
+  [Hosted CI for the executor checkpoint](https://github.com/weshofmann/boxwarden/actions/runs/36079269375)
+  passed its full deterministic matrix. A separate host SSH method now sends
+  only the canonical bounded action request through the fixed `action` helper
+  mode with the exact host-key pin, association, and credential path checks;
+  it accepts only the matching bounded success receipt. Targeted `sshx`
+  tests and vet, all-package compilation, gofmt, and diff checks passed
+  locally. The existing qualified generic base predates this helper. Fresh
+  READY admission, journal completion around the SSH call, explicit
+  retry/skip, and real-VM qualification remain. Public recipes still reject
+  `once`, `reconfigure`, `startup`, and `launch`; desktop `launch` also refuses
+  in the helper until its graphical environment is designed.
 - Internal free capacity was about 31 GiB after the successful stopped export.
   The export guard previously required about 25.8 GiB. Check capacity before
   another expensive host trial and report any renewed shortfall; no further
@@ -65,8 +70,8 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Remaining acceptance
 
-1. Bind exact host attempts and guest receipts to fresh READY over pinned SSH,
-   then rebuild and qualify a new generic base. Enable guest-only
+1. Bind exact host attempts and guest receipts to fresh READY in the session
+   service, then rebuild and qualify a new generic base. Enable guest-only
    `once`, explicit `reconfigure`, `startup`, and `launch` only with visible
    retry/skip and truthful failure or waiting-for-sign-in states.
 2. Qualify a software-changing rebuild, replacement-sandbox reattachment,
