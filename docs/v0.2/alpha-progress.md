@@ -58,21 +58,27 @@ prototype with material acceptance gaps, not an alpha-ready release.
   mode with the exact host-key pin, association, and credential path checks;
   it accepts only the matching bounded success receipt. Targeted `sshx`
   tests and vet, all-package compilation, gofmt, and diff checks passed
-  locally. The existing qualified generic base predates this helper. Fresh
-  READY admission, journal completion around the SSH call, explicit
-  retry/skip, and real-VM qualification remain. Public recipes still reject
-  `once`, `reconfigure`, `startup`, and `launch`; desktop `launch` also refuses
-  in the helper until its graphical environment is designed.
-- Internal free capacity was about 31 GiB after the successful stopped export.
+  locally; [hosted CI for the transport checkpoint](https://github.com/weshofmann/boxwarden/actions/runs/36079723505)
+  passed. The session action service now reloads exact stored recipe argv,
+  requires fresh generation READY on both sides of execution, reserves before
+  the guest call, and journals an exact success receipt digest. An interrupted
+  call or changed readiness becomes indeterminate. Full session package tests,
+  targeted race tests, vet, all-package compilation, gofmt, and diff checks
+  passed locally. The existing qualified generic base predates this helper.
+  The retained-owner control route, explicit retry/skip, and real-VM
+  qualification remain. Public recipes still reject `once`, `reconfigure`,
+  `startup`, and `launch`; desktop `launch` also refuses in the helper until
+  its graphical environment is designed.
+- Internal free capacity was about 30 GiB at the latest check.
   The export guard previously required about 25.8 GiB. Check capacity before
   another expensive host trial and report any renewed shortfall; no further
   cleanup is planned.
 
 ## Remaining acceptance
 
-1. Bind exact host attempts and guest receipts to fresh READY in the session
-   service, then rebuild and qualify a new generic base. Enable guest-only
-   `once`, explicit `reconfigure`, `startup`, and `launch` only with visible
+1. Route exact host attempts through the retained supervisor with independent
+   journal admission, then rebuild and qualify a new generic base. Enable
+   guest-only `once`, explicit `reconfigure`, `startup`, and `launch` with visible
    retry/skip and truthful failure or waiting-for-sign-in states.
 2. Qualify a software-changing rebuild, replacement-sandbox reattachment,
    desktop application launch, and the complete public synthetic workflow

@@ -52,6 +52,20 @@ still refuses before claim because its graphical session environment needs a
 separate design. The host has no public action route yet and must validate an
 absolute guest executable when it eventually admits recipe actions.
 
+The host action SSH method is separate from the short management probe. It
+rechecks the exact private host-key pin and certificate paths, sends only the
+canonical bounded request to the fixed `action` helper mode, and accepts only
+the matching canonical success receipt. The session action service reloads
+the immutable recipe argv, acquires the ordinary transition and session locks,
+requires fresh exact-generation READY, and reserves the durable attempt before
+asking the retained owner to execute. It requires another fresh READY check
+after the receipt before recording the receipt digest as success. Transport
+failure, malformed receipt, or lost readiness leaves the attempt
+indeterminate and non-replayable. The retained-owner control route must
+independently re-admit the exact reserved attempt before exposing its SSH
+credentials; it and explicit recovery are still pending. No public recipe
+action is enabled by these source increments.
+
 ## Live workspace identity loss and caching experiment, 2026-09-24
 
 A separate fresh empty-volume run reached exact mount-bound READY, then
