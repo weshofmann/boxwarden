@@ -33,19 +33,24 @@ type ImportReceipt struct {
 	RemotePath string
 }
 
-type SFTPClient struct{ runner Runner }
-
-func NewSFTPClient() *SFTPClient {
-	return &SFTPClient{runner: newExecRunner(execx.OSRunner{MaxOutputBytes: 256 << 10, MaxStdinBytes: maxImportBatchBytes})}
+type SFTPClient struct {
+	runner   Runner
+	readback func(context.Context, Connection, []importx.Entry, string, string) error
 }
 
-func newSFTPClient(runner Runner) *SFTPClient { return &SFTPClient{runner: runner} }
+func NewSFTPClient() *SFTPClient {
+	return &SFTPClient{runner: newExecRunner(execx.OSRunner{MaxOutputBytes: 256 << 10, MaxStdinBytes: maxImportBatchBytes}), readback: runPinnedSFTPReadback}
+}
+
+func newSFTPClient(runner Runner) *SFTPClient {
+	return &SFTPClient{runner: runner, readback: runPinnedSFTPReadback}
+}
 
 // TransferImport sends only one re-admitted private snapshot to a transaction
 // directory on an already mounted workspace. It then gets every file into a
 // fresh private host tree and re-admits the exact bytes against the manifest.
 func (c *SFTPClient) TransferImport(ctx context.Context, connection Connection, stagingParent, transactionID, sourceDigest, mountPath string) (receipt ImportReceipt, err error) {
-	if c == nil || c.runner == nil || !validWorkspaceMountPath(mountPath) || !validImportUUID(transactionID) || !validImportDigest(sourceDigest) {
+	if c == nil || c.runner == nil || c.readback == nil || !validWorkspaceMountPath(mountPath) || !validImportUUID(transactionID) || !validImportDigest(sourceDigest) {
 		return ImportReceipt{}, fmt.Errorf("invalid bounded import transfer")
 	}
 	if err := validateConnection(connection); err != nil {
@@ -92,7 +97,7 @@ func (c *SFTPClient) TransferImport(ctx context.Context, connection Connection, 
 		}
 	}
 	remote := mountPath + "/boxwarden-import-" + transactionID
-	upload, download, err := importBatches(snapshot, readbackDirectory, remote)
+	upload, err := importUploadBatch(snapshot, remote)
 	if err != nil {
 		return ImportReceipt{}, err
 	}
@@ -103,7 +108,7 @@ func (c *SFTPClient) TransferImport(ctx context.Context, connection Connection, 
 	if err != nil || current.Digest != sourceDigest || current.FileCount != snapshot.FileCount || current.TotalBytes != snapshot.TotalBytes {
 		return ImportReceipt{}, fmt.Errorf("import source changed while uploading: %v", err)
 	}
-	if err := c.runSFTP(ctx, connection, download); err != nil {
+	if err := c.readback(ctx, connection, snapshot.Entries, remote, readbackDirectory); err != nil {
 		return ImportReceipt{}, fmt.Errorf("read back bounded import: %w", err)
 	}
 	for _, entry := range snapshot.Entries {
@@ -156,40 +161,37 @@ func sftpArguments(connection Connection) []string {
 	return append(arguments, "-q", "-b", "-", "-P", strconv.Itoa(int(connection.Port)), "boxwarden@"+address)
 }
 
-func importBatches(snapshot importx.Snapshot, readbackDirectory, remote string) ([]byte, []byte, error) {
-	if !safeSFTPPath(snapshot.Directory) || !safeSFTPPath(readbackDirectory) || !safeSFTPPath(remote) {
-		return nil, nil, fmt.Errorf("import path cannot be represented safely in SFTP batch")
+func importUploadBatch(snapshot importx.Snapshot, remote string) ([]byte, error) {
+	if !safeSFTPPath(snapshot.Directory) || !safeSFTPPath(remote) {
+		return nil, fmt.Errorf("import path cannot be represented safely in SFTP batch")
 	}
-	var upload, download strings.Builder
+	var upload strings.Builder
 	// macOS OpenSSH sftp accepts only `mkdir path`. Ignore an existing
 	// transaction directory on retry, then require that it is traversable.
 	upload.WriteString("-mkdir " + quoteSFTPPath(remote) + "\ncd " + quoteSFTPPath(remote) + "\n")
 	for _, entry := range snapshot.Entries {
 		remotePath := remote + "/" + entry.Path
 		if !safeSFTPPath(remotePath) {
-			return nil, nil, fmt.Errorf("unsafe import entry path")
+			return nil, fmt.Errorf("unsafe import entry path")
 		}
 		if entry.Kind == "directory" {
 			upload.WriteString("-mkdir " + quoteSFTPPath(remotePath) + "\ncd " + quoteSFTPPath(remotePath) + "\n")
 			continue
 		}
 		if entry.Kind != "file" {
-			return nil, nil, fmt.Errorf("invalid import entry kind")
+			return nil, fmt.Errorf("invalid import entry kind")
 		}
 		localSource := filepath.Join(snapshot.Directory, filepath.FromSlash(entry.Path))
-		localReadback := filepath.Join(readbackDirectory, filepath.FromSlash(entry.Path))
-		if !safeSFTPPath(localSource) || !safeSFTPPath(localReadback) {
-			return nil, nil, fmt.Errorf("unsafe local import path")
+		if !safeSFTPPath(localSource) {
+			return nil, fmt.Errorf("unsafe local import path")
 		}
 		upload.WriteString("put -f " + quoteSFTPPath(localSource) + " " + quoteSFTPPath(remotePath) + "\n")
-		download.WriteString("get -f " + quoteSFTPPath(remotePath) + " " + quoteSFTPPath(localReadback) + "\n")
 	}
 	upload.WriteString("quit\n")
-	download.WriteString("quit\n")
-	if upload.Len() > maxImportBatchBytes || download.Len() > maxImportBatchBytes {
-		return nil, nil, fmt.Errorf("SFTP batch exceeds bound")
+	if upload.Len() > maxImportBatchBytes {
+		return nil, fmt.Errorf("SFTP batch exceeds bound")
 	}
-	return []byte(upload.String()), []byte(download.String()), nil
+	return []byte(upload.String()), nil
 }
 
 func safeSFTPPath(value string) bool {

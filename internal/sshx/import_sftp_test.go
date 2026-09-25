@@ -34,10 +34,11 @@ func TestSFTPImportRequiresMeasuredReadback(t *testing.T) {
 	connection := testConnection(t)
 	runner := &fakeRunner{onRun: func(Command) Result { return Result{} }}
 	client := newSFTPClient(runner)
+	client.readback = func(context.Context, Connection, []importx.Entry, string, string) error { return nil }
 	if _, err := client.TransferImport(context.Background(), connection, parent, importTestID, snapshot.Digest, "/home/boxwarden/workspaces/project"); err == nil {
 		t.Fatal("SFTP success without host readback was accepted")
 	}
-	if len(runner.commands) != 2 {
+	if len(runner.commands) != 1 {
 		t.Fatalf("SFTP command count = %d", len(runner.commands))
 	}
 	for _, command := range runner.commands {
@@ -59,24 +60,19 @@ func TestSFTPImportReadbackMatchesCapturedSource(t *testing.T) {
 		{"different", "changed\n", true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			runner := &fakeRunner{onRun: func(command Command) Result {
-				for _, line := range strings.Split(string(command.Stdin), "\n") {
-					if !strings.HasPrefix(line, "get -f ") {
-						continue
-					}
-					last := strings.LastIndex(line, "\"")
-					previous := strings.LastIndex(line[:last], "\"")
-					if last < 0 || previous < 0 {
-						t.Fatalf("malformed get command %q", line)
-					}
-					local := line[previous+1 : last]
-					if err := os.WriteFile(local, []byte(test.content), 0o600); err != nil {
-						t.Fatal(err)
+			runner := &fakeRunner{onRun: func(Command) Result { return Result{} }}
+			client := newSFTPClient(runner)
+			client.readback = func(_ context.Context, _ Connection, entries []importx.Entry, _, local string) error {
+				for _, entry := range entries {
+					if entry.Kind == "file" {
+						if err := os.WriteFile(filepath.Join(local, filepath.FromSlash(entry.Path)), []byte(test.content), 0o600); err != nil {
+							return err
+						}
 					}
 				}
-				return Result{}
-			}}
-			receipt, err := newSFTPClient(runner).TransferImport(context.Background(), connection, parent, importTestID, snapshot.Digest, "/home/boxwarden/workspaces/project")
+				return nil
+			}
+			receipt, err := client.TransferImport(context.Background(), connection, parent, importTestID, snapshot.Digest, "/home/boxwarden/workspaces/project")
 			if (err != nil) != test.wantErr {
 				t.Fatalf("receipt = %#v, err = %v", receipt, err)
 			}
@@ -92,7 +88,9 @@ func TestSFTPImportRejectsUnsafePathsAndChangedPin(t *testing.T) {
 	connection := testConnection(t)
 	runner := &fakeRunner{onRun: func(Command) Result { return Result{} }}
 	client := newSFTPClient(runner)
-	if _, _, err := importBatches(snapshot, filepath.Join(parent, "bad$path"), "/home/boxwarden/workspaces/project/boxwarden-import-"+importTestID); err == nil {
+	badSnapshot := snapshot
+	badSnapshot.Directory = filepath.Join(parent, "bad$path")
+	if _, err := importUploadBatch(badSnapshot, "/home/boxwarden/workspaces/project/boxwarden-import-"+importTestID); err == nil {
 		t.Fatal("unsafe local SFTP batch path was accepted")
 	}
 	if err := os.WriteFile(connection.KnownHostsFile, []byte("wrong host key\n"), 0o600); err != nil {
@@ -105,12 +103,12 @@ func TestSFTPImportRejectsUnsafePathsAndChangedPin(t *testing.T) {
 
 func TestSFTPImportBatchUsesQualifiedMacSyntax(t *testing.T) {
 	_, snapshot := sftpSnapshotFixture(t)
-	upload, _, err := importBatches(snapshot, "/private/tmp/boxwarden-readback", "/home/boxwarden/workspaces/project/boxwarden-import-"+importTestID)
+	upload, err := importUploadBatch(snapshot, "/home/boxwarden/workspaces/project/boxwarden-import-"+importTestID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	batch := string(upload)
-	if strings.Contains(batch, "mkdir -p") || strings.Count(batch, "-mkdir ") != 2 || strings.Count(batch, "\ncd ") != 2 || strings.Count(batch, "put -f ") != 1 {
+	if strings.Contains(batch, "mkdir -p") || strings.Contains(batch, "get -f ") || strings.Count(batch, "-mkdir ") != 2 || strings.Count(batch, "\ncd ") != 2 || strings.Count(batch, "put -f ") != 1 {
 		t.Fatalf("unsupported or non-checked SFTP mkdir syntax: %q", batch)
 	}
 }
