@@ -41,6 +41,12 @@ and `RECIPE` to `examples/v0.2-alpha-base.json` within it. Give each new
 session and workspace fresh names and UUIDs. Global flags precede the
 command:
 
+The optional `examples/v0.2-alpha-chatgpt.json` recipe adds a pinned official
+ARM64 ChatGPT package as a `prepare` step. Its helper checks the downloaded
+bytes, Debian package identity, and installed identity, and disables the
+package's optional apt source. This source path has targeted checks, but the
+ChatGPT recipe has not yet passed real-VM build or graphical acceptance.
+
 ```sh
 "$BW" --config "$CONFIG" doctor
 "$BW" --config "$CONFIG" --domain alpha alpha recipe check --recipe "$RECIPE" --iso "$ISO"

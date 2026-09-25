@@ -35,6 +35,18 @@ func writeRecipe(t *testing.T, contents string) string {
 	return path
 }
 
+func TestTrackedChatGPTRecipeUsesPinnedGuestPreparation(t *testing.T) {
+	path := filepath.Join("..", "..", "examples", "v0.2-alpha-chatgpt.json")
+	recipe, err := LoadRunnable(path)
+	if err != nil {
+		t.Fatalf("tracked ChatGPT recipe is not runnable: %v", err)
+	}
+	if len(recipe.Steps) != 1 || recipe.Steps[0].Phase != "prepare" ||
+		len(recipe.Steps[0].Argv) != 1 || recipe.Steps[0].Argv[0] != "/usr/local/libexec/boxwarden-install-pinned-chatgpt" {
+		t.Fatalf("tracked ChatGPT preparation changed: %+v", recipe.Steps)
+	}
+}
+
 func TestCanonicalIntentSeparatesSessionActionsFromReusableBase(t *testing.T) {
 	path := writeRecipe(t, validRecipe)
 	before, err := Load(path)

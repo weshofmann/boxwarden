@@ -679,8 +679,10 @@ Its Debian control metadata identifies `chatgpt` version `26.917.71314` for
 host and this package has not yet been installed in a guest. A recipe must
 check the downloaded bytes against the pinned digest before guest installation.
 The package's inspected `postinst` can add an OpenAI apt source for later
-updates; the build should disable that optional registration so a qualified
-base does not later pull a different ChatGPT package implicitly.
+updates. The source-tracked guest installer writes its documented opt-out
+before installation and refuses any ChatGPT apt source afterward, so a
+qualified base cannot silently adopt a later ChatGPT package. That policy
+still needs real-guest verification.
 
 The official guide says Computer Use is not yet available in the Linux
 preview. [OpenAI release notes](https://help.openai.com/en/articles/6825453-chatgpt-release-notes)

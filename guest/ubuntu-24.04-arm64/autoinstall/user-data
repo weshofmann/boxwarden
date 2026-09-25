@@ -78,6 +78,8 @@ autoinstall:
     - install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/finalize-golden.sh /target/usr/local/libexec/boxwarden-finalize-golden
     - "printf '%s  %s\\n' '__BOXWARDEN_RECIPE_HELPER_SHA256__' '/cdrom/boxwarden-artifacts/recipe-prepare.py' | sha256sum -c -"
     - install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/recipe-prepare.py /target/usr/local/libexec/boxwarden-recipe-prepare
+    - "printf '%s  %s\\n' '__BOXWARDEN_CHATGPT_INSTALLER_SHA256__' '/cdrom/boxwarden-artifacts/install-pinned-chatgpt.py' | sha256sum -c -"
+    - install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/install-pinned-chatgpt.py /target/usr/local/libexec/boxwarden-install-pinned-chatgpt
     - "printf '%s  %s\\n' '__BOXWARDEN_RECIPE_PAYLOAD_SHA256__' '/cdrom/boxwarden-artifacts/recipe-prepare.json' | sha256sum -c -"
     - install -d -o root -g root -m 0700 /target/var/lib/boxwarden
     - install -o root -g root -m 0600 /cdrom/boxwarden-artifacts/recipe-prepare.json /target/var/lib/boxwarden/recipe-prepare.json

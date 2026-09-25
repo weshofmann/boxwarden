@@ -173,10 +173,22 @@ prototype with material acceptance gaps, not an alpha-ready release.
   compatibility, a visible graphical window, and sign-in are unverified.
   The internal Data volume subsequently fell to about 13 GiB free; real-VM
   work remains paused under the host free-space floor.
+- The tracked ChatGPT alpha recipe now invokes a guest-only installer during
+  reusable-base preparation. The fixed guest definition and remastered ISO
+  bind that helper by digest. It checks the official version-specific package
+  URL, exact byte count and SHA-256, Debian identity, and installed identity;
+  it suppresses the package's optional apt-source registration. Four synthetic
+  helper tests, the fake-ISO mapping check, recipe and basebuild package tests,
+  shell syntax, and diff checks passed locally. This is source verification:
+  no guest installation, dependency resolution, or graphical launch has passed.
+  The internal Data volume is now about 12 GiB free. Per the operator's
+  direction, no further VM or temporary-file cleanup is planned; large host
+  qualification remains deferred until sufficient headroom is available.
 
 ## Remaining acceptance
 
-1. Qualify ordered `once` and `startup` phases in a fresh public real-VM flow,
+1. Qualify the pinned ChatGPT prepare step and ordered `once` and `startup`
+   phases in fresh public real-VM flows when host disk headroom is adequate;
    then design graphical-session handling for `launch` and waiting-for-sign-in
    behavior.
 2. Qualify a software-changing rebuild, replacement-sandbox reattachment,

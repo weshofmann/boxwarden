@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "source": {
+    "kind": "ubuntu-24.04.4-desktop-arm64",
+    "sha256": "c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"
+  },
+  "machine": {
+    "cpus": 4,
+    "memory_mib": 4096,
+    "system_disk_gib": 30
+  },
+  "apt_packages": ["git", "curl", "ca-certificates", "nodejs"],
+  "steps": [
+    {
+      "id": "install-chatgpt",
+      "phase": "prepare",
+      "argv": ["/usr/local/libexec/boxwarden-install-pinned-chatgpt"]
+    }
+  ],
+  "workspaces": [
+    {
+      "name": "project",
+      "mount": "/home/boxwarden/workspaces/project"
+    }
+  ],
+  "launch": []
+}

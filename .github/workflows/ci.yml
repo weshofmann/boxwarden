@@ -37,6 +37,7 @@ jobs:
           bash guest/ubuntu-24.04-arm64/tests/render-golden-seed.sh
           bash guest/ubuntu-24.04-arm64/tests/finalize-golden.sh
           bash guest/ubuntu-24.04-arm64/tests/remaster-golden-iso.sh
+          python3 guest/ubuntu-24.04-arm64/tests/install_chatgpt_test.py
 
       - name: Require a module for tracked Go source
         shell: bash
