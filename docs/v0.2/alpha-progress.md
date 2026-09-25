@@ -84,10 +84,17 @@ prototype with material acceptance gaps, not an alpha-ready release.
   controller cannot launch or stop a VM. The control frame can hold the
   canonical 64 KiB request, while launch publication retains its separate
   16 KiB limit. The full supervisor package, focused race and architecture
-  tests, vet, CI build, gofmt, and diff checks passed locally; hosted CI for
-  this increment is pending. The existing qualified generic base predates
-  this helper. Explicit retry/skip and real-VM qualification remain. Public
-  recipes still reject `once`, `reconfigure`,
+  tests, vet, CI build, gofmt, and diff checks passed locally;
+  [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36082416681)
+  passed. An explicit same-attempt retry now reconstructs the immutable argv
+  and original attempt ID, marks a crash-left reservation indeterminate before
+  retry, and uses a separate supervisor/owner route that admits only that
+  exact indeterminate intent. A completed guest claim can return its stored
+  receipt; an unresolved claim remains indeterminate. The full local Go suite,
+  focused race tests, vet, CLI build, gofmt, and diff checks passed for this
+  recovery source increment; hosted CI is pending. The existing qualified
+  generic base predates this helper. Explicit skip, public commands, and
+  real-VM qualification remain. Public recipes still reject `once`, `reconfigure`,
   `startup`, and `launch`. The helper also refuses desktop `launch` until its
   graphical environment is designed.
 - Internal free capacity was about 30 GiB at the latest check.
@@ -97,7 +104,7 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Remaining acceptance
 
-1. Add explicit action retry/skip and complete the public action route, then
+1. Add explicit skip and complete the public action route, then
    rebuild and qualify a new generic base. Enable guest-only `once`, explicit
    `reconfigure`, `startup`, and `launch` with visible retry/skip and truthful
    failure or waiting-for-sign-in states.

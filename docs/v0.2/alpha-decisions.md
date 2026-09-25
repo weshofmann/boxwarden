@@ -554,3 +554,20 @@ socket frame limit is 80 KiB. The launch request file keeps its independent
 16 KiB cap; broadening that publication gate would admit a different class of
 startup input. The architecture guard permits only the action protocol types
 and encoders in the two reviewed supervisor action files.
+
+## Explicit same-attempt recovery, 2026-09-25
+
+An interrupted host action remains indeterminate. A distinct `retry_action`
+control request is available only when a caller names the original attempt
+UUID. The host reconstructs the exact stored recipe argv and binding, checks
+the current running generation and fresh READY, and marks a crash-left
+reservation indeterminate before sending the retry. The retained owner
+independently admits only that indeterminate journal and rechecks it after the
+guest call. Ordinary `run_action` still accepts only a reserved attempt.
+
+The guest helper's durable claim is the replay boundary: it returns a stored
+success receipt when execution already completed, refuses a claim without a
+receipt, or executes if the original request never reached the guest. The
+host records success only after the exact receipt and fresh READY checks.
+A changed generation or recipe cannot turn the old attempt into a new command;
+explicit skip and public retry/skip UX remain separate work.
