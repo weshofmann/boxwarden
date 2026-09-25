@@ -20,7 +20,11 @@ prototype with material acceptance gaps, not an alpha-ready release.
   must precede rebuild/replacement, and that public `session start` must follow
   rebuild to run pending automatic actions. Both remain untested in this fresh
   ChatGPT workflow.
-- A fresh public ChatGPT base preparation from that exact source is now
+- Published `e4da704` corrected the public acceptance runbook and review
+  ledger for that order. Its [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36191518555)
+  passed. These source and documentation checks do not qualify the running
+  installer or its future clone.
+- A fresh public ChatGPT base preparation from published `c94c915` is now
   `installer-running` with one owned candidate. The two earlier timed-out
   candidates remain stopped as failed evidence. Neither a prepared base nor
   the ChatGPT package or window is qualified yet.
@@ -430,14 +434,17 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Remaining acceptance
 
-1. Diagnose the timed-out ChatGPT base preparation, correct the identified
-   cause, then qualify its pinned prepare step and ordered `once` and `startup`
-   phases in fresh public real-VM flows after current source gates pass;
-   then verify graphical launch and waiting-for-sign-in in an actual desktop
-   VM.
-2. Qualify a software-changing rebuild, replacement-sandbox reattachment,
-   desktop application launch, and the complete public synthetic workflow
-   from a separate fresh tracked-source sandbox.
+1. Require terminal success from the current fresh ChatGPT base preparation,
+   an exact stopped candidate, and a passed independent-clone qualification.
+   Then create a public session and verify ordered `once` and `startup`
+   actions, actual desktop launch, and waiting-for-sign-in without treating
+   management READY as application proof.
+2. Import the tracked synthetic project, verify it with an initial stopped
+   export while its original session/backend still owns the volume, then
+   qualify stop/start retention, software-changing rebuild with explicit
+   public start, replacement-sandbox reattachment, and a new independently
+   compared stopped export. Repeat the essential workflow from a separate
+   fresh tracked-source sandbox and volume.
 3. Run final source and real-host acceptance checks, resolve review findings,
    record limitations, and update the Draft PR. Wes's real provider sign-in
    and subjective GUI acceptance may remain human actions.
