@@ -128,9 +128,14 @@ mkdir -m 700 "$EXPORT_DEST"
 Set `EXPORT_UUID` from the successful export's printed transaction. The
 verify command reports `import: verified` only after the stopped backend,
 qualified disk, published whole-directory export, and captured source all
-match. Keep the VM stopped when finished. Rebuild, replacement reattachment,
-GUI acceptance, and a fresh independent repetition are tracked in
-[alpha progress](alpha-progress.md) until they pass the complete matrix.
+match. Complete this verification while the original importing session and
+backend still own the attachment: a rebuild changes backend identity, and a
+replacement changes session identity. After either transition, make a new
+stopped export and compare its bytes independently; the original import
+verification cannot be repeated against that new owner. Keep the VM stopped
+when finished. Rebuild, replacement reattachment, GUI acceptance, and a fresh
+independent repetition are tracked in [alpha progress](alpha-progress.md)
+until they pass the complete matrix.
 
 For the pending software-changing rebuild trial, the tracked
 `examples/v0.2-alpha-chatgpt-jq.json` recipe retains the ChatGPT preparation,
@@ -147,8 +152,11 @@ the public command:
   --guest-definition "$SOURCE_ROOT/guest/ubuntu-24.04-arm64" \
   --openssl "$OPENSSL" --openssl-sha256 "$OPENSSL_SHA256" \
   --xorriso "$XORRISO" --xorriso-sha256 "$XORRISO_SHA256" "$SESSION"
+"$BW" --config "$CONFIG" --domain alpha session start "$SESSION"
 ```
 
-This command and the subsequent workspace byte comparison still require a
-fresh real-host qualification. Do not infer retained data or a usable desktop
-from the command's exit status alone.
+Rebuild reports management state but does not invoke the recipe's automatic
+`once` and `startup` actions. Require the subsequent start to report
+`automatic-actions: complete`, then check the workspace bytes and actual GUI.
+These commands still require a fresh real-host qualification. Do not infer
+retained data or a usable desktop from rebuild's exit status alone.

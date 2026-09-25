@@ -68,3 +68,13 @@ old 90-minute cap without a virtual clock. Targeted serial/basebuild tests,
 the full local Go suite, and [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36188021072)
 passed. A fresh real installer attempt is still running; this review does
 not qualify it.
+
+At published `5c686d1`, a separate read-only audit followed the public
+ChatGPT recipe, start, action, workspace, rebuild, replacement, and export
+routes. It found no new confirmed Critical or Important source defect. The
+import verifier binds the original session and backend, so the initial
+stopped export and verification must precede rebuild or replacement. A later
+owner can make a new stopped export for independent byte comparison. Rebuild
+reports management state but does not invoke automatic actions; public
+`session start` must follow it before checking action completion and the GUI.
+These are acceptance-order findings, not real-host qualification.

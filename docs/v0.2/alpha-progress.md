@@ -13,6 +13,13 @@ prototype with material acceptance gaps, not an alpha-ready release.
   passed afterward. [Hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36188021072)
   passed its deterministic matrix. Independent read-only delta review found
   no Critical or Important issue; real installer success remains unproved.
+- Published `5c686d1` updated the sanitized progress, review, and quickstart
+  records; its [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36190652530)
+  passed. A read-only public-path audit of that head found no new Critical or
+  Important source defect. It established that stopped import verification
+  must precede rebuild/replacement, and that public `session start` must follow
+  rebuild to run pending automatic actions. Both remain untested in this fresh
+  ChatGPT workflow.
 - A fresh public ChatGPT base preparation from that exact source is now
   `installer-running` with one owned candidate. The two earlier timed-out
   candidates remain stopped as failed evidence. Neither a prepared base nor
@@ -23,9 +30,11 @@ prototype with material acceptance gaps, not an alpha-ready release.
   retained-workspace loop remain pending.
 - Next: require the builder's terminal success, stopped candidate, passed
   independent-clone qualification, and healthy host doctor before public
-  session create. Then exercise graphical launch, import, stop/start,
-  software-changing rebuild, replacement attach, stopped export, and a
-  separate fresh repeat. Real sign-in remains a human acceptance action.
+  session create. Then exercise graphical launch, import, initial stopped
+  export and import verification, stop/start, software-changing rebuild and
+  explicit start, replacement attach, a second stopped export with independent
+  byte comparison, and a separate fresh repeat. Real sign-in remains a human
+  acceptance action.
 - Current external image storage remains in use. Relocation is deferred until
   Wes supplies a separate disk and explicit direction. No capacity guard is
   currently blocking the running attempt.
