@@ -55,6 +55,30 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      - name: Verify alpha guest and VM helper sources
+        if: ${{ hashFiles('go.mod') != '' }}
+        shell: bash
+        run: |
+          python3 guest/ubuntu-24.04-arm64/tests/recipe_prepare_test.py
+          python3 tools/alpha-inspector/fixture_contract_test.py
+          python3 tools/alpha-inspector/kernel_image_test.py
+          python3 tools/alpha-inspector/pack_initramfs_test.py
+          python3 tools/alpha-inspector/run_boot_probe_test.py
+          python3 tools/alpha-formatter/pack_initramfs_test.py
+          python3 tools/alpha-vm-queue-test.py
+          bash tools/alpha-inspector/disk_admission_test.sh
+          scratch="$(mktemp -d "$RUNNER_TEMP/boxwarden-alpha-source.XXXXXX")"
+          trap 'rm -rf -- "$scratch"' EXIT
+          python3 tools/alpha-formatter/bind_root.py /private/tmp/boxwarden-alpha-ci-state alpha "$scratch/binding.swift"
+          swiftc -module-cache-path "$scratch/inspector-swift-cache" \
+            -o "$scratch/alpha-inspector-host" tools/alpha-inspector/main.swift tools/alpha-inspector/boot.swift
+          swiftc -D MANAGED_BOUND -module-cache-path "$scratch/formatter-swift-cache" \
+            -o "$scratch/alpha-formatter-host" tools/alpha-formatter/main.swift tools/alpha-formatter/boot.swift "$scratch/binding.swift"
+          GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+            go build -o "$scratch/alpha-inspector-guest" ./tools/alpha-inspector/guest
+          GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+            go build -o "$scratch/alpha-formatter-guest" ./tools/alpha-formatter/guest
+
       - name: Verify gofmt
         if: ${{ hashFiles('go.mod') != '' }}
         run: test -z "$(gofmt -l $(git ls-files -- '*.go'))"

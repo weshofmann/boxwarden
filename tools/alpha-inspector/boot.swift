@@ -68,13 +68,14 @@ private final class SerialPump {
 }
 
 private func requestAndForceStop(_ vm: VZVirtualMachine, queue: DispatchQueue, observer: StopObserver) throws {
-    if vm.state == .stopped { return }
+    if queue.sync(execute: { vm.state == .stopped }) { return }
     queue.async {
         if vm.canRequestStop {
             try? vm.requestStop()
         }
     }
-    if observer.stopped.wait(timeout: .now() + .seconds(3)) == .success, vm.state == .stopped {
+    if observer.stopped.wait(timeout: .now() + .seconds(3)) == .success,
+       queue.sync(execute: { vm.state == .stopped }) {
         return
     }
     let forced = DispatchSemaphore(value: 0)
@@ -88,9 +89,9 @@ private func requestAndForceStop(_ vm: VZVirtualMachine, queue: DispatchQueue, o
     guard forced.wait(timeout: .now() + .seconds(5)) == .success else {
         throw BootFailure.stopTimeout
     }
-    if vm.state != .stopped {
+    if !queue.sync(execute: { vm.state == .stopped }) {
         guard observer.stopped.wait(timeout: .now() + .seconds(5)) == .success,
-              vm.state == .stopped else {
+              queue.sync(execute: { vm.state == .stopped }) else {
             throw BootFailure.stopTimeout
         }
     }
@@ -104,10 +105,13 @@ func bootProof(_ prepared: PreparedConfiguration) throws {
         try requireExportSnapshotDisk(prepared.diskURL, expected: expected)
     }
     let queue = DispatchQueue(label: "boxwarden.alpha.inspector.vm")
-    let vm = VZVirtualMachine(configuration: prepared.configuration, queue: queue)
     let observer = StopObserver()
-    vm.delegate = observer
-    guard vm.networkDevices.isEmpty, vm.state == .stopped else {
+    let vm = queue.sync {
+        let vm = VZVirtualMachine(configuration: prepared.configuration, queue: queue)
+        vm.delegate = observer
+        return vm
+    }
+    guard queue.sync(execute: { vm.networkDevices.isEmpty && vm.state == .stopped }) else {
         throw BootFailure.unexpectedState
     }
 
@@ -117,7 +121,7 @@ func bootProof(_ prepared: PreparedConfiguration) throws {
     consolePump.start()
     exportPump.start()
     defer {
-        if vm.state != .stopped {
+        if !queue.sync(execute: { vm.state == .stopped }) {
             try? requestAndForceStop(vm, queue: queue, observer: observer)
         }
         try? prepared.consoleOutput.fileHandleForWriting.close()
@@ -145,7 +149,8 @@ func bootProof(_ prepared: PreparedConfiguration) throws {
         throw BootFailure.stopTimeout
     }
     if let stopError = observer.error { throw stopError }
-    guard vm.state == .stopped, vm.networkDevices.isEmpty else {
+    let (vmStopped, networkDeviceCount) = queue.sync { (vm.state == .stopped, vm.networkDevices.count) }
+    guard vmStopped, networkDeviceCount == 0 else {
         throw BootFailure.unexpectedState
     }
 
@@ -163,7 +168,7 @@ func bootProof(_ prepared: PreparedConfiguration) throws {
 
     var evidence: [String: Any] = [
         "vm_state": "stopped",
-        "runtime_network_devices": vm.networkDevices.count,
+        "runtime_network_devices": networkDeviceCount,
         "console_bytes": consolePump.count,
         "export_bytes": exportPump.count,
     ]

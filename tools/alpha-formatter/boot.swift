@@ -71,11 +71,12 @@ private final class SerialPump {
 }
 
 private func forceStop(_ vm: VZVirtualMachine, queue: DispatchQueue, observer: StopObserver) throws {
-    if vm.state == .stopped { return }
+    if queue.sync(execute: { vm.state == .stopped }) { return }
     queue.async {
         if vm.canRequestStop { try? vm.requestStop() }
     }
-    if observer.stopped.wait(timeout: .now() + .seconds(3)) == .success, vm.state == .stopped {
+    if observer.stopped.wait(timeout: .now() + .seconds(3)) == .success,
+       queue.sync(execute: { vm.state == .stopped }) {
         return
     }
     let forced = DispatchSemaphore(value: 0)
@@ -89,9 +90,9 @@ private func forceStop(_ vm: VZVirtualMachine, queue: DispatchQueue, observer: S
     guard forced.wait(timeout: .now() + .seconds(5)) == .success else {
         throw RunFailure.stopTimeout
     }
-    if vm.state != .stopped {
+    if !queue.sync(execute: { vm.state == .stopped }) {
         guard observer.stopped.wait(timeout: .now() + .seconds(5)) == .success,
-              vm.state == .stopped else {
+              queue.sync(execute: { vm.state == .stopped }) else {
             throw RunFailure.stopTimeout
         }
     }
@@ -149,10 +150,13 @@ private struct RunEvidence: Encodable {
 
 func runFormatterVM(_ prepared: PreparedFormatter) throws {
     let queue = DispatchQueue(label: "boxwarden.alpha.formatter.vm")
-    let vm = VZVirtualMachine(configuration: prepared.configuration, queue: queue)
     let observer = StopObserver()
-    vm.delegate = observer
-    guard vm.state == .stopped, vm.networkDevices.isEmpty,
+    let vm = queue.sync {
+        let vm = VZVirtualMachine(configuration: prepared.configuration, queue: queue)
+        vm.delegate = observer
+        return vm
+    }
+    guard queue.sync(execute: { vm.state == .stopped && vm.networkDevices.isEmpty }),
           prepared.configuration.storageDevices.count == 1,
           !prepared.diskAttachment.isReadOnly else {
         throw RunFailure.unexpectedState
@@ -165,7 +169,7 @@ func runFormatterVM(_ prepared: PreparedFormatter) throws {
     console.start()
     report.start()
     defer {
-        if vm.state != .stopped {
+        if !queue.sync(execute: { vm.state == .stopped }) {
             do {
                 try forceStop(vm, queue: queue, observer: observer)
             } catch {
@@ -193,7 +197,7 @@ func runFormatterVM(_ prepared: PreparedFormatter) throws {
         throw RunFailure.stopTimeout
     }
     if let stopError = observer.error { throw stopError }
-    guard vm.state == .stopped, vm.networkDevices.isEmpty else {
+    guard queue.sync(execute: { vm.state == .stopped && vm.networkDevices.isEmpty }) else {
         throw RunFailure.unexpectedState
     }
     try prepared.consoleOutput.fileHandleForWriting.close()
