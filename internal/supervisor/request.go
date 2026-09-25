@@ -13,11 +13,14 @@ import (
 )
 
 const (
-	requestName        = "supervisor-request.json"
-	socketName         = "supervisor.sock"
-	lockName           = "generation.lock"
-	maxDiagnosticBytes = 2048
-	maxControlBytes    = 16 << 10
+	requestName           = "supervisor-request.json"
+	socketName            = "supervisor.sock"
+	lockName              = "generation.lock"
+	maxDiagnosticBytes    = 2048
+	maxLaunchRequestBytes = 16 << 10
+	// One canonical action request can be 64 KiB; the typed control envelope
+	// has a separate 80 KiB frame ceiling. Other actions retain their own bounds.
+	maxControlBytes = 80 << 10
 )
 
 type Binding struct{ Domain, SessionID, BackendKind, BackendObject, Generation string }
@@ -99,7 +102,7 @@ func validLaunchRequest(r LaunchRequest) error {
 		return fmt.Errorf("runtime directory does not match exact binding")
 	}
 	data, err := json.Marshal(r)
-	if err != nil || len(data) > maxControlBytes {
+	if err != nil || len(data) > maxLaunchRequestBytes {
 		return fmt.Errorf("encoded launch request exceeds bound")
 	}
 	return nil
@@ -158,9 +161,12 @@ func readExactRequestFile(path string) (LaunchRequest, error) {
 		return r, err
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, maxControlBytes+1))
+	data, err := io.ReadAll(io.LimitReader(file, maxLaunchRequestBytes+1))
 	if err != nil {
 		return r, err
+	}
+	if len(data) > maxLaunchRequestBytes {
+		return r, fmt.Errorf("encoded launch request exceeds bound")
 	}
 	if err = decodeExact(data, &r); err != nil {
 		return r, err

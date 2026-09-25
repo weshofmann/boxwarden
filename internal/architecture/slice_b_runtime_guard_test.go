@@ -113,6 +113,15 @@ func f(r protocol.ActionRequest, receipt protocol.ActionReceipt) { _, _, _ = pro
 import protocol "github.com/weshofmann/boxwarden/internal/guestproto"
 var _ = protocol.ActionRequest{Association: protocol.Association{}}
 func f(r protocol.ActionRequest) { _, _, _ = protocol.EncodeActionRequest(r) }`},
+		{"typed supervisor action control", "internal/supervisor/control.go", `package supervisor
+import protocol "github.com/weshofmann/boxwarden/internal/guestproto"
+var _ = protocol.ActionRequest{Association: protocol.Association{}}
+var _ = protocol.ActionReceipt{}
+func f(r protocol.ActionRequest, receipt protocol.ActionReceipt) { _, _, _ = protocol.EncodeActionRequest(r); _, _ = protocol.EncodeActionReceipt(r, receipt) }`},
+		{"exact action controller", "internal/supervisor/action_exact.go", `package supervisor
+import protocol "github.com/weshofmann/boxwarden/internal/guestproto"
+var _ = protocol.ActionRequest{}
+var _ = protocol.ActionReceipt{}`},
 		{"serial protocol foundation", "internal/serialx/runtime.go", `package serialx
 import protocol "github.com/weshofmann/boxwarden/internal/guestproto"
 var _ = protocol.MaxRequestBytes
@@ -262,7 +271,8 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 		}
 		if composition && !serialFoundation && strings.HasSuffix(importPath, "/internal/guestproto") &&
 			path != "internal/sessionruntime/owner.go" && path != "internal/session/action_service.go" &&
-			path != "internal/sessionruntime/action_owner.go" {
+			path != "internal/sessionruntime/action_owner.go" && path != "internal/supervisor/control.go" &&
+			path != "internal/supervisor/action_exact.go" {
 			p.add(path, "unauthorized Slice C import", importPath)
 		}
 	}
@@ -450,6 +460,13 @@ func allowedFoundationSelector(path, foundation, selector string) bool {
 			case "ActionRequest", "ActionReceipt", "Association", "EncodeActionRequest", "EncodeActionReceipt":
 				return true
 			}
+		case "internal/supervisor/control.go":
+			switch selector {
+			case "ActionRequest", "ActionReceipt", "Association", "EncodeActionRequest", "EncodeActionReceipt":
+				return true
+			}
+		case "internal/supervisor/action_exact.go":
+			return selector == "ActionRequest" || selector == "ActionReceipt"
 		}
 	}
 	if foundation == "serialx" && selector == "CreateInstallerRuntime" {
