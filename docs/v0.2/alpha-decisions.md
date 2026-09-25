@@ -31,6 +31,16 @@ guest cooperation only. The helper's durable claim-before-execution marker,
 closed environment, bounded execution, and host-side SSH admission remain
 separate work; this protocol does not enable the public recipe actions.
 
+The guest now has a root-owned claim store under its private Boxwarden state.
+After checking the installed association, the helper must durably publish an
+exact request-digest claim before a command can be considered for execution.
+The same attempt without a success receipt returns an indeterminate result;
+it cannot silently rerun. A success receipt is published separately with
+no-replace semantics and is returned on an exact retry. Corrupt, linked,
+foreign, or mismatched marker state fails closed. This is guest-local crash
+recovery, not host evidence of trustworthy execution. The host journal and a
+future fresh pinned SSH check remain independent requirements.
+
 ## Live workspace identity loss and caching experiment, 2026-09-24
 
 A separate fresh empty-volume run reached exact mount-bound READY, then
