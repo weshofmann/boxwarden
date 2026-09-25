@@ -537,3 +537,20 @@ The public alpha-only verify command requires the exact import and published
 export UUIDs. It obtains the qualified backend observer from the selected
 domain and prints `verified` only after the stopped-volume gate returns a
 matching durable journal. A private readback receipt alone cannot drive it.
+
+## Exact supervisor action control, 2026-09-25
+
+The common action service may request only a typed action on an already live
+exact generation. The supervisor checks the request's full domain, session,
+backend, and generation binding, requires a fresh READY snapshot before and
+after the retained owner's pinned SSH call, and validates the exact success
+receipt. The separate action controller resolves only the existing generation
+socket; it has no launch or stop method. An ambiguous or failed call remains
+an indeterminate journal attempt for explicit recovery rather than implicit
+replay.
+
+Canonical recipe argv can make a guest action request 64 KiB, so the control
+socket frame limit is 80 KiB. The launch request file keeps its independent
+16 KiB cap; broadening that publication gate would admit a different class of
+startup input. The architecture guard permits only the action protocol types
+and encoders in the two reviewed supervisor action files.

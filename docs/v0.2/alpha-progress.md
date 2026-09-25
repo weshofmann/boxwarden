@@ -71,14 +71,23 @@ prototype with material acceptance gaps, not an alpha-ready release.
   independently checks the exact running record, reserved attempt, stored
   recipe argv, and no-rebuild gate before any future SSH call. The complete
   local Go suite, affected runtime tests, targeted race test, vet, CI build,
-  gofmt, and diff checks passed after the correction; hosted CI is pending.
+  gofmt, and diff checks passed after the correction. Hosted CI passed for
+  [owner admission](https://github.com/weshofmann/boxwarden/actions/runs/36080934075).
   The retained owner now invokes the fixed pinned SSH action only after its
   own fresh READY and reserved-intent checks, then rechecks both after the
   receipt. The full runtime package, targeted race and architecture tests,
   vet, all-package compilation, gofmt, and diff checks passed for that
-  increment locally. The existing qualified generic base predates this
-  helper. The typed supervisor control RPC, explicit retry/skip, and real-VM
-  qualification remain. Public recipes still reject `once`, `reconfigure`,
+  increment locally; [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36081366044)
+  passed. A typed supervisor RPC now carries the bounded action request and
+  receipt to that retained owner for the exact generation. It checks READY
+  before and after the call and validates the receipt. The action-only
+  controller cannot launch or stop a VM. The control frame can hold the
+  canonical 64 KiB request, while launch publication retains its separate
+  16 KiB limit. The full supervisor package, focused race and architecture
+  tests, vet, CI build, gofmt, and diff checks passed locally; hosted CI for
+  this increment is pending. The existing qualified generic base predates
+  this helper. Explicit retry/skip and real-VM qualification remain. Public
+  recipes still reject `once`, `reconfigure`,
   `startup`, and `launch`. The helper also refuses desktop `launch` until its
   graphical environment is designed.
 - Internal free capacity was about 30 GiB at the latest check.
@@ -88,7 +97,7 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Remaining acceptance
 
-1. Add the typed supervisor control RPC for exact host action attempts, then
+1. Add explicit action retry/skip and complete the public action route, then
    rebuild and qualify a new generic base. Enable guest-only `once`, explicit
    `reconfigure`, `startup`, and `launch` with visible retry/skip and truthful
    failure or waiting-for-sign-in states.
