@@ -64,11 +64,19 @@ prototype with material acceptance gaps, not an alpha-ready release.
   the guest call, and journals an exact success receipt digest. An interrupted
   call or changed readiness becomes indeterminate. Full session package tests,
   targeted race tests, vet, all-package compilation, gofmt, and diff checks
-  passed locally. The existing qualified generic base predates this helper.
-  The retained-owner control route, explicit retry/skip, and real-VM
-  qualification remain. Public recipes still reject `once`, `reconfigure`,
-  `startup`, and `launch`; desktop `launch` also refuses in the helper until
-  its graphical environment is designed.
+  passed locally. [Hosted CI for that source checkpoint](https://github.com/weshofmann/boxwarden/actions/runs/36080269429)
+  failed because the architecture guard had not admitted the new action
+  protocol import. A narrow guard correction now allows those selectors only
+  in the reviewed action service and owner admission files. The owner also
+  independently checks the exact running record, reserved attempt, stored
+  recipe argv, and no-rebuild gate before any future SSH call. The complete
+  local Go suite, affected runtime tests, targeted race test, vet, CI build,
+  gofmt, and diff checks passed after the correction; hosted CI is pending.
+  The existing qualified generic base predates this helper. The retained-owner
+  control route, explicit retry/skip, and real-VM qualification remain. Public
+  recipes still reject `once`, `reconfigure`, `startup`, and `launch`; desktop
+  `launch` also refuses in the helper until its graphical environment is
+  designed.
 - Internal free capacity was about 30 GiB at the latest check.
   The export guard previously required about 25.8 GiB. Check capacity before
   another expensive host trial and report any renewed shortfall; no further

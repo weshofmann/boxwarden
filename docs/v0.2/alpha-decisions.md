@@ -66,6 +66,15 @@ independently re-admit the exact reserved attempt before exposing its SSH
 credentials; it and explicit recovery are still pending. No public recipe
 action is enabled by these source increments.
 
+The retained owner's independent admission check now compares the exact
+running record, no-rebuild gate, reserved attempt, and immutable recipe argv
+against the proposed action request before the future control route can use
+the owner's credential. The older architecture guard allowed guest protocol
+types only at the bootstrap composition site; its file-specific allowlist was
+extended for the session action service and this owner check, while the
+backend remains barred from importing action protocol types. The owner control
+RPC and live SSH invocation are still separate work.
+
 ## Live workspace identity loss and caching experiment, 2026-09-24
 
 A separate fresh empty-volume run reached exact mount-bound READY, then
