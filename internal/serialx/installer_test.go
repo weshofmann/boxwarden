@@ -78,6 +78,26 @@ func TestInstallerRuntimeFixedOrderedExchange(t *testing.T) {
 	}
 }
 
+func TestInstallerWaitRequiresCallerDeadline(t *testing.T) {
+	host, guest := net.Pipe()
+	defer guest.Close()
+	runtime := newRuntimeKind(host, "attempt-1", "run-1")
+	defer runtime.Close()
+
+	result := make(chan error, 1)
+	go func() {
+		result <- runtime.InstallerWaitFor(context.Background(), "boxwarden@boxwarden-task0-run-1:")
+	}()
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "deadline") {
+			t.Fatalf("unbounded wait error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("unbounded installer wait was not rejected")
+	}
+}
+
 func TestInstallerRuntimeIgnoresMarkerBeforeFinalizer(t *testing.T) {
 	host, guest := net.Pipe()
 	defer guest.Close()

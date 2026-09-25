@@ -80,24 +80,23 @@ func (e *installerExchange) notify() {
 }
 
 // InstallerWaitFor recognizes only the bound prompt and fixed preparation and
-// clone-ready markers. It never returns console text to a caller.
+// clone-ready markers. The builder owns each phase's finite deadline; this
+// transport must not shorten it with an independent timeout. It never returns
+// console text to a caller.
 func (r *Runtime) InstallerWaitFor(ctx context.Context, marker string) error {
 	if r == nil || r.installer == nil {
 		return errors.New("installer serial runtime is required")
 	}
-	var limit time.Duration
 	switch marker {
 	case r.installer.expectedPrompt:
-		limit = 90 * time.Minute
 	case installerPreparedMarker:
-		limit = 40 * time.Minute
 	case installerReadyMarker:
-		limit = 10 * time.Minute
 	default:
 		return errors.New("unrecognized installer marker")
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, limit)
-	defer cancel()
+	if _, bounded := ctx.Deadline(); !bounded {
+		return errors.New("installer marker wait requires caller deadline")
+	}
 	for {
 		r.mu.Lock()
 		e := r.installer
@@ -117,8 +116,8 @@ func (r *Runtime) InstallerWaitFor(ctx context.Context, marker string) error {
 		}
 		select {
 		case <-wake:
-		case <-waitCtx.Done():
-			r.fail(fmt.Errorf("wait for installer marker: %w", waitCtx.Err()))
+		case <-ctx.Done():
+			r.fail(fmt.Errorf("wait for installer marker: %w", ctx.Err()))
 			return r.Err()
 		}
 	}

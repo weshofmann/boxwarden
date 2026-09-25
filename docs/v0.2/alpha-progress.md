@@ -344,17 +344,18 @@ prototype with material acceptance gaps, not an alpha-ready release.
   successful real installer.
 - A private binary built from clean published `cc1cdb9` passed host doctor
   and the public tracked ChatGPT recipe/ISO check. Two fresh invocations were
-  rejected before VM creation: the first supplied Homebrew's symlinked
-  `xorriso`, and the second supplied macOS LibreSSL without the required
-  SHA-512 crypt mode. An attempted detached shell run ended with its command
-  session before creating an attempt directory. The current retained command
-  session uses exact checked regular OpenSSL and xorriso executables. Its
-  fresh attempt is `installer-running` with an exact live Tart child; the
-  previous timed-out candidate remains stopped and immutable. No prepared
-  ChatGPT base is yet qualified. At the latest check, internal Data had about
-  74 GiB free, qualification state 97 GiB, and Tart store 255 GiB. Next:
-  observe the installed-guest marker and recipe step, then require
-  finalization and independent-clone qualification before cache admission.
+  rejected before VM creation because their auxiliary executables failed
+  admission. The subsequent fresh public attempt again ended at about 90
+  minutes in `installer-running`: the builder supplied a four-hour context,
+  but the serial marker wait independently imposed its old 90-minute limit.
+  The exact candidate is stopped; its failed journal, VM, and logs remain
+  private immutable evidence. No prepared ChatGPT base is qualified.
+  The serial wait now requires a bounded caller context and uses its deadline
+  without a second shorter timer. A regression check failed before the fix;
+  targeted serial and basebuild Go tests passed afterward. This is source
+  verification; a new attempt and independent-clone qualification remain.
+  At the last capacity check, internal Data had about 73 GiB free,
+  qualification state 97 GiB, and Tart store 254 GiB.
 - A tracked ChatGPT plus `jq` recipe is staged for a later software-changing
   rebuild. It retains the original startup action and workspace declaration;
   only the declared apt package set differs. The structural delta check,
