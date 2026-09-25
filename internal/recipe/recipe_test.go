@@ -1,6 +1,7 @@
 package recipe
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -255,5 +256,42 @@ func TestVerifyDigestChecksExactRegularFile(t *testing.T) {
 	}
 	if err := verifyDigest(filename, digest, int64(len("known input")+1)); err == nil {
 		t.Fatal("wrong size was accepted")
+	}
+}
+
+// Runnable action admission must reject commands that the fixed guest action
+// protocol cannot encode, before a recipe triggers base preparation or a VM.
+func TestLoadRunnableRejectsUnexecutableActionArgv(t *testing.T) {
+	cases := []struct {
+		name    string
+		phase   string
+		argv    []string
+		wantErr bool
+	}{
+		{name: "relative-once", phase: "once", argv: []string{"python3", "-V"}, wantErr: true},
+		{name: "noncanonical-startup", phase: "startup", argv: []string{"/usr/bin/../bin/python3"}, wantErr: true},
+		{name: "root-reconfigure", phase: "reconfigure", argv: []string{"/"}, wantErr: true},
+		{name: "control-in-executable", phase: "once", argv: []string{"/bin/true\n"}, wantErr: true},
+		{name: "oversized-envelope", phase: "startup", argv: []string{"/bin/true", strings.Repeat("a", 40000), strings.Repeat("b", 40000)}, wantErr: true},
+		{name: "relative-prepare-keeps-path-semantics", phase: "prepare", argv: []string{"python3", "-V"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			value := Recipe{Version: 1, Source: Source{Kind: sourceKind, SHA256: sourceSHA256},
+				Machine: Machine{CPUs: 2, MemoryMiB: 4096, SystemDiskGiB: 30},
+				Steps:   []Step{{ID: "do-thing", Phase: tc.phase, Argv: tc.argv}}}
+			raw, err := json.Marshal(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			filename := writeRecipe(t, string(raw))
+			if _, err := Load(filename); err != nil {
+				t.Fatalf("structurally valid recipe rejected: %v", err)
+			}
+			_, err = LoadRunnable(filename)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("runnable admission error = %v, want error %v", err, tc.wantErr)
+			}
+		})
 	}
 }

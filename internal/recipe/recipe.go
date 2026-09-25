@@ -143,6 +143,11 @@ func LoadRunnable(filename string) (Recipe, error) {
 		if step.Phase != "prepare" && step.Phase != "once" && step.Phase != "startup" && step.Phase != "reconfigure" {
 			return Recipe{}, fmt.Errorf("recipe phase %q is unsupported until session execution is available", step.Phase)
 		}
+		if step.Phase != "prepare" {
+			if err := validateRunnableActionArgv(step.Argv); err != nil {
+				return Recipe{}, fmt.Errorf("recipe action %q: %w", step.ID, err)
+			}
+		}
 	}
 	if len(value.Launch) != 0 {
 		return Recipe{}, errors.New("recipe launch actions are unsupported until session execution is available")
@@ -242,6 +247,22 @@ func validArgv(args []string) bool {
 		}
 	}
 	return true
+}
+
+// The action wire envelope contains domain, session, backend, generation, and
+// attempt bindings in addition to argv. Reserve 4 KiB for those bounded
+// fields so an admitted action always fits the 64 KiB request limit.
+func validateRunnableActionArgv(argv []string) error {
+	executable := argv[0]
+	if !path.IsAbs(executable) || path.Clean(executable) != executable || executable == "/" ||
+		strings.IndexFunc(executable, unicode.IsControl) >= 0 {
+		return errors.New("executable must be a canonical absolute guest path")
+	}
+	encoded, err := json.Marshal(argv)
+	if err != nil || len(encoded) > 60<<10 {
+		return errors.New("action arguments exceed the bounded request envelope")
+	}
+	return nil
 }
 
 func validMount(mount string) bool {
