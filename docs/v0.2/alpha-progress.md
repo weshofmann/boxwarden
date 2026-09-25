@@ -313,8 +313,21 @@ prototype with material acceptance gaps, not an alpha-ready release.
   attempt did **not** qualify a reusable base or ChatGPT installation.
 - After the failure, internal Data had about 73 GiB free, the qualification
   state 107 GiB, and the Tart store 262 GiB. Disk headroom is not the current
-  blocker. Current work is read-only diagnosis of the stopped candidate and
-  installer evidence before changing inputs or starting a fresh attempt.
+  blocker. Targeted read-only extraction of the stopped target's `dpkg.log`
+  found package unpack/configure activity from 16:49 through 18:01 UTC,
+  including upgrades in the final minute. The installer was doing package
+  work at timeout; the log does not establish why it was slow.
+- An idle 256 MiB incompressible, uncached benchmark measured about
+  466/428 MiB/s write/read on the direct external SSD and 279/258 MiB/s on
+  the encrypted qualification volume, with matching readback digests. A
+  temporary regular file in the encrypted Tart store read at about 355 MiB/s,
+  but two existing VM disk images read populated extents at only 3–4.4 MiB/s.
+  The USB SATA bridge negotiated 10 Gb/s. The severe slowdown is specific to
+  the VM disk images or their allocated extent layout; fragmentation and
+  copy-on-write overhead are hypotheses, not established causes. Temporary
+  benchmark files were removed. Current work is a bounded storage-pattern
+  test before choosing a storage or installer-timeout correction and starting
+  a fresh candidate. The failed candidate remains immutable evidence.
 
 ## Remaining acceptance
 
