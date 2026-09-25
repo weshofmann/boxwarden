@@ -35,9 +35,15 @@ prototype with material acceptance gaps, not an alpha-ready release.
   independent empty-volume trial and the published-source import trial both
   stopped with clean exact filesystem identity. The causal mechanism and
   long-run reliability are still unproven.
-- Guest-only recipe `once`, `reconfigure`, `startup`, and `launch` actions are
-  rejected until durable attempt, receipt, retry, and skip semantics exist.
-  Those records and the bounded guest executor are the current source work.
+- A private action-attempt journal now binds each reserved action to the
+  immutable recipe, exact session and backend, and start generation. It blocks
+  duplicate `once` attempts on a system, blocks same-generation replay of
+  other actions, and permits one terminal result with a receipt digest slot.
+  The session package tests, all-package compile check, targeted vet, gofmt,
+  and diff checks passed locally. Hosted CI for this source checkpoint is
+  pending. Fresh READY admission, guest receipt generation and checking,
+  explicit retry/skip, and execution are not yet wired. Public recipes still
+  reject `once`, `reconfigure`, `startup`, and `launch` actions.
 - Internal free capacity was about 31 GiB after the successful stopped export.
   The export guard previously required about 25.8 GiB. Check capacity before
   another expensive host trial and report any renewed shortfall; no further
@@ -45,9 +51,10 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Remaining acceptance
 
-1. Implement guest-only `once`, explicit `reconfigure`, `startup`, and `launch`
-   actions with bounded durable attempts, visible retry/skip, and truthful
-   failure or waiting-for-sign-in states.
+1. Bind the journal to fresh READY, implement the fixed guest receipt and
+   bounded executor, then enable guest-only `once`, explicit `reconfigure`,
+   `startup`, and `launch` with visible retry/skip and truthful failure or
+   waiting-for-sign-in states.
 2. Qualify a software-changing rebuild, replacement-sandbox reattachment,
    desktop application launch, and the complete public synthetic workflow
    from a separate fresh tracked-source sandbox.
