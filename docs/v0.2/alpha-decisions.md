@@ -635,3 +635,12 @@ automatic execution until explicit recovery. A later completed step cannot
 hide a missing predecessor. The planner does not execute guest code or change
 public recipe admission; the post-start orchestrator and status reporting are
 separate increments.
+
+The service now reads the exact session, recipe, and attempt set under one
+session lock. Its bounded runner replans after each checked receipt and stays
+bound to the record returned by start. Before reserving a `once` or `startup`
+attempt, the action service reloads the journal under the transition and
+session locks and requires that action to be the first pending step. An
+uncertain result stops the runner and leaves the original attempt available
+for explicit retry or deliberate stopped-session skip. Public start routing
+and admission remain closed until their output and status semantics land.

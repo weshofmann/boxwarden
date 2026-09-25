@@ -34,7 +34,13 @@ func ListActionAttempts(ctx context.Context, configured config.Domain, rawName s
 	if err != nil {
 		return nil, err
 	}
-	root, err := openSessionStateRoot(configured.StateRoot)
+	return listActionAttemptsForRecord(configured.StateRoot, record)
+}
+
+// listActionAttemptsForRecord requires the caller to hold the exact session
+// lock so the record and attempt set form one consistent planning snapshot.
+func listActionAttemptsForRecord(stateRoot string, record Record) ([]ActionAttempt, error) {
+	root, err := openSessionStateRoot(stateRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -82,13 +88,13 @@ func ListActionAttempts(ctx context.Context, configured config.Domain, rawName s
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	results = make([]ActionAttempt, 0, len(ids))
+	results := make([]ActionAttempt, 0, len(ids))
 	for _, id := range ids {
-		attempt, loadErr := LoadActionAttempt(configured.StateRoot, domainID, record.ID, id)
+		attempt, loadErr := LoadActionAttempt(stateRoot, record.Domain, record.ID, id)
 		if loadErr != nil {
 			return nil, fmt.Errorf("load exact action attempt %q: %w", id, loadErr)
 		}
-		if attempt.SessionName != string(name) {
+		if attempt.SessionName != string(record.Name) {
 			return nil, fmt.Errorf("action attempt %q names a different session", id)
 		}
 		results = append(results, attempt)

@@ -144,6 +144,11 @@ prototype with material acceptance gaps, not an alpha-ready release.
   Session and architecture tests, the session race test, vet, gofmt, and diff
   checks passed locally; hosted CI remains. `session start` does not invoke
   this planner yet.
+- The action service now has a bounded automatic runner. It reloads the exact
+  record, recipe, and attempts after each checked receipt; the reservation
+  path independently enforces the next `once`/`startup` step under locks.
+  Tests cover ordering, interruption without replay, and startup on a new
+  generation. Public start routing and recipe admission remain pending.
 - At the latest capacity check, the internal Data volume had about 16 GiB
   available, below the stopped-export guard. Host export and other large VM
   operations are deferred until headroom is restored; source work continues.

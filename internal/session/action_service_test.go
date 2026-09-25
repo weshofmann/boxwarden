@@ -88,6 +88,139 @@ func TestExecuteActionReservesBeforeGuestAndRecordsExactReceipt(t *testing.T) {
 	}
 }
 
+func TestExecuteActionEnforcesAutomaticPhaseOrderAtReservation(t *testing.T) {
+	root := sessionRoot(t)
+	record, value, _ := automaticPlanFixture(t)
+	digest, err := PublishRecipeIntent(root, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.RecipeIntentDigest = digest
+	if err := SaveRecord(root, record.Domain, record); err != nil {
+		t.Fatal(err)
+	}
+	control := &actionControlFake{now: time.Now()}
+	service := NewActionService(config.Domain{ID: record.Domain, StateRoot: root}, control)
+	service.now = func() time.Time { return control.now }
+	ids := []string{
+		"00000000-0000-4000-8000-000000000011",
+		"00000000-0000-4000-8000-000000000012",
+		"00000000-0000-4000-8000-000000000013",
+	}
+	service.newID = func() (string, error) {
+		if len(ids) == 0 {
+			t.Fatal("unexpected action attempt allocation")
+		}
+		id := ids[0]
+		ids = ids[1:]
+		return id, nil
+	}
+	if _, err := service.ExecuteAction(t.Context(), "dev", "startup", "startup-a"); err == nil || control.runs != 0 || len(ids) != 3 {
+		t.Fatalf("startup bypassed once actions: %v, runs=%d ids=%d", err, control.runs, len(ids))
+	}
+	if _, err := service.ExecuteAction(t.Context(), "dev", "once", "once-b"); err == nil || control.runs != 0 || len(ids) != 3 {
+		t.Fatalf("second once bypassed first: %v, runs=%d ids=%d", err, control.runs, len(ids))
+	}
+	for _, action := range []struct{ phase, id string }{{"once", "once-a"}, {"once", "once-b"}, {"startup", "startup-a"}} {
+		got, err := service.ExecuteAction(t.Context(), "dev", action.phase, action.id)
+		if err != nil || got.State != ActionAttemptSucceeded {
+			t.Fatalf("ordered %s/%s = %+v, %v", action.phase, action.id, got, err)
+		}
+	}
+	if control.runs != 3 || len(ids) != 0 {
+		t.Fatalf("ordered actions reached guest %d times; remaining IDs %d", control.runs, len(ids))
+	}
+	if _, err := service.ExecuteAction(t.Context(), "dev", "once", "once-a"); err == nil || control.runs != 3 {
+		t.Fatalf("completed once action replayed: %v", err)
+	}
+}
+
+func TestRunAutomaticActionsStopsAtUncertainAttemptAndResumesExactOrder(t *testing.T) {
+	root := sessionRoot(t)
+	record, value, _ := automaticPlanFixture(t)
+	digest, err := PublishRecipeIntent(root, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.RecipeIntentDigest = digest
+	if err := SaveRecord(root, record.Domain, record); err != nil {
+		t.Fatal(err)
+	}
+	control := &actionControlFake{now: time.Now()}
+	service := NewActionService(config.Domain{ID: record.Domain, StateRoot: root}, control)
+	service.now = func() time.Time { return control.now }
+	ids := []string{"00000000-0000-4000-8000-000000000021", "00000000-0000-4000-8000-000000000022", "00000000-0000-4000-8000-000000000023"}
+	service.newID = func() (string, error) {
+		id := ids[0]
+		ids = ids[1:]
+		return id, nil
+	}
+	control.run = func(request guestproto.ActionRequest) (guestproto.ActionReceipt, error) {
+		if request.ActionID == "once-b" {
+			return guestproto.ActionReceipt{}, errors.New("guest reply lost")
+		}
+		_, digest, err := guestproto.EncodeActionRequest(request)
+		if err != nil {
+			return guestproto.ActionReceipt{}, err
+		}
+		return guestproto.ActionReceipt{Version: guestproto.Version, Association: request.Association, Generation: request.Generation,
+			RecipeDigest: request.RecipeDigest, ActionID: request.ActionID, ActionPhase: request.ActionPhase,
+			AttemptID: request.AttemptID, RequestSHA256: digest, State: "succeeded"}, nil
+	}
+	done, err := service.RunAutomaticActions(t.Context(), record)
+	if err == nil || len(done) != 2 || done[0].ActionID != "once-a" || done[0].State != ActionAttemptSucceeded ||
+		done[1].ActionID != "once-b" || done[1].State != ActionAttemptIndeterminate || control.runs != 2 || len(ids) != 1 {
+		t.Fatalf("uncertain automatic run = %+v, %v; runs=%d ids=%d", done, err, control.runs, len(ids))
+	}
+	if done, err := service.RunAutomaticActions(t.Context(), record); !errors.Is(err, ErrAutomaticActionUnresolved) || len(done) != 0 || control.runs != 2 {
+		t.Fatalf("uncertain automatic action replayed: %+v, %v", done, err)
+	}
+}
+
+func TestRunAutomaticActionsExecutesOrderedStepsAndNewGenerationStartup(t *testing.T) {
+	root := sessionRoot(t)
+	record, value, _ := automaticPlanFixture(t)
+	digest, err := PublishRecipeIntent(root, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.RecipeIntentDigest = digest
+	if err := SaveRecord(root, record.Domain, record); err != nil {
+		t.Fatal(err)
+	}
+	control := &actionControlFake{now: time.Now()}
+	service := NewActionService(config.Domain{ID: record.Domain, StateRoot: root}, control)
+	service.now = func() time.Time { return control.now }
+	ids := []string{"00000000-0000-4000-8000-000000000031", "00000000-0000-4000-8000-000000000032", "00000000-0000-4000-8000-000000000033", "00000000-0000-4000-8000-000000000034"}
+	service.newID = func() (string, error) {
+		if len(ids) == 0 {
+			t.Fatal("unexpected action attempt allocation")
+		}
+		id := ids[0]
+		ids = ids[1:]
+		return id, nil
+	}
+	done, err := service.RunAutomaticActions(t.Context(), record)
+	if err != nil || len(done) != 3 || done[0].ActionID != "once-a" || done[1].ActionID != "once-b" || done[2].ActionID != "startup-a" || control.runs != 3 {
+		t.Fatalf("ordered automatic run = %+v, %v; runs=%d", done, err, control.runs)
+	}
+	if again, err := service.RunAutomaticActions(t.Context(), record); err != nil || len(again) != 0 || control.runs != 3 {
+		t.Fatalf("completed generation replayed: %+v, %v; runs=%d", again, err, control.runs)
+	}
+	old := record
+	record.StartGeneration = "00000000-0000-4000-8000-000000000004"
+	if err := SaveRecord(root, record.Domain, record); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RunAutomaticActions(t.Context(), old); err == nil || control.runs != 3 {
+		t.Fatalf("stale generation was accepted: %v", err)
+	}
+	done, err = service.RunAutomaticActions(t.Context(), record)
+	if err != nil || len(done) != 1 || done[0].ActionID != "startup-a" || done[0].Generation != record.StartGeneration || control.runs != 4 {
+		t.Fatalf("new generation startup = %+v, %v; runs=%d", done, err, control.runs)
+	}
+}
+
 func TestExecuteActionRejectsStaleReadinessBeforeReservation(t *testing.T) {
 	root, fixture := actionAttemptFixture(t)
 	control := &actionControlFake{now: time.Now(), mutateSnapshot: func(_ int, s *supervisor.Snapshot) { s.ProbeOK = false }}

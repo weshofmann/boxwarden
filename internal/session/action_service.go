@@ -24,9 +24,9 @@ type ActionControl interface {
 	RetryAction(context.Context, supervisor.Binding, guestproto.ActionRequest) (guestproto.ActionReceipt, error)
 }
 
-// ActionService owns the durable host transition around one guest-only step.
-// Public recipe admission stays closed until the explicit skip and public
-// action route are implemented and the new helper is qualified on a real VM.
+// ActionService owns the durable host transition around guest-only steps.
+// Public once/startup recipe admission stays closed until post-start routing
+// and status reporting expose the automatic runner honestly.
 type ActionService struct {
 	domain  config.Domain
 	control ActionControl
@@ -36,6 +36,48 @@ type ActionService struct {
 
 func NewActionService(configured config.Domain, control ActionControl) *ActionService {
 	return &ActionService{domain: configured, control: control, now: time.Now, newID: newSessionID}
+}
+
+// RunAutomaticActions advances only the exact session returned by start. It
+// reloads the durable plan after every checked receipt. ExecuteAction then
+// independently rechecks the next step under the transition and session
+// locks before reserving it, so a concurrent transition cannot turn a stale
+// plan into guest execution.
+func (s *ActionService) RunAutomaticActions(ctx context.Context, started Record) ([]ActionAttempt, error) {
+	if s == nil || s.control == nil {
+		return nil, fmt.Errorf("action service dependencies are required")
+	}
+	if started.Domain != s.domain.ID {
+		return nil, fmt.Errorf("automatic action session differs from selected domain")
+	}
+	completed := make([]ActionAttempt, 0)
+	for count := 0; count <= 128; count++ {
+		current, pending, err := LoadAutomaticActionPlan(ctx, s.domain, string(started.Name))
+		if err != nil {
+			return completed, fmt.Errorf("load automatic action plan: %w", err)
+		}
+		if current != started {
+			return completed, fmt.Errorf("automatic action session changed after start")
+		}
+		if len(pending) == 0 {
+			return completed, nil
+		}
+		if count == 128 {
+			return completed, fmt.Errorf("automatic action count exceeds recipe bound")
+		}
+		step := pending[0]
+		attempt, runErr := s.ExecuteAction(ctx, string(started.Name), step.Phase, step.ID)
+		if attempt.AttemptID != "" {
+			completed = append(completed, attempt)
+		}
+		if runErr != nil {
+			return completed, fmt.Errorf("automatic action %s/%s attempt %s: %w", step.Phase, step.ID, attempt.AttemptID, runErr)
+		}
+		if attempt.State != ActionAttemptSucceeded || attempt.ActionPhase != step.Phase || attempt.ActionID != step.ID {
+			return completed, fmt.Errorf("automatic action %s/%s returned no checked success", step.Phase, step.ID)
+		}
+	}
+	return completed, fmt.Errorf("automatic action count exceeds recipe bound")
 }
 
 // ExecuteAction runs one explicitly selected stored recipe step. It holds the
@@ -95,6 +137,19 @@ func (s *ActionService) ExecuteAction(ctx context.Context, rawName, phase, actio
 	}
 	if len(argv) == 0 {
 		return ActionAttempt{}, fmt.Errorf("action is absent from exact stored recipe")
+	}
+	if phase == "once" || phase == "startup" {
+		attempts, listErr := listActionAttemptsForRecord(s.domain.StateRoot, record)
+		if listErr != nil {
+			return ActionAttempt{}, fmt.Errorf("load exact automatic action journal: %w", listErr)
+		}
+		pending, planErr := PlanAutomaticActions(record, intent, attempts)
+		if planErr != nil {
+			return ActionAttempt{}, fmt.Errorf("plan automatic actions before reservation: %w", planErr)
+		}
+		if len(pending) == 0 || pending[0].Phase != phase || pending[0].ID != actionID {
+			return ActionAttempt{}, fmt.Errorf("action %s/%s is not the next automatic step", phase, actionID)
+		}
 	}
 	attemptID, err := s.newID()
 	if err != nil {

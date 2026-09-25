@@ -1,13 +1,47 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/recipe"
 )
+
+func TestLoadAutomaticActionPlanReadsExactDurableState(t *testing.T) {
+	root, attempt := actionAttemptFixture(t)
+	selected := config.Domain{ID: attempt.Domain, StateRoot: root}
+	record, pending, err := LoadAutomaticActionPlan(context.Background(), selected, attempt.SessionName)
+	if err != nil || record.ID != attempt.SessionID || len(pending) != 1 || pending[0].ID != attempt.ActionID {
+		t.Fatalf("initial durable plan = %+v, %+v, %v", record, pending, err)
+	}
+	if err := ReserveActionAttempt(root, attempt); err != nil {
+		t.Fatal(err)
+	}
+	_, pending, err = LoadAutomaticActionPlan(context.Background(), selected, attempt.SessionName)
+	if pending != nil || !errors.Is(err, ErrAutomaticActionUnresolved) {
+		t.Fatalf("reserved durable action was replayable: %+v, %v", pending, err)
+	}
+	succeeded := attempt
+	succeeded.State = ActionAttemptSucceeded
+	succeeded.ReceiptSHA256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	if err := advanceActionAttempt(root, attempt, succeeded); err != nil {
+		t.Fatal(err)
+	}
+	_, pending, err = LoadAutomaticActionPlan(context.Background(), selected, attempt.SessionName)
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("completed durable plan = %+v, %v", pending, err)
+	}
+	deadline, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if _, _, err := LoadAutomaticActionPlan(deadline, selected, attempt.SessionName); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("canceled plan read = %v", err)
+	}
+}
 
 func automaticPlanFixture(t *testing.T) (Record, recipe.Recipe, ActionAttempt) {
 	t.Helper()
