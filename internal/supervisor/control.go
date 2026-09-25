@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/weshofmann/boxwarden/internal/guestproto"
 )
 
 // controlIOTimeout caps snapshot RPC expiry as well as bounded request/response
@@ -31,24 +33,27 @@ const bootstrapTimeout = 4 * time.Minute
 const readyTimeout = 5 * time.Minute
 const inspectTimeout = 90 * time.Second
 const importTimeout = 11 * time.Minute
+const actionControlTimeout = 12 * time.Minute
 
 type controlRequest struct {
-	Version   int             `json:"version"`
-	Action    string          `json:"action"`
-	Binding   Binding         `json:"binding"`
-	ExpiresAt time.Time       `json:"expires_at"`
-	Packages  []string        `json:"packages,omitempty"`
-	Import    *ImportTransfer `json:"import,omitempty"`
+	Version     int                       `json:"version"`
+	Action      string                    `json:"action"`
+	Binding     Binding                   `json:"binding"`
+	ExpiresAt   time.Time                 `json:"expires_at"`
+	Packages    []string                  `json:"packages,omitempty"`
+	Import      *ImportTransfer           `json:"import,omitempty"`
+	GuestAction *guestproto.ActionRequest `json:"guest_action,omitempty"`
 }
 type controlResponse struct {
-	Version  int              `json:"version"`
-	Binding  Binding          `json:"binding"`
-	Snapshot Snapshot         `json:"snapshot"`
-	Error    string           `json:"error"`
-	Packages []PackageVersion `json:"packages,omitempty"`
-	Identity *GuestIdentity   `json:"identity,omitempty"`
-	Import   *ImportResult    `json:"import,omitempty"`
-	Stop     *StopOutcome     `json:"stop,omitempty"`
+	Version      int                       `json:"version"`
+	Binding      Binding                   `json:"binding"`
+	Snapshot     Snapshot                  `json:"snapshot"`
+	Error        string                    `json:"error"`
+	Packages     []PackageVersion          `json:"packages,omitempty"`
+	Identity     *GuestIdentity            `json:"identity,omitempty"`
+	Import       *ImportResult             `json:"import,omitempty"`
+	Stop         *StopOutcome              `json:"stop,omitempty"`
+	GuestReceipt *guestproto.ActionReceipt `json:"guest_receipt,omitempty"`
 }
 
 // PackageInspector is an optional read-only capability of a live runtime
@@ -62,13 +67,16 @@ type IdentityInspector interface {
 type Importer interface {
 	TransferImport(context.Context, ImportTransfer) (ImportResult, error)
 }
+type ActionRunner interface {
+	RunAction(context.Context, guestproto.ActionRequest) (guestproto.ActionReceipt, error)
+}
 
 func validControlAction(request controlRequest) bool {
 	switch request.Action {
 	case "snapshot", "bootstrap", "ready", "stop", "inspect_identity":
-		return len(request.Packages) == 0 && request.Import == nil
+		return len(request.Packages) == 0 && request.Import == nil && request.GuestAction == nil
 	case "inspect_packages":
-		if request.Import != nil || len(request.Packages) == 0 || len(request.Packages) > 32 {
+		if request.Import != nil || request.GuestAction != nil || len(request.Packages) == 0 || len(request.Packages) > 32 {
 			return false
 		}
 		seen := make(map[string]bool, len(request.Packages))
@@ -80,10 +88,23 @@ func validControlAction(request controlRequest) bool {
 		}
 		return true
 	case "transfer_import":
-		return len(request.Packages) == 0 && request.Import != nil && validImportTransfer(*request.Import)
+		return len(request.Packages) == 0 && request.GuestAction == nil && request.Import != nil && validImportTransfer(*request.Import)
+	case "run_action":
+		if len(request.Packages) != 0 || request.Import != nil || request.GuestAction == nil || request.GuestAction.ActionPhase == "launch" {
+			return false
+		}
+		_, _, err := guestproto.EncodeActionRequest(*request.GuestAction)
+		return err == nil
 	default:
 		return false
 	}
+}
+
+func exactControlActionBinding(binding Binding, request guestproto.ActionRequest) bool {
+	return request.Association == (guestproto.Association{
+		Domain: binding.Domain, SessionID: binding.SessionID,
+		BackendKind: binding.BackendKind, BackendObject: binding.BackendObject,
+	}) && request.Generation == binding.Generation
 }
 
 func validImportTransfer(spec ImportTransfer) bool {
@@ -222,7 +243,8 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 	if err := decodeExact(data, &request); err != nil {
 		return
 	}
-	if request.Version != 1 || request.Binding != binding || !validControlAction(request) {
+	if request.Version != 1 || request.Binding != binding || !validControlAction(request) ||
+		request.Action == "run_action" && !exactControlActionBinding(binding, *request.GuestAction) {
 		return
 	}
 	if request.Action == "bootstrap" {
@@ -235,6 +257,8 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 		serverDeadline = acceptedAt.Add(inspectTimeout)
 	} else if request.Action == "transfer_import" {
 		serverDeadline = acceptedAt.Add(importTimeout)
+	} else if request.Action == "run_action" {
+		serverDeadline = acceptedAt.Add(actionControlTimeout)
 	}
 	now := time.Now()
 	if request.ExpiresAt.IsZero() || !request.ExpiresAt.After(now) || request.ExpiresAt.After(serverDeadline) {
@@ -326,6 +350,20 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 				response.Import = &result
 			}
 		}
+	} else if request.Action == "run_action" {
+		before := owner.Snapshot(operationCtx)
+		if before.Binding != binding || !snapshotReady(before) {
+			response.Error = "exact runtime is not ready for action"
+		} else if runner, ok := owner.(ActionRunner); !ok {
+			response.Error = "action runner is unavailable"
+		} else {
+			receipt, actionErr := runner.RunAction(operationCtx, *request.GuestAction)
+			if actionErr != nil {
+				response.Error = "guest action failed"
+			} else {
+				response.GuestReceipt = &receipt
+			}
+		}
 	}
 	response.Snapshot = owner.Snapshot(operationCtx)
 	if request.Action == "snapshot" && operationCtx.Err() != nil {
@@ -354,6 +392,15 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 			response.Error = "import transfer result or readiness changed"
 		}
 	}
+	if request.Action == "run_action" {
+		_, receiptErr := encodeControlActionReceipt(*request.GuestAction, response.GuestReceipt)
+		if !exactAfterBinding || !snapshotReady(response.Snapshot) || receiptErr != nil {
+			response.GuestReceipt = nil
+			if response.Error == "" {
+				response.Error = "action receipt or readiness changed"
+			}
+		}
+	}
 	data, err = encodeControlResponse(response)
 	if err != nil {
 		return
@@ -364,6 +411,13 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 func validImportResult(spec ImportTransfer, result *ImportResult) bool {
 	return result != nil && result.Digest == spec.SourceDigest && result.FileCount > 0 && result.FileCount <= 256 &&
 		result.TotalBytes >= 0 && result.TotalBytes <= 16<<20 && result.RemotePath == spec.MountPath+"/boxwarden-import-"+spec.TransactionID
+}
+
+func encodeControlActionReceipt(request guestproto.ActionRequest, receipt *guestproto.ActionReceipt) ([]byte, error) {
+	if receipt == nil {
+		return nil, fmt.Errorf("action receipt is missing")
+	}
+	return guestproto.EncodeActionReceipt(request, *receipt)
 }
 
 // Measure the complete encoded response: JSON escaping can expand each
@@ -542,6 +596,31 @@ func (c *Client) TransferImport(ctx context.Context, binding Binding, spec Impor
 	}
 	return *response.Import, nil
 }
+
+func (c *Client) RunAction(ctx context.Context, binding Binding, action guestproto.ActionRequest) (guestproto.ActionReceipt, error) {
+	if !exactControlActionBinding(binding, action) {
+		return guestproto.ActionReceipt{}, fmt.Errorf("action differs from exact supervisor binding")
+	}
+	action.Argv = append([]string(nil), action.Argv...)
+	request := controlRequest{Action: "run_action", GuestAction: &action}
+	if !validControlAction(request) {
+		return guestproto.ActionReceipt{}, fmt.Errorf("invalid bounded action request")
+	}
+	response, err := c.callRequest(ctx, binding, request)
+	if err != nil {
+		return guestproto.ActionReceipt{}, err
+	}
+	if err := c.validateSnapshot(response.Snapshot); err != nil {
+		return guestproto.ActionReceipt{}, err
+	}
+	if !snapshotReady(response.Snapshot) {
+		return guestproto.ActionReceipt{}, fmt.Errorf("exact action result is not ready")
+	}
+	if _, err := encodeControlActionReceipt(action, response.GuestReceipt); err != nil {
+		return guestproto.ActionReceipt{}, fmt.Errorf("exact action receipt is invalid: %w", err)
+	}
+	return *response.GuestReceipt, nil
+}
 func (c *Client) call(ctx context.Context, binding Binding, action string) (controlResponse, error) {
 	return c.callWithPackages(ctx, binding, action, nil)
 }
@@ -590,6 +669,8 @@ func (c *Client) callRequest(ctx context.Context, binding Binding, requestBody c
 		timeout = inspectTimeout
 	} else if action == "transfer_import" {
 		timeout = importTimeout
+	} else if action == "run_action" {
+		timeout = actionControlTimeout
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
