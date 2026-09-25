@@ -77,6 +77,14 @@ func TestOwnerActionAdmissionRechecksExactReservedRecipeStep(t *testing.T) {
 	if err := admitOwnerAction(f.root, "dev", f.request.Binding, request); err == nil {
 		t.Fatal("terminal attempt admitted for guest execution")
 	}
+	if err := admitOwnerActionState(f.root, "dev", f.request.Binding, request, session.ActionAttemptIndeterminate); err != nil {
+		t.Fatalf("exact explicit retry refused: %v", err)
+	}
+	changed := request
+	changed.Argv = []string{"/usr/bin/false"}
+	if err := admitOwnerActionState(f.root, "dev", f.request.Binding, changed, session.ActionAttemptIndeterminate); err == nil {
+		t.Fatal("changed argv admitted for explicit retry")
+	}
 }
 
 func TestOwnerActionRunsOnlyReservedStepWhileExactRuntimeStaysReady(t *testing.T) {
@@ -148,5 +156,26 @@ func TestOwnerActionRunsOnlyReservedStepWhileExactRuntimeStaysReady(t *testing.T
 	}
 	if _, err := f.owner.RunAction(context.Background(), request); err == nil || actionClient.calls != 2 {
 		t.Fatalf("lost READY reached SSH: %v", err)
+	}
+	client.probe = nil
+	attempt.State = session.ActionAttemptIndeterminate
+	writePrivateImportFixture(t, f.root, filepath.Join("action-attempts", f.record.ID), request.AttemptID+".json", attempt)
+	actionClient.run = func(request guestproto.ActionRequest) (guestproto.ActionReceipt, error) {
+		if err := admitOwnerActionState(f.root, "dev", f.request.Binding, request, session.ActionAttemptIndeterminate); err != nil {
+			t.Fatalf("retry reached SSH without exact indeterminate admission: %v", err)
+		}
+		_, digest, err := guestproto.EncodeActionRequest(request)
+		if err != nil {
+			return guestproto.ActionReceipt{}, err
+		}
+		return guestproto.ActionReceipt{Version: guestproto.Version, Association: request.Association, Generation: request.Generation,
+			RecipeDigest: request.RecipeDigest, ActionID: request.ActionID, ActionPhase: request.ActionPhase,
+			AttemptID: request.AttemptID, RequestSHA256: digest, State: "succeeded"}, nil
+	}
+	if _, err := f.owner.RunAction(context.Background(), request); err == nil || actionClient.calls != 2 {
+		t.Fatalf("ordinary action admitted indeterminate attempt: %v", err)
+	}
+	if receipt, err := f.owner.RetryAction(context.Background(), request); err != nil || receipt.State != "succeeded" || actionClient.calls != 3 {
+		t.Fatalf("exact owner retry = %+v, %v; calls=%d", receipt, err, actionClient.calls)
 	}
 }

@@ -70,6 +70,9 @@ type Importer interface {
 type ActionRunner interface {
 	RunAction(context.Context, guestproto.ActionRequest) (guestproto.ActionReceipt, error)
 }
+type ActionRetrier interface {
+	RetryAction(context.Context, guestproto.ActionRequest) (guestproto.ActionReceipt, error)
+}
 
 func validControlAction(request controlRequest) bool {
 	switch request.Action {
@@ -89,7 +92,7 @@ func validControlAction(request controlRequest) bool {
 		return true
 	case "transfer_import":
 		return len(request.Packages) == 0 && request.GuestAction == nil && request.Import != nil && validImportTransfer(*request.Import)
-	case "run_action":
+	case "run_action", "retry_action":
 		if len(request.Packages) != 0 || request.Import != nil || request.GuestAction == nil || request.GuestAction.ActionPhase == "launch" {
 			return false
 		}
@@ -244,7 +247,7 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 		return
 	}
 	if request.Version != 1 || request.Binding != binding || !validControlAction(request) ||
-		request.Action == "run_action" && !exactControlActionBinding(binding, *request.GuestAction) {
+		(request.Action == "run_action" || request.Action == "retry_action") && !exactControlActionBinding(binding, *request.GuestAction) {
 		return
 	}
 	if request.Action == "bootstrap" {
@@ -257,7 +260,7 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 		serverDeadline = acceptedAt.Add(inspectTimeout)
 	} else if request.Action == "transfer_import" {
 		serverDeadline = acceptedAt.Add(importTimeout)
-	} else if request.Action == "run_action" {
+	} else if request.Action == "run_action" || request.Action == "retry_action" {
 		serverDeadline = acceptedAt.Add(actionControlTimeout)
 	}
 	now := time.Now()
@@ -350,17 +353,27 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 				response.Import = &result
 			}
 		}
-	} else if request.Action == "run_action" {
+	} else if request.Action == "run_action" || request.Action == "retry_action" {
 		before := owner.Snapshot(operationCtx)
 		if before.Binding != binding || !snapshotReady(before) {
 			response.Error = "exact runtime is not ready for action"
-		} else if runner, ok := owner.(ActionRunner); !ok {
-			response.Error = "action runner is unavailable"
 		} else {
-			receipt, actionErr := runner.RunAction(operationCtx, *request.GuestAction)
+			var receipt guestproto.ActionReceipt
+			var actionErr error
+			if request.Action == "retry_action" {
+				if runner, ok := owner.(ActionRetrier); ok {
+					receipt, actionErr = runner.RetryAction(operationCtx, *request.GuestAction)
+				} else {
+					response.Error = "action retrier is unavailable"
+				}
+			} else if runner, ok := owner.(ActionRunner); ok {
+				receipt, actionErr = runner.RunAction(operationCtx, *request.GuestAction)
+			} else {
+				response.Error = "action runner is unavailable"
+			}
 			if actionErr != nil {
 				response.Error = "guest action failed"
-			} else {
+			} else if response.Error == "" {
 				response.GuestReceipt = &receipt
 			}
 		}
@@ -392,7 +405,7 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 			response.Error = "import transfer result or readiness changed"
 		}
 	}
-	if request.Action == "run_action" {
+	if request.Action == "run_action" || request.Action == "retry_action" {
 		_, receiptErr := encodeControlActionReceipt(*request.GuestAction, response.GuestReceipt)
 		if !exactAfterBinding || !snapshotReady(response.Snapshot) || receiptErr != nil {
 			response.GuestReceipt = nil
@@ -598,11 +611,19 @@ func (c *Client) TransferImport(ctx context.Context, binding Binding, spec Impor
 }
 
 func (c *Client) RunAction(ctx context.Context, binding Binding, action guestproto.ActionRequest) (guestproto.ActionReceipt, error) {
+	return c.callAction(ctx, binding, action, "run_action")
+}
+
+func (c *Client) RetryAction(ctx context.Context, binding Binding, action guestproto.ActionRequest) (guestproto.ActionReceipt, error) {
+	return c.callAction(ctx, binding, action, "retry_action")
+}
+
+func (c *Client) callAction(ctx context.Context, binding Binding, action guestproto.ActionRequest, operation string) (guestproto.ActionReceipt, error) {
 	if !exactControlActionBinding(binding, action) {
 		return guestproto.ActionReceipt{}, fmt.Errorf("action differs from exact supervisor binding")
 	}
 	action.Argv = append([]string(nil), action.Argv...)
-	request := controlRequest{Action: "run_action", GuestAction: &action}
+	request := controlRequest{Action: operation, GuestAction: &action}
 	if !validControlAction(request) {
 		return guestproto.ActionReceipt{}, fmt.Errorf("invalid bounded action request")
 	}
@@ -669,7 +690,7 @@ func (c *Client) callRequest(ctx context.Context, binding Binding, requestBody c
 		timeout = inspectTimeout
 	} else if action == "transfer_import" {
 		timeout = importTimeout
-	} else if action == "run_action" {
+	} else if action == "run_action" || action == "retry_action" {
 		timeout = actionControlTimeout
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, timeout)

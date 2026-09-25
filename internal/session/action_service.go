@@ -21,11 +21,12 @@ import (
 type ActionControl interface {
 	Snapshot(context.Context, supervisor.Binding) (supervisor.Snapshot, error)
 	RunAction(context.Context, supervisor.Binding, guestproto.ActionRequest) (guestproto.ActionReceipt, error)
+	RetryAction(context.Context, supervisor.Binding, guestproto.ActionRequest) (guestproto.ActionReceipt, error)
 }
 
 // ActionService owns the durable host transition around one guest-only step.
-// Public recipe admission stays closed until the retained-owner control route
-// and explicit recovery operations are implemented and qualified.
+// Public recipe admission stays closed until the explicit skip and public
+// action route are implemented and the new helper is qualified on a real VM.
 type ActionService struct {
 	domain  config.Domain
 	control ActionControl
@@ -168,4 +169,106 @@ func (s *ActionService) indeterminateAction(reserved ActionAttempt, cause error)
 		return reserved, errors.Join(cause, fmt.Errorf("record indeterminate action: %w", err))
 	}
 	return uncertain, cause
+}
+
+// RetryAction explicitly re-sends the exact original attempt. The guest's
+// durable claim returns an existing success receipt, refuses an unresolved
+// claim, or starts the command when no claim exists. This operation never
+// allocates another attempt or changes argv.
+func (s *ActionService) RetryAction(ctx context.Context, rawName, attemptID string) (result ActionAttempt, err error) {
+	if s == nil || s.control == nil || s.now == nil {
+		return ActionAttempt{}, fmt.Errorf("action service dependencies are required")
+	}
+	domainID, parseErr := domain.Parse(string(s.domain.ID))
+	if parseErr != nil || domainID != s.domain.ID || strings.TrimSpace(s.domain.StateRoot) == "" {
+		return ActionAttempt{}, fmt.Errorf("invalid configured domain")
+	}
+	name, err := ParseName(rawName)
+	if err != nil || !validUUID(attemptID) {
+		return ActionAttempt{}, fmt.Errorf("invalid exact action retry identity")
+	}
+	transition, err := lock.Acquire(ctx, s.domain.StateRoot, "transition-"+string(domainID)+"-"+string(name))
+	if err != nil {
+		return ActionAttempt{}, fmt.Errorf("acquire session transition lock: %w", err)
+	}
+	defer func() { err = errors.Join(err, transition.Release()) }()
+	held, err := lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
+	if err != nil {
+		return ActionAttempt{}, fmt.Errorf("acquire session lock: %w", err)
+	}
+	defer func() { err = errors.Join(err, held.Release()) }()
+	record, err := LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+	if err != nil {
+		return ActionAttempt{}, err
+	}
+	attempt, err := LoadActionAttempt(s.domain.StateRoot, domainID, record.ID, attemptID)
+	if err != nil {
+		return ActionAttempt{}, err
+	}
+	if attempt.State != ActionAttemptReserved && attempt.State != ActionAttemptIndeterminate {
+		return attempt, fmt.Errorf("action attempt is already terminal")
+	}
+	if !actionMatchesRunningRecord(attempt, record) {
+		return attempt, fmt.Errorf("action retry differs from current running generation")
+	}
+	if err := RequireNoRebuild(s.domain.StateRoot, domainID, string(name)); err != nil {
+		return attempt, err
+	}
+	intentBytes, err := LoadRecipeIntent(s.domain.StateRoot, attempt.RecipeDigest)
+	if err != nil {
+		return attempt, err
+	}
+	intent, err := recipe.DecodeIntent(intentBytes)
+	if err != nil {
+		return attempt, err
+	}
+	var argv []string
+	for _, step := range intent.Steps {
+		if step.ID == attempt.ActionID && step.Phase == attempt.ActionPhase {
+			argv = append([]string(nil), step.Argv...)
+			break
+		}
+	}
+	if len(argv) == 0 || attempt.ActionPhase == "launch" {
+		return attempt, fmt.Errorf("action retry differs from exact guest-only recipe step")
+	}
+	request := guestproto.ActionRequest{Version: guestproto.Version,
+		Association: guestproto.Association{Domain: string(attempt.Domain), SessionID: attempt.SessionID,
+			BackendKind: record.Backend.Kind, BackendObject: attempt.BackendObject},
+		Generation: attempt.Generation, RecipeDigest: attempt.RecipeDigest, ActionID: attempt.ActionID,
+		ActionPhase: attempt.ActionPhase, AttemptID: attempt.AttemptID, Argv: argv}
+	if _, _, err := guestproto.EncodeActionRequest(request); err != nil {
+		return attempt, err
+	}
+	binding := startBinding(record)
+	if err := s.requireFreshActionReady(ctx, binding); err != nil {
+		return attempt, err
+	}
+	if attempt.State == ActionAttemptReserved {
+		uncertain := attempt
+		uncertain.State = ActionAttemptIndeterminate
+		if err := advanceActionAttempt(s.domain.StateRoot, attempt, uncertain); err != nil {
+			return attempt, fmt.Errorf("mark interrupted action indeterminate: %w", err)
+		}
+		attempt = uncertain
+	}
+	receipt, err := s.control.RetryAction(ctx, binding, request)
+	if err != nil {
+		return attempt, fmt.Errorf("exact guest action retry: %w", err)
+	}
+	receiptBytes, err := guestproto.EncodeActionReceipt(request, receipt)
+	if err != nil {
+		return attempt, fmt.Errorf("invalid exact guest receipt: %w", err)
+	}
+	if err := s.requireFreshActionReady(ctx, binding); err != nil {
+		return attempt, fmt.Errorf("fresh READY after guest action retry: %w", err)
+	}
+	digest := sha256.Sum256(receiptBytes)
+	result = attempt
+	result.State = ActionAttemptSucceeded
+	result.ReceiptSHA256 = fmt.Sprintf("%x", digest[:])
+	if err := advanceActionAttempt(s.domain.StateRoot, attempt, result); err != nil {
+		return attempt, fmt.Errorf("record exact recovered receipt: %w", err)
+	}
+	return result, nil
 }

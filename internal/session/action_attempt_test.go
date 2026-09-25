@@ -170,3 +170,32 @@ func TestActionAttemptSuccessRejectsChangedRunningGeneration(t *testing.T) {
 		t.Fatalf("stale success changed journal = %#v, %v", got, err)
 	}
 }
+
+func TestActionAttemptExactRecoveryAfterIndeterminate(t *testing.T) {
+	root, attempt := actionAttemptFixture(t)
+	if err := ReserveActionAttempt(root, attempt); err != nil {
+		t.Fatal(err)
+	}
+	uncertain := attempt
+	uncertain.State = ActionAttemptIndeterminate
+	if err := advanceActionAttempt(root, attempt, uncertain); err != nil {
+		t.Fatal(err)
+	}
+	recovered := uncertain
+	recovered.State = ActionAttemptSucceeded
+	recovered.ReceiptSHA256 = strings.Repeat("a", 64)
+	if err := advanceActionAttempt(root, uncertain, recovered); err != nil {
+		t.Fatalf("exact successful recovery refused: %v", err)
+	}
+	if err := advanceActionAttempt(root, uncertain, recovered); err != nil {
+		t.Fatalf("idempotent recovery refused: %v", err)
+	}
+	if got, err := LoadActionAttempt(root, attempt.Domain, attempt.SessionID, attempt.AttemptID); err != nil || got != recovered {
+		t.Fatalf("recovered attempt = %+v, %v", got, err)
+	}
+	foreign := recovered
+	foreign.ReceiptSHA256 = strings.Repeat("b", 64)
+	if err := advanceActionAttempt(root, uncertain, foreign); err == nil {
+		t.Fatal("different recovered receipt replaced terminal result")
+	}
+}

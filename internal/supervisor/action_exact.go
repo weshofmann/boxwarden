@@ -42,3 +42,14 @@ func (c *ExactActionController) RunAction(ctx context.Context, binding Binding, 
 	}
 	return (&Client{RuntimeDirectory: directory, MaxSnapshotAge: exactActionSnapshotAge}).RunAction(ctx, binding, request)
 }
+
+func (c *ExactActionController) RetryAction(ctx context.Context, binding Binding, request guestproto.ActionRequest) (guestproto.ActionReceipt, error) {
+	if c == nil {
+		return guestproto.ActionReceipt{}, fmt.Errorf("exact action controller is required")
+	}
+	directory, err := exactRuntimeDirectory(c.runtimeRoot, binding)
+	if err != nil {
+		return guestproto.ActionReceipt{}, err
+	}
+	return (&Client{RuntimeDirectory: directory, MaxSnapshotAge: exactActionSnapshotAge}).RetryAction(ctx, binding, request)
+}
