@@ -106,15 +106,19 @@ prototype with material acceptance gaps, not an alpha-ready release.
   attempt UUID and recovery commands; successful output requires a receipt
   digest. Full app, CLI, and architecture packages, focused app race tests,
   vet, all-package compilation, CLI build, gofmt, and diff checks passed
-  locally; hosted CI is pending. The existing qualified generic base predates
+  locally; [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36084558094)
+  passed. The existing qualified generic base predates
   this helper. Normal recipe admission and real-VM qualification remain.
   Public recipes still reject `once`, `reconfigure`,
   `startup`, and `launch`. The helper also refuses desktop `launch` until its
   graphical environment is designed.
-- Internal free capacity was about 30 GiB at the latest check.
-  The export guard previously required about 25.8 GiB. Check capacity before
-  another expensive host trial and report any renewed shortfall; no further
-  cleanup is planned.
+- A separate encrypted external qualification state passed host doctor,
+  domain-CA initialization, exact installer and auxiliary-tool checks. A fresh
+  preparation attempt from the published source is copying installer files;
+  build finalization, clone qualification, and cache admission remain pending.
+  Internal free capacity fell to about 26 GiB during VM startup, close to the
+  earlier 25.8 GiB export threshold. Monitor it during host trials and report
+  a renewed shortfall; no further cleanup is planned.
 
 ## Remaining acceptance
 
