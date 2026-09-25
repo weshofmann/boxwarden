@@ -447,7 +447,7 @@ func allowedFoundationSelector(path, foundation, selector string) bool {
 			}
 		case "internal/sessionruntime/action_owner.go":
 			switch selector {
-			case "ActionRequest", "Association", "EncodeActionRequest":
+			case "ActionRequest", "ActionReceipt", "Association", "EncodeActionRequest", "EncodeActionReceipt":
 				return true
 			}
 		}
@@ -503,6 +503,9 @@ func allowedFoundationSelector(path, foundation, selector string) bool {
 	}
 	if path == "internal/sessionruntime/import_owner.go" && foundation == "sshx" && selector == "WorkspaceMount" {
 		return true // Retained owner compares only its already admitted launch mounts.
+	}
+	if path == "internal/sessionruntime/action_owner.go" && foundation == "sshx" && selector == "Connection" {
+		return true // The retained owner uses its existing pinned connection for one admitted action.
 	}
 	if path != "internal/sessionruntime/owner.go" {
 		if foundation == "guestproto" && (selector == "Association" || selector == "EncodeSerialFrame" || selector == "Version") {

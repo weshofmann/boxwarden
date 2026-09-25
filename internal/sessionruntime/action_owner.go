@@ -1,6 +1,7 @@
 package sessionruntime
 
 import (
+	"context"
 	"fmt"
 	"slices"
 
@@ -8,8 +9,62 @@ import (
 	"github.com/weshofmann/boxwarden/internal/guestproto"
 	"github.com/weshofmann/boxwarden/internal/recipe"
 	"github.com/weshofmann/boxwarden/internal/session"
+	"github.com/weshofmann/boxwarden/internal/sshx"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
 )
+
+type actionClient interface {
+	RunAction(context.Context, sshx.Connection, guestproto.ActionRequest) (guestproto.ActionReceipt, error)
+}
+
+// RunAction uses only the current retained generation's pinned SSH connection.
+// It does not hold readyMu during the potentially ten-minute guest command:
+// certificate maintenance must remain able to renew this short-lived credential.
+// The caller holds the session transition lock; the owner re-admits the exact
+// reserved attempt and fresh READY both before and after the guest call.
+func (o *Owner) RunAction(ctx context.Context, request guestproto.ActionRequest) (guestproto.ActionReceipt, error) {
+	if o == nil || o.deps.client == nil {
+		return guestproto.ActionReceipt{}, fmt.Errorf("runtime action client is unavailable")
+	}
+	client, ok := o.deps.client.(actionClient)
+	if !ok {
+		return guestproto.ActionReceipt{}, fmt.Errorf("runtime action client is unavailable")
+	}
+	before := o.Snapshot(ctx)
+	if !readyImportSnapshot(before) {
+		return guestproto.ActionReceipt{}, fmt.Errorf("exact runtime is not ready for action")
+	}
+	o.mu.Lock()
+	connection, binding, sshBinding, runtimePath := o.connection, o.binding, o.sshBinding, o.runtimePath
+	stateRoot, sessionName, pin := o.stateRoot, o.sessionName, o.expectedPin
+	o.mu.Unlock()
+	if before.Binding != binding || connection.Binding != sshBinding ||
+		connection.Binding.SessionID != binding.SessionID || connection.Binding.BackendObject != binding.BackendObject ||
+		connection.RuntimeDirectory != runtimePath || connection.Pin != pin {
+		return guestproto.ActionReceipt{}, fmt.Errorf("action connection no longer matches exact runtime")
+	}
+	if err := admitOwnerAction(stateRoot, sessionName, binding, request); err != nil {
+		return guestproto.ActionReceipt{}, err
+	}
+	receipt, err := client.RunAction(ctx, connection, request)
+	if err != nil {
+		return guestproto.ActionReceipt{}, err
+	}
+	if _, err := guestproto.EncodeActionReceipt(request, receipt); err != nil {
+		return guestproto.ActionReceipt{}, fmt.Errorf("invalid action receipt: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return guestproto.ActionReceipt{}, err
+	}
+	after := o.Snapshot(ctx)
+	if after.Binding != binding || !readyImportSnapshot(after) {
+		return guestproto.ActionReceipt{}, fmt.Errorf("exact runtime changed during action")
+	}
+	if err := admitOwnerAction(stateRoot, sessionName, binding, request); err != nil {
+		return guestproto.ActionReceipt{}, err
+	}
+	return receipt, nil
+}
 
 // admitOwnerAction independently rechecks the caller's exact durable host
 // intent before the retained owner can use its generation SSH credentials.
