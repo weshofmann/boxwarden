@@ -99,6 +99,7 @@ type Options struct {
 	AlphaExportResume     AlphaExportResumeFunc
 	AlphaImport           AlphaImportFunc
 	AlphaImportVerify     AlphaImportVerifyFunc
+	AlphaAction           AlphaActionFunc
 	Output                io.Writer
 }
 
@@ -156,6 +157,15 @@ func Run(ctx context.Context, args []string, options Options) error {
 	}
 
 	switch command.kind {
+	case commandAlphaAction:
+		if selectedDomain.ID != "alpha" {
+			return errors.New("v0.2 session actions are limited to the explicit alpha domain")
+		}
+		if options.AlphaAction == nil {
+			return errors.New("alpha session action composition is required")
+		}
+		result, actionErr := options.AlphaAction(ctx, selectedDomain, command.alphaAction)
+		return writeAlphaAction(options.Output, selectedDomain, command.alphaAction, result, actionErr)
 	case commandAlphaPrepare:
 		if options.AlphaPrepare == nil {
 			return errors.New("alpha base preparer is required")
@@ -482,6 +492,7 @@ const (
 	commandWorkspaceExportResume
 	commandWorkspaceImport
 	commandWorkspaceImportVerify
+	commandAlphaAction
 )
 
 type parsedCommand struct {
@@ -498,6 +509,7 @@ type parsedCommand struct {
 	alphaImport          AlphaImportInput
 	alphaImportVerify    AlphaImportVerifyInput
 	alphaWorkspaceCreate AlphaWorkspaceCreateInput
+	alphaAction          AlphaActionInput
 	recipeCreate         bool
 	rebuildBase          string
 	volumeID             string
@@ -591,6 +603,35 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 	if len(remaining) == 3 && remaining[0] == "session" && remaining[1] == "status" {
 		base.kind = commandSessionStatus
 		base.name = remaining[2]
+		return base, nil
+	}
+	if len(remaining) >= 3 && remaining[0] == "session" && remaining[1] == "action" {
+		input := AlphaActionInput{Operation: remaining[2]}
+		switch input.Operation {
+		case "run":
+			if len(remaining) != 6 ||
+				(remaining[3] != "once" && remaining[3] != "reconfigure" && remaining[3] != "startup") {
+				return parsedCommand{}, errors.New("session action run requires once|reconfigure|startup <action-id> <running-session>")
+			}
+			input.Phase, input.ActionID, input.SessionName = remaining[3], remaining[4], remaining[5]
+		case "retry", "skip":
+			if len(remaining) != 5 {
+				return parsedCommand{}, fmt.Errorf("session action %s requires <attempt-uuid> <session>", input.Operation)
+			}
+			input.AttemptID, input.SessionName = remaining[3], remaining[4]
+			if !alphaCreateUUID(input.AttemptID) {
+				return parsedCommand{}, errors.New("session action requires one canonical attempt UUID")
+			}
+		default:
+			return parsedCommand{}, errors.New("session action supports run, retry, or skip")
+		}
+		if _, err := session.ParseName(input.SessionName); err != nil {
+			return parsedCommand{}, err
+		}
+		if input.Operation == "run" && !validAlphaActionID(input.ActionID) {
+			return parsedCommand{}, errors.New("session action requires a canonical action ID")
+		}
+		base.kind, base.alphaAction = commandAlphaAction, input
 		return base, nil
 	}
 	if len(remaining) == 2 && remaining[0] == "domain" && remaining[1] == "init" {
@@ -806,7 +847,7 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		base.kind, base.alphaExport = commandWorkspaceExport, input
 		return base, nil
 	}
-	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] [--recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256] <session>, session start <session>, session stop <session>, session delete <stopped-session>, session rebuild [--base REVISION | recipe inputs] <session>, session status <session>, workspace create --bundle PATH --source-root PATH --filesystem-uuid UUID --size-mib N <new-volume-uuid>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, workspace import --source PATH <volume-uuid> <running-session>, workspace import resume --volume UUID --session NAME <transaction-uuid>, workspace import verify --export UUID <transaction-uuid>, workspace export --destination PATH --select RELATIVE [--select RELATIVE...] --source-root PATH --iso PATH --go PATH <volume-uuid>, workspace export resume --source-root PATH --iso PATH --go PATH <transaction-uuid>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
+	return parsedCommand{}, errors.New("supported commands are: init, doctor, domain init, golden register <object>, session create [--mode clean|quarantine] [--recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256] <session>, session start <session>, session stop <session>, session delete <stopped-session>, session rebuild [--base REVISION | recipe inputs] <session>, session status <session>, session action run once|reconfigure|startup <action-id> <running-session>, session action retry|skip <attempt-uuid> <session>, workspace create --bundle PATH --source-root PATH --filesystem-uuid UUID --size-mib N <new-volume-uuid>, workspace attach --mount PATH <volume-uuid> <stopped-session>, workspace detach <volume-uuid> <stopped-session>, workspace import --source PATH <volume-uuid> <running-session>, workspace import resume --volume UUID --session NAME <transaction-uuid>, workspace import verify --export UUID <transaction-uuid>, workspace export --destination PATH --select RELATIVE [--select RELATIVE...] --source-root PATH --iso PATH --go PATH <volume-uuid>, workspace export resume --source-root PATH --iso PATH --go PATH <transaction-uuid>, alpha recipe check --recipe PATH --iso PATH, alpha prepare --recipe PATH --iso PATH --guest-definition PATH --openssl PATH --openssl-sha256 SHA256 --xorriso PATH --xorriso-sha256 SHA256")
 }
 
 func writeWorkspaceAttachment(output io.Writer, record workspacex.Record, state string) error {

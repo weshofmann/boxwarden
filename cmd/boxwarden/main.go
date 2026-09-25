@@ -77,6 +77,23 @@ func publicOptions(output io.Writer) app.Options {
 		},
 		AlphaRebuild: sessionruntime.Rebuild,
 		AlphaDelete:  sessionruntime.Delete,
+		AlphaAction: func(ctx context.Context, selected config.Domain, input app.AlphaActionInput) (session.ActionAttempt, error) {
+			controller, err := supervisor.NewExactActionController(filepath.Join(selected.StateRoot, "runtime"))
+			if err != nil {
+				return session.ActionAttempt{}, err
+			}
+			service := session.NewActionService(selected, controller)
+			switch input.Operation {
+			case "run":
+				return service.ExecuteAction(ctx, input.SessionName, input.Phase, input.ActionID)
+			case "retry":
+				return service.RetryAction(ctx, input.SessionName, input.AttemptID)
+			case "skip":
+				return service.SkipAction(ctx, input.SessionName, input.AttemptID)
+			default:
+				return session.ActionAttempt{}, fmt.Errorf("unsupported alpha action operation")
+			}
+		},
 		AlphaWorkspaceCreate: func(ctx context.Context, selected config.Domain, input app.AlphaWorkspaceCreateInput) (workspacex.Record, error) {
 			formatter := workspaceformat.VZFormatter{StateRoot: selected.StateRoot, Domain: selected.ID,
 				BundlePath: input.BundlePath, SourceRoot: input.SourceRoot}
