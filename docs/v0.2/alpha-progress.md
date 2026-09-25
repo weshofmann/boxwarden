@@ -236,6 +236,14 @@ prototype with material acceptance gaps, not an alpha-ready release.
   ChatGPT recipe and verified the pinned installer ISO. The admitted Tart
   inventory showed no running VM. An actual guest apt transaction and GUI
   launch remain untested while internal Data space stays below the host floor.
+- [Hosted CI for the published-source preflight checkpoint `f435aab`](https://github.com/weshofmann/boxwarden/actions/runs/36097732422)
+  passed shell syntax, golden fixtures, gofmt, full Go tests, race tests,
+  vet, and build. The integration branch has no unpublished source work.
+  At the latest read-only check, internal Data had about 14 GiB free, below
+  the mission floor (about 22.8 GiB on this volume) and the stopped-export
+  guard (about 25.8 GiB). The next safe acceptance step is a fresh public
+  ChatGPT recipe prepare and ordered-action VM run after that headroom is
+  restored. No more cleanup is planned under the operator's direction.
 
 ## Remaining acceptance
 
