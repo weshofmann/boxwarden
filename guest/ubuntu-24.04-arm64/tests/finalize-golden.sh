@@ -142,6 +142,7 @@ make_fixture() {
     "$root/usr/local/libexec" "$root/var/lib/NetworkManager" \
     "$root/var/lib/dhcp" "$root/var/lib/systemd" "$root/var/backups" \
     "$root/var/lib/cloud/instances" "$root/var/lib/cloud/seed" \
+    "$root/var/lib/boxwarden" \
     "$root/var/log/installer" "$root/root/.cache" \
     "$root/home/boxwarden/.cache" "$root/home/boxwarden/.mozilla"
   printf '%s\n' 'boxwarden:$6$fixture$BUILD_VERIFIER:20000:0:99999:7:::' >"$root/etc/shadow"
@@ -169,6 +170,7 @@ make_fixture() {
   printf '%s\n' 'AutomaticLoginEnable = true' 'AutomaticLogin = boxwarden' >"$root/etc/gdm3/custom.conf"
   printf '%s\n' 'boxwarden ALL=(ALL:ALL) NOPASSWD: ALL' >"$root/etc/sudoers.d/90-boxwarden"
   cp "$guest_dir/artifacts/boxwarden-guest-bootstrap" "$root/usr/local/libexec/boxwarden-guest-bootstrap"
+  chmod 0700 "$root/var/lib/boxwarden"
 }
 
 run_finalizer() {
@@ -224,6 +226,7 @@ run_finalizer "$builder_ssh" >"$test_dir/builder-ssh.out" || fail 'finalizer rej
 [[ ! -e "$good/var/log/installer/autoinstall-user-data" && ! -e "$good/home/boxwarden/.bash_history" ]] || fail 'build log/history survived'
 [[ ! -e "$good/home/boxwarden/.cache/item" && ! -e "$good/home/boxwarden/.mozilla/profile" ]] || fail 'profile/cache survived'
 [[ -f "$good/var/lib/boxwarden/golden-clone-ready" ]] || fail 'clone-ready marker missing'
+[[ "$(PATH="${stub_bin}:${PATH}" stat -c '%u:%g:%a' "$good/var/lib/boxwarden")" == 0:0:700 ]] || fail 'finalization widened private action state directory'
 [[ -x "$good/usr/local/libexec/boxwarden-firstboot-identity" ]] || fail 'first-boot identity helper missing'
 [[ -f "$good/etc/systemd/system/boxwarden-firstboot-identity.service" ]] || fail 'first-boot identity unit missing'
 for service in NetworkManager ssh gdm3 display-manager serial-getty@hvc0; do
@@ -254,6 +257,12 @@ mkdir -p "$active/etc/ssh/boxwarden/active"
 if run_finalizer "$active" >"$test_dir/active.out" 2>&1; then fail 'active domain trust was admitted'; fi
 [[ ! -e "$active/var/lib/boxwarden/golden-clone-ready" ]] || fail 'active trust produced clone-ready marker'
 [[ "$(awk -F: '$1=="boxwarden" {print $2}' "$active/etc/shadow")" == '$6$fixture$BUILD_VERIFIER' ]] || fail 'active-trust refusal mutated account'
+
+public_state="$test_dir/public-state"
+make_fixture "$public_state"
+chmod 0755 "$public_state/var/lib/boxwarden"
+if run_finalizer "$public_state" >"$test_dir/public-state.out" 2>&1; then fail 'public action state directory was admitted'; fi
+[[ ! -e "$public_state/var/lib/boxwarden/golden-clone-ready" ]] || fail 'public action state produced clone-ready marker'
 
 bad_trust_mode="$test_dir/bad-trust-mode"
 make_fixture "$bad_trust_mode"

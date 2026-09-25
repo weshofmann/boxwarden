@@ -174,6 +174,8 @@ finalize_golden() {
   dbus="$(path_in_root "$root" /var/lib/dbus/machine-id)"
   marker="$(path_in_root "$root" /var/lib/boxwarden/golden-clone-ready)"
   [[ ! -e "$marker" && ! -L "$marker" ]] || die 'clone-ready marker already exists'
+  [[ -d "$(dirname "$marker")" && ! -L "$(dirname "$marker")" &&
+    "$(stat -c '%u:%g:%a' "$(dirname "$marker")")" == 0:0:700 ]] || die 'private Boxwarden state directory is unsafe'
   [[ -f "$helper" && -x "$helper" && ! -L "$helper" ]] || die 'fixed guest bootstrap helper is missing or unsafe'
   [[ "$(sha256sum "$helper" | awk '{print $1}')" == "$helper_sha256" ]] || die 'fixed guest bootstrap helper digest differs from lock'
   [[ -f "$shadow" && ! -L "$shadow" ]] || die 'shadow account database is missing or unsafe'
@@ -248,7 +250,6 @@ finalize_golden() {
     [[ ! -e "$(path_in_root "$root" "$ssh_dir")" && ! -L "$(path_in_root "$root" "$ssh_dir")" ]] || die 'builder SSH state survived'
   done
   sync
-  install -d -m 0755 "$(dirname "$marker")"
   : >"$marker"
   chmod 0644 "$marker"
   printf 'generic golden clone-ready; power off without another boot\n'

@@ -110,17 +110,22 @@ prototype with material acceptance gaps, not an alpha-ready release.
   passed. The existing qualified generic base predates
   this helper. Explicit `reconfigure` steps are now admitted by the runnable
   recipe loader because they have an explicit public command and durable
-  recovery route. Targeted recipe and app tests passed locally; hosted CI and
-  real-VM action execution remain. Public recipes still reject `once`,
+  recovery route. Targeted recipe and app tests passed locally, and
+  [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36086586857)
+  passed. Real-VM action execution remains. Public recipes still reject `once`,
   `startup`, and `launch` until lifecycle sequencing exists. The helper also
   refuses desktop `launch` until its graphical environment is designed.
 - A separate encrypted external qualification state passed host doctor,
   domain-CA initialization, exact installer and auxiliary-tool checks. A fresh
-  preparation attempt from the published source is copying installer files;
-  build finalization, clone qualification, and cache admission remain pending.
-  Internal free capacity fell to about 26 GiB during VM startup, close to the
-  earlier 25.8 GiB export threshold. Monitor it during host trials and report
-  a renewed shortfall; no further cleanup is planned.
+  generic base completed finalization, independent-clone qualification, and
+  cache admission. One explicit `reconfigure` action then failed before the
+  guest could claim or run it: finalization had changed the private guest
+  action-state directory from `0700` to `0755`. The failed attempt and VM
+  remain private evidence; the VM was stopped through the public path. A
+  source fixture reproduced that defect and now verifies the private mode and
+  refusal of a public directory. A corrected fresh base and real-VM action
+  trial remain pending. Internal free capacity is monitored before expensive
+  host trials; no further cleanup is planned.
 
 ## Remaining acceptance
 
