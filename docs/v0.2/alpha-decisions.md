@@ -570,4 +570,16 @@ success receipt when execution already completed, refuses a claim without a
 receipt, or executes if the original request never reached the guest. The
 host records success only after the exact receipt and fresh READY checks.
 A changed generation or recipe cannot turn the old attempt into a new command;
-explicit skip and public retry/skip UX remain separate work.
+the public retry/skip UX remains separate work.
+
+## Deliberate skip after a proved stop, 2026-09-25
+
+`SkipAction` is a host-only decision for an exact reserved or indeterminate
+attempt. It requires the normal stop transition to have published the exact
+session as stopped, with no current generation, under the transition and
+session locks. This prevents a skip from being followed by another action
+while the old VM command is still active. The `skipped` state carries no
+success receipt and makes no claim that the command did not run. It remains a
+prior attempt for same-system `once` replay prevention. Repeating the exact
+skip is idempotent; a successful action cannot later be relabeled skipped.
+Public exposure and workflow sequencing remain to be implemented.

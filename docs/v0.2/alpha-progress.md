@@ -92,9 +92,16 @@ prototype with material acceptance gaps, not an alpha-ready release.
   exact indeterminate intent. A completed guest claim can return its stored
   receipt; an unresolved claim remains indeterminate. The full local Go suite,
   focused race tests, vet, CLI build, gofmt, and diff checks passed for this
-  recovery source increment; hosted CI is pending. The existing qualified
-  generic base predates this helper. Explicit skip, public commands, and
-  real-VM qualification remain. Public recipes still reject `once`, `reconfigure`,
+  recovery source increment;
+  [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36083318667)
+  passed. A deliberate skip now resolves a reserved or indeterminate attempt
+  only after the exact session has completed its stopped transition. Skip
+  records no success receipt and does not assert that the guest command never
+  ran; the prior attempt still blocks same-system `once` replay. The session
+  package, focused race and architecture tests, vet, all-package compilation,
+  gofmt, and diff checks passed locally for this increment; hosted CI is
+  pending. The existing qualified generic base predates this helper. Public
+  commands and real-VM qualification remain. Public recipes still reject `once`, `reconfigure`,
   `startup`, and `launch`. The helper also refuses desktop `launch` until its
   graphical environment is designed.
 - Internal free capacity was about 30 GiB at the latest check.
@@ -104,7 +111,7 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Remaining acceptance
 
-1. Add explicit skip and complete the public action route, then
+1. Complete the public action route, then
    rebuild and qualify a new generic base. Enable guest-only `once`, explicit
    `reconfigure`, `startup`, and `launch` with visible retry/skip and truthful
    failure or waiting-for-sign-in states.
