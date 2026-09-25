@@ -87,7 +87,7 @@ def install():
         if fields != ["chatgpt", PACKAGE_VERSION, "arm64"]:
             raise RuntimeError("package identity differs from pin")
         disable_repository_registration()
-        run_checked(["/usr/bin/apt-get", "install", "-y", "--no-install-recommends", str(package)], 1200, capture=False)
+        run_checked(["/usr/bin/apt-get", "install", "-y", "--no-remove", "--no-install-recommends", str(package)], 1200, capture=False)
         installed = run_checked(["/usr/bin/dpkg-query", "--show", "--showformat=${Version} ${Architecture}", "chatgpt"], 30).stdout.strip()
         if installed != PACKAGE_VERSION + " arm64":
             raise RuntimeError("installed ChatGPT identity differs from pin")

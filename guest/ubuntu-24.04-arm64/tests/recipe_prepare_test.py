@@ -31,7 +31,7 @@ class RecipePrepareTests(unittest.TestCase):
         }).encode())
         self.assertEqual(helper.command_plan(payload), [
             ("apt-update", ["/usr/bin/apt-get", "update"]),
-            ("apt-install", ["/usr/bin/apt-get", "install", "-y", "--no-install-recommends", "git", "nodejs"]),
+            ("apt-install", ["/usr/bin/apt-get", "install", "-y", "--no-remove", "--no-install-recommends", "git", "nodejs"]),
             ("sample", ["/bin/echo", "one word", "; touch /tmp/should-not-run"]),
         ])
 

@@ -684,6 +684,16 @@ before installation and refuses any ChatGPT apt source afterward, so a
 qualified base cannot silently adopt a later ChatGPT package. That policy
 still needs real-guest verification.
 
+Reusable-base preparation passes `--no-remove` to apt for both declared
+packages and the pinned ChatGPT `.deb`. Ubuntu 24.04's
+[`apt-get` manual](https://manpages.ubuntu.com/manpages/noble/man8/apt-get.8.html)
+states that this option aborts if dependency resolution would remove any
+installed package. This retains the full Ubuntu Desktop source if a third-party
+package proposes a conflicting transaction; preparation fails instead of
+accepting a changed base under `-y`. Source tests verify the emitted argv and
+the digest-bound guest-definition mapping. The actual apt plan and package
+installation remain unqualified until a fresh guest run.
+
 The official guide says Computer Use is not yet available in the Linux
 preview. [OpenAI release notes](https://help.openai.com/en/articles/6825453-chatgpt-release-notes)
 say browser actions are available there while control of other desktop apps

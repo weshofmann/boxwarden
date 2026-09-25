@@ -225,6 +225,11 @@ prototype with material acceptance gaps, not an alpha-ready release.
   This does not prove full apt dependency closure, installation, or GUI launch.
   The internal Data volume remained at about 12 GiB free at this check, so
   real-VM qualification and stopped-volume export remain paused.
+- Reusable-base apt installs now use `--no-remove` for declared recipe
+  packages and the pinned ChatGPT package, so a dependency conflict cannot
+  silently remove installed desktop packages under `-y`. The command-plan
+  tests failed before the change and passed afterward; the fake ISO digest
+  mapping check also passed. An actual guest apt transaction remains untested.
 
 ## Remaining acceptance
 

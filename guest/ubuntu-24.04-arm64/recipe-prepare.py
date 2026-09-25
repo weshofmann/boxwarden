@@ -77,7 +77,7 @@ def command_plan(payload):
     commands = []
     if payload["apt_packages"]:
         commands.append(("apt-update", ["/usr/bin/apt-get", "update"]))
-        commands.append(("apt-install", ["/usr/bin/apt-get", "install", "-y", "--no-install-recommends", *payload["apt_packages"]]))
+        commands.append(("apt-install", ["/usr/bin/apt-get", "install", "-y", "--no-remove", "--no-install-recommends", *payload["apt_packages"]]))
     commands.extend((step["id"], step["argv"]) for step in payload["steps"])
     return commands
 

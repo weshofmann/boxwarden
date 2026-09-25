@@ -58,6 +58,7 @@ class PinnedChatGPTInstallTests(unittest.TestCase):
             if argv[0] == "/usr/bin/dpkg-deb":
                 return mock.Mock(stdout="chatgpt\n26.917.71314\narm64\n")
             if argv[0] == "/usr/bin/apt-get":
+                self.assertEqual(argv[1:-1], ["install", "-y", "--no-remove", "--no-install-recommends"])
                 self.assertEqual(self.defaults.read_text(), 'repo_add_once="false"\n')
                 self.assertFalse(self.sources.exists())
                 return mock.Mock(stdout="")
