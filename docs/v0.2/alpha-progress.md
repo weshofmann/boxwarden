@@ -5,6 +5,31 @@ Updated: 2026-09-25 UTC. Integration branch:
 The mission deadline is 2026-10-03 14:44 UTC. This remains a functional
 prototype with material acceptance gaps, not an alpha-ready release.
 
+## Current checkpoint
+
+- Published `c94c915` removes the stale 90-minute serial wait that overrode
+  the builder's four-hour installer deadline. The new regression failed
+  before the fix; targeted serial/basebuild tests and the full local Go suite
+  passed afterward. [Hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36188021072)
+  passed its deterministic matrix. Independent read-only delta review found
+  no Critical or Important issue; real installer success remains unproved.
+- A fresh public ChatGPT base preparation from that exact source is now
+  `installer-running` with one owned candidate. The two earlier timed-out
+  candidates remain stopped as failed evidence. Neither a prepared base nor
+  the ChatGPT package or window is qualified yet.
+- Two separate 64 MiB workspace volumes are formatted, identity-checked,
+  available, and unattached. The staged credential-free three-file source
+  matches the tracked example byte for byte. Guest attach/import and the
+  retained-workspace loop remain pending.
+- Next: require the builder's terminal success, stopped candidate, passed
+  independent-clone qualification, and healthy host doctor before public
+  session create. Then exercise graphical launch, import, stop/start,
+  software-changing rebuild, replacement attach, stopped export, and a
+  separate fresh repeat. Real sign-in remains a human acceptance action.
+- Current external image storage remains in use. Relocation is deferred until
+  Wes supplies a separate disk and explicit direction. No capacity guard is
+  currently blocking the running attempt.
+
 ## Verified behavior
 
 | Area | Evidence and limit |

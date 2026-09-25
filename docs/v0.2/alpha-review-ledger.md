@@ -57,3 +57,14 @@ The three correction deltas have received independent source review. Final
 cumulative head review and real-host acceptance remain before the PR can be
 marked Ready. No review finding authorizes weakening host guards or using
 affected old helper binaries for acceptance.
+
+The `f282f28..c94c915` serial-deadline correction also received independent
+read-only review. No Critical or Important issue was found. The reviewer
+confirmed that the builder's four-hour, two-hour, and ten-minute phase
+contexts reach the serial wait unchanged and that marker binding, ordering,
+and terminal poisoning remain intact. A Minor test-coverage note remains:
+the new test proves rejection of an unbounded caller but cannot simulate the
+old 90-minute cap without a virtual clock. Targeted serial/basebuild tests,
+the full local Go suite, and [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36188021072)
+passed. A fresh real installer attempt is still running; this review does
+not qualify it.

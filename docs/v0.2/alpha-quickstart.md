@@ -51,6 +51,13 @@ that the user manager accepted the process; a usable visible window and
 waiting-for-sign-in state require separate VM acceptance. This recipe has not
 yet passed a real-VM build or graphical acceptance.
 
+[OpenAI's Linux guide](https://learn.chatgpt.com/docs/linux/linux-app) lists
+Ubuntu 24.04 ARM64 as supported but says Computer Use is not yet available in
+the Linux preview. Its [release notes](https://help.openai.com/en/articles/6825453-chatgpt-release-notes)
+clarify the boundary: browser actions in the built-in browser or Chrome are
+available, while controlling other desktop apps is not. Installation, visible
+launch, and sign-in readiness do not establish either agent capability.
+
 For a credential-free action check, `examples/v0.2-alpha-actions.json` writes
 a `once` marker in the guest home, then its `startup` step requires that marker
 and increments a guest-local start counter. A fresh run should produce counter
