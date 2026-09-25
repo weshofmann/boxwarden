@@ -72,11 +72,15 @@ prototype with material acceptance gaps, not an alpha-ready release.
   recipe argv, and no-rebuild gate before any future SSH call. The complete
   local Go suite, affected runtime tests, targeted race test, vet, CI build,
   gofmt, and diff checks passed after the correction; hosted CI is pending.
-  The existing qualified generic base predates this helper. The retained-owner
-  control route, explicit retry/skip, and real-VM qualification remain. Public
-  recipes still reject `once`, `reconfigure`, `startup`, and `launch`; desktop
-  `launch` also refuses in the helper until its graphical environment is
-  designed.
+  The retained owner now invokes the fixed pinned SSH action only after its
+  own fresh READY and reserved-intent checks, then rechecks both after the
+  receipt. The full runtime package, targeted race and architecture tests,
+  vet, all-package compilation, gofmt, and diff checks passed for that
+  increment locally. The existing qualified generic base predates this
+  helper. The typed supervisor control RPC, explicit retry/skip, and real-VM
+  qualification remain. Public recipes still reject `once`, `reconfigure`,
+  `startup`, and `launch`. The helper also refuses desktop `launch` until its
+  graphical environment is designed.
 - Internal free capacity was about 30 GiB at the latest check.
   The export guard previously required about 25.8 GiB. Check capacity before
   another expensive host trial and report any renewed shortfall; no further
@@ -84,10 +88,10 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Remaining acceptance
 
-1. Route exact host attempts through the retained supervisor with independent
-   journal admission, then rebuild and qualify a new generic base. Enable
-   guest-only `once`, explicit `reconfigure`, `startup`, and `launch` with visible
-   retry/skip and truthful failure or waiting-for-sign-in states.
+1. Add the typed supervisor control RPC for exact host action attempts, then
+   rebuild and qualify a new generic base. Enable guest-only `once`, explicit
+   `reconfigure`, `startup`, and `launch` with visible retry/skip and truthful
+   failure or waiting-for-sign-in states.
 2. Qualify a software-changing rebuild, replacement-sandbox reattachment,
    desktop application launch, and the complete public synthetic workflow
    from a separate fresh tracked-source sandbox.

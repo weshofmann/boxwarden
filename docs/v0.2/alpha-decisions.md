@@ -75,6 +75,15 @@ extended for the session action service and this owner check, while the
 backend remains barred from importing action protocol types. The owner control
 RPC and live SSH invocation are still separate work.
 
+The retained owner now has the direct action call. It checks fresh READY and
+the exact reserved intent before using its pinned SSH connection, validates
+the returned success receipt, then rechecks READY and the durable intent. It
+does not hold the readiness renewal mutex during a potentially ten-minute
+guest action: management certificates last fifteen minutes and renew within
+five minutes of expiry, so renewal must remain available while that call is
+in flight. The supervisor control RPC still has to constrain and deliver this
+operation; no public action route is enabled.
+
 ## Live workspace identity loss and caching experiment, 2026-09-24
 
 A separate fresh empty-volume run reached exact mount-bound READY, then
