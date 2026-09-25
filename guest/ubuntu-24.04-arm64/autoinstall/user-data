@@ -72,7 +72,7 @@ autoinstall:
       PermitUserRC no
       EOF
     - install -d -o root -g root -m 0755 /target/usr/local/libexec
-    - "printf '%s  %s\\n' '2819f2bb506340aea018b9f4cd548cc2b19276b880c411d8a1bd6361b70d42cd' '/cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap' | sha256sum -c -"
+    - "printf '%s  %s\\n' 'ecdb752197c6d36f9594d234e4035745f55e1e38c95426a78d473e5d26dadf06' '/cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap' | sha256sum -c -"
     - install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap /target/usr/local/libexec/boxwarden-guest-bootstrap
     - "printf '%s  %s\\n' '__BOXWARDEN_FINALIZER_SHA256__' '/cdrom/boxwarden-artifacts/finalize-golden.sh' | sha256sum -c -"
     - install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/finalize-golden.sh /target/usr/local/libexec/boxwarden-finalize-golden

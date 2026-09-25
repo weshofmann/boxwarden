@@ -16,6 +16,51 @@ import (
 
 type errorWriter struct{}
 
+type mainActionExecutor struct{ calls int }
+
+func (r *mainActionExecutor) Run(_ context.Context, argv []string) error {
+	r.calls++
+	if len(argv) != 1 || argv[0] != "/usr/bin/true" {
+		return errors.New("action argv changed")
+	}
+	return nil
+}
+
+func TestMainActionModeReturnsExactReceiptWithoutReplay(t *testing.T) {
+	b, _ := managementFixture(t)
+	base := filepath.Join(b.Root, "var/lib/boxwarden")
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(base, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	executor := &mainActionExecutor{}
+	b.ActionExecutor = executor
+	request := guestproto.ActionRequest{
+		Version:      guestproto.Version,
+		Association:  guestproto.Association{Domain: "work", SessionID: "123e4567-e89b-42d3-a456-426614174000", BackendKind: "tart", BackendObject: "workstation"},
+		Generation:   "9b2d12d8-7014-4c5e-9d5c-627c2fcc1575",
+		RecipeDigest: strings.Repeat("a", 64), ActionID: "setup", ActionPhase: "once",
+		AttemptID: "00112233-4455-4677-8899-aabbccddeeff", Argv: []string{"/usr/bin/true"},
+	}
+	input, _, err := guestproto.EncodeActionRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first bytes.Buffer
+	if err := run([]string{"action"}, bytes.NewReader(input), &first, &bytes.Buffer{}, b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := guestproto.DecodeActionReceipt(request, bytes.NewReader(first.Bytes())); err != nil {
+		t.Fatalf("helper returned invalid receipt: %v", err)
+	}
+	var second bytes.Buffer
+	if err := run([]string{"action"}, bytes.NewReader(input), &second, &bytes.Buffer{}, b); err != nil || second.String() != first.String() || executor.calls != 1 {
+		t.Fatalf("exact retry = %v, %q, calls=%d", err, second.String(), executor.calls)
+	}
+}
+
 func (errorWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
 
 type shortOutputWriter struct{}
