@@ -1,144 +1,64 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-24 UTC. Integration branch:
+Updated: 2026-09-25 UTC. Integration branch:
 `weshofmann/feature/v02-alpha`; [Draft PR #12](https://github.com/weshofmann/boxwarden/pull/12).
-The mission deadline is 2026-10-03 14:44 UTC. This is a functional prototype
-with material acceptance gaps, not an alpha-ready release.
+The mission deadline is 2026-10-03 14:44 UTC. This remains a functional
+prototype with material acceptance gaps, not an alpha-ready release.
 
-## Verified implementation
+## Verified behavior
 
-| Area | Current evidence and limit |
+| Area | Evidence and limit |
 | --- | --- |
-| Host and preparation | Host doctor is healthy. The pinned Canonical Ubuntu 24.04.4 ARM64 Desktop installer was signature and digest checked. The public recipe path built a fresh generic base carrying the corrected shutdown helper, qualified a separate clone, admitted the base to its cache, and created a stopped session from it. The session reached bound READY. |
-| Graphical sandbox | A real Ubuntu Desktop clone displayed GNOME and Firefox, restarted to bound READY, and retained a synthetic home file. Actual agent desktop use and provider sign-in remain unverified. |
-| Recipe identity | Preparation has a reusable cache key; the complete canonical recipe has a separate immutable digest. Public create persists that digest before cloning. Rebuild journals and switches old/candidate recipe intent with the system identity. Legacy unbound sessions remain unbound. These additions have source tests; fresh real-host qualification is pending. |
-| Recipe actions | Public preparation rejects `once`, `reconfigure`, `startup`, and `launch` actions until durable attempts and an executor exist. Guest-only phase execution is not claimed. |
-| Workspaces | Public create formatted independent ext4 volumes; attachment, mount-bound READY, stop/start, detach/reattach, and a same-software system rebuild preserved synthetic content in real VM runs. Public session delete retains a volume. New-format software upgrade and the complete fresh sequence remain pending. |
-| Import | The public command captured a bounded synthetic host tree and transferred it over pinned SFTP to an attached running workspace. Host readback matched. Its journal deliberately remains `transferring`; readback alone does not prove stopped-disk persistence. |
+| Host and base | Host doctor is healthy. The pinned Ubuntu Desktop ARM64 installer was signature and digest checked. A corrected generic base was built, qualified on a separate clone, admitted, and used to create stopped sessions that reached bound READY. |
+| Desktop | A real Ubuntu Desktop clone displayed GNOME and Firefox, restarted to bound READY, and retained a synthetic home file. Agent desktop use and provider sign-in remain unverified. |
+| Recipe identity | Preparation has a reusable cache key; the canonical recipe has a separate immutable digest. Public create persists the digest before cloning, and rebuild journals old and candidate intent with system identity. Source tests pass; fresh real-host qualification of software changes remains. |
+| Workspaces | Public create formatted independent ext4 volumes. Attachment, mount-bound READY, stop/start, detach/reattach, same-software system rebuild, and retained-volume delete preserved synthetic content in real VM runs. |
+| Import persistence | From published cached-disk source, a fresh bound READY session imported a credential-free synthetic tree with matching pinned live readback. Public stop reported `request=guest_accepted forced=false`. The exact stopped 64 MiB raw inode retained its UUID and clean ext4 header without journal recovery or orphan state. A zero-NIC stopped export returned the selected tree; independent byte-for-byte comparison matched all three source files, and public `workspace import verify` advanced the exact import journal to `verified`. This establishes one real stopped-disk import proof, not general reliability. |
 | Controlled return | Selected files from clean stopped workspace snapshots were exported through a zero-NIC Linux inspector and bounded host receiver into new destinations. An `inspected` export resumed and published; a dirty ext4 snapshot was refused. Ambiguous post-final-rename recovery remains a manual evidence gate. |
-| Import verification | Source code compares a complete selected stopped export against the captured import and can advance an exact journal to `verified`. Focused tests and a separate source review passed. No real import has yet passed this stopped-disk verification. |
-| Shutdown correction | A fresh base carrying fixed guest poweroff qualified, but an attached empty workspace reproduced a dirty stop while the no-workspace control stopped promptly. A 120-second grace experiment also failed. The owner now passes exact bound workspace mounts to the helper, which verifies and unmounts them before queuing poweroff. The quiesce source and pinned helper passed targeted tests and hosted CI. On its freshly qualified base, one empty-volume stop was dirty; two more fresh empty-volume stops had clean ext4, one fast and one after the full grace. Public stop now records whether the guest request was acknowledged, Tart was used, and force stop was sent; it explicitly leaves workspace cleanliness unverified. A fresh public empty-volume trial reported Tart fallback plus force stop after 67.53 seconds; its stopped ext4 required recovery. Another fresh traced run identified guest UUID resolution failure and loss of the primary ext4 superblock after earlier verified formatting and mount-bound READY. Boxwarden now pins cached I/O for managed ext4 disks; one fresh cached trial retained the clean header after guest-accepted stop. Repeated clean persistence is pending. |
-| Host capacity | The stopped Tart store moved into an encrypted external APFS image. All 33 files matched byte for byte and by SHA-256 after remount; ownership, modes, extended attributes, and the 11 stopped VMs present at cutover matched. Doctor and disposable Tart create/clone/delete passed. A login/mount LaunchAgent remounted it without a prompt in a controlled test. The internal copy was retired, recovering 31.99 GiB immediately; an actual host reboot remains untested. |
+| Stop observability | Public stop and status report whether the pinned guest request was accepted, whether Tart fallback or force stop occurred, and explicitly mark workspace cleanliness unverified. Read-only stopped-filesystem inspection remains the persistence gate. |
+| External Tart store | The stopped Tart store moved into an encrypted external APFS image. All 33 files matched byte for byte and by SHA-256 after remount; ownership, modes, extended attributes, and the 11 stopped VMs at cutover matched. Doctor and disposable Tart create/clone/delete passed. A login/mount LaunchAgent remounted it without a prompt in a controlled test; an actual reboot remains untested. |
 
-The quiesce source checkpoint `31399e5f05c089e87da82cf2bdc340ea7f059220`
-passed [hosted macOS CI](https://github.com/weshofmann/boxwarden/actions/runs/36065549820)
-(gofmt, full Go tests, race tests, vet, and build). Local affected-package
-tests (guest protocol, SSH, runtime, supervisor), all-package Go compilation,
-guest installer/finalizer/remaster fixtures, artifact digest, and diff checks
-also passed. These source checks do not establish a clean real attached-volume
-stop.
+## Verification and current work
 
-The newer stop-outcome source checkpoint passed full tests in the four affected
-Go packages (session runtime, supervisor, session, and app), focused outcome
-regressions, all-package Go compilation, and diff checks. [Hosted macOS
-CI](https://github.com/weshofmann/boxwarden/actions/runs/36071821720) passed
-gofmt, full Go tests, race tests, vet, and build. A fresh real-host public stop
-reported the failed guest-request branch and persisted it through status; its
-stopped volume failed the independent clean-ext4 gate.
-
-## Current work and blockers
-
-- Two fresh import runs reached matching live readback, then controlled stop
-  left the exact ext4 workspace with `needs_recovery`. One stopped export
-  refused the dirty snapshot; another was not attempted. Their volumes,
-  journals, and remaining failed VM evidence are retained privately.
-- A third fresh public session used the newly qualified base and an independent
-  formatted workspace. Synthetic import matched a pinned live readback and
-  the session reached READY; after public controlled stop, stopped export
-  refused `ext4 filesystem requires recovery`. An empty attached workspace
-  reproduced the dirty stop without import; the same software stopped promptly
-  without a workspace. Doubling the graceful window to 120 seconds did not
-  change the result. These failed runs and their exact volumes remain private
-  evidence. A single source-digest preflight anomaly did not recur in two
-  read-only checks or a bounded public create retry; its cause remains unproven.
-- The quiesce-helper source built and qualified another fresh generic base. A
-  new public session with an empty attached ext4 workspace reached bound
-  READY. Controlled stop took 60.96 seconds and the stopped ext4 header still
-  had `needs_recovery`; no import was involved. Its VM and volume are retained
-  privately without restart or repair. That run predates public outcome
-  reporting, so its guest-request result is unknown.
-- Two further fresh empty-volume trials from that same base used an isolated
-  host-only private trace, with no guest or stop-decision change. Both pinned
-  guest shutdown requests were acknowledged in under half a second, and both
-  stopped ext4 headers were clean. One VM exited in about six seconds; the
-  other took roughly 63 seconds, consistent with the force-stop path after
-  the grace window. The first dirty stop had no trace, so its request outcome
-  remains unknown. The trace patch is retained only in private evidence and
-  was removed from the worker checkout.
-- A fresh empty-volume public trial using the published stop-outcome source
-  reached exact mount-bound READY. Stop took 67.53 seconds and reported
-  `request=tart_fallback forced=true`; a later public status retained the same
-  result and observed the exact backend stopped. Read-only inspection of the
-  stopped raw volume matched its filesystem UUID but found
-  `needs_recovery=true`. The VM and volume are preserved privately. The
-  fallback result establishes that the pinned guest request did not return
-  success; it does not yet identify why. No import persistence is claimed.
-- A separate fresh diagnostic session also reached mount-bound READY, then
-  developed persistent strict-SSH-probe drift before stop. Public stop reported
-  Tart fallback without force. A private bounded trace showed the guest helper
-  could not resolve the exact workspace filesystem UUID with `blkid`; it
-  failed before unmount. The format journal had earlier verified ext4 on the
-  same raw-file inode, but the stopped raw file had lost its primary ext4 magic
-  and UUID. The VM and volume remain private failed evidence. This is a live
-  volume identity-loss branch, with cause still unproven.
-- Pinned Tart 2.32.1 [selects cached I/O for Linux root disks](https://github.com/openai/tart/blob/2.32.1/Sources/tart/VM.swift)
-  to avoid filesystem corruption, while [additional file disks default to
-  automatic caching](https://github.com/openai/tart/blob/2.32.1/Sources/tart/Commands/Run.swift).
-  That difference motivated the cached-disk trial; one clean comparison does
-  not yet prove the failure mechanism or durable reliability.
-- An isolated cached-additional-disk trial used a separately formatted volume
-  whose ext4 magic, UUID, and inode were checked before launch. The guest stayed
-  mount-bound READY for roughly a minute. Public stop took 7.89 seconds and
-  reported `request=guest_accepted forced=false`; exact backend status then
-  reported stopped. Read-only inspection of the same raw inode found the
-  expected UUID, clean ext4 state, and no journal recovery or orphan flag.
-  The fixed cached option is now in source, with the Tart package tests and
-  all-package compilation passing locally. Hosted CI and repeated real-host
-  trials from the published source are pending.
-- The external Tart migration recovered 31.99 GiB of unique internal space.
-  If the encrypted image is unavailable, the unmounted
-  Tart path is mode `000` and operations fail closed. Login and filesystem
-  mount triggers are installed, but an actual reboot has not been exercised.
-  Separately, a cold historical private archive was verified after relocation
-  into the encrypted evidence vault; its internal copy was retired and that
-  vault is unmounted.
-- One stopped synthetic system clone was retired through public `session
-  delete`; its independent workspace kept the same inode, size, and SHA-256
-  and is now available and detached. A later private ledger check showed that
-  this volume also had a dirty-stop diagnostic. Its system disk is no longer
-  available for further diagnosis; the retained volume, host records, and
-  other failed runs remain. No further diagnostic VM retirement is planned.
-- Durable recipe action attempts and receipts are the next source increment.
-  Until their retry and unknown-outcome semantics exist, action execution
-  stays disabled.
+- [Hosted macOS CI for the cached-disk source](https://github.com/weshofmann/boxwarden/actions/runs/36075148788)
+  passed gofmt, full Go tests, race tests, vet, and build. Local Tart package
+  tests, all-package compilation, and diff checks passed before publication.
+  The real-host import proof above used a binary built from that exact
+  published integration commit. These are separate source and host checks.
+- Earlier automatic-cache trials produced dirty ext4 stops, including one
+  public Tart fallback with force and one traced guest request that could not
+  resolve the expected filesystem UUID after the raw volume lost its primary
+  ext4 header. Failed VMs, volumes, and journals remain private evidence.
+  Pinned Tart [uses cached I/O for Linux root disks](https://github.com/openai/tart/blob/2.32.1/Sources/tart/VM.swift)
+  while [additional file disks default to automatic caching](https://github.com/openai/tart/blob/2.32.1/Sources/tart/Commands/Run.swift).
+  Boxwarden now pins `caching=cached` for managed writable ext4 disks. An
+  independent empty-volume trial and the published-source import trial both
+  stopped with clean exact filesystem identity. The causal mechanism and
+  long-run reliability are still unproven.
+- Guest-only recipe `once`, `reconfigure`, `startup`, and `launch` actions are
+  rejected until durable attempt, receipt, retry, and skip semantics exist.
+  Those records and the bounded guest executor are the current source work.
+- Internal free capacity was about 31 GiB after the successful stopped export.
+  The export guard previously required about 25.8 GiB. Check capacity before
+  another expensive host trial and report any renewed shortfall; no further
+  cleanup is planned.
 
 ## Remaining acceptance
 
-1. Repeat the cached additional-disk test on fresh disposable volumes from
-   published source with read-only filesystem checks before launch and after
-   stop, then qualify the verified failure correction,
-   qualify a new baseline, prove clean stopped ext4, then repeat public
-   synthetic import, stopped export, and `workspace import verify`.
-2. Implement guest-only `once`, explicit `reconfigure`, `startup`, and `launch`
+1. Implement guest-only `once`, explicit `reconfigure`, `startup`, and `launch`
    actions with bounded durable attempts, visible retry/skip, and truthful
    failure or waiting-for-sign-in states.
-3. Qualify a software-changing rebuild, replacement-sandbox reattachment,
+2. Qualify a software-changing rebuild, replacement-sandbox reattachment,
    desktop application launch, and the complete public synthetic workflow
    from a separate fresh tracked-source sandbox.
-4. Run final source and real-host acceptance checks, resolve review findings,
+3. Run final source and real-host acceptance checks, resolve review findings,
    record limitations, and update the Draft PR. Wes's real provider sign-in
    and subjective GUI acceptance may remain human actions.
 
-## Next step and publication policy
+## Publication policy
 
-Preserve the failed diagnostic runs. Repeat the fixed cached managed-disk path
-from the published alpha source on independent fresh volumes, checking the
-ext4 header before launch and after stop. Then exercise synthetic import and
-stopped export only after a clean stopped-volume gate. Continue authoritative
-offline ext4 inspection after every stopped-volume trial.
-Continue durable per-action attempt records and tests as the next source
-increment. Publish each independently verified increment promptly on the alpha
-branch and keep the
-Draft PR accurate. Keep private host evidence, VM disks, credentials, and the
-vault key out of Git.
+Publish each meaningful independently verified increment promptly on the
+alpha branch, with targeted checks for small changes and full integration
+checks at mission gates. Keep this record and the Draft PR current. Keep
+private host evidence, VM disks, credentials, and vault keys out of Git.
 Never push or merge into `main`, rewrite published history, or bypass checks.
