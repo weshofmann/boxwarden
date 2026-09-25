@@ -41,6 +41,17 @@ foreign, or mismatched marker state fails closed. This is guest-local crash
 recovery, not host evidence of trustworthy execution. The host journal and a
 future fresh pinned SSH check remain independent requirements.
 
+The fixed helper now has a separate ten-minute `action` mode. It validates the
+canonical request, claims it durably, then passes argv directly to a bounded
+process running as the explicit `boxwarden` workstation user. The root helper
+reads the root-owned association and claim state; the child receives a closed
+environment and guest home, not the helper's root credentials or ambient host
+values. A failed command leaves the claim indeterminate. An exact completed
+receipt returns on retry without another process invocation. Desktop `launch`
+still refuses before claim because its graphical session environment needs a
+separate design. The host has no public action route yet and must validate an
+absolute guest executable when it eventually admits recipe actions.
+
 ## Live workspace identity loss and caching experiment, 2026-09-24
 
 A separate fresh empty-volume run reached exact mount-bound READY, then

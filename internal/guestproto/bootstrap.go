@@ -55,6 +55,7 @@ func (b *boundedBuffer) Write(data []byte) (int, error) {
 type Bootstrapper struct {
 	Root              string
 	Runner            Runner
+	ActionExecutor    ActionExecutor
 	HostKeyPath       string
 	ZonePath          string
 	Failpoint         func(string) error
@@ -70,7 +71,7 @@ func NewBootstrapper(root string, runner Runner) *Bootstrapper {
 	if runner == nil {
 		runner = ExecRunner{}
 	}
-	return &Bootstrapper{Root: root, Runner: runner, HostKeyPath: "/etc/ssh/ssh_host_ed25519_key.pub", ZonePath: "/etc/timezone", effectiveHostname: os.Hostname, renameNoReplace: renameWithoutReplacement, workspaceOwner: lookupWorkspaceOwner}
+	return &Bootstrapper{Root: root, Runner: runner, ActionExecutor: WorkstationActionExecutor{}, HostKeyPath: "/etc/ssh/ssh_host_ed25519_key.pub", ZonePath: "/etc/timezone", effectiveHostname: os.Hostname, renameNoReplace: renameWithoutReplacement, workspaceOwner: lookupWorkspaceOwner}
 }
 
 func (b *Bootstrapper) Serial(ctx context.Context, request SerialRequest) (SerialResult, error) {
