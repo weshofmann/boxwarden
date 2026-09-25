@@ -1,6 +1,7 @@
 package sshx
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/weshofmann/boxwarden/internal/guestproto"
 )
 
 const (
@@ -17,6 +20,7 @@ const (
 	maxManagementRequestBytes  = 64 << 10
 	maxManagementResponseBytes = 64 << 10
 	managementWallTimeout      = 30 * time.Second
+	actionWallTimeout          = 10*time.Minute + 15*time.Second
 )
 
 type Connection struct {
@@ -383,6 +387,47 @@ func (c *Client) run(ctx context.Context, connection Connection, request managem
 	return []byte(result.Stdout), nil
 }
 
+// RunAction carries one already-admitted action over the exact pinned SSH
+// connection. It proves only that the fixed guest helper returned a matching
+// receipt; the caller owns fresh READY checks and the durable attempt journal.
+func (c *Client) RunAction(ctx context.Context, connection Connection, request guestproto.ActionRequest) (guestproto.ActionReceipt, error) {
+	if c == nil || c.runner == nil {
+		return guestproto.ActionReceipt{}, fmt.Errorf("action SSH runner is required")
+	}
+	if err := validateConnection(connection); err != nil {
+		return guestproto.ActionReceipt{}, err
+	}
+	if request.Domain != string(connection.Binding.Domain) || request.SessionID != connection.Binding.SessionID ||
+		request.BackendKind != connection.Binding.BackendKind || request.BackendObject != connection.Binding.BackendObject {
+		return guestproto.ActionReceipt{}, fmt.Errorf("action request does not match SSH connection binding")
+	}
+	encoded, _, err := guestproto.EncodeActionRequest(request)
+	if err != nil {
+		return guestproto.ActionReceipt{}, fmt.Errorf("invalid action request: %w", err)
+	}
+	if err := verifyKnownHostsPin(connection); err != nil {
+		return guestproto.ActionReceipt{}, fmt.Errorf("SSH known-hosts file: %w", err)
+	}
+	deadline := time.Now().Add(actionWallTimeout)
+	if callerDeadline, hasDeadline := ctx.Deadline(); hasDeadline && callerDeadline.Before(deadline) {
+		deadline = callerDeadline
+	}
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	result, err := c.runner.Run(ctx, Command{Path: sshPath, Args: sshActionArguments(connection), Stdin: encoded})
+	if err != nil {
+		return guestproto.ActionReceipt{}, fmt.Errorf("strict action SSH: %w", err)
+	}
+	if result.Truncated || len(result.Stdout) > guestproto.MaxActionReceiptBytes || len(result.Stderr) > guestproto.MaxActionReceiptBytes {
+		return guestproto.ActionReceipt{}, fmt.Errorf("action SSH output exceeds bound")
+	}
+	receipt, err := guestproto.DecodeActionReceipt(request, bytes.NewReader([]byte(result.Stdout)))
+	if err != nil {
+		return guestproto.ActionReceipt{}, fmt.Errorf("parse exact action receipt: %w", err)
+	}
+	return receipt, nil
+}
+
 func managementRequestFor(binding Binding, kind, zone string) managementRequest {
 	return managementRequest{Version: 1, Kind: kind, Domain: string(binding.Domain), SessionID: binding.SessionID, BackendKind: binding.BackendKind, BackendObject: binding.BackendObject, Zone: zone}
 }
@@ -451,8 +496,16 @@ func verifyKnownHostsPin(connection Connection) error {
 }
 
 func sshArguments(connection Connection) []string {
+	return fixedGuestHelperArguments(connection, "management")
+}
+
+func sshActionArguments(connection Connection) []string {
+	return fixedGuestHelperArguments(connection, "action")
+}
+
+func fixedGuestHelperArguments(connection Connection, mode string) []string {
 	arguments := strictOpenSSHArguments(connection)
-	arguments = append(arguments, "-p", strconv.Itoa(int(connection.Port)), "boxwarden@"+connection.Address, "/usr/bin/sudo", "-n", "--", guestManagementHelper, "management")
+	arguments = append(arguments, "-p", strconv.Itoa(int(connection.Port)), "boxwarden@"+connection.Address, "/usr/bin/sudo", "-n", "--", guestManagementHelper, mode)
 	return arguments
 }
 
