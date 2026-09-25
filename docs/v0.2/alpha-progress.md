@@ -25,7 +25,11 @@ prototype with material acceptance gaps, not an alpha-ready release.
   passed. These source and documentation checks do not qualify the running
   installer or its future clone.
 - A fresh public ChatGPT base preparation from published `c94c915` is now
-  `installer-running` with one owned candidate. The two earlier timed-out
+  `installer-running` with one owned candidate. At 2026-09-25 16:33 MDT, its
+  exact builder, Tart, and Virtualization processes were still live after
+  about 101 minutes, and the candidate disk was being written. This passes
+  the previous premature 90-minute transport cap, but neither the installer
+  nor the four-hour bounded attempt has completed. The two earlier timed-out
   candidates remain stopped as failed evidence. Neither a prepared base nor
   the ChatGPT package or window is qualified yet.
 - Two separate 64 MiB workspace volumes are formatted, identity-checked,
