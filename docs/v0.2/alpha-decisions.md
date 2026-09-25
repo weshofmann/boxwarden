@@ -1,5 +1,25 @@
 # Boxwarden v0.2 alpha decisions
 
+## Durable guest-action attempt foundation, 2026-09-25
+
+An action command must not run before its exact attempt is durable. The first
+source increment adds a private owner-only journal bound to the immutable
+recipe digest, action ID and phase, domain, session UUID, backend object, and
+start generation. Reservation re-admits the stored recipe and current running
+record; a `once` action cannot acquire a second attempt on the same system,
+even after a new start generation. Other actions cannot acquire a second
+attempt in the same generation. An interrupted `reserved` attempt is
+indeterminate rather than a reason to replay. A terminal result is one-way;
+success requires a digest slot for a separately checked guest receipt and
+still requires the exact running generation at the moment it is recorded.
+
+This journal is a storage and replay boundary, not a guest executor or a
+trustworthy completion claim. The caller must hold the session operation lock
+and establish fresh READY independently of the stored readiness bit. Guest
+receipt creation, host verification, explicit retry/skip, and execution are
+subsequent increments. The public recipe loader continues rejecting all
+session actions until those pieces are connected.
+
 ## Live workspace identity loss and caching experiment, 2026-09-24
 
 A separate fresh empty-volume run reached exact mount-bound READY, then
