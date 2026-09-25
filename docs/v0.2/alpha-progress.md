@@ -195,6 +195,11 @@ prototype with material acceptance gaps, not an alpha-ready release.
   the graphical session, bus, or display is available. Unsafe runtime metadata
   still fails immediately. Seven synthetic launcher tests and the fake-ISO
   source mapping check passed locally; the ordering is not yet VM-qualified.
+- A tracked credential-free action recipe now provides observable `once` and
+  `startup` evidence: a guest-home marker plus a counter that should advance
+  across a later stop/start. Recipe admission and a temporary-directory
+  execution of the exact embedded Python steps (counter `1` then `2`) passed
+  locally. No real VM has executed this recipe yet.
 
 ## Remaining acceptance
 

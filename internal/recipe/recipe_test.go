@@ -51,6 +51,18 @@ func TestTrackedChatGPTRecipeUsesPinnedGuestPreparation(t *testing.T) {
 	}
 }
 
+func TestTrackedAutomaticActionRecipeHasOrderedSyntheticSteps(t *testing.T) {
+	path := filepath.Join("..", "..", "examples", "v0.2-alpha-actions.json")
+	recipe, err := LoadRunnable(path)
+	if err != nil {
+		t.Fatalf("tracked action recipe is not runnable: %v", err)
+	}
+	if len(recipe.Steps) != 2 || recipe.Steps[0].Phase != "once" ||
+		recipe.Steps[1].Phase != "startup" {
+		t.Fatalf("tracked action recipe lost ordered phases: %+v", recipe.Steps)
+	}
+}
+
 func TestCanonicalIntentSeparatesSessionActionsFromReusableBase(t *testing.T) {
 	path := writeRecipe(t, validRecipe)
 	before, err := Load(path)

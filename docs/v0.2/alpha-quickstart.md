@@ -51,6 +51,12 @@ that the user manager accepted the process; a usable visible window and
 waiting-for-sign-in state require separate VM acceptance. This recipe has not
 yet passed a real-VM build or graphical acceptance.
 
+For a credential-free action check, `examples/v0.2-alpha-actions.json` writes
+a `once` marker in the guest home, then its `startup` step requires that marker
+and increments a guest-local start counter. A fresh run should produce counter
+`1`; a later stop/start of the same system should produce `2` while the marker
+remains. This example is source checked and awaits fresh-VM qualification.
+
 ```sh
 "$BW" --config "$CONFIG" doctor
 "$BW" --config "$CONFIG" --domain alpha alpha recipe check --recipe "$RECIPE" --iso "$ISO"
