@@ -40,10 +40,16 @@ prototype with material acceptance gaps, not an alpha-ready release.
   duplicate `once` attempts on a system, blocks same-generation replay of
   other actions, and permits one terminal result with a receipt digest slot.
   The session package tests, all-package compile check, targeted vet, gofmt,
-  and diff checks passed locally. Hosted CI for this source checkpoint is
-  pending. Fresh READY admission, guest receipt generation and checking,
-  explicit retry/skip, and execution are not yet wired. Public recipes still
-  reject `once`, `reconfigure`, `startup`, and `launch` actions.
+  and diff checks passed locally. [Hosted CI for that journal checkpoint](https://github.com/weshofmann/boxwarden/actions/runs/36077138266)
+  passed gofmt, full Go tests, race tests, vet, and build.
+- The fixed guest action request and success receipt now have bounded canonical
+  JSON, an exact argv digest, and session/recipe/attempt/generation binding.
+  The full guest protocol package, all-package compile check, targeted vet,
+  gofmt, and diff checks passed locally. Hosted CI for this newer source
+  checkpoint is pending. Fresh READY admission, the guest's durable
+  claim-before-run marker, receipt storage and checking, explicit retry/skip,
+  and execution are not yet wired. Public recipes still reject `once`,
+  `reconfigure`, `startup`, and `launch` actions.
 - Internal free capacity was about 31 GiB after the successful stopped export.
   The export guard previously required about 25.8 GiB. Check capacity before
   another expensive host trial and report any renewed shortfall; no further
@@ -51,10 +57,10 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Remaining acceptance
 
-1. Bind the journal to fresh READY, implement the fixed guest receipt and
-   bounded executor, then enable guest-only `once`, explicit `reconfigure`,
-   `startup`, and `launch` with visible retry/skip and truthful failure or
-   waiting-for-sign-in states.
+1. Add the guest claim-before-run marker and bounded executor, then bind exact
+   attempts and receipts to fresh READY over pinned SSH. Enable guest-only
+   `once`, explicit `reconfigure`, `startup`, and `launch` only with visible
+   retry/skip and truthful failure or waiting-for-sign-in states.
 2. Qualify a software-changing rebuild, replacement-sandbox reattachment,
    desktop application launch, and the complete public synthetic workflow
    from a separate fresh tracked-source sandbox.
