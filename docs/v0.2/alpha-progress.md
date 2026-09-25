@@ -352,7 +352,7 @@ prototype with material acceptance gaps, not an alpha-ready release.
   fresh attempt is `installer-running` with an exact live Tart child; the
   previous timed-out candidate remains stopped and immutable. No prepared
   ChatGPT base is yet qualified. At the latest check, internal Data had about
-  74 GiB free, qualification state 97 GiB, and Tart store 261 GiB. Next:
+  74 GiB free, qualification state 97 GiB, and Tart store 255 GiB. Next:
   observe the installed-guest marker and recipe step, then require
   finalization and independent-clone qualification before cache admission.
 - A tracked ChatGPT plus `jq` recipe is staged for a later software-changing
@@ -366,10 +366,17 @@ prototype with material acceptance gaps, not an alpha-ready release.
   clean source passed host doctor and public recipe/ISO admission. A private
   synthetic import source now contains all three tracked example files with
   owner-only modes and matching bytes; no guest import is claimed from this
-  staging. The prior signed workspace formatter bundle is bound to an older
-  source commit, so a fresh bundle is required before public workspace create.
-  No replacement base, rebuild, or retained-workspace byte proof is claimed
-  from this fixture yet.
+  staging. [Hosted CI for `5dd5cca`](https://github.com/weshofmann/boxwarden/actions/runs/36181523273)
+  passed its deterministic matrix. A private signed formatter bundle built
+  from clean `5dd5cca` passed artifact-digest, signature, and read-only
+  production admission checks. The exact-source CLI passed host doctor and
+  public `workspace create` returned `available` for a fresh 64 MiB volume.
+  Its verified format journal and available record bind the same raw inode
+  and filesystem UUID; an independent read-only ext4 header check confirmed
+  clean state, the requested UUID, and no recovery flag. The raw digest and
+  resource ownership are retained privately. The installer remained live and
+  writing throughout. No guest mount, import, replacement base, rebuild, or
+  retained-workspace byte proof is claimed from this trial yet.
 
 ## Remaining acceptance
 
