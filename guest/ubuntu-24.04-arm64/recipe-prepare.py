@@ -87,7 +87,7 @@ def execute_payload(payload):
         try:
             completed = subprocess.run(argv, cwd="/", env=RUN_ENV, stdin=subprocess.DEVNULL,
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                       timeout=1200, check=False, start_new_session=True)
+                                       timeout=1800, check=False, start_new_session=True)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise RuntimeError(f"recipe preparation {identifier} could not finish") from exc
         if completed.returncode != 0:

@@ -314,9 +314,12 @@ prototype with material acceptance gaps, not an alpha-ready release.
 - After the failure, internal Data had about 73 GiB free, the qualification
   state 107 GiB, and the Tart store 262 GiB. Disk headroom is not the current
   blocker. Targeted read-only extraction of the stopped target's `dpkg.log`
-  found package unpack/configure activity from 16:49 through 18:01 UTC,
-  including upgrades in the final minute. The installer was doing package
-  work at timeout; the log does not establish why it was slow.
+  found package unpack/configure activity from 16:49 through 18:01 UTC.
+  `apt/history.log` shows unattended upgrades beginning at 17:49 with 364
+  packages selected and no completed transaction before the stop. Dpkg
+  processed 68 upgrade actions after that start, including activity in the
+  final minute. The installer was still doing security maintenance at the
+  timeout; these logs do not establish why this VM's storage was slow.
 - An idle 256 MiB incompressible, uncached benchmark measured about
   466/428 MiB/s write/read on the direct external SSD and 279/258 MiB/s on
   the encrypted qualification volume, with matching readback digests. A
@@ -325,9 +328,20 @@ prototype with material acceptance gaps, not an alpha-ready release.
   The USB SATA bridge negotiated 10 Gb/s. The severe slowdown is specific to
   the VM disk images or their allocated extent layout; fragmentation and
   copy-on-write overhead are hypotheses, not established causes. Temporary
-  benchmark files were removed. Current work is a bounded storage-pattern
-  test before choosing a storage or installer-timeout correction and starting
-  a fresh candidate. The failed candidate remains immutable evidence.
+  benchmark files were removed. A bounded 64 MiB synthetic sparse random-I/O
+  trial on the same store did not reproduce the existing disk images' 3–4.4
+  MiB/s reads, so the current evidence does not isolate a filesystem cause.
+  The failed candidate remains immutable evidence.
+- The active unattended-upgrades transaction exceeded the old 90-minute
+  installed-guest marker window. Source now gives that phase a four-hour
+  ceiling while retaining the updates, and gives recipe preparation a
+  two-hour ceiling around three separately bounded commands (30 minutes
+  each; the pinned ChatGPT installer remains bounded to 20 minutes inside
+  its command). Targeted basebuild, app, and recipe Go tests, 15 guest Python
+  tests, fake-ISO mapping, gofmt, and diff checks passed locally. This is
+  source verification, not a successful real installer. The next step is to
+  publish this correction, build the exact source, and start a fresh public
+  candidate with a new attempt ID; the failed candidate will not be resumed.
 
 ## Remaining acceptance
 

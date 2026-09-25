@@ -289,7 +289,9 @@ func Build(ctx context.Context, in Inputs, deps Dependencies) (result Result, er
 	if startErr != nil {
 		return Result{}, fmt.Errorf("start installer: %w", startErr)
 	}
-	installCtx, cancel := context.WithTimeout(ctx, 90*time.Minute)
+	// Ubuntu's unattended security upgrades can continue well past the initial
+	// desktop copy phase; the host still owns a finite installer deadline.
+	installCtx, cancel := context.WithTimeout(ctx, 4*time.Hour)
 	defer cancel()
 	if err := handle.WaitFor(installCtx, InstalledPrompt(in.RunID)); err != nil {
 		return Result{}, fmt.Errorf("wait for installed guest: %w", err)
@@ -297,7 +299,9 @@ func Build(ctx context.Context, in Inputs, deps Dependencies) (result Result, er
 	if err := setPhase(PhasePreparing); err != nil {
 		return Result{}, err
 	}
-	prepareCtx, cancel := context.WithTimeout(ctx, 40*time.Minute)
+	// Recipe preparation has three independently bounded commands for the
+	// tracked alpha recipe, plus guest scheduling and serial transport margin.
+	prepareCtx, cancel := context.WithTimeout(ctx, 2*time.Hour)
 	defer cancel()
 	if err := handle.SendLine(prepareCtx, PrepareCommand); err != nil {
 		return Result{}, fmt.Errorf("send fixed guest preparation command: %w", err)
