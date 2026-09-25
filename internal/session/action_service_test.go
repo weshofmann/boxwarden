@@ -185,6 +185,51 @@ func TestRetryActionRejectsChangedGenerationBeforeGuest(t *testing.T) {
 	}
 }
 
+func TestSkipActionRequiresStoppedExactSessionAndKeepsReplayBlocked(t *testing.T) {
+	root, fixture := actionAttemptFixture(t)
+	if err := ReserveActionAttempt(root, fixture); err != nil {
+		t.Fatal(err)
+	}
+	service := testActionService(root, &actionControlFake{now: time.Now()}, fixture.AttemptID)
+	if _, err := service.SkipAction(context.Background(), fixture.SessionName, fixture.AttemptID); err == nil {
+		t.Fatal("running action skipped while guest may still be executing")
+	}
+	record, err := LoadRecord(root, string(fixture.Domain), fixture.SessionName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.IntendedState = StateStopped
+	record.StartGeneration = ""
+	record.Readiness = ReadinessRecord{Status: ReadinessNotReady}
+	if err := SaveRecord(root, record.Domain, record); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SkipAction(context.Background(), fixture.SessionName, "00000000-0000-4000-8000-000000000005"); err == nil {
+		t.Fatal("foreign attempt skipped")
+	}
+	skipped, err := service.SkipAction(context.Background(), fixture.SessionName, fixture.AttemptID)
+	if err != nil || skipped.State != ActionAttemptSkipped || skipped.ReceiptSHA256 != "" {
+		t.Fatalf("exact skip = %+v, %v", skipped, err)
+	}
+	if again, err := service.SkipAction(context.Background(), fixture.SessionName, fixture.AttemptID); err != nil || again != skipped {
+		t.Fatalf("idempotent skip = %+v, %v", again, err)
+	}
+	if stored, err := LoadActionAttempt(root, fixture.Domain, fixture.SessionID, fixture.AttemptID); err != nil || stored != skipped {
+		t.Fatalf("durable skip = %+v, %v", stored, err)
+	}
+	record.IntendedState = StateRunning
+	record.StartGeneration = fixture.Generation
+	record.Readiness = ReadinessRecord{Status: ReadinessReady}
+	if err := SaveRecord(root, record.Domain, record); err != nil {
+		t.Fatal(err)
+	}
+	other := fixture
+	other.AttemptID = "00000000-0000-4000-8000-000000000005"
+	if err := ReserveActionAttempt(root, other); err == nil {
+		t.Fatal("skipped once action admitted a new attempt on same system")
+	}
+}
+
 func TestExecuteActionRejectsReceiptWhenReadinessChangesAfterGuest(t *testing.T) {
 	root, fixture := actionAttemptFixture(t)
 	control := &actionControlFake{now: time.Now(), mutateSnapshot: func(call int, s *supervisor.Snapshot) {
