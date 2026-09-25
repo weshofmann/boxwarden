@@ -874,6 +874,68 @@ func TestSessionStatusRendersPersistedAndObservedState(t *testing.T) {
 	}
 }
 
+func TestAlphaRecipeStatusSeparatesManagementReadinessFromActionProgress(t *testing.T) {
+	path := writeStatusFixture(t, "alpha", "dev")
+	root := filepath.Dir(path)
+	value := recipe.Recipe{Version: 1,
+		Source:  recipe.Source{Kind: "ubuntu-24.04.4-desktop-arm64", SHA256: "c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"},
+		Machine: recipe.Machine{CPUs: 4, MemoryMiB: 4096, SystemDiskGiB: 30},
+		Steps:   []recipe.Step{{ID: "configure-agent", Phase: "once", Argv: []string{"/usr/bin/true"}}},
+	}
+	digest, err := session.PublishRecipeIntent(root, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := session.Record{Version: 2, Domain: "alpha", Name: "dev", ID: "13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0",
+		Mode: session.ModeClean, IntendedState: session.StateRunning,
+		Backend: session.BackendRef{Kind: "tart", ObjectID: "boxwarden-alpha-dev"}, GoldenRevision: "golden-r1",
+		RecipeIntentDigest: digest, StartGeneration: "00000000-0000-4000-8000-000000000003",
+		Readiness: session.ReadinessRecord{Status: session.ReadinessReady}}
+	if err := session.SaveRecord(root, record.Domain, record); err != nil {
+		t.Fatal(err)
+	}
+	binding := supervisor.Binding{Domain: "alpha", SessionID: record.ID, BackendKind: "tart", BackendObject: record.Backend.ObjectID, Generation: record.StartGeneration}
+	reader := &statusSnapshotFake{snapshot: supervisor.Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true,
+		PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true, ObservedAt: time.Now()}}
+	options := Options{Observer: fake.Observer{Observations: map[string]backend.Observation{
+		record.Backend.ObjectID: {ObjectID: record.Backend.ObjectID, Exists: true, State: backend.ObjectRunning}}},
+		StatusSnapshotFactory: func(config.Config, config.Domain) (StatusSnapshotReader, error) { return reader, nil }}
+	run := func() string {
+		t.Helper()
+		var output bytes.Buffer
+		options.Output = &output
+		if err := Run(t.Context(), []string{"--config", path, "--domain", "alpha", "session", "status", "dev"}, options); err != nil {
+			t.Fatal(err)
+		}
+		return output.String()
+	}
+	if got := run(); !strings.Contains(got, "readiness: ready\n") || !strings.Contains(got, "actions: pending\n") {
+		t.Fatalf("ready management hid pending action: %q", got)
+	}
+	attempt := session.ActionAttempt{Version: 1, Domain: record.Domain, SessionName: "dev", SessionID: record.ID,
+		BackendObject: record.Backend.ObjectID, Generation: record.StartGeneration, RecipeDigest: digest,
+		ActionID: "configure-agent", ActionPhase: "once", AttemptID: "00112233-4455-4677-8899-aabbccddeeff", State: session.ActionAttemptReserved}
+	if err := session.ReserveActionAttempt(root, attempt); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(); !strings.Contains(got, "actions: blocked\n") || !strings.Contains(got, "recovery: session action list dev\n") {
+		t.Fatalf("reserved action was hidden: %q", got)
+	}
+	reader.snapshot.ProbeOK = false
+	reader.snapshot.ObservedAt = time.Now()
+	if got := run(); !strings.Contains(got, "readiness: drift\n") || !strings.Contains(got, "actions: unavailable\n") {
+		t.Fatalf("drifted management claimed action progress: %q", got)
+	}
+	reader.snapshot.ProbeOK = true
+	reader.snapshot.ObservedAt = time.Now()
+	if err := os.WriteFile(filepath.Join(root, "action-attempts", record.ID, "unexpected"), []byte("unexpected"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(); !strings.Contains(got, "readiness: ready\n") || !strings.Contains(got, "actions: unknown\n") {
+		t.Fatalf("corrupt action journal claimed completion: %q", got)
+	}
+}
+
 type statusSnapshotFake struct {
 	snapshot supervisor.Snapshot
 	err      error

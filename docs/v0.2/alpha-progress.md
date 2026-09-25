@@ -151,7 +151,10 @@ prototype with material acceptance gaps, not an alpha-ready release.
   generation. Public alpha `session start` now calls the runner only after
   exact management READY and reports `management-readiness` separately from
   automatic action completion or a blocked attempt. Public recipe admission
-  for `once` and `startup`, plus status reporting, remain pending.
+  for `once` and `startup` remains pending. Read-only `session status` now
+  reports `pending`, `blocked`, `complete`, `unknown`, or `unavailable` action
+  state separately from live management readiness. Tests cover pending work,
+  an unresolved reservation, live-readiness drift, and a corrupt journal.
 - At the latest capacity check, the internal Data volume had about 14 GiB
   available, below the stopped-export guard. One broad local app test fixture
   hit its free-space reserve on the internal temporary filesystem; the same

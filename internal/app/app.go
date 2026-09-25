@@ -253,13 +253,13 @@ func Run(ctx context.Context, args []string, options Options) error {
 		}
 		if _, rebuildErr := session.LoadRebuildJournal(selectedDomain.StateRoot, record.Domain, string(record.Name)); rebuildErr == nil {
 			reconciled = lifecycle.Reconciliation{Consistency: lifecycle.Drift, Diagnostic: "system rebuild in progress; readiness requires rebuild reconciliation"}
-			return writeStatus(options.Output, record, observed, reconciled, session.ReadinessDrift)
+			return writeStatusWithAlphaActions(ctx, options.Output, selectedDomain, record, observed, reconciled, session.ReadinessDrift)
 		} else if !errors.Is(rebuildErr, os.ErrNotExist) {
 			reconciled = lifecycle.Reconciliation{Consistency: lifecycle.Drift, Diagnostic: "system rebuild journal is unavailable or invalid"}
-			return writeStatus(options.Output, record, observed, reconciled, session.ReadinessDrift)
+			return writeStatusWithAlphaActions(ctx, options.Output, selectedDomain, record, observed, reconciled, session.ReadinessDrift)
 		}
 		reconciled, readiness := reconcileStatusSnapshot(ctx, loaded, selectedDomain, record, observed, reconciled, options.StatusSnapshotFactory)
-		return writeStatus(options.Output, record, observed, reconciled, readiness)
+		return writeStatusWithAlphaActions(ctx, options.Output, selectedDomain, record, observed, reconciled, readiness)
 	case commandGoldenRegister:
 		if options.Observer == nil {
 			return errors.New("backend observer is required")
@@ -1060,6 +1060,43 @@ func writeStatus(output io.Writer, record session.Record, observed backend.Obser
 		if _, err := fmt.Fprintf(output, "diagnostic: %s\n", reconciled.Diagnostic); err != nil {
 			return fmt.Errorf("write reconciliation diagnostic: %w", err)
 		}
+	}
+	return nil
+}
+
+func writeStatusWithAlphaActions(ctx context.Context, output io.Writer, selected config.Domain, record session.Record,
+	observed backend.Observation, reconciled lifecycle.Reconciliation, readiness session.ReadinessStatus) error {
+	actionState := ""
+	if selected.ID == "alpha" && record.RecipeIntentDigest != "" {
+		actionState = "unavailable"
+		if readiness == session.ReadinessReady && reconciled.Consistency == lifecycle.Consistent {
+			current, pending, planErr := session.LoadAutomaticActionPlan(ctx, selected, string(record.Name))
+			switch {
+			case current != record:
+				actionState = "unknown"
+			case errors.Is(planErr, session.ErrAutomaticActionUnresolved):
+				actionState = "blocked"
+			case planErr != nil:
+				actionState = "unknown"
+			case len(pending) != 0:
+				actionState = "pending"
+			default:
+				actionState = "complete"
+			}
+		}
+	}
+	if err := writeStatus(output, record, observed, reconciled, readiness); err != nil {
+		return err
+	}
+	if actionState == "" {
+		return nil
+	}
+	if _, err := fmt.Fprintf(output, "actions: %s\n", actionState); err != nil {
+		return err
+	}
+	if actionState == "blocked" {
+		_, err := fmt.Fprintf(output, "recovery: session action list %s\n", record.Name)
+		return err
 	}
 	return nil
 }

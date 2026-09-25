@@ -651,3 +651,11 @@ output labels that evidence `management-readiness` and reports automatic
 actions separately as `complete` or `blocked`; a blocked run returns an error
 and points to the exact attempt list for recovery. The public recipe gate
 still rejects `once` and `startup` until status can report their state.
+
+Read-only `session status` now reports automatic action progress for a
+recipe-bound alpha session. It marks `pending` when the exact durable plan has
+steps, `blocked` when a same-system attempt needs explicit recovery,
+`complete` only when no steps remain, and `unknown` when the journal or
+snapshot changes during inspection. If management readiness is not freshly
+proven, it reports actions `unavailable`. The existing readiness field remains
+the management-plane observation; action progress is a separate field.
