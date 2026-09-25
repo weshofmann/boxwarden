@@ -245,10 +245,42 @@ prototype with material acceptance gaps, not an alpha-ready release.
   ChatGPT recipe prepare and ordered-action VM run after that headroom is
   restored. No more cleanup is planned under the operator's direction.
 
+## Stabilization after capacity recovery
+
+- Wes cleared host storage. The latest read-only check found about 81 GiB
+  available on internal Data, with 114 GiB in the mounted qualification state,
+  271 GiB in the mounted Tart store, and 508 GiB on the external backing
+  filesystem. Host doctor was healthy and all 31 admitted Tart VMs were stopped.
+  The prior capacity gate is cleared; each operation still has to pass its own
+  reserve and expected-allocation check. No further cleanup was performed.
+- Cumulative source review is frozen at `8edbd66` against merge base `e16f239`;
+  [the review ledger](alpha-review-ledger.md) records scope, reviewers,
+  concrete findings, disposition, and the one-time diff inventory. No fresh
+  real-VM trial has run since capacity recovery.
+- Commit `518a4be` rejects guest session actions that cannot satisfy the fixed
+  action protocol before preparation or VM start. The five-case regression
+  failed before the change and passed afterward. Focused recipe, app,
+  basebuild, architecture tests and recipe vet passed locally; [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36157627198)
+  passed its deterministic matrix.
+- Commit `a7de9c7` moves inspector/formatter VM access onto each VM's serial
+  queue and adds hosted Swift, guest/tooling Python, and Linux ARM64 helper
+  build checks. The queue test found 23 baseline off-queue accesses and passes
+  corrected source; Swift builds, six Python suites, and synthetic inspector
+  disk admission passed locally. Independent review found no remaining
+  Important issue in that bounded correction. [Hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36158247998)
+  passed its expanded deterministic matrix, including the full Go race suite.
+  Replacement helper bundles and fresh synthetic helper VM runs are pending.
+- Review also confirmed an unbounded guest-controlled SFTP readback into host
+  staging, a stopped-candidate rebuild recovery gap, and crash-left action
+  attempt temporaries that block public recovery discovery. Corrections are in
+  progress and remain unpublished until each path is verified and reviewed.
+  Import and affected formatter/inspector operations are held from new real-VM
+  acceptance until their boundary fixes and helper qualification pass.
+
 ## Remaining acceptance
 
 1. Qualify the pinned ChatGPT prepare step and ordered `once` and `startup`
-   phases in fresh public real-VM flows when host disk headroom is adequate;
+   phases in fresh public real-VM flows after current source gates pass;
    then design graphical-session handling for `launch` and waiting-for-sign-in
    behavior.
 2. Qualify a software-changing rebuild, replacement-sandbox reattachment,
