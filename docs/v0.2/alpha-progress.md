@@ -229,7 +229,13 @@ prototype with material acceptance gaps, not an alpha-ready release.
   packages and the pinned ChatGPT package, so a dependency conflict cannot
   silently remove installed desktop packages under `-y`. The command-plan
   tests failed before the change and passed afterward; the fake ISO digest
-  mapping check also passed. An actual guest apt transaction remains untested.
+  mapping check also passed. [Hosted CI for `41f6aa6`](https://github.com/weshofmann/boxwarden/actions/runs/36097021662)
+  passed shell syntax, golden fixtures, gofmt, full Go tests, race tests,
+  vet, and build. A binary built from that clean published source reported
+  healthy host doctor, and the public alpha recipe check admitted the tracked
+  ChatGPT recipe and verified the pinned installer ISO. The admitted Tart
+  inventory showed no running VM. An actual guest apt transaction and GUI
+  launch remain untested while internal Data space stays below the host floor.
 
 ## Remaining acceptance
 
