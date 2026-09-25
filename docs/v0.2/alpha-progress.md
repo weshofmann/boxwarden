@@ -44,12 +44,20 @@ prototype with material acceptance gaps, not an alpha-ready release.
   passed gofmt, full Go tests, race tests, vet, and build.
 - The fixed guest action request and success receipt now have bounded canonical
   JSON, an exact argv digest, and session/recipe/attempt/generation binding.
-  The full guest protocol package, all-package compile check, targeted vet,
-  gofmt, and diff checks passed locally. Hosted CI for this newer source
-  checkpoint is pending. Fresh READY admission, the guest's durable
-  claim-before-run marker, receipt storage and checking, explicit retry/skip,
-  and execution are not yet wired. Public recipes still reject `once`,
-  `reconfigure`, `startup`, and `launch` actions.
+  The guest helper now checks its installed association, durably claims the
+  exact request, runs an argv-only command as the workstation account with a
+  closed environment and ten-minute limit, and publishes a success receipt.
+  An interrupted claim cannot silently rerun; exact completed retry returns
+  the stored receipt. Full local Go tests, affected race tests, vet, CI build,
+  static-helper reproducibility, and golden source fixtures passed. An earlier
+  hosted run caught a stale static helper artifact after the protocol source
+  changed; the [coherent artifact correction passed hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36078574683).
+  Hosted CI for the newer executor checkpoint is pending. The existing
+  qualified generic base predates this helper. Fresh READY admission,
+  host-side pinned SSH invocation and receipt checking, explicit retry/skip,
+  and real-VM qualification remain. Public recipes still reject `once`,
+  `reconfigure`, `startup`, and `launch`; desktop `launch` also refuses in the
+  helper until its graphical environment is designed.
 - Internal free capacity was about 31 GiB after the successful stopped export.
   The export guard previously required about 25.8 GiB. Check capacity before
   another expensive host trial and report any renewed shortfall; no further
@@ -57,8 +65,8 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Remaining acceptance
 
-1. Add the guest claim-before-run marker and bounded executor, then bind exact
-   attempts and receipts to fresh READY over pinned SSH. Enable guest-only
+1. Bind exact host attempts and guest receipts to fresh READY over pinned SSH,
+   then rebuild and qualify a new generic base. Enable guest-only
    `once`, explicit `reconfigure`, `startup`, and `launch` only with visible
    retry/skip and truthful failure or waiting-for-sign-in states.
 2. Qualify a software-changing rebuild, replacement-sandbox reattachment,
