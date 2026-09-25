@@ -78,6 +78,12 @@ func listActionAttemptsForRecord(stateRoot string, record Record) ([]ActionAttem
 	}
 	ids := make([]string, 0, len(entries))
 	for _, entry := range entries {
+		if temporary, err := publishedActionAttemptTemporary(sessionAttempts, entry.Name()); temporary {
+			if err != nil {
+				return nil, fmt.Errorf("inspect unpublished action attempt %q: %w", entry.Name(), err)
+			}
+			continue
+		}
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			return nil, fmt.Errorf("unexpected action attempt entry %q", entry.Name())
 		}

@@ -224,6 +224,12 @@ func rejectActionReplay(stateRoot string, sessionAttempts *os.Root, next ActionA
 		return fmt.Errorf("action attempt registry exceeds bound")
 	}
 	for _, entry := range entries {
+		if temporary, err := publishedActionAttemptTemporary(sessionAttempts, entry.Name()); temporary {
+			if err != nil {
+				return fmt.Errorf("inspect unpublished action attempt %q: %w", entry.Name(), err)
+			}
+			continue
+		}
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			return fmt.Errorf("unexpected action attempt entry %q", entry.Name())
 		}
@@ -239,6 +245,39 @@ func rejectActionReplay(stateRoot string, sessionAttempts *os.Root, next ActionA
 		}
 	}
 	return nil
+}
+
+// A write interrupted before rename may leave its private temporary beside
+// the published attempt. Its bytes are not an outcome: they may be partial or
+// contain an uncommitted terminal state. Only the exact generated name and a
+// present published target allow scans to pass it over. The caller holds the
+// session lock, and neither scan removes the evidence.
+func publishedActionAttemptTemporary(sessionAttempts *os.Root, name string) (bool, error) {
+	const marker = ".json.tmp-"
+	if len(name) != 1+36+len(marker)+32 || name[0] != '.' ||
+		name[37:37+len(marker)] != marker || !validUUID(name[1:37]) {
+		return false, nil
+	}
+	for _, character := range name[37+len(marker):] {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return false, nil
+		}
+	}
+	info, err := sessionAttempts.Lstat(name)
+	if err != nil {
+		return true, err
+	}
+	if err := requirePrivateRegularInfo(info); err != nil {
+		return true, err
+	}
+	if info.Size() > maxActionAttemptBytes {
+		return true, fmt.Errorf("unpublished action attempt exceeds bound")
+	}
+	final, err := sessionAttempts.Lstat(name[1:37] + ".json")
+	if err != nil {
+		return true, fmt.Errorf("published action attempt is absent: %w", err)
+	}
+	return true, requirePrivateRegularInfo(final)
 }
 
 // LoadActionAttempt reads one exact domain/session/attempt identity, including

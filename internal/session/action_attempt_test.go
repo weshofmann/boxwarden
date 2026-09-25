@@ -73,6 +73,99 @@ func TestListActionAttemptsExposesExactJournalAndRejectsUnexpectedEntries(t *tes
 	}
 }
 
+func TestActionAttemptInterruptedTerminalWritePreservesPublishedReservation(t *testing.T) {
+	root, attempt := actionAttemptFixture(t)
+	if err := ReserveActionAttempt(root, attempt); err != nil {
+		t.Fatal(err)
+	}
+	directory := filepath.Join(root, "action-attempts", attempt.SessionID)
+	temporary := filepath.Join(directory, "."+attempt.AttemptID+".json.tmp-0123456789abcdef0123456789abcdef")
+	// An interrupted terminal write can leave a partial unpublished file.
+	if err := os.WriteFile(temporary, []byte(`{"state":"succeeded"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	selected := config.Domain{ID: attempt.Domain, StateRoot: root}
+	got, err := ListActionAttempts(context.Background(), selected, attempt.SessionName)
+	if err != nil || len(got) != 1 || got[0] != attempt {
+		t.Fatalf("published reservation with interrupted update = %+v, %v", got, err)
+	}
+	if _, pending, err := LoadAutomaticActionPlan(context.Background(), selected, attempt.SessionName); !errors.Is(err, ErrAutomaticActionUnresolved) || pending != nil {
+		t.Fatalf("interrupted update changed automatic replay decision: %+v, %v", pending, err)
+	}
+	otherID := attempt
+	otherID.AttemptID = "00112233-4455-4677-8899-aabbccddeeee"
+	if err := ReserveActionAttempt(root, otherID); err == nil {
+		t.Fatal("interrupted terminal write allowed action replay")
+	}
+	if raw, err := os.ReadFile(temporary); err != nil || string(raw) != `{"state":"succeeded"` {
+		t.Fatalf("unpublished evidence changed: %q, %v", raw, err)
+	}
+	completed := attempt
+	completed.State = ActionAttemptSucceeded
+	completed.ReceiptSHA256 = strings.Repeat("a", 64)
+	if err := advanceActionAttempt(root, attempt, completed); err != nil {
+		t.Fatalf("exact terminal recovery with old temporary: %v", err)
+	}
+	if got, err := ListActionAttempts(context.Background(), selected, attempt.SessionName); err != nil || len(got) != 1 || got[0] != completed {
+		t.Fatalf("recovered attempt with old temporary = %+v, %v", got, err)
+	}
+	if _, pending, err := LoadAutomaticActionPlan(context.Background(), selected, attempt.SessionName); err != nil || len(pending) != 0 {
+		t.Fatalf("completed automatic action was stranded: %+v, %v", pending, err)
+	}
+}
+
+func TestActionAttemptTemporaryRejectsForeignShapeAndUnsafeType(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		make func(string) error
+	}{
+		{"wrong nonce", func(path string) error { return os.WriteFile(path+"x", []byte("partial"), 0o600) }},
+		{"symlink", func(path string) error { return os.Symlink("elsewhere", path) }},
+		{"world readable", func(path string) error { return os.WriteFile(path, []byte("partial"), 0o644) }},
+		{"oversized", func(path string) error { return os.WriteFile(path, make([]byte, maxActionAttemptBytes+1), 0o600) }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root, attempt := actionAttemptFixture(t)
+			if err := ReserveActionAttempt(root, attempt); err != nil {
+				t.Fatal(err)
+			}
+			temporary := filepath.Join(root, "action-attempts", attempt.SessionID,
+				"."+attempt.AttemptID+".json.tmp-0123456789abcdef0123456789abcdef")
+			if err := test.make(temporary); err != nil {
+				t.Fatal(err)
+			}
+			selected := config.Domain{ID: attempt.Domain, StateRoot: root}
+			if got, err := ListActionAttempts(context.Background(), selected, attempt.SessionName); err == nil || len(got) != 0 {
+				t.Fatalf("unsafe temporary was ignored by action list: %+v, %v", got, err)
+			}
+			other := attempt
+			other.AttemptID = "00112233-4455-4677-8899-aabbccddeeee"
+			if err := ReserveActionAttempt(root, other); err == nil {
+				t.Fatal("unsafe temporary was ignored by replay scan")
+			}
+		})
+	}
+}
+
+func TestActionAttemptUnpublishedReservationStillBlocksReplay(t *testing.T) {
+	root, attempt := actionAttemptFixture(t)
+	directory := filepath.Join(root, "action-attempts", attempt.SessionID)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	temporary := filepath.Join(directory, "."+attempt.AttemptID+".json.tmp-0123456789abcdef0123456789abcdef")
+	if err := os.WriteFile(temporary, []byte(`{"state":"reserved"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	selected := config.Domain{ID: attempt.Domain, StateRoot: root}
+	if got, err := ListActionAttempts(context.Background(), selected, attempt.SessionName); err == nil || len(got) != 0 {
+		t.Fatalf("unpublished reservation was silently discarded: %+v, %v", got, err)
+	}
+	if err := ReserveActionAttempt(root, attempt); err == nil {
+		t.Fatal("unpublished reservation allowed action replay")
+	}
+}
+
 func TestActionAttemptReserveAndExactTerminalAdvance(t *testing.T) {
 	root, attempt := actionAttemptFixture(t)
 	if err := ReserveActionAttempt(root, attempt); err != nil {
