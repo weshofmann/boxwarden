@@ -199,3 +199,39 @@ func TestActionAttemptExactRecoveryAfterIndeterminate(t *testing.T) {
 		t.Fatal("different recovered receipt replaced terminal result")
 	}
 }
+
+func TestActionAttemptSkipOfIndeterminateRequiresStoppedBackendIntent(t *testing.T) {
+	root, attempt := actionAttemptFixture(t)
+	if err := ReserveActionAttempt(root, attempt); err != nil {
+		t.Fatal(err)
+	}
+	uncertain := attempt
+	uncertain.State = ActionAttemptIndeterminate
+	if err := advanceActionAttempt(root, attempt, uncertain); err != nil {
+		t.Fatal(err)
+	}
+	skipped := uncertain
+	skipped.State = ActionAttemptSkipped
+	if err := advanceActionAttempt(root, uncertain, skipped); err == nil {
+		t.Fatal("running system admitted a skip")
+	}
+	record, err := LoadRecord(root, string(attempt.Domain), attempt.SessionName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.IntendedState = StateStopped
+	record.StartGeneration = ""
+	record.Readiness = ReadinessRecord{Status: ReadinessNotReady}
+	if err := SaveRecord(root, record.Domain, record); err != nil {
+		t.Fatal(err)
+	}
+	if err := advanceActionAttempt(root, uncertain, skipped); err != nil {
+		t.Fatalf("stopped exact skip refused: %v", err)
+	}
+	recovered := skipped
+	recovered.State = ActionAttemptSucceeded
+	recovered.ReceiptSHA256 = strings.Repeat("a", 64)
+	if err := advanceActionAttempt(root, skipped, recovered); err == nil {
+		t.Fatal("skipped action later claimed success")
+	}
+}

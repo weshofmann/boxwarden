@@ -24,6 +24,7 @@ const (
 	ActionAttemptSucceeded     ActionAttemptState = "succeeded"
 	ActionAttemptFailed        ActionAttemptState = "failed"
 	ActionAttemptIndeterminate ActionAttemptState = "indeterminate"
+	ActionAttemptSkipped       ActionAttemptState = "skipped"
 )
 
 // ActionAttempt is an operational record, not proof that guest software is
@@ -64,7 +65,7 @@ func validateActionAttempt(a ActionAttempt) error {
 		return fmt.Errorf("invalid action phase %q", a.ActionPhase)
 	}
 	switch a.State {
-	case ActionAttemptReserved, ActionAttemptFailed, ActionAttemptIndeterminate:
+	case ActionAttemptReserved, ActionAttemptFailed, ActionAttemptIndeterminate, ActionAttemptSkipped:
 		if a.ReceiptSHA256 != "" {
 			return fmt.Errorf("unfinished or failed action cannot claim a receipt")
 		}
@@ -194,6 +195,15 @@ func actionMatchesRunningRecord(a ActionAttempt, record Record) bool {
 		record.Readiness.Status == ReadinessReady
 }
 
+func actionMatchesStoppedRecord(a ActionAttempt, record Record) bool {
+	return record.Domain == a.Domain && string(record.Name) == a.SessionName &&
+		record.ID == a.SessionID && record.Backend.Kind == "tart" &&
+		record.Backend.ObjectID == a.BackendObject &&
+		record.RecipeIntentDigest == a.RecipeDigest &&
+		record.IntendedState == StateStopped && record.StartGeneration == "" &&
+		record.Readiness.Status == ReadinessNotReady
+}
+
 // The session lock serializes this scan with reservations and terminal writes.
 // A corrupt or unexplained registry entry blocks execution rather than
 // allowing a second attempt to hide an uncertain first attempt.
@@ -280,8 +290,9 @@ func LoadActionAttempt(stateRoot string, expectedDomain domain.ID, sessionID, at
 
 // advanceActionAttempt records one result for a reserved attempt. An explicit
 // recovery may promote an indeterminate attempt to exact success after the
-// same guest attempt returns a checked receipt. A retry accepts an already
-// visible exact result after uncertain directory sync.
+// same guest attempt returns a checked receipt. A deliberate skip requires a
+// stopped exact system and is never a success receipt. A retry accepts an
+// already visible exact result after uncertain directory sync.
 func advanceActionAttempt(stateRoot string, expected, next ActionAttempt) error {
 	if err := validateActionAttempt(expected); err != nil {
 		return err
@@ -291,7 +302,8 @@ func advanceActionAttempt(stateRoot string, expected, next ActionAttempt) error 
 	}
 	if next.State == ActionAttemptReserved ||
 		(expected.State != ActionAttemptReserved &&
-			(expected.State != ActionAttemptIndeterminate || next.State != ActionAttemptSucceeded)) {
+			(expected.State != ActionAttemptIndeterminate ||
+				(next.State != ActionAttemptSucceeded && next.State != ActionAttemptSkipped))) {
 		return fmt.Errorf("action attempt cannot advance from or to this state")
 	}
 	want := expected
@@ -317,6 +329,15 @@ func advanceActionAttempt(stateRoot string, expected, next ActionAttempt) error 
 		}
 		if !actionMatchesRunningRecord(next, record) {
 			return fmt.Errorf("successful action differs from running session binding")
+		}
+	}
+	if next.State == ActionAttemptSkipped {
+		record, err := LoadRecord(stateRoot, string(next.Domain), next.SessionName)
+		if err != nil {
+			return err
+		}
+		if !actionMatchesStoppedRecord(next, record) {
+			return fmt.Errorf("skipped action differs from stopped session binding")
 		}
 	}
 	root, err := openSessionStateRoot(stateRoot)
