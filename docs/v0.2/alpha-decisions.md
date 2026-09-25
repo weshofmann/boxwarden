@@ -20,6 +20,17 @@ receipt creation, host verification, explicit retry/skip, and execution are
 subsequent increments. The public recipe loader continues rejecting all
 session actions until those pieces are connected.
 
+The next source increment defines a separate fixed action request and success
+receipt rather than broadening the 30-second management probe. The request
+carries the exact association, generation, recipe/action/attempt identities,
+and a bounded argv vector with an absolute guest executable. Canonical JSON
+bytes have one SHA-256 identity; the receipt repeats the bindings and that
+request digest. Strict parsing rejects duplicate or unknown fields, changed
+argv, alternate encodings, and mismatched identity. A matching receipt is
+guest cooperation only. The helper's durable claim-before-execution marker,
+closed environment, bounded execution, and host-side SSH admission remain
+separate work; this protocol does not enable the public recipe actions.
+
 ## Live workspace identity loss and caching experiment, 2026-09-24
 
 A separate fresh empty-volume run reached exact mount-bound READY, then
