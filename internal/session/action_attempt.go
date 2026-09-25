@@ -278,9 +278,10 @@ func LoadActionAttempt(stateRoot string, expectedDomain domain.ID, sessionID, at
 	return a, nil
 }
 
-// advanceActionAttempt may record only one terminal result for a reserved
-// attempt. A retry accepts an already visible exact result after uncertain
-// directory sync. Success requires a digest of a separately checked receipt.
+// advanceActionAttempt records one result for a reserved attempt. An explicit
+// recovery may promote an indeterminate attempt to exact success after the
+// same guest attempt returns a checked receipt. A retry accepts an already
+// visible exact result after uncertain directory sync.
 func advanceActionAttempt(stateRoot string, expected, next ActionAttempt) error {
 	if err := validateActionAttempt(expected); err != nil {
 		return err
@@ -288,7 +289,9 @@ func advanceActionAttempt(stateRoot string, expected, next ActionAttempt) error 
 	if err := validateActionAttempt(next); err != nil {
 		return err
 	}
-	if expected.State != ActionAttemptReserved || next.State == ActionAttemptReserved {
+	if next.State == ActionAttemptReserved ||
+		(expected.State != ActionAttemptReserved &&
+			(expected.State != ActionAttemptIndeterminate || next.State != ActionAttemptSucceeded)) {
 		return fmt.Errorf("action attempt cannot advance from or to this state")
 	}
 	want := expected

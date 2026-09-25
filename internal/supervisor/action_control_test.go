@@ -14,8 +14,14 @@ import (
 type actionRuntimeFixture struct {
 	runtimeFixture
 	actions    atomic.Int32
+	retries    atomic.Int32
 	badReceipt atomic.Bool
 	loseReady  atomic.Bool
+}
+
+func (o *actionRuntimeFixture) RetryAction(ctx context.Context, request guestproto.ActionRequest) (guestproto.ActionReceipt, error) {
+	o.retries.Add(1)
+	return o.RunAction(ctx, request)
 }
 
 func (o *actionRuntimeFixture) RunAction(_ context.Context, request guestproto.ActionRequest) (guestproto.ActionReceipt, error) {
@@ -98,6 +104,26 @@ func TestActionControlRequiresExactReadyGenerationAndBoundedReceipt(t *testing.T
 	}
 	if _, err := client.RunAction(context.Background(), launch.Binding, action); err == nil || owner.actions.Load() != 3 {
 		t.Fatalf("lost READY before action reached owner: %v", err)
+	}
+}
+
+func TestActionControlExplicitRetryUsesRetrierOnly(t *testing.T) {
+	launch, action := actionControlRequest(t)
+	path, _, err := publishOrAdmitRequest(launch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &actionRuntimeFixture{runtimeFixture: runtimeFixture{done: make(chan struct{}), pinPresent: new(atomic.Bool)}}
+	owner.pinPresent.Store(true)
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(context.Background(), path, owner) }()
+	client := &Client{RuntimeDirectory: launch.RuntimeDirectory, MaxSnapshotAge: time.Minute}
+	if _, err := awaitSnapshot(context.Background(), launch.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Stop(context.Background(), launch.Binding); <-runDone })
+	if _, err := client.RetryAction(context.Background(), launch.Binding, action); err != nil || owner.retries.Load() != 1 || owner.actions.Load() != 1 {
+		t.Fatalf("exact retry route = %v; retries=%d actions=%d", err, owner.retries.Load(), owner.actions.Load())
 	}
 }
 

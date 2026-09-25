@@ -17,8 +17,14 @@ type actionControlFake struct {
 	now            time.Time
 	snapshots      int
 	runs           int
+	retries        int
 	mutateSnapshot func(int, *supervisor.Snapshot)
 	run            func(guestproto.ActionRequest) (guestproto.ActionReceipt, error)
+}
+
+func (f *actionControlFake) RetryAction(ctx context.Context, binding supervisor.Binding, request guestproto.ActionRequest) (guestproto.ActionReceipt, error) {
+	f.retries++
+	return f.RunAction(ctx, binding, request)
 }
 
 func (f *actionControlFake) Snapshot(_ context.Context, binding supervisor.Binding) (supervisor.Snapshot, error) {
@@ -109,6 +115,73 @@ func TestExecuteActionKeepsUncertainGuestResultIndeterminate(t *testing.T) {
 	}
 	if _, err := service.ExecuteAction(context.Background(), fixture.SessionName, fixture.ActionPhase, fixture.ActionID); err == nil || control.runs != 1 {
 		t.Fatalf("uncertain action replayed: %v", err)
+	}
+}
+
+func TestRetryActionRecoversOnlyExactOriginalAttempt(t *testing.T) {
+	root, fixture := actionAttemptFixture(t)
+	control := &actionControlFake{now: time.Now(), run: func(guestproto.ActionRequest) (guestproto.ActionReceipt, error) {
+		return guestproto.ActionReceipt{}, errors.New("connection dropped")
+	}}
+	service := testActionService(root, control, fixture.AttemptID)
+	uncertain, err := service.ExecuteAction(context.Background(), fixture.SessionName, fixture.ActionPhase, fixture.ActionID)
+	if err == nil || uncertain.State != ActionAttemptIndeterminate {
+		t.Fatalf("initial uncertain attempt = %+v, %v", uncertain, err)
+	}
+	if _, err := service.RetryAction(context.Background(), fixture.SessionName, "00000000-0000-4000-8000-000000000005"); err == nil || control.retries != 0 {
+		t.Fatalf("foreign attempt reached guest: %v", err)
+	}
+	control.run = nil
+	service.newID = func() (string, error) { t.Fatal("retry allocated new attempt"); return "", nil }
+	recovered, err := service.RetryAction(context.Background(), fixture.SessionName, fixture.AttemptID)
+	if err != nil || recovered.State != ActionAttemptSucceeded || recovered.AttemptID != fixture.AttemptID || control.retries != 1 {
+		t.Fatalf("exact retry = %+v, %v; retries=%d", recovered, err, control.retries)
+	}
+	if _, err := service.RetryAction(context.Background(), fixture.SessionName, fixture.AttemptID); err == nil || control.retries != 1 {
+		t.Fatalf("terminal attempt retried: %v", err)
+	}
+}
+
+func TestRetryActionAdmitsInterruptedReservationWithoutNewAttempt(t *testing.T) {
+	root, fixture := actionAttemptFixture(t)
+	if err := ReserveActionAttempt(root, fixture); err != nil {
+		t.Fatal(err)
+	}
+	control := &actionControlFake{now: time.Now()}
+	control.run = func(request guestproto.ActionRequest) (guestproto.ActionReceipt, error) {
+		stored, err := LoadActionAttempt(root, fixture.Domain, fixture.SessionID, fixture.AttemptID)
+		if err != nil || stored.State != ActionAttemptIndeterminate || request.AttemptID != fixture.AttemptID {
+			t.Fatalf("retry reached guest without exact indeterminate intent: %+v, %v", stored, err)
+		}
+		return guestproto.ActionReceipt{}, errors.New("guest claim unresolved")
+	}
+	service := testActionService(root, control, fixture.AttemptID)
+	got, err := service.RetryAction(context.Background(), fixture.SessionName, fixture.AttemptID)
+	if err == nil || got.State != ActionAttemptIndeterminate || control.retries != 1 {
+		t.Fatalf("interrupted reservation = %+v, %v; retries=%d", got, err, control.retries)
+	}
+	if stored, err := LoadActionAttempt(root, fixture.Domain, fixture.SessionID, fixture.AttemptID); err != nil || stored != got {
+		t.Fatalf("durable interrupted state = %+v, %v", stored, err)
+	}
+}
+
+func TestRetryActionRejectsChangedGenerationBeforeGuest(t *testing.T) {
+	root, fixture := actionAttemptFixture(t)
+	if err := ReserveActionAttempt(root, fixture); err != nil {
+		t.Fatal(err)
+	}
+	record, err := LoadRecord(root, string(fixture.Domain), fixture.SessionName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.StartGeneration = "00000000-0000-4000-8000-000000000004"
+	if err := SaveRecord(root, record.Domain, record); err != nil {
+		t.Fatal(err)
+	}
+	control := &actionControlFake{now: time.Now()}
+	service := testActionService(root, control, fixture.AttemptID)
+	if _, err := service.RetryAction(context.Background(), fixture.SessionName, fixture.AttemptID); err == nil || control.retries != 0 {
+		t.Fatalf("changed generation retried: %v", err)
 	}
 }
 
