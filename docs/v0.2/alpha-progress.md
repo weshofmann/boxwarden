@@ -200,6 +200,17 @@ prototype with material acceptance gaps, not an alpha-ready release.
   across a later stop/start. Recipe admission and a temporary-directory
   execution of the exact embedded Python steps (counter `1` then `2`) passed
   locally. No real VM has executed this recipe yet.
+- At the current source integration checkpoint, `go mod verify`, `go vet
+  ./...`, the host and guest-bootstrap command builds, and Linux ARM64 guest
+  formatter/inspector cross-builds passed locally with external temporary
+  storage. `go test -count=1 ./...` passed every package except one
+  `internal/workspacex` inspector-bundle test: its intentional reserve check
+  includes `/private/tmp` on the low-space internal Data volume and refused
+  before invoking the builder. [Hosted CI for `5e27267`](https://github.com/weshofmann/boxwarden/actions/runs/36094673029)
+  passed shell syntax, golden source fixtures, gofmt, full Go tests, full race
+  tests, vet, and CLI build. The local `go build ./...` command is inapplicable
+  on Darwin to Linux-only guest command packages, which were cross-built
+  separately.
 
 ## Remaining acceptance
 
