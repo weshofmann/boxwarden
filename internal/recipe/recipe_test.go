@@ -133,7 +133,7 @@ func TestLoadSupportedRecipeKeepsGuestOperationsExplicit(t *testing.T) {
 	}
 }
 
-func TestLoadRunnableAdmitsExplicitReconfigureOnly(t *testing.T) {
+func TestLoadRunnableAdmitsGuestActionsWithImplementedLifecycles(t *testing.T) {
 	prepareOnly := strings.Replace(validRecipe, `"phase": "once"`, `"phase": "prepare"`, 1)
 	prepareOnly = strings.Replace(prepareOnly, `"launch": [
     {"id": "chatgpt", "argv": ["/usr/bin/chatgpt"]}
@@ -148,13 +148,16 @@ func TestLoadRunnableAdmitsExplicitReconfigureOnly(t *testing.T) {
 	for name, input := range map[string]string{
 		"once":    strings.Replace(prepareOnly, `"phase": "prepare"`, `"phase": "once"`, 1),
 		"startup": strings.Replace(prepareOnly, `"phase": "prepare"`, `"phase": "startup"`, 1),
-		"launch":  strings.Replace(prepareOnly, `"launch": []`, `"launch": [{"id":"chatgpt","argv":["/usr/bin/chatgpt"]}]`, 1),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := LoadRunnable(writeRecipe(t, input)); err == nil || !strings.Contains(err.Error(), name) {
-				t.Fatalf("unsupported %s action accepted or unreported: %v", name, err)
+			if got, err := LoadRunnable(writeRecipe(t, input)); err != nil || len(got.Steps) != 1 || got.Steps[0].Phase != name {
+				t.Fatalf("supported %s action rejected: %+v, %v", name, got.Steps, err)
 			}
 		})
+	}
+	launch := strings.Replace(prepareOnly, `"launch": []`, `"launch": [{"id":"chatgpt","argv":["/usr/bin/chatgpt"]}]`, 1)
+	if _, err := LoadRunnable(writeRecipe(t, launch)); err == nil || !strings.Contains(err.Error(), "launch") {
+		t.Fatalf("unsupported launch action accepted or unreported: %v", err)
 	}
 }
 

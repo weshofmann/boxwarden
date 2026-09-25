@@ -58,11 +58,14 @@ command:
 "$BW" --config "$CONFIG" --domain alpha session action list "$SESSION"
 ```
 
+For a recipe with `once` or `startup` steps, `session start` runs those guest
+actions after management READY and reports automatic setup separately.
+`session status` reports the live management readiness and action progress.
 The action list reads the exact session's durable attempt journal. If an
-explicit `reconfigure` command was interrupted before its UUID was recorded
-by the caller, list it here before choosing `session action retry` in the same
-READY generation or stopping and using `session action skip`. An
-`indeterminate` entry does not prove whether the guest command ran.
+automatic or explicit `reconfigure` command was interrupted before its UUID
+was recorded by the caller, list it here before choosing `session action
+retry` in the same READY generation or stopping and using `session action
+skip`. An `indeterminate` entry does not prove whether the guest command ran.
 
 Stage a private copy of the tracked synthetic project outside Boxwarden
 state. `PRIVATE_SOURCE` must be a new absolute directory owned by the current

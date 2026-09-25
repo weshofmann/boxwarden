@@ -659,3 +659,11 @@ steps, `blocked` when a same-system attempt needs explicit recovery,
 snapshot changes during inspection. If management readiness is not freshly
 proven, it reports actions `unavailable`. The existing readiness field remains
 the management-plane observation; action progress is a separate field.
+
+With the ordered runner, explicit recovery, public start route, and read-only
+status in place, runnable recipe admission now accepts `once` and `startup`
+steps. The preparer still derives its reusable base key from preparation
+inputs, while the immutable full recipe intent binds session execution.
+Graphical `launch` remains rejected because its desktop session contract is
+not implemented. Source admission does not substitute for a fresh real-VM
+qualification of the public ordered flow.

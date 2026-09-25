@@ -113,8 +113,8 @@ prototype with material acceptance gaps, not an alpha-ready release.
   recipe loader because they have an explicit public command and durable
   recovery route. Targeted recipe and app tests passed locally, and
   [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36086586857)
-  passed. The real-VM action result is recorded below. Public recipes still
-  reject `once`, `startup`, and `launch` until lifecycle sequencing exists.
+  passed. The real-VM action result is recorded below. At that checkpoint,
+  public recipes still rejected `once`, `startup`, and `launch`.
   The helper also refuses desktop `launch` until its graphical environment is
   designed.
 - A separate encrypted external qualification state passed host doctor,
@@ -142,19 +142,24 @@ prototype with material acceptance gaps, not an alpha-ready release.
   recognizes successful or deliberately skipped steps at the correct system
   and generation, and blocks unresolved attempts or out-of-order completion.
   Session and architecture tests, the session race test, vet, gofmt, and diff
-  checks passed locally; hosted CI remains. `session start` does not invoke
-  this planner yet.
+  checks passed locally; [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36091192576)
+  passed. At that source-only checkpoint, `session start` did not invoke the
+  planner yet.
 - The action service now has a bounded automatic runner. It reloads the exact
   record, recipe, and attempts after each checked receipt; the reservation
   path independently enforces the next `once`/`startup` step under locks.
   Tests cover ordering, interruption without replay, and startup on a new
   generation. Public alpha `session start` now calls the runner only after
   exact management READY and reports `management-readiness` separately from
-  automatic action completion or a blocked attempt. Public recipe admission
-  for `once` and `startup` remains pending. Read-only `session status` now
+  automatic action completion or a blocked attempt. Read-only `session status` now
   reports `pending`, `blocked`, `complete`, `unknown`, or `unavailable` action
   state separately from live management readiness. Tests cover pending work,
   an unresolved reservation, live-readiness drift, and a corrupt journal.
+  Runnable alpha recipes now admit `once` and `startup`; `launch` remains
+  closed. Recipe, preparer, app, CLI, session, and architecture package tests,
+  targeted vet, gofmt, and diff checks passed locally for this admission
+  increment; hosted CI remains. The public ordered flow still needs real-VM
+  qualification.
 - At the latest capacity check, the internal Data volume had about 14 GiB
   available, below the stopped-export guard. One broad local app test fixture
   hit its free-space reserve on the internal temporary filesystem; the same
@@ -164,9 +169,9 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Remaining acceptance
 
-1. Implement ordered `once` and `startup` phases with truthful pending and
-   failure states, then design graphical-session handling for `launch` and
-   waiting-for-sign-in behavior.
+1. Qualify ordered `once` and `startup` phases in a fresh public real-VM flow,
+   then design graphical-session handling for `launch` and waiting-for-sign-in
+   behavior.
 2. Qualify a software-changing rebuild, replacement-sandbox reattachment,
    desktop application launch, and the complete public synthetic workflow
    from a separate fresh tracked-source sandbox.
