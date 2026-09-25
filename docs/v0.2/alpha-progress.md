@@ -377,14 +377,29 @@ prototype with material acceptance gaps, not an alpha-ready release.
   resource ownership are retained privately. The installer remained live and
   writing throughout. No guest mount, import, replacement base, rebuild, or
   retained-workspace byte proof is claimed from this trial yet.
+- [Hosted CI for `a6ae66b`](https://github.com/weshofmann/boxwarden/actions/runs/36183683850)
+  passed its deterministic matrix. An independent source-only review found no
+  Important/Critical defect in the ChatGPT guest installer, launcher, and
+  automatic startup route; 11 targeted guest Python tests and selected Go
+  action, recipe, and app tests passed. This does not prove a visible window
+  or waiting-for-sign-in state. From clean published `a6ae66b`, a second
+  private signed formatter bundle passed artifact-digest, signature, and
+  read-only production admission checks. The exact-source public
+  `workspace create` returned `available` for another fresh 64 MiB volume. Its verified
+  format journal and available record bind the same raw inode and filesystem
+  UUID; an independent read-only ext4 header and raw digest check found clean
+  state and no recovery flag. This volume remains unattached for the later
+  independent fresh workflow. The live ChatGPT installer was not touched.
+  Existing external image storage remains in use; image relocation is deferred
+  until the operator provides a separate disk and direction.
 
 ## Remaining acceptance
 
 1. Diagnose the timed-out ChatGPT base preparation, correct the identified
    cause, then qualify its pinned prepare step and ordered `once` and `startup`
    phases in fresh public real-VM flows after current source gates pass;
-   then design graphical-session handling for `launch` and waiting-for-sign-in
-   behavior.
+   then verify graphical launch and waiting-for-sign-in in an actual desktop
+   VM.
 2. Qualify a software-changing rebuild, replacement-sandbox reattachment,
    desktop application launch, and the complete public synthetic workflow
    from a separate fresh tracked-source sandbox.
