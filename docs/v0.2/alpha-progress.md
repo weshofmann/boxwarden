@@ -11,7 +11,8 @@ prototype with material acceptance gaps, not an alpha-ready release.
 | --- | --- |
 | Host and base | Host doctor is healthy. The pinned Ubuntu Desktop ARM64 installer was signature and digest checked. A corrected generic base was built, qualified on a separate clone, admitted, and used to create stopped sessions that reached bound READY. |
 | Desktop | A real Ubuntu Desktop clone displayed GNOME and Firefox, restarted to bound READY, and retained a synthetic home file. Agent desktop use and provider sign-in remain unverified. |
-| Recipe identity | Preparation has a reusable cache key; the canonical recipe has a separate immutable digest. Public create persists the digest before cloning, and rebuild journals old and candidate intent with system identity. Source tests pass; fresh real-host qualification of software changes remains. |
+| Recipe identity | Preparation has a reusable cache key; the canonical recipe has a separate immutable digest. Public create persists the digest before cloning, and rebuild journals old and candidate intent with system identity. Source tests pass; a software-changing rebuild still needs real-host qualification. |
+| Guest actions | A fresh base from the corrected finalizer passed independent-clone qualification and cache admission. A new recipe-bound clone reached READY, ran synthetic `reconfigure` create and verify steps with checked receipts, refused same-generation replay, then restarted to READY and verified the marker again in a new generation. Both public stops were guest-accepted without force. This proves one synthetic guest-only action path, not ordered `once`/`startup`, desktop launch, or provider integration. |
 | Workspaces | Public create formatted independent ext4 volumes. Attachment, mount-bound READY, stop/start, detach/reattach, same-software system rebuild, and retained-volume delete preserved synthetic content in real VM runs. |
 | Import persistence | From published cached-disk source, a fresh bound READY session imported a credential-free synthetic tree with matching pinned live readback. Public stop reported `request=guest_accepted forced=false`. The exact stopped 64 MiB raw inode retained its UUID and clean ext4 header without journal recovery or orphan state. A zero-NIC stopped export returned the selected tree; independent byte-for-byte comparison matched all three source files, and public `workspace import verify` advanced the exact import journal to `verified`. This establishes one real stopped-disk import proof, not general reliability. |
 | Controlled return | Selected files from clean stopped workspace snapshots were exported through a zero-NIC Linux inspector and bounded host receiver into new destinations. An `inspected` export resumed and published; a dirty ext4 snapshot was refused. Ambiguous post-final-rename recovery remains a manual evidence gate. |
@@ -112,9 +113,10 @@ prototype with material acceptance gaps, not an alpha-ready release.
   recipe loader because they have an explicit public command and durable
   recovery route. Targeted recipe and app tests passed locally, and
   [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36086586857)
-  passed. Real-VM action execution remains. Public recipes still reject `once`,
-  `startup`, and `launch` until lifecycle sequencing exists. The helper also
-  refuses desktop `launch` until its graphical environment is designed.
+  passed. The real-VM action result is recorded below. Public recipes still
+  reject `once`, `startup`, and `launch` until lifecycle sequencing exists.
+  The helper also refuses desktop `launch` until its graphical environment is
+  designed.
 - A separate encrypted external qualification state passed host doctor,
   domain-CA initialization, exact installer and auxiliary-tool checks. A fresh
   generic base completed finalization, independent-clone qualification, and
@@ -123,21 +125,24 @@ prototype with material acceptance gaps, not an alpha-ready release.
   action-state directory from `0700` to `0755`. The failed attempt and VM
   remain private evidence; the VM was stopped through the public path. A
   source fixture reproduced that defect and now verifies the private mode and
-  refusal of a public directory. A corrected fresh base and real-VM action
-  trial remain pending. [Hosted CI for the source correction](https://github.com/weshofmann/boxwarden/actions/runs/36088089572)
-  passed its full deterministic matrix. The corrected fresh preparation is in
-  its installer phase. A public read-only action list now reports bounded,
-  exact session attempts and recovery commands after client output loss; its
-  source tests and one read of the retained failed attempt passed locally.
-  Hosted CI for the list increment remains pending. Internal free capacity is
-  monitored before expensive host trials; no further cleanup is planned.
+  refusal of a public directory. [Hosted CI for the source correction](https://github.com/weshofmann/boxwarden/actions/runs/36088089572)
+  passed its full deterministic matrix. The corrected fresh preparation passed
+  installer, finalization, independent-clone qualification, and cache
+  admission. The published `ccad8c9` CLI created a fresh clone from that
+  cache and completed the synthetic action sequence summarized above. A public
+  read-only action list reports bounded exact session attempts and recovery
+  commands after client output loss; its source tests and one read of the
+  retained failed attempt passed locally.
+  [Hosted CI for the list increment](https://github.com/weshofmann/boxwarden/actions/runs/36089431070)
+  passed its deterministic matrix. Internal free capacity was about 26 GiB
+  after the action trial, close to the earlier 25.8 GiB stopped-export guard.
+  Recheck before any export; no further cleanup is planned.
 
 ## Remaining acceptance
 
-1. Rebuild and qualify a new generic base, prove explicit guest-only
-   `reconfigure`, then implement `once`, `startup`, and `launch` with visible
-   retry/skip and truthful
-   failure or waiting-for-sign-in states.
+1. Implement ordered `once` and `startup` phases with truthful pending and
+   failure states, then design graphical-session handling for `launch` and
+   waiting-for-sign-in behavior.
 2. Qualify a software-changing rebuild, replacement-sandbox reattachment,
    desktop application launch, and the complete public synthetic workflow
    from a separate fresh tracked-source sandbox.
