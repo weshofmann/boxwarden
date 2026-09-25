@@ -644,3 +644,10 @@ session locks and requires that action to be the first pending step. An
 uncertain result stops the runner and leaves the original attempt available
 for explicit retry or deliberate stopped-session skip. Public start routing
 and admission remain closed until their output and status semantics land.
+
+Public alpha `session start` now invokes the automatic runner only after the
+start service returns exact management READY for a recipe-bound session. The
+output labels that evidence `management-readiness` and reports automatic
+actions separately as `complete` or `blocked`; a blocked run returns an error
+and points to the exact attempt list for recovery. The public recipe gate
+still rejects `once` and `startup` until status can report their state.

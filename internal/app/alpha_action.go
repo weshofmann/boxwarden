@@ -16,6 +16,48 @@ type AlphaActionInput struct {
 
 type AlphaActionFunc func(context.Context, config.Domain, AlphaActionInput) (session.ActionAttempt, error)
 
+type AlphaAutomaticFunc func(context.Context, config.Domain, session.Record) ([]session.ActionAttempt, error)
+
+func writeAlphaAutomaticStart(output io.Writer, record session.Record, attempts []session.ActionAttempt, operationErr error) error {
+	for _, attempt := range attempts {
+		if attempt.Version != 1 || attempt.Domain != record.Domain || attempt.SessionName != string(record.Name) ||
+			attempt.SessionID != record.ID || attempt.BackendObject != record.Backend.ObjectID ||
+			attempt.Generation != record.StartGeneration || attempt.RecipeDigest != record.RecipeIntentDigest ||
+			!alphaCreateUUID(attempt.AttemptID) || !validAlphaActionID(attempt.ActionID) ||
+			(attempt.ActionPhase != "once" && attempt.ActionPhase != "startup") {
+			return errors.Join(errors.New("automatic action returned an attempt outside the started session"), operationErr)
+		}
+		if attempt.State == session.ActionAttemptSucceeded {
+			if !lowerSHA(attempt.ReceiptSHA256) {
+				return errors.Join(errors.New("automatic action success lacks a checked receipt digest"), operationErr)
+			}
+		} else if operationErr == nil || attempt.ReceiptSHA256 != "" ||
+			(attempt.State != session.ActionAttemptReserved && attempt.State != session.ActionAttemptIndeterminate) {
+			return errors.Join(errors.New("automatic action returned an invalid or unreported outcome"), operationErr)
+		}
+	}
+	state := "complete"
+	if operationErr != nil {
+		state = "blocked"
+	}
+	if _, err := fmt.Fprintf(output, "domain: %s\nsession: %s\nstate: %s\nmanagement-readiness: %s\nactions: %s\n",
+		record.Domain, record.Name, record.IntendedState, record.Readiness.Status, state); err != nil {
+		return errors.Join(err, operationErr)
+	}
+	for _, attempt := range attempts {
+		if _, err := fmt.Fprintf(output, "attempt: %s\naction: %s/%s\nattempt-state: %s\n",
+			attempt.AttemptID, attempt.ActionPhase, attempt.ActionID, attempt.State); err != nil {
+			return errors.Join(err, operationErr)
+		}
+	}
+	if operationErr != nil {
+		if _, err := fmt.Fprintf(output, "recovery: session action list %s\n", record.Name); err != nil {
+			return errors.Join(err, operationErr)
+		}
+	}
+	return operationErr
+}
+
 func validAlphaActionID(value string) bool {
 	if len(value) < 1 || len(value) > 64 || value[0] < 'a' || value[0] > 'z' {
 		return false

@@ -148,9 +148,15 @@ prototype with material acceptance gaps, not an alpha-ready release.
   record, recipe, and attempts after each checked receipt; the reservation
   path independently enforces the next `once`/`startup` step under locks.
   Tests cover ordering, interruption without replay, and startup on a new
-  generation. Public start routing and recipe admission remain pending.
-- At the latest capacity check, the internal Data volume had about 16 GiB
-  available, below the stopped-export guard. Host export and other large VM
+  generation. Public alpha `session start` now calls the runner only after
+  exact management READY and reports `management-readiness` separately from
+  automatic action completion or a blocked attempt. Public recipe admission
+  for `once` and `startup`, plus status reporting, remain pending.
+- At the latest capacity check, the internal Data volume had about 14 GiB
+  available, below the stopped-export guard. One broad local app test fixture
+  hit its free-space reserve on the internal temporary filesystem; the same
+  app, CLI, session, and architecture packages passed when temporary test
+  state used the external Boxwarden directory. Host export and other large VM
   operations are deferred until headroom is restored; source work continues.
 
 ## Remaining acceptance

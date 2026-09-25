@@ -100,6 +100,7 @@ type Options struct {
 	AlphaImport           AlphaImportFunc
 	AlphaImportVerify     AlphaImportVerifyFunc
 	AlphaAction           AlphaActionFunc
+	AlphaAutomatic        AlphaAutomaticFunc
 	Output                io.Writer
 }
 
@@ -316,6 +317,19 @@ func Run(ctx context.Context, args []string, options Options) error {
 		record, err := starter.Start(ctx, command.name)
 		if err != nil {
 			return fmt.Errorf("start session: %w", err)
+		}
+		if selectedDomain.ID == "alpha" && record.RecipeIntentDigest != "" {
+			if record.Domain != selectedDomain.ID || string(record.Name) != command.name ||
+				record.IntendedState != session.StateRunning || record.Readiness.Status != session.ReadinessReady ||
+				!alphaCreateUUID(record.ID) || !alphaCreateUUID(record.StartGeneration) ||
+				!lowerSHA(record.RecipeIntentDigest) || record.Backend.Kind != "tart" || record.Backend.ObjectID == "" {
+				return errors.New("recipe session did not return exact management READY")
+			}
+			if options.AlphaAutomatic == nil {
+				return errors.New("alpha automatic action composition is required")
+			}
+			attempts, automaticErr := options.AlphaAutomatic(ctx, selectedDomain, record)
+			return writeAlphaAutomaticStart(options.Output, record, attempts, automaticErr)
 		}
 		return writeStartedSession(options.Output, record)
 	case commandSessionStop:

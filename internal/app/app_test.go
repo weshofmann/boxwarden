@@ -717,6 +717,72 @@ func TestSessionStarterFactoryFailureAndNilStarterAreErrors(t *testing.T) {
 	}
 }
 
+func TestAlphaRecipeStartReportsAutomaticCompletionAfterManagementReady(t *testing.T) {
+	path, selected := writeV2DomainFixture(t, "alpha")
+	record := session.Record{Domain: selected.ID, Name: "dev", ID: "13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0",
+		IntendedState: session.StateRunning, Backend: session.BackendRef{Kind: "tart", ObjectID: "boxwarden-alpha-dev"},
+		RecipeIntentDigest: strings.Repeat("a", 64), StartGeneration: "00000000-0000-4000-8000-000000000003",
+		Readiness: session.ReadinessRecord{Status: session.ReadinessReady}}
+	starter := &sessionStarterFake{record: record}
+	var output bytes.Buffer
+	called := false
+	err := Run(t.Context(), []string{"--config", path, "--domain", "alpha", "session", "start", "dev"}, Options{
+		SessionStarter: starter, Output: &output,
+		AlphaAutomatic: func(_ context.Context, domain config.Domain, started session.Record) ([]session.ActionAttempt, error) {
+			called = true
+			if starter.name != "dev" || domain != selected || started != record {
+				t.Fatalf("automatic runner received wrong start: %+v, %+v", domain, started)
+			}
+			return nil, nil
+		},
+	})
+	if err != nil || !called || output.String() != "domain: alpha\nsession: dev\nstate: running\nmanagement-readiness: ready\nactions: complete\n" {
+		t.Fatalf("alpha automatic start = %v, called=%t, output=%q", err, called, output.String())
+	}
+}
+
+func TestAlphaRecipeStartReportsUncertainAttemptWithoutClaimingSetupComplete(t *testing.T) {
+	path, selected := writeV2DomainFixture(t, "alpha")
+	record := session.Record{Domain: selected.ID, Name: "dev", ID: "13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0",
+		IntendedState: session.StateRunning, Backend: session.BackendRef{Kind: "tart", ObjectID: "boxwarden-alpha-dev"},
+		RecipeIntentDigest: strings.Repeat("a", 64), StartGeneration: "00000000-0000-4000-8000-000000000003",
+		Readiness: session.ReadinessRecord{Status: session.ReadinessReady}}
+	attempt := session.ActionAttempt{Version: 1, Domain: selected.ID, SessionName: "dev", SessionID: record.ID,
+		BackendObject: record.Backend.ObjectID, Generation: record.StartGeneration, RecipeDigest: record.RecipeIntentDigest,
+		ActionID: "configure-agent", ActionPhase: "once", AttemptID: "00112233-4455-4677-8899-aabbccddeeff", State: session.ActionAttemptIndeterminate}
+	var output bytes.Buffer
+	want := errors.New("guest reply lost")
+	err := Run(t.Context(), []string{"--config", path, "--domain", "alpha", "session", "start", "dev"}, Options{
+		SessionStarter: &sessionStarterFake{record: record}, Output: &output,
+		AlphaAutomatic: func(context.Context, config.Domain, session.Record) ([]session.ActionAttempt, error) {
+			return []session.ActionAttempt{attempt}, want
+		},
+	})
+	if !errors.Is(err, want) || !strings.Contains(output.String(), "management-readiness: ready\nactions: blocked\n") ||
+		!strings.Contains(output.String(), "attempt: "+attempt.AttemptID+"\n") || strings.Contains(output.String(), "actions: complete") {
+		t.Fatalf("uncertain automatic start = %v, output=%q", err, output.String())
+	}
+}
+
+func TestAlphaRecipeStartDoesNotRunActionsBeforeManagementReady(t *testing.T) {
+	path, selected := writeV2DomainFixture(t, "alpha")
+	record := session.Record{Domain: selected.ID, Name: "dev", ID: "13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0",
+		IntendedState: session.StateStarting, Backend: session.BackendRef{Kind: "tart", ObjectID: "boxwarden-alpha-dev"},
+		RecipeIntentDigest: strings.Repeat("a", 64), StartGeneration: "00000000-0000-4000-8000-000000000003",
+		Readiness: session.ReadinessRecord{Status: session.ReadinessStarting}}
+	var output bytes.Buffer
+	err := Run(t.Context(), []string{"--config", path, "--domain", "alpha", "session", "start", "dev"}, Options{
+		SessionStarter: &sessionStarterFake{record: record}, Output: &output,
+		AlphaAutomatic: func(context.Context, config.Domain, session.Record) ([]session.ActionAttempt, error) {
+			t.Fatal("automatic runner called before management READY")
+			return nil, nil
+		},
+	})
+	if err == nil || output.Len() != 0 {
+		t.Fatalf("unready alpha recipe start = %v, output=%q", err, output.String())
+	}
+}
+
 type sessionStarterFake struct {
 	name   string
 	record session.Record

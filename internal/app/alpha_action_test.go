@@ -12,6 +12,26 @@ import (
 	"github.com/weshofmann/boxwarden/internal/session"
 )
 
+func TestWriteAlphaAutomaticStartRejectsFalseSuccess(t *testing.T) {
+	record := session.Record{Domain: "alpha", Name: "dev", ID: "13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0",
+		IntendedState: session.StateRunning, Backend: session.BackendRef{Kind: "tart", ObjectID: "boxwarden-alpha-dev"},
+		RecipeIntentDigest: strings.Repeat("a", 64), StartGeneration: "00000000-0000-4000-8000-000000000003",
+		Readiness: session.ReadinessRecord{Status: session.ReadinessReady}}
+	attempt := session.ActionAttempt{Version: 1, Domain: record.Domain, SessionName: "dev", SessionID: record.ID,
+		BackendObject: record.Backend.ObjectID, Generation: record.StartGeneration, RecipeDigest: record.RecipeIntentDigest,
+		ActionID: "configure-agent", ActionPhase: "once", AttemptID: "00112233-4455-4677-8899-aabbccddeeff", State: session.ActionAttemptIndeterminate}
+	var output bytes.Buffer
+	if err := writeAlphaAutomaticStart(&output, record, []session.ActionAttempt{attempt}, nil); err == nil || output.Len() != 0 {
+		t.Fatalf("false automatic success accepted: %v, output=%q", err, output.String())
+	}
+	attempt.State = session.ActionAttemptSucceeded
+	attempt.ReceiptSHA256 = strings.Repeat("b", 64)
+	attempt.SessionID = "00000000-0000-4000-8000-000000000099"
+	if err := writeAlphaAutomaticStart(&output, record, []session.ActionAttempt{attempt}, nil); err == nil || output.Len() != 0 {
+		t.Fatalf("foreign automatic success accepted: %v, output=%q", err, output.String())
+	}
+}
+
 func TestAlphaActionListRecoversAttemptIDFromExactSessionJournal(t *testing.T) {
 	configPath, selected := writeV2DomainFixture(t, "alpha")
 	value := recipe.Recipe{Version: 1,

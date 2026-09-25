@@ -94,6 +94,16 @@ func publicOptions(output io.Writer) app.Options {
 				return session.ActionAttempt{}, fmt.Errorf("unsupported alpha action operation")
 			}
 		},
+		AlphaAutomatic: func(ctx context.Context, selected config.Domain, started session.Record) ([]session.ActionAttempt, error) {
+			if selected.ID != "alpha" || started.Domain != selected.ID {
+				return nil, fmt.Errorf("automatic actions require the exact alpha domain")
+			}
+			controller, err := supervisor.NewExactActionController(filepath.Join(selected.StateRoot, "runtime"))
+			if err != nil {
+				return nil, err
+			}
+			return session.NewActionService(selected, controller).RunAutomaticActions(ctx, started)
+		},
 		AlphaWorkspaceCreate: func(ctx context.Context, selected config.Domain, input app.AlphaWorkspaceCreateInput) (workspacex.Record, error) {
 			formatter := workspaceformat.VZFormatter{StateRoot: selected.StateRoot, Domain: selected.ID,
 				BundlePath: input.BundlePath, SourceRoot: input.SourceRoot}

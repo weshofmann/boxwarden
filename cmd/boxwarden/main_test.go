@@ -148,6 +148,9 @@ func TestProductionPublicOptionsWireAdmittedStarterFactory(t *testing.T) {
 	if options.AlphaAction == nil {
 		t.Fatal("production alpha action service is not composed")
 	}
+	if options.AlphaAutomatic == nil {
+		t.Fatal("production alpha automatic action runner is not composed")
+	}
 	if _, err := options.SessionStarterFactory(config.Config{}, config.Domain{}, "/private/config.json"); err == nil {
 		t.Fatal("production factory accepted unadmitted configuration")
 	}
