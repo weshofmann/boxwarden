@@ -355,6 +355,14 @@ prototype with material acceptance gaps, not an alpha-ready release.
   74 GiB free, qualification state 97 GiB, and Tart store 261 GiB. Next:
   observe the installed-guest marker and recipe step, then require
   finalization and independent-clone qualification before cache admission.
+- A tracked ChatGPT plus `jq` recipe is staged for a later software-changing
+  rebuild. It retains the original startup action and workspace declaration;
+  only the declared apt package set differs. The structural delta check,
+  public recipe/ISO admission, targeted recipe and app tests, and exact key
+  calculation passed locally: the current ChatGPT key is `bdc87cda3efe...`,
+  while the `jq` variant is `470730d0e0f8...`. This is source verification.
+  No replacement base, rebuild, or retained-workspace byte proof is claimed
+  from this fixture yet.
 
 ## Remaining acceptance
 

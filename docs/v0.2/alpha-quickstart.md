@@ -124,3 +124,24 @@ qualified disk, published whole-directory export, and captured source all
 match. Keep the VM stopped when finished. Rebuild, replacement reattachment,
 GUI acceptance, and a fresh independent repetition are tracked in
 [alpha progress](alpha-progress.md) until they pass the complete matrix.
+
+For the pending software-changing rebuild trial, the tracked
+`examples/v0.2-alpha-chatgpt-jq.json` recipe retains the ChatGPT preparation,
+startup action, and workspace declaration while adding the [Ubuntu 24.04 ARM64
+`jq` package](https://packages.ubuntu.com/noble/arm64/jq). This gives the
+replacement base a different preparation key and an
+additional package for independent-clone inventory. After recording the
+stopped original system and exact workspace bytes, prepare and rebuild through
+the public command:
+
+```sh
+"$BW" --config "$CONFIG" --domain alpha session rebuild \
+  --recipe "$SOURCE_ROOT/examples/v0.2-alpha-chatgpt-jq.json" --iso "$ISO" \
+  --guest-definition "$SOURCE_ROOT/guest/ubuntu-24.04-arm64" \
+  --openssl "$OPENSSL" --openssl-sha256 "$OPENSSL_SHA256" \
+  --xorriso "$XORRISO" --xorriso-sha256 "$XORRISO_SHA256" "$SESSION"
+```
+
+This command and the subsequent workspace byte comparison still require a
+fresh real-host qualification. Do not infer retained data or a usable desktop
+from the command's exit status alone.
