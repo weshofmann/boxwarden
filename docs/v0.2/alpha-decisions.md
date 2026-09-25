@@ -667,3 +667,24 @@ inputs, while the immutable full recipe intent binds session execution.
 Graphical `launch` remains rejected because its desktop session contract is
 not implemented. Source admission does not substitute for a fresh real-VM
 qualification of the public ordered flow.
+
+## Official Linux agent package candidate, 2026-09-25
+
+The [official Linux desktop guide](https://learn.chatgpt.com/docs/linux/linux-app)
+lists Ubuntu 24.04 ARM64 support and a direct `.deb` download. The exact
+official package observed for the alpha candidate was 399,743,370 bytes,
+SHA-256 `2114883623dae34a4bc7a67faad3e6652dd9bfdc7a28f57c36ed03e350be1cf1`.
+Its Debian control metadata identifies `chatgpt` version `26.917.71314` for
+`arm64`. Inspection only was performed; no package script ran on the trusted
+host and this package has not yet been installed in a guest. A recipe must
+check the downloaded bytes against the pinned digest before guest installation.
+The package's inspected `postinst` can add an OpenAI apt source for later
+updates; the build should disable that optional registration so a qualified
+base does not later pull a different ChatGPT package implicitly.
+
+The official guide says Computer Use is not yet available in the Linux
+preview. [OpenAI release notes](https://help.openai.com/en/articles/6825453-chatgpt-release-notes)
+say browser actions are available there while control of other desktop apps
+is not. Alpha acceptance must distinguish successful installation and visible
+launch from full desktop Computer Use. Native Wayland remains experimental in
+the vendor guide; its default XWayland path is the initial launch candidate.

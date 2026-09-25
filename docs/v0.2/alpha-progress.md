@@ -158,14 +158,21 @@ prototype with material acceptance gaps, not an alpha-ready release.
   Runnable alpha recipes now admit `once` and `startup`; `launch` remains
   closed. Recipe, preparer, app, CLI, session, and architecture package tests,
   targeted vet, gofmt, and diff checks passed locally for this admission
-  increment; hosted CI remains. The public ordered flow still needs real-VM
-  qualification.
+  increment; [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36092521283)
+  passed its deterministic matrix. The public ordered flow still needs
+  real-VM qualification.
 - At the latest capacity check, the internal Data volume had about 14 GiB
   available, below the stopped-export guard. One broad local app test fixture
   hit its free-space reserve on the internal temporary filesystem; the same
   app, CLI, session, and architecture packages passed when temporary test
   state used the external Boxwarden directory. Host export and other large VM
   operations are deferred until headroom is restored; source work continues.
+- The official Ubuntu 24.04 ARM64 ChatGPT desktop package is now identified
+  by exact byte count, version, and SHA-256 in `alpha-decisions.md`. Its
+  installer scripts were inspected as data. Guest installation, dependency
+  compatibility, a visible graphical window, and sign-in are unverified.
+  The internal Data volume subsequently fell to about 13 GiB free; real-VM
+  work remains paused under the host free-space floor.
 
 ## Remaining acceptance
 
