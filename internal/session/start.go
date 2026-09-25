@@ -79,7 +79,8 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 }
 
 // StartRebuildCandidate is the narrow internal continuation after durable
-// cutover. Ordinary Start still rejects every pending rebuild journal.
+// cutover, including a stopped candidate after Ready or Retiring. Ordinary
+// Start still rejects every pending rebuild journal.
 func (s *Service) StartRebuildCandidate(ctx context.Context, rawName string, journal RebuildJournal) (Record, error) {
 	return s.startSession(ctx, rawName, &journal)
 }
@@ -129,9 +130,9 @@ func (s *Service) startSession(ctx context.Context, rawName string, rebuild *Reb
 		}
 	} else {
 		current, loadErr := LoadRebuildJournal(s.domain.StateRoot, domainID, string(name))
-		if loadErr != nil || current != *rebuild || current.Phase != RebuildCutover || current.SessionID != record.ID ||
+		if loadErr != nil || current != *rebuild || (current.Phase != RebuildCutover && current.Phase != RebuildReady && current.Phase != RebuildRetiring) || current.SessionID != record.ID ||
 			current.CandidateBackend != record.Backend.ObjectID || current.CandidateRevision != record.GoldenRevision || current.CandidateIntentDigest != record.RecipeIntentDigest {
-			return Record{}, fmt.Errorf("starting session lacks exact candidate cutover journal: %v", loadErr)
+			return Record{}, fmt.Errorf("starting session lacks exact candidate rebuild journal: %v", loadErr)
 		}
 	}
 	_, _, err = s.admitStartPrerequisites(ctx)

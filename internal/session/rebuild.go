@@ -603,5 +603,14 @@ func (s *RebuildService) execute(ctx context.Context, rawName, revision, candida
 			return Record{}, err
 		}
 	}
+	if (j.Phase == RebuildReady || j.Phase == RebuildRetiring) && (current.IntendedState == StateStopped || current.IntendedState == StateStarting) {
+		record, startErr := starter.StartRebuildCandidate(ctx, string(name), j)
+		if startErr != nil {
+			return Record{}, startErr
+		}
+		if record.IntendedState != StateRunning || record.Readiness.Status != ReadinessReady {
+			return Record{}, fmt.Errorf("candidate remains %s; retry exact rebuild after readiness converges", record.IntendedState)
+		}
+	}
 	return s.RetireOld(ctx, string(name), starter)
 }

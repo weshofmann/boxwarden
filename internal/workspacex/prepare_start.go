@@ -81,9 +81,9 @@ func prepareSessionStartJournal(ctx context.Context, stateRoot string, domainID 
 		}
 	} else {
 		currentJournal, loadErr := session.LoadRebuildJournal(stateRoot, domainID, string(expected.Name))
-		if loadErr != nil || currentJournal != *rebuild || currentJournal.Phase != session.RebuildCutover ||
+		if loadErr != nil || currentJournal != *rebuild || (currentJournal.Phase != session.RebuildCutover && currentJournal.Phase != session.RebuildReady && currentJournal.Phase != session.RebuildRetiring) ||
 			currentJournal.SessionID != expected.ID || currentJournal.CandidateBackend != expected.Backend.ObjectID || currentJournal.CandidateRevision != expected.GoldenRevision {
-			return session.Record{}, fmt.Errorf("workspace start lacks exact rebuild cutover journal: %v", loadErr)
+			return session.Record{}, fmt.Errorf("workspace start lacks exact candidate rebuild journal: %v", loadErr)
 		}
 	}
 	attached, err := listSessionAttachments(ctx, stateRoot, domainID, expected.ID, string(expected.Name))

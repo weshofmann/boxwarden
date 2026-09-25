@@ -406,7 +406,9 @@ func (p *sliceBPolicy) finish() []string {
 		{p.serialRuntimeConstructions, 1, "Slice B serial runtime construction"},
 		{p.serialBootstrapCalls, 1, "Slice C serial bootstrap composition"},
 		{p.pinAdmissionCalls, 1, "Slice C host-key pin admission"},
-		{p.pinLoadCalls, 1, "Slice C host-key pin verification"},
+		// Recovery loads the established candidate pin before relaunch; READY
+		// composition loads it again against the live exact-generation key.
+		{p.pinLoadCalls, 2, "Slice C host-key pin verification"},
 	} {
 		if check.got != check.want {
 			issues = append(issues, check.name+" count = "+strconv.Itoa(check.got)+", want "+strconv.Itoa(check.want))

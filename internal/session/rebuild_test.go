@@ -353,6 +353,91 @@ func TestRebuildRetirementReconcilesPostEffectDeleteFailure(t *testing.T) {
 	}
 }
 
+func TestExecuteRebuildRestartsStoppedCandidateBeforeRetirement(t *testing.T) {
+	for _, scenario := range []struct {
+		name        string
+		phase       RebuildPhase
+		deleteAfter bool
+		wantDeletes int
+	}{
+		{name: "ready", phase: RebuildReady, wantDeletes: 1},
+		{name: "retiring_before_delete", phase: RebuildRetiring, wantDeletes: 2},
+		{name: "retiring_after_delete", phase: RebuildRetiring, deleteAfter: true, wantDeletes: 1},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			rebuilder, backendFake, old := rebuildPreparationFixture(t)
+			if _, err := rebuilder.PrepareCandidate(t.Context(), "dev", "golden-r2"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := rebuilder.Cutover(t.Context(), "dev"); err != nil {
+				t.Fatal(err)
+			}
+			journal := mustRebuildJournal(t, rebuilder.domain.StateRoot, old.Domain)
+			control := &startSupervisorFake{
+				start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+					backendFake.SetObservation(backend.Observation{ObjectID: journal.CandidateBackend, Exists: true, State: backend.ObjectRunning})
+					return readySnapshot(request.Binding, time.Now()), nil
+				},
+				snapshot: func(binding supervisor.Binding) (supervisor.Snapshot, error) {
+					return readySnapshot(binding, time.Now()), nil
+				},
+				stop: func(binding supervisor.Binding) error {
+					backendFake.SetObservation(backend.Observation{ObjectID: binding.BackendObject, Exists: true, State: backend.ObjectStopped})
+					return nil
+				},
+			}
+			generations := []string{testStartGeneration, "74527eb0-43c6-4c41-929c-57502dbb8c72"}
+			starter := newStartTestService(rebuilder.domain, backendFake, control, time.Now, func() (string, error) {
+				generation := generations[0]
+				generations = generations[1:]
+				return generation, nil
+			})
+			if _, err := starter.StartRebuildCandidate(t.Context(), "dev", journal); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := rebuilder.ConfirmReady(t.Context(), "dev", starter); err != nil {
+				t.Fatal(err)
+			}
+			if scenario.phase == RebuildRetiring {
+				injected := errors.New("delete reply failed")
+				if scenario.deleteAfter {
+					rebuilder.deps.Deleter = postEffectRebuildDeleter{inner: backendFake, err: injected}
+				} else {
+					backendFake.SetDeleteError(injected)
+				}
+				if _, err := rebuilder.RetireOld(t.Context(), "dev", starter); !errors.Is(err, injected) {
+					t.Fatalf("retirement interruption = %v", err)
+				}
+				backendFake.SetDeleteError(nil)
+				rebuilder.deps.Deleter = backendFake
+			}
+			stopped, err := starter.Stop(t.Context(), "dev")
+			if err != nil || stopped.IntendedState != StateStopped || stopped.ID != old.ID || stopped.Backend.ObjectID != journal.CandidateBackend {
+				t.Fatalf("public stop changed candidate identity: %#v, %v", stopped, err)
+			}
+			if got := mustRebuildJournal(t, rebuilder.domain.StateRoot, old.Domain).Phase; got != scenario.phase {
+				t.Fatalf("stop changed rebuild phase to %q, want %q", got, scenario.phase)
+			}
+			if _, err := starter.Start(t.Context(), "dev"); err == nil {
+				t.Fatal("ordinary start bypassed pending rebuild")
+			}
+			resumed, err := rebuilder.Execute(t.Context(), "dev", "", starter)
+			if err != nil || resumed.ID != old.ID || resumed.Backend.ObjectID != journal.CandidateBackend || resumed.IntendedState != StateRunning || resumed.Readiness.Status != ReadinessReady {
+				t.Fatalf("stopped candidate recovery = %#v, %v", resumed, err)
+			}
+			if _, err := LoadRebuildJournal(rebuilder.domain.StateRoot, old.Domain, "dev"); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("completed retirement retained journal: %v", err)
+			}
+			if len(backendFake.CloneCalls()) != 2 || len(backendFake.DeleteCalls()) != scenario.wantDeletes || control.startCalls != 2 {
+				t.Fatalf("recovery repeated backend mutations: clones=%d deletes=%d starts=%d", len(backendFake.CloneCalls()), len(backendFake.DeleteCalls()), control.startCalls)
+			}
+			if _, err := rebuilder.Execute(t.Context(), "dev", "golden-r2", starter); err != nil || len(backendFake.CloneCalls()) != 2 || len(backendFake.DeleteCalls()) != scenario.wantDeletes || control.startCalls != 2 {
+				t.Fatalf("completed recovery was not idempotent: %v; clones=%d deletes=%d starts=%d", err, len(backendFake.CloneCalls()), len(backendFake.DeleteCalls()), control.startCalls)
+			}
+		})
+	}
+}
+
 func mustRebuildJournal(t *testing.T, root string, domainID domain.ID) RebuildJournal {
 	t.Helper()
 	j, err := LoadRebuildJournal(root, domainID, "dev")

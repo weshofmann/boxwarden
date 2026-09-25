@@ -16,43 +16,47 @@ import (
 )
 
 func TestPrepareRebuildSessionStartReservesOnlyExactCandidateUses(t *testing.T) {
-	root, stopped := stoppedLaunchFixture(t)
-	journal := session.RebuildJournal{Version: 1, Domain: domain.ID("work"), SessionName: "dev", SessionID: stopped.ID,
-		OperationID: "7fb25db7-3cc1-4d92-a04c-b60fd05fa421", Phase: session.RebuildCutover,
-		OldBackend: stopped.Backend.ObjectID, OldRevision: stopped.GoldenRevision,
-		CandidateBackend: "boxwarden-work-7fb25db73cc14d92a04cb60fd05fa421", CandidateRevision: "golden-r2"}
-	stopped.Backend.ObjectID = journal.CandidateBackend
-	stopped.GoldenRevision = journal.CandidateRevision
-	if err := session.SaveRecord(root, domain.ID("work"), stopped); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(filepath.Join(root, "rebuilds"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := json.Marshal(journal)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "rebuilds", "dev.json"), raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	observer := stoppedObserver{state: backend.ObjectStopped, object: journal.CandidateBackend}
-	if _, err := PrepareSessionStart(context.Background(), root, domain.ID("work"), stopped, testGeneration, observer); err == nil {
-		t.Fatal("ordinary start bypassed pending rebuild journal")
-	}
-	wrong := journal
-	wrong.CandidateRevision = "foreign-base"
-	if _, err := PrepareRebuildSessionStart(context.Background(), root, domain.ID("work"), stopped, testGeneration, observer, wrong); err == nil {
-		t.Fatal("foreign rebuild journal reserved a workspace Use")
-	}
-	started, err := PrepareRebuildSessionStart(context.Background(), root, domain.ID("work"), stopped, testGeneration, observer, journal)
-	if err != nil || started.IntendedState != session.StateStarting || started.Backend.ObjectID != journal.CandidateBackend {
-		t.Fatalf("rebuild start reservation = %#v, %v", started, err)
-	}
-	volume, err := LoadRecord(root, domain.ID("work"), testVolumeID)
-	if err != nil || volume.Use == nil || *volume.Use != (Use{BackendKind: "tart", BackendObject: journal.CandidateBackend, Generation: testGeneration}) ||
-		volume.Attachment == nil || volume.Attachment.SessionID != stopped.ID {
-		t.Fatalf("candidate Use or stable attachment = %#v, %v", volume, err)
+	for _, phase := range []session.RebuildPhase{session.RebuildCutover, session.RebuildReady, session.RebuildRetiring} {
+		t.Run(string(phase), func(t *testing.T) {
+			root, stopped := stoppedLaunchFixture(t)
+			journal := session.RebuildJournal{Version: 1, Domain: domain.ID("work"), SessionName: "dev", SessionID: stopped.ID,
+				OperationID: "7fb25db7-3cc1-4d92-a04c-b60fd05fa421", Phase: phase,
+				OldBackend: stopped.Backend.ObjectID, OldRevision: stopped.GoldenRevision,
+				CandidateBackend: "boxwarden-work-7fb25db73cc14d92a04cb60fd05fa421", CandidateRevision: "golden-r2"}
+			stopped.Backend.ObjectID = journal.CandidateBackend
+			stopped.GoldenRevision = journal.CandidateRevision
+			if err := session.SaveRecord(root, domain.ID("work"), stopped); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(filepath.Join(root, "rebuilds"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := json.Marshal(journal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "rebuilds", "dev.json"), raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			observer := stoppedObserver{state: backend.ObjectStopped, object: journal.CandidateBackend}
+			if _, err := PrepareSessionStart(context.Background(), root, domain.ID("work"), stopped, testGeneration, observer); err == nil {
+				t.Fatal("ordinary start bypassed pending rebuild journal")
+			}
+			wrong := journal
+			wrong.CandidateRevision = "foreign-base"
+			if _, err := PrepareRebuildSessionStart(context.Background(), root, domain.ID("work"), stopped, testGeneration, observer, wrong); err == nil {
+				t.Fatal("foreign rebuild journal reserved a workspace Use")
+			}
+			started, err := PrepareRebuildSessionStart(context.Background(), root, domain.ID("work"), stopped, testGeneration, observer, journal)
+			if err != nil || started.IntendedState != session.StateStarting || started.Backend.ObjectID != journal.CandidateBackend {
+				t.Fatalf("rebuild start reservation = %#v, %v", started, err)
+			}
+			volume, err := LoadRecord(root, domain.ID("work"), testVolumeID)
+			if err != nil || volume.Use == nil || *volume.Use != (Use{BackendKind: "tart", BackendObject: journal.CandidateBackend, Generation: testGeneration}) ||
+				volume.Attachment == nil || volume.Attachment.SessionID != stopped.ID {
+				t.Fatalf("candidate Use or stable attachment = %#v, %v", volume, err)
+			}
+		})
 	}
 }
 

@@ -279,6 +279,102 @@ func TestRebuildBootstrapRotatesOnlyJournalBoundPin(t *testing.T) {
 	_ = f.owner.Wait(context.Background())
 }
 
+func TestRebuildOwnerRestartsExactPinnedCandidateAfterReadyOrRetiring(t *testing.T) {
+	for _, scenario := range []struct {
+		name      string
+		phase     session.RebuildPhase
+		oldExists bool
+	}{
+		{name: "ready", phase: session.RebuildReady, oldExists: true},
+		{name: "retiring_before_delete", phase: session.RebuildRetiring, oldExists: true},
+		{name: "retiring_after_delete", phase: session.RebuildRetiring, oldExists: false},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			f, journal, oldBinding := rebuildOwnerFixture(t)
+			journal.Phase = scenario.phase
+			writeOwnerRebuildJournal(t, f.root, journal)
+			store := sshx.NewPinStore(sshx.Domain{ID: "work", StateRoot: f.root})
+			candidateBinding := oldBinding
+			candidateBinding.BackendObject = journal.CandidateBackend
+			candidatePin, err := store.TransitionRebuild(t.Context(), journal.OperationID, oldBinding, candidateBinding,
+				journal.OldPinPresent, journal.OldPinDigest, sshx.ObservedHostKey{Algorithm: "ssh-ed25519", PublicKey: ownerTestPublicKey})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.observe = func(_ context.Context, object string) (backend.Observation, error) {
+				switch object {
+				case journal.OldBackend:
+					if !scenario.oldExists {
+						return backend.Observation{ObjectID: object, State: backend.ObjectUnknown}, nil
+					}
+					return backend.Observation{ObjectID: object, Exists: true, State: backend.ObjectStopped}, nil
+				case journal.CandidateBackend:
+					state := backend.ObjectStopped
+					if f.startRequest.ObjectID != "" {
+						state = backend.ObjectRunning
+					}
+					return backend.Observation{ObjectID: object, Exists: true, State: state}, nil
+				default:
+					t.Fatalf("unexpected observed object %q", object)
+					return backend.Observation{}, nil
+				}
+			}
+			if err := f.owner.Start(t.Context(), f.request); err != nil {
+				t.Fatalf("exact recovery launch: %v", err)
+			}
+			if f.startRequest.ObjectID != journal.CandidateBackend {
+				t.Fatalf("launched %q instead of exact candidate", f.startRequest.ObjectID)
+			}
+			if err := f.owner.Bootstrap(t.Context()); err != nil {
+				t.Fatalf("exact recovery bootstrap: %v", err)
+			}
+			if got, err := store.Load(t.Context(), candidateBinding); err != nil || got != candidatePin {
+				t.Fatalf("candidate pin changed during recovery: %#v, %v", got, err)
+			}
+			if _, err := store.Load(t.Context(), oldBinding); err == nil {
+				t.Fatal("old pin became active during recovery")
+			}
+			if err := f.owner.Stop(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.owner.Wait(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestRebuildOwnerRecoveryRequiresEstablishedCandidatePin(t *testing.T) {
+	f, journal, _ := rebuildOwnerFixture(t)
+	journal.Phase = session.RebuildReady
+	writeOwnerRebuildJournal(t, f.root, journal)
+	if err := f.owner.Start(t.Context(), f.request); err == nil || f.startRequest.ObjectID != "" {
+		t.Fatalf("ready recovery launched without candidate pin: %v; request=%#v", err, f.startRequest)
+	}
+}
+
+func TestRebuildOwnerReadyRecoveryRejectsAbsentOldBackend(t *testing.T) {
+	f, journal, oldBinding := rebuildOwnerFixture(t)
+	journal.Phase = session.RebuildReady
+	writeOwnerRebuildJournal(t, f.root, journal)
+	candidateBinding := oldBinding
+	candidateBinding.BackendObject = journal.CandidateBackend
+	store := sshx.NewPinStore(sshx.Domain{ID: "work", StateRoot: f.root})
+	if _, err := store.TransitionRebuild(t.Context(), journal.OperationID, oldBinding, candidateBinding,
+		journal.OldPinPresent, journal.OldPinDigest, sshx.ObservedHostKey{Algorithm: "ssh-ed25519", PublicKey: ownerTestPublicKey}); err != nil {
+		t.Fatal(err)
+	}
+	f.observe = func(_ context.Context, object string) (backend.Observation, error) {
+		if object != journal.OldBackend {
+			t.Fatalf("observed unexpected object %q before old-backend gate", object)
+		}
+		return backend.Observation{ObjectID: object, State: backend.ObjectUnknown}, nil
+	}
+	if err := f.owner.Start(t.Context(), f.request); err == nil || f.startRequest.ObjectID != "" {
+		t.Fatalf("ready recovery accepted absent old backend: %v; request=%#v", err, f.startRequest)
+	}
+}
+
 func TestRebuildBootstrapRejectsChangedJournalBeforePinRotation(t *testing.T) {
 	f, journal, oldBinding := rebuildOwnerFixture(t)
 	if err := f.owner.Start(context.Background(), f.request); err != nil {
@@ -302,6 +398,7 @@ func TestRebuildOwnerRejectsWrongPhaseAndRunningOldSystemBeforeLaunch(t *testing
 		mutate func(*fixture, *session.RebuildJournal)
 	}{
 		{name: "wrong phase", mutate: func(_ *fixture, j *session.RebuildJournal) { j.Phase = session.RebuildCloned }},
+		{name: "candidate intent mismatch", mutate: func(_ *fixture, j *session.RebuildJournal) { j.CandidateIntentDigest = strings.Repeat("a", 64) }},
 		{name: "pin transition unavailable", mutate: func(f *fixture, _ *session.RebuildJournal) { f.pin = &flakyPinStore{} }},
 		{name: "old still running", mutate: func(f *fixture, j *session.RebuildJournal) {
 			candidate := j.CandidateBackend

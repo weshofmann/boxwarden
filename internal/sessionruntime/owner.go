@@ -41,6 +41,10 @@ type rebuildPinStore interface {
 	TransitionRebuild(context.Context, string, sshx.Binding, sshx.Binding, bool, string, sshx.ObservedHostKey) (sshx.HostKeyPin, error)
 }
 
+func candidateRebuildPhase(phase session.RebuildPhase) bool {
+	return phase == session.RebuildCutover || phase == session.RebuildReady || phase == session.RebuildRetiring
+}
+
 type certificateIssuer interface {
 	Issue(context.Context, sshx.Binding, string, string) (sshx.Certificate, error)
 }
@@ -182,9 +186,9 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) (re
 	var rebuild *session.RebuildJournal
 	journal, journalErr := session.LoadRebuildJournal(selected.StateRoot, selected.ID, string(record.Name))
 	if journalErr == nil {
-		if journal.Phase != session.RebuildCutover || journal.SessionID != record.ID || journal.CandidateBackend != record.Backend.ObjectID ||
-			journal.CandidateRevision != record.GoldenRevision || journal.Domain != record.Domain {
-			return fmt.Errorf("starting session does not match exact rebuild cutover journal")
+		if !candidateRebuildPhase(journal.Phase) || journal.SessionID != record.ID || journal.CandidateBackend != record.Backend.ObjectID ||
+			journal.CandidateRevision != record.GoldenRevision || journal.CandidateIntentDigest != record.RecipeIntentDigest || journal.Domain != record.Domain {
+			return fmt.Errorf("starting session does not match exact candidate rebuild journal")
 		}
 		rebuild = &journal
 	} else if !errors.Is(journalErr, os.ErrNotExist) {
@@ -219,15 +223,23 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) (re
 		if _, ok := pins.(rebuildPinStore); !ok {
 			return fmt.Errorf("rebuild pin transition is unavailable before candidate launch")
 		}
+		if rebuild.Phase != session.RebuildCutover {
+			candidateBinding := sshx.Binding{Domain: record.Domain, SessionID: record.ID, BackendKind: record.Backend.Kind, BackendObject: record.Backend.ObjectID}
+			if _, err := pins.Load(ctx, candidateBinding); err != nil {
+				return fmt.Errorf("reload established candidate host-key pin before rebuild recovery: %w", err)
+			}
+		}
 	}
 	observer := o.deps.observer(admission.Host.TartExecutable, admission.Host.TartHome)
 	if observer == nil {
 		return fmt.Errorf("qualified backend observer is required")
 	}
 	if rebuild != nil {
-		oldObservation, oldErr := observeExact(ctx, observer, rebuild.OldBackend)
-		if oldErr != nil || !oldObservation.Exists || oldObservation.State != backend.ObjectStopped {
-			return fmt.Errorf("old rebuild system must remain exactly stopped before candidate launch: %v", oldErr)
+		oldObservation, oldErr := observer.Observe(ctx, rebuild.OldBackend)
+		if oldErr != nil || oldObservation.ObjectID != rebuild.OldBackend ||
+			(oldObservation.Exists && oldObservation.State != backend.ObjectStopped) ||
+			(!oldObservation.Exists && (oldObservation.State != backend.ObjectUnknown || rebuild.Phase != session.RebuildRetiring)) {
+			return fmt.Errorf("old rebuild system must be exactly stopped or absent under retiring intent before candidate launch: %v", oldErr)
 		}
 	}
 	observation, err := observeExact(ctx, observer, binding.BackendObject)
@@ -352,7 +364,7 @@ func (o *Owner) Bootstrap(ctx context.Context) error {
 		pin, err = pins.Admit(ctx, sshBinding, observedKey)
 	} else {
 		current, loadErr := session.LoadRebuildJournal(rebuildRoot, rebuild.Domain, rebuild.SessionName)
-		if loadErr != nil || current != *rebuild || current.Phase != session.RebuildCutover {
+		if loadErr != nil || current != *rebuild || !candidateRebuildPhase(current.Phase) {
 			return fmt.Errorf("exact rebuild journal changed before host-key transition: %v", loadErr)
 		}
 		transition, ok := pins.(rebuildPinStore)
