@@ -361,6 +361,13 @@ prototype with material acceptance gaps, not an alpha-ready release.
   public recipe/ISO admission, targeted recipe and app tests, and exact key
   calculation passed locally: the current ChatGPT key is `bdc87cda3efe...`,
   while the `jq` variant is `470730d0e0f8...`. This is source verification.
+  [Hosted CI for `5fe9283`](https://github.com/weshofmann/boxwarden/actions/runs/36180071270)
+  passed its deterministic matrix. A private binary built from that exact
+  clean source passed host doctor and public recipe/ISO admission. A private
+  synthetic import source now contains all three tracked example files with
+  owner-only modes and matching bytes; no guest import is claimed from this
+  staging. The prior signed workspace formatter bundle is bound to an older
+  source commit, so a fresh bundle is required before public workspace create.
   No replacement base, rebuild, or retained-workspace byte proof is claimed
   from this fixture yet.
 
