@@ -95,16 +95,22 @@ prototype with material acceptance gaps, not an alpha-ready release.
   dependency. The copy stopped normally and its exact result is retained
   privately. Host resolution works; the original attempt's logs show a
   connected NetworkManager, so this does not attribute that earlier failure.
-- One disposable diagnostic copy reached its installed prompt, but its probe
+- A disposable diagnostic copy reached its installed prompt, but its probe
   command was not delivered completely. An isolated host PTY regression
   reproduced a short write that the diagnostic harness ignored; the guest
   received the same prefix without the terminal newline. The regression failed
   on that harness and passed after bounded full-write handling. The corrected
-  future harness is retained privately; it has not run in a VM. The current
-  harness remains live and owns bounded shutdown. Boxwarden's production
+  harness is retained privately. The failed harness exited 1 at its
+  result deadline, and full-host observation confirms its copy stopped.
+  Its exact result is retained privately. Boxwarden's production
   serial transport already handles short writes. This diagnostic defect does
   not attribute the original preparation failure, and no helper execution or
   qualification is claimed from this probe. No new full preparation is running.
+- One fresh disposable diagnostic copy is now running with the corrected
+  full-write harness. Exact ownership and hashes, stopped objects, full-host
+  doctor, and capacity checks passed before launch. Network/DNS readiness and
+  the original source-pinned helper result remain pending. The failed original
+  disk identity and journal are unchanged; all prior copies are stopped.
 - [Hosted CI for `a66d939`](https://github.com/weshofmann/boxwarden/actions/runs/36220982974)
   passed its deterministic matrix. A CLI built from that clean source passed
   full-host doctor and the pinned recipe/ISO check. A replacement conditional
@@ -115,6 +121,8 @@ prototype with material acceptance gaps, not an alpha-ready release.
   in the typed diagnostic changes; all 15 affected Python tests passed.
   [Hosted CI for that checkpoint](https://github.com/weshofmann/boxwarden/actions/runs/36221684989)
   also passed. These checks do not prove real-guest behavior or admission.
+  [Hosted CI for the `be31d38` review record](https://github.com/weshofmann/boxwarden/actions/runs/36221984837)
+  passed its deterministic matrix.
 - Next: inspect the diagnostic result, propagate any established cause across
   remaining phases, and review the source before starting a fresh
   baseline. Require terminal success, stopped candidate, passed independent-clone
