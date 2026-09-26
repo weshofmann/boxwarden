@@ -247,3 +247,20 @@ no remaining Important/Critical issue in the bounded delta. Private artifacts
 are durably archived; none of these tests operated a real VM or native disk
 tool. The copy remains the sole live operation, and fresh clone preparation,
 boot, guest behavior and all alpha acceptance gates remain unexecuted.
+
+## Native migration capacity review (2026-09-26)
+
+Independent read-only review checked installed ASR, diskutil, clonefile and
+hdiutil contracts plus Apple's primary APFS replication explanation. A full
+replica cannot fit alongside the current source while retaining the mission
+free-space floor. Internal staging does not close that gap; source snapshots
+and caches offer no measured reclamation. Cross-filesystem clone calls fail,
+and snapshot deltas require an existing baseline on the target. No documented
+compaction saving justifies proceeding with an undersized full restore.
+
+The recommended plan stages and verifies the intact sparsebundle on temporary
+storage, then restores into the exact new encrypted native volume, preserving
+canonical mounting and historical evidence provenance. Incremental source
+deletions and bespoke clone reconstruction are not the selected approach.
+This is a capacity/method review, not approval of unprepared device-specific
+commands or executed migration evidence. Suitable staging storage is pending.

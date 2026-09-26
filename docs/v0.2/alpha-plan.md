@@ -274,3 +274,35 @@ on synthetic data before the fresh end-to-end repetition.
    workspace, attach it to a fresh replacement, and export selected files.
    Record exact source/build SHA, observed outcomes, test commands, host limits,
    and owner-only sign-in actions. Leave all owned VMs stopped.
+
+## Native Tart storage migration (operator direction, 2026-09-26)
+
+Migrate at the next safe transition before further expensive VM trials. Current
+shared capacity cannot retain both a full replica and the mission free-space
+floor; the internal disk cannot supply the difference. Native replication is
+preferred because cross-filesystem file copies cannot retain the existing APFS
+clone sharing. Documented metadata compaction provides no sizing guarantee.
+
+1. Adjudicate the one live copy using its original process result and exact
+   private receipt; verify all VMs stopped with full host visibility.
+2. Inventory and independently review the actual staging disk, encryption,
+   capacity, exact volume identities and cutover commands before mutation.
+3. Cleanly detach the Tart sparsebundle and stage its complete intact tree on
+   temporary storage. Verify its inventory, every member's bytes and metadata,
+   then verify attachment and filesystem consistency without guest boot.
+4. Retire only the verified old bundle instance from the original SSD as an
+   exact migration step, retaining the staged source for rollback. Rediscover
+   devices by persistent identity; create the encrypted native target and use
+   native APFS replication with verification. Only the exact new target volume
+   may be erased; no existing volume, disk or container is an erase target.
+5. Verify migrated content and metadata, encryption, clone behavior and free
+   space; preserve historical journals and record old-to-new identity provenance.
+   Restore the canonical Tart mount and require healthy full-host doctor and
+   stopped objects before any guest operation.
+6. Measure the resulting layout without competing heavy writes, then refresh
+   diagnostic and acceptance plans for the new storage identities. A migration
+   or benchmark does not admit a failed base or qualify the alpha.
+
+The exact disk-specific commands and private evidence remain outside Git.
+Temporary storage is currently required; no staging, retirement or cutover has
+been executed. The existing noninteractive host-only passphrase policy applies.

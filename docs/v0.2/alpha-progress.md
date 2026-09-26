@@ -113,14 +113,17 @@ limits and supervisor fixture correction retain their recorded targeted checks.
 - All twelve fresh workflow acceptance gates remain pending. No reusable
   ChatGPT base or graphical application has passed this workflow. The remaining
   sequence is listed below. Real sign-in and subjective GUI acceptance may need
-  human participation later; no current human action is required.
+  human participation later. Temporary staging storage is the current
+  operator dependency for migration; source and synthetic work may continue.
 - Wes has authorized migration to a native encrypted APFS volume at the next
   safe storage transition, superseding the earlier relocation hold. The bounded
   copy remains the sole live write operation; migration takes priority before
   another VM boot. Read-only inventory found insufficient shared capacity for
   a complete second copy while retaining the mission free-space floor. Native
-  replication and staging options are under review; no new volume, cutover or
-  source retirement has occurred. Preserve the canonical Tart mount, clone
+  replication was reviewed against Apple documentation. The recommended path
+  needs temporary storage for the intact sparsebundle before restoration into
+  the exact new native volume; suitable staging storage has been requested.
+  No new volume, cutover or source retirement has occurred. Preserve the canonical Tart mount, clone
   relationships, failed evidence and noninteractive unlock handling.
 
 <details>
