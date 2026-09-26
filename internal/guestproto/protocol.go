@@ -29,7 +29,7 @@ var requiredInstalledSHA256 = map[string]struct{}{
 var requiredSSHD = map[string]string{
 	"trustedusercakeys":            "/etc/ssh/boxwarden/active/trusted-user-ca.pub",
 	"authorizedprincipalsfile":     "/etc/ssh/boxwarden/active/authorized_principals/%u",
-	"authorizedkeysfile":           "none",
+	"authorizedkeysfile":           ".ssh/authorized_keys",
 	"permituserenvironment":        "no",
 	"permituserrc":                 "no",
 	"passwordauthentication":       "no",
@@ -62,7 +62,14 @@ type ManagementRequest struct {
 	Version int    `json:"version"`
 	Kind    string `json:"kind"`
 	Association
-	Zone string `json:"zone,omitempty"`
+	Zone       string           `json:"zone,omitempty"`
+	Packages   []string         `json:"packages,omitempty"`
+	Workspaces []WorkspaceMount `json:"workspaces,omitempty"`
+}
+type WorkspaceMount struct {
+	VolumeID       string `json:"volume_id"`
+	FilesystemUUID string `json:"filesystem_uuid"`
+	MountPath      string `json:"mount_path"`
 }
 type SerialResult struct {
 	Version         int    `json:"version"`
@@ -119,9 +126,20 @@ func DecodeManagementRequest(reader io.Reader) (ManagementRequest, error) {
 	if err != nil {
 		return ManagementRequest{}, err
 	}
-	fields, err := exactObject(contents, "version", "kind", "domain", "session_id", "backend_kind", "backend_object", "zone")
+	fields, err := exactObject(contents, "version", "kind", "domain", "session_id", "backend_kind", "backend_object", "zone", "packages", "workspaces")
 	if err != nil {
 		return ManagementRequest{}, err
+	}
+	if raw := fields["workspaces"]; raw != nil {
+		var entries []json.RawMessage
+		if err := json.Unmarshal(raw, &entries); err != nil || len(entries) == 0 || len(entries) > 4 {
+			return ManagementRequest{}, fmt.Errorf("invalid workspace array")
+		}
+		for _, entry := range entries {
+			if _, err := exactObject(entry, "volume_id", "filesystem_uuid", "mount_path"); err != nil {
+				return ManagementRequest{}, fmt.Errorf("invalid workspace entry: %w", err)
+			}
+		}
 	}
 	var value ManagementRequest
 	if err := decodeFields(fields, &value); err != nil {
@@ -129,6 +147,21 @@ func DecodeManagementRequest(reader io.Reader) (ManagementRequest, error) {
 	}
 	if err := value.Validate(); err != nil {
 		return ManagementRequest{}, err
+	}
+	_, hasZone := fields["zone"]
+	if hasZone != (value.Kind == "apply_zone") {
+		return ManagementRequest{}, fmt.Errorf("management request zone field is out of kind")
+	}
+	_, hasPackages := fields["packages"]
+	if hasPackages != (value.Kind == "inspect_packages") {
+		return ManagementRequest{}, fmt.Errorf("management request package field is out of kind")
+	}
+	_, hasWorkspaces := fields["workspaces"]
+	if hasWorkspaces && value.Kind != "probe" && value.Kind != "ensure_workspaces" && value.Kind != "request_shutdown" {
+		return ManagementRequest{}, fmt.Errorf("management request workspace field is out of kind")
+	}
+	if !hasWorkspaces && value.Kind == "ensure_workspaces" {
+		return ManagementRequest{}, fmt.Errorf("management request has no workspaces")
 	}
 	return value, nil
 }
@@ -146,18 +179,81 @@ func (r ManagementRequest) Validate() error {
 		return fmt.Errorf("invalid management request")
 	}
 	switch r.Kind {
-	case "probe", "read_zone":
-		if r.Zone != "" {
-			return fmt.Errorf("management request has unexpected zone")
+	case "probe":
+		if r.Zone != "" || len(r.Packages) != 0 || !validWorkspaces(r.Workspaces) {
+			return fmt.Errorf("invalid mount-bound probe")
+		}
+	case "ensure_workspaces":
+		if r.Zone != "" || len(r.Packages) != 0 || len(r.Workspaces) == 0 || !validWorkspaces(r.Workspaces) {
+			return fmt.Errorf("invalid workspace mount request")
+		}
+	case "read_zone", "inspect_identity":
+		if r.Zone != "" || len(r.Packages) != 0 || len(r.Workspaces) != 0 {
+			return fmt.Errorf("management request has unexpected parameters")
+		}
+	case "request_shutdown":
+		if r.Zone != "" || len(r.Packages) != 0 || !validWorkspaces(r.Workspaces) {
+			return fmt.Errorf("invalid workspace-bound shutdown request")
 		}
 	case "apply_zone":
-		if !validZone(r.Zone) {
+		if !validZone(r.Zone) || len(r.Packages) != 0 || len(r.Workspaces) != 0 {
 			return fmt.Errorf("invalid time zone")
+		}
+	case "inspect_packages":
+		if r.Zone != "" || len(r.Packages) == 0 || len(r.Packages) > 128 || len(r.Workspaces) != 0 {
+			return fmt.Errorf("invalid package inspection request")
+		}
+		seen := make(map[string]bool, len(r.Packages))
+		for _, pkg := range r.Packages {
+			if !validPackageName(pkg) || seen[pkg] {
+				return fmt.Errorf("invalid or duplicate package inspection name")
+			}
+			seen[pkg] = true
 		}
 	default:
 		return fmt.Errorf("unsupported management request")
 	}
 	return nil
+}
+func validWorkspaces(mounts []WorkspaceMount) bool {
+	if len(mounts) > 4 {
+		return false
+	}
+	volumes, uuids, paths := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	for _, mount := range mounts {
+		if !validUUID(mount.VolumeID) || !validUUID(mount.FilesystemUUID) || !validWorkspacePath(mount.MountPath) || volumes[mount.VolumeID] || uuids[mount.FilesystemUUID] || paths[mount.MountPath] {
+			return false
+		}
+		volumes[mount.VolumeID], uuids[mount.FilesystemUUID], paths[mount.MountPath] = true, true, true
+	}
+	return true
+}
+func validWorkspacePath(path string) bool {
+	const prefix = "/home/boxwarden/workspaces/"
+	if !strings.HasPrefix(path, prefix) {
+		return false
+	}
+	name := strings.TrimPrefix(path, prefix)
+	if len(name) == 0 || len(name) > 63 || name[0] < 'a' || name[0] > 'z' {
+		return false
+	}
+	for i := 1; i < len(name); i++ {
+		if !(name[i] >= 'a' && name[i] <= 'z' || name[i] >= '0' && name[i] <= '9') {
+			return false
+		}
+	}
+	return true
+}
+func validPackageName(value string) bool {
+	if len(value) == 0 || len(value) > 128 || value[0] < 'a' || value[0] > 'z' {
+		return false
+	}
+	for _, c := range value[1:] {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '+' || c == '.' || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 func (a Association) valid() bool {
 	return validToken(a.Domain, 1, 63) && validUUID(a.SessionID) && validToken(a.BackendKind, 1, 63) && validToken(a.BackendObject, 1, 255)
@@ -290,7 +386,7 @@ func exactObject(data []byte, allowed ...string) (map[string]json.RawMessage, er
 		return nil, fmt.Errorf("trailing JSON")
 	}
 	for _, key := range allowed {
-		if fields[key] == nil && key != "zone" {
+		if fields[key] == nil && key != "zone" && key != "packages" && key != "workspaces" {
 			return nil, fmt.Errorf("missing field %q", key)
 		}
 	}

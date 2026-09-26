@@ -4,15 +4,15 @@ package tart
 
 import (
 	"context"
-	"os/exec"
+	"os"
 	"testing"
 )
 
 func TestOSProcessStarterRejectsBeforeSpawnWithoutDarwinProcessGroups(t *testing.T) {
 	spawned := false
-	starter := osProcessStarter{spawn: func(*exec.Cmd) error {
+	starter := osProcessStarter{spawn: func(string, []string, *os.ProcAttr) (*os.Process, error) {
 		spawned = true
-		return nil
+		return nil, nil
 	}}
 	if _, err := starter.start(context.Background(), processSpec{path: "/opt/qualified/tart"}); err == nil {
 		t.Fatal("start() error = nil, want unsupported-platform refusal")

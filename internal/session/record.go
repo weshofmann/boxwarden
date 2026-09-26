@@ -60,16 +60,17 @@ type ReadinessRecord struct {
 }
 
 type Record struct {
-	Version         int             `json:"version"`
-	Domain          domain.ID       `json:"domain"`
-	Name            Name            `json:"name"`
-	ID              string          `json:"id"`
-	Mode            Mode            `json:"mode"`
-	IntendedState   IntendedState   `json:"intended_state"`
-	Backend         BackendRef      `json:"backend"`
-	GoldenRevision  string          `json:"golden_revision,omitempty"`
-	StartGeneration string          `json:"start_generation,omitempty"`
-	Readiness       ReadinessRecord `json:"readiness"`
+	Version            int             `json:"version"`
+	Domain             domain.ID       `json:"domain"`
+	Name               Name            `json:"name"`
+	ID                 string          `json:"id"`
+	Mode               Mode            `json:"mode"`
+	IntendedState      IntendedState   `json:"intended_state"`
+	Backend            BackendRef      `json:"backend"`
+	GoldenRevision     string          `json:"golden_revision,omitempty"`
+	RecipeIntentDigest string          `json:"recipe_intent_digest,omitempty"`
+	StartGeneration    string          `json:"start_generation,omitempty"`
+	Readiness          ReadinessRecord `json:"readiness"`
 }
 
 func LoadRecord(stateRoot, expectedDomain, rawName string) (Record, error) {
@@ -135,7 +136,7 @@ func decodeRecord(decoder *json.Decoder) (Record, error) {
 
 	seen := map[string]bool{}
 	var record Record
-	var gotVersion, gotDomain, gotName, gotID, gotMode, gotState, gotBackend, gotGoldenRevision, gotGeneration, gotReadiness bool
+	var gotVersion, gotDomain, gotName, gotID, gotMode, gotState, gotBackend, gotGoldenRevision, gotIntent, gotGeneration, gotReadiness bool
 	for decoder.More() {
 		field, err := objectField(decoder, seen)
 		if err != nil {
@@ -174,6 +175,9 @@ func decodeRecord(decoder *json.Decoder) (Record, error) {
 		case "golden_revision":
 			err = decoder.Decode(&record.GoldenRevision)
 			gotGoldenRevision = true
+		case "recipe_intent_digest":
+			err = decoder.Decode(&record.RecipeIntentDigest)
+			gotIntent = true
 		case "start_generation":
 			err = decoder.Decode(&record.StartGeneration)
 			gotGeneration = true
@@ -207,12 +211,15 @@ func decodeRecord(decoder *json.Decoder) (Record, error) {
 	}
 	switch record.Version {
 	case recordVersionV1:
-		if gotGeneration || gotReadiness {
+		if gotGeneration || gotReadiness || gotIntent {
 			return Record{}, fmt.Errorf("version 1 session record has version 2 fields")
 		}
 	case recordVersion:
 		if !gotGoldenRevision || !validBackendObjectID(record.GoldenRevision) || !gotReadiness {
 			return Record{}, fmt.Errorf("session record has missing required fields")
+		}
+		if gotIntent && !lowerSHA256(record.RecipeIntentDigest) {
+			return Record{}, fmt.Errorf("invalid recipe intent digest")
 		}
 		if err := validateStartGeneration(record); err != nil {
 			return Record{}, err
@@ -226,7 +233,7 @@ func decodeRecord(decoder *json.Decoder) (Record, error) {
 
 func validateStartGeneration(record Record) error {
 	switch record.IntendedState {
-	case StateStarting, StateRunning:
+	case StateStarting, StateRunning, StateStopping:
 		if !validUUID(record.StartGeneration) {
 			return fmt.Errorf("%s record requires a valid start generation", record.IntendedState)
 		}
@@ -279,7 +286,7 @@ func validateReadiness(record Record) error {
 	}
 	switch record.Readiness.Status {
 	case ReadinessNotReady:
-		if record.StartGeneration != "" {
+		if record.StartGeneration != "" && record.IntendedState != StateStopping {
 			return fmt.Errorf("not-ready record must not have a start generation")
 		}
 	case ReadinessStarting:

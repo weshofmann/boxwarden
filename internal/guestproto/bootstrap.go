@@ -53,12 +53,15 @@ func (b *boundedBuffer) Write(data []byte) (int, error) {
 }
 
 type Bootstrapper struct {
-	Root            string
-	Runner          Runner
-	HostKeyPath     string
-	ZonePath        string
-	Failpoint       func(string) error
-	renameNoReplace func(string, string) error
+	Root              string
+	Runner            Runner
+	ActionExecutor    ActionExecutor
+	HostKeyPath       string
+	ZonePath          string
+	Failpoint         func(string) error
+	effectiveHostname func() (string, error)
+	renameNoReplace   func(string, string) error
+	workspaceOwner    func() (int, int, error)
 }
 
 func NewBootstrapper(root string, runner Runner) *Bootstrapper {
@@ -68,7 +71,7 @@ func NewBootstrapper(root string, runner Runner) *Bootstrapper {
 	if runner == nil {
 		runner = ExecRunner{}
 	}
-	return &Bootstrapper{Root: root, Runner: runner, HostKeyPath: "/etc/ssh/ssh_host_ed25519_key.pub", ZonePath: "/etc/timezone", renameNoReplace: renameWithoutReplacement}
+	return &Bootstrapper{Root: root, Runner: runner, ActionExecutor: WorkstationActionExecutor{}, HostKeyPath: "/etc/ssh/ssh_host_ed25519_key.pub", ZonePath: "/etc/timezone", effectiveHostname: os.Hostname, renameNoReplace: renameWithoutReplacement, workspaceOwner: lookupWorkspaceOwner}
 }
 
 func (b *Bootstrapper) Serial(ctx context.Context, request SerialRequest) (SerialResult, error) {
@@ -117,10 +120,41 @@ func (b *Bootstrapper) Serial(ctx context.Context, request SerialRequest) (Seria
 	if err != nil {
 		return SerialResult{}, fmt.Errorf("host public key: %w", err)
 	}
-	if !validPublicKey(strings.TrimSpace(string(host))) {
-		return SerialResult{}, fmt.Errorf("host public key is not fresh ed25519 public material")
+	hostKey, err := canonicalGuestHostKey(host)
+	if err != nil {
+		return SerialResult{}, err
 	}
-	return b.result(request, active, sshd, strings.TrimSpace(string(host)))
+	return b.result(request, active, sshd, hostKey)
+}
+
+// OpenSSH's ssh-keygen -A adds a local human comment to generated public-key
+// files. The comment is not key identity; only the validated ed25519 blob is
+// sent to the host for exact-generation pinning. Refuse multiline or unusual
+// trailing material so a malformed file cannot be silently normalized.
+func canonicalGuestHostKey(raw []byte) (string, error) {
+	line := strings.TrimSuffix(string(raw), "\n")
+	if strings.ContainsAny(line, "\r\n\t") {
+		return "", fmt.Errorf("host public key is not fresh ed25519 public material")
+	}
+	fields := strings.Split(line, " ")
+	if len(fields) != 2 && len(fields) != 3 {
+		return "", fmt.Errorf("host public key is not fresh ed25519 public material")
+	}
+	if len(fields) == 3 {
+		if len(fields[2]) == 0 || len(fields[2]) > 256 {
+			return "", fmt.Errorf("host public key is not fresh ed25519 public material")
+		}
+		for _, b := range []byte(fields[2]) {
+			if b < 0x21 || b > 0x7e {
+				return "", fmt.Errorf("host public key is not fresh ed25519 public material")
+			}
+		}
+	}
+	canonical := fields[0] + " " + fields[1]
+	if !validPublicKey(canonical) {
+		return "", fmt.Errorf("host public key is not fresh ed25519 public material")
+	}
+	return canonical, nil
 }
 func (b *Bootstrapper) Management(ctx context.Context, request ManagementRequest) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
@@ -141,6 +175,14 @@ func (b *Bootstrapper) Management(ctx context.Context, request ManagementRequest
 	}
 	switch request.Kind {
 	case "probe":
+		if err := b.probeWorkspaceMounts(ctx, request.Workspaces); err != nil {
+			return nil, err
+		}
+		return []byte(`{"version":1,"ok":true}`), nil
+	case "ensure_workspaces":
+		if err := b.ensureWorkspaceMounts(ctx, request.Workspaces); err != nil {
+			return nil, err
+		}
 		return []byte(`{"version":1,"ok":true}`), nil
 	case "read_zone":
 		contents, err := b.readGuestFile(b.ZonePath, 0o644)
@@ -157,8 +199,58 @@ func (b *Bootstrapper) Management(ctx context.Context, request ManagementRequest
 			return nil, fmt.Errorf("apply time zone: %w", err)
 		}
 		return []byte(`{"version":1,"ok":true}`), nil
+	case "inspect_packages":
+		return b.inspectPackages(ctx, request.Packages)
+	case "inspect_identity":
+		return b.inspectIdentity()
+	case "request_shutdown":
+		if err := b.quiesceWorkspaceMounts(ctx, request.Workspaces); err != nil {
+			return nil, err
+		}
+		// This only confirms that systemd accepted the fixed poweroff job.
+		// The trusted host still waits for its retained Tart child to exit.
+		if _, err := b.Runner.Run(ctx, "/usr/bin/systemctl", "--no-block", "--no-wall", "--ignore-inhibitors", "poweroff"); err != nil {
+			return nil, fmt.Errorf("enqueue guest poweroff: %w", err)
+		}
+		return []byte(`{"version":1,"ok":true}`), nil
 	}
 	return nil, fmt.Errorf("unsupported management request")
+}
+
+type inspectedPackage struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// inspectPackages invokes dpkg with fixed flags and exact validated package
+// argv. The output is diagnostic guest evidence, not host isolation proof.
+func (b *Bootstrapper) inspectPackages(ctx context.Context, names []string) ([]byte, error) {
+	packages := make([]inspectedPackage, 0, len(names))
+	for _, name := range names {
+		output, err := b.Runner.Run(ctx, "/usr/bin/dpkg-query", "-W", "-f=${Status}\t${Version}", "--", name)
+		if err != nil {
+			return nil, fmt.Errorf("package %q query failed: %w", name, err)
+		}
+		line := strings.TrimSuffix(string(output), "\n")
+		status, version, ok := strings.Cut(line, "\t")
+		if !ok || status != "install ok installed" || len(version) == 0 || len(version) > 128 {
+			return nil, fmt.Errorf("package %q is not verifiably installed", name)
+		}
+		for _, c := range version {
+			if c < 0x21 || c > 0x7e {
+				return nil, fmt.Errorf("package %q version is invalid", name)
+			}
+		}
+		packages = append(packages, inspectedPackage{Name: name, Version: version})
+	}
+	response, err := json.Marshal(struct {
+		Version  int                `json:"version"`
+		Packages []inspectedPackage `json:"packages"`
+	}{Version: Version, Packages: packages})
+	if err != nil || len(response) > MaxResponseBytes {
+		return nil, fmt.Errorf("package inspection response exceeds bound")
+	}
+	return response, nil
 }
 func (b *Bootstrapper) path(relative string) (string, error) {
 	if relative == "" || filepath.IsAbs(relative) || filepath.Clean(relative) != relative || strings.HasPrefix(relative, "..") {

@@ -14,6 +14,7 @@ type StartRequest struct {
 	ObjectID            string
 	SerialDevice        string
 	GenerationDirectory string
+	ManagedDisks        *ManagedDiskSet
 }
 
 // Handle owns the exact process lifetime created by a successful start.
@@ -21,6 +22,13 @@ type StartRequest struct {
 type Handle interface {
 	Stop(context.Context) error
 	Wait(context.Context) error
+}
+
+// RetainedChildLiveness is optional evidence from the exact direct-child
+// handle. It never reconstructs ownership from a persisted PID or a backend
+// listing, and false means exited or unprovable rather than safely stopped.
+type RetainedChildLiveness interface {
+	RetainedChildLive() bool
 }
 
 // Starter launches one existing backend object with its fixed adapter policy.
@@ -45,6 +53,11 @@ func ValidateStartRequest(request StartRequest) error {
 	}
 	if !canonicalAbsolutePath(request.GenerationDirectory) {
 		return fmt.Errorf("generation directory must be canonical and absolute")
+	}
+	if request.ManagedDisks != nil {
+		if err := request.ManagedDisks.ValidateForStart(request); err != nil {
+			return fmt.Errorf("managed disk launch admission: %w", err)
+		}
 	}
 	return nil
 }

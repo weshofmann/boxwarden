@@ -84,9 +84,12 @@ that field, while non-password GUI/serial automatic login and guest sudo remain
 intended workstation behavior. This account-authentication interaction and
 post-finalization rejection of the temporary build password require attended
 Ubuntu validation; source-level fixtures establish only the file-state
-contract. Generic sshd has `AuthorizedKeysFile none`, so later management
-access depends on the exact domain-bound certificate bootstrap, not a
-build-time `authorized_keys` file.
+contract. Finalization removes root and workstation `.ssh` directories, including
+installer-created scaffolding, so no builder key is inherited by clones. The
+generic sshd baseline permits a later owner-created `.ssh/authorized_keys`;
+Boxwarden management still uses the exact domain-bound certificate and a
+host-side pinned SSH client. Guest-local keys grant access to that disposable
+guest, not to the trusted host.
 
 Anything admitted from a disposable session into trusted persistent configuration is a persistence attempt until reviewed. M1A accepts only declarative adapter outputs whose exact bytes, normalized manifest, confidentiality, execution trust, paths, limits, and semantic diff have been validated authoritatively by trusted-host code. Guest checks may fail early for usability but are never security controls. Human review renders guest-controlled bytes without terminal control: C0/C1 and ANSI/OSC sequences are escaped, bidi and zero-width/format controls are visibly marked, truncation and byte counts are explicit, and the exact relevant digests are adjacent to the reviewed material. Untrusted candidate content is never passed to a rich Markdown renderer. Restore occurs in a fresh staging directory and is applied only after validation; arbitrary archives and opaque state are rejected.
 

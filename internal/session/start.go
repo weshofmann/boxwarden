@@ -37,7 +37,21 @@ type CAValidator interface {
 type SupervisorControl interface {
 	StartExact(context.Context, supervisor.LaunchRequest) (supervisor.Snapshot, error)
 	Snapshot(context.Context, supervisor.Binding) (supervisor.Snapshot, error)
+	Ready(context.Context, supervisor.Binding) (supervisor.Snapshot, error)
 	Stop(context.Context, supervisor.Binding) error
+	Quiesced(context.Context, supervisor.Binding) (bool, error)
+}
+
+// WorkspaceLifecycle owns the volume-first batch transactions. Session code
+// cannot import the volume package because volume records bind sessions.
+type WorkspaceLifecycle interface {
+	PrepareStart(context.Context, string, domain.ID, Record, string, backend.Observer) (Record, error)
+	VerifyUses(context.Context, string, domain.ID, Record) error
+	ReleaseUses(context.Context, string, domain.ID, Record, backend.Observer) error
+}
+
+type RebuildWorkspaceLifecycle interface {
+	PrepareRebuildStart(context.Context, string, domain.ID, Record, string, backend.Observer, RebuildJournal) (Record, error)
 }
 
 type StartDependencies struct {
@@ -47,6 +61,7 @@ type StartDependencies struct {
 	CA                CAValidator
 	ConfiguredDomains []sshx.Domain
 	Supervisor        SupervisorControl
+	Workspaces        WorkspaceLifecycle
 	RuntimeRoot       string
 	ConfigPath        string
 	NewGeneration     func() (string, error)
@@ -60,6 +75,17 @@ func NewStartService(configured config.Domain, dependencies StartDependencies) *
 }
 
 func (s *Service) Start(ctx context.Context, rawName string) (record Record, err error) {
+	return s.startSession(ctx, rawName, nil)
+}
+
+// StartRebuildCandidate is the narrow internal continuation after durable
+// cutover, including a stopped candidate after Ready or Retiring. Ordinary
+// Start still rejects every pending rebuild journal.
+func (s *Service) StartRebuildCandidate(ctx context.Context, rawName string, journal RebuildJournal) (Record, error) {
+	return s.startSession(ctx, rawName, &journal)
+}
+
+func (s *Service) startSession(ctx context.Context, rawName string, rebuild *RebuildJournal) (record Record, err error) {
 	if s == nil || s.start == nil {
 		return Record{}, fmt.Errorf("session start dependencies are required")
 	}
@@ -71,6 +97,15 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 	if err != nil {
 		return Record{}, err
 	}
+	transition, err := lock.Acquire(ctx, s.domain.StateRoot, "transition-"+string(domainID)+"-"+string(name))
+	if err != nil {
+		return Record{}, fmt.Errorf("acquire session transition lock: %w", err)
+	}
+	defer func() {
+		if releaseErr := transition.Release(); err == nil && releaseErr != nil {
+			err = fmt.Errorf("release session transition lock: %w", releaseErr)
+		}
+	}()
 	held, err := lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
 	if err != nil {
 		return Record{}, fmt.Errorf("acquire session lock: %w", err)
@@ -80,10 +115,25 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 			err = fmt.Errorf("release session lock: %w", releaseErr)
 		}
 	}()
-
 	record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
 	if err != nil {
 		return Record{}, fmt.Errorf("load session record: %w", err)
+	}
+	if record.RecipeIntentDigest != "" {
+		if _, err := LoadRecipeIntent(s.domain.StateRoot, record.RecipeIntentDigest); err != nil {
+			return Record{}, fmt.Errorf("load bound recipe intent before start: %w", err)
+		}
+	}
+	if rebuild == nil {
+		if err := RequireNoRebuild(s.domain.StateRoot, domainID, string(name)); err != nil {
+			return Record{}, err
+		}
+	} else {
+		current, loadErr := LoadRebuildJournal(s.domain.StateRoot, domainID, string(name))
+		if loadErr != nil || current != *rebuild || (current.Phase != RebuildCutover && current.Phase != RebuildReady && current.Phase != RebuildRetiring) || current.SessionID != record.ID ||
+			current.CandidateBackend != record.Backend.ObjectID || current.CandidateRevision != record.GoldenRevision || current.CandidateIntentDigest != record.RecipeIntentDigest {
+			return Record{}, fmt.Errorf("starting session lacks exact candidate rebuild journal: %v", loadErr)
+		}
 	}
 	_, _, err = s.admitStartPrerequisites(ctx)
 	if err != nil {
@@ -91,6 +141,11 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 	}
 	if record.Backend.Kind != "tart" || record.Backend.ObjectID == "" {
 		return Record{}, fmt.Errorf("session backend binding is unsupported")
+	}
+	if record.IntendedState == StateStarting || record.IntendedState == StateRunning {
+		if err := s.start.Workspaces.VerifyUses(ctx, s.domain.StateRoot, domainID, record); err != nil {
+			return Record{}, fmt.Errorf("verify exact workspace uses: %w", err)
+		}
 	}
 
 	switch record.IntendedState {
@@ -102,15 +157,58 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 		if !observation.Exists || observation.State != backend.ObjectStopped {
 			return Record{}, fmt.Errorf("stopped session does not match one stopped backend object")
 		}
+		if record.Version == recordVersionV1 {
+			legacy := record
+			if saveErr := SaveRecord(s.domain.StateRoot, domainID, record); saveErr != nil {
+				return Record{}, fmt.Errorf("upgrade stopped session before workspace reservation: %w", saveErr)
+			}
+			record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+			if err != nil || record.Version != recordVersion || record.IntendedState != StateStopped || !sameStoppedIdentity(legacy, record) {
+				return Record{}, fmt.Errorf("stopped session upgrade did not retain exact identity: %w", err)
+			}
+		}
+		if releaseErr := held.Release(); releaseErr != nil {
+			return Record{}, fmt.Errorf("release session lock before stopped workspace reconciliation: %w", releaseErr)
+		}
+		if releaseErr := s.start.Workspaces.ReleaseUses(ctx, s.domain.StateRoot, domainID, record, s.observer); releaseErr != nil {
+			return Record{}, fmt.Errorf("reconcile stopped workspace uses before start: %w", releaseErr)
+		}
+		held, err = lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
+		if err != nil {
+			return Record{}, fmt.Errorf("reacquire session lock after stopped workspace reconciliation: %w", err)
+		}
+		current, loadErr := LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+		if loadErr != nil || current != record {
+			return Record{}, fmt.Errorf("stopped session changed during workspace reconciliation: %w", loadErr)
+		}
 		generation, generationErr := s.start.NewGeneration()
 		if generationErr != nil || !validUUID(generation) {
 			return Record{}, fmt.Errorf("generate start generation: %w", generationErr)
 		}
-		record.IntendedState = StateStarting
-		record.StartGeneration = generation
-		record.Readiness = ReadinessRecord{Status: ReadinessStarting}
-		if saveErr := SaveRecord(s.domain.StateRoot, domainID, record); saveErr != nil {
-			return Record{}, fmt.Errorf("persist starting session: %w", saveErr)
+		if releaseErr := held.Release(); releaseErr != nil {
+			return Record{}, fmt.Errorf("release session lock before workspace reservation: %w", releaseErr)
+		}
+		var started Record
+		var prepareErr error
+		if rebuild == nil {
+			started, prepareErr = s.start.Workspaces.PrepareStart(ctx, s.domain.StateRoot, domainID, record, generation, s.observer)
+		} else {
+			coordinator, ok := s.start.Workspaces.(RebuildWorkspaceLifecycle)
+			if !ok {
+				return Record{}, fmt.Errorf("rebuild workspace start capability is unavailable")
+			}
+			started, prepareErr = coordinator.PrepareRebuildStart(ctx, s.domain.StateRoot, domainID, record, generation, s.observer, *rebuild)
+		}
+		if prepareErr != nil {
+			return Record{}, fmt.Errorf("reserve workspaces and persist starting session: %w", prepareErr)
+		}
+		held, err = lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
+		if err != nil {
+			return Record{}, fmt.Errorf("reacquire session lock after workspace reservation: %w", err)
+		}
+		record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+		if err != nil || record != started || record.IntendedState != StateStarting {
+			return Record{}, fmt.Errorf("starting session changed after workspace reservation: %w", err)
 		}
 	case StateStarting:
 		observation, observeErr := s.observeExact(ctx, record.Backend.ObjectID)
@@ -121,14 +219,63 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 			return Record{}, fmt.Errorf("starting session backend is missing")
 		}
 		switch observation.State {
-		case backend.ObjectRunning:
+		case backend.ObjectRunning, backend.ObjectStopped:
 			snapshot, snapshotErr := s.start.Supervisor.Snapshot(ctx, startBinding(record))
 			if snapshotErr != nil {
-				return Record{}, fmt.Errorf("inspect exact starting generation: %w", snapshotErr)
+				if observation.State == backend.ObjectRunning {
+					return Record{}, fmt.Errorf("inspect exact starting generation: %w", snapshotErr)
+				}
+				// No exact owner is available. StartExact must independently
+				// classify the generation before any launch or bootstrap.
+				break
 			}
-			return s.acceptStarted(record, snapshot)
-		case backend.ObjectStopped:
-			// Relaunch below using only the durable generation.
+			now := s.start.Now()
+			if snapshot.Binding != startBinding(record) || snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || now.Sub(snapshot.ObservedAt) > maxReadySnapshotAge {
+				return Record{}, fmt.Errorf("supervisor did not provide a fresh exact running snapshot")
+			}
+			if !snapshot.BackendRunning {
+				if observation.State == backend.ObjectRunning {
+					return Record{}, fmt.Errorf("supervisor did not provide a fresh exact running snapshot")
+				}
+				break
+			}
+			if snapshot.SerialHealthy && snapshot.PinPresent {
+				if snapshot.CertificateCurrent && snapshot.ProbeOK && snapshot.ZoneMatches {
+					return s.persistReady(record, snapshot)
+				}
+				ready, readyErr := s.start.Supervisor.Ready(ctx, startBinding(record))
+				if readyErr != nil {
+					return Record{}, fmt.Errorf("converge exact starting generation: %w", readyErr)
+				}
+				return s.acceptStarted(record, ready)
+			}
+			if !snapshot.SerialHealthy {
+				if releaseErr := held.Release(); releaseErr != nil {
+					return Record{}, fmt.Errorf("release session lock before poisoned-generation stop: %w", releaseErr)
+				}
+				if stopErr := s.start.Supervisor.Stop(ctx, startBinding(record)); stopErr != nil {
+					return Record{}, fmt.Errorf("stop poisoned exact serial generation: %w", stopErr)
+				}
+				held, err = lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
+				if err != nil {
+					return Record{}, fmt.Errorf("reacquire session lock after poisoned-generation stop: %w", err)
+				}
+				current, loadErr := LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+				if loadErr != nil || !sameLaunchIdentity(record, current) || current.IntendedState != StateStarting {
+					return Record{}, fmt.Errorf("poisoned-generation stop changed starting record: %w", loadErr)
+				}
+				record = current
+				stopped, stoppedErr := s.observeExact(ctx, record.Backend.ObjectID)
+				if stoppedErr != nil {
+					return Record{}, fmt.Errorf("prove exact backend stopped before same-generation relaunch: %w", stoppedErr)
+				}
+				if !stopped.Exists || stopped.State != backend.ObjectStopped {
+					return Record{}, fmt.Errorf("exact backend did not stop before same-generation relaunch")
+				}
+			}
+			// A healthy but incomplete owner reuses its validated exchange or
+			// performs the one bootstrap below. A poisoned owner was explicitly
+			// stopped and relaunches below with the same durable generation.
 		default:
 			return Record{}, fmt.Errorf("starting session backend state is ambiguous")
 		}
@@ -146,11 +293,40 @@ func (s *Service) Start(ctx context.Context, rawName string) (record Record, err
 		HostConfigPath:    s.start.ConfigPath,
 		SessionRecordName: string(record.Name),
 	}
+	// The exact child may need the same session lock to admit managed volume
+	// leases. Durable starting intent carries authority across this handoff.
+	if err := held.Release(); err != nil {
+		return Record{}, fmt.Errorf("release session lock before supervisor launch: %w", err)
+	}
 	snapshot, err := s.start.Supervisor.StartExact(ctx, request)
 	if err != nil {
 		return Record{}, fmt.Errorf("start exact generation: %w", err)
 	}
-	return s.acceptStarted(record, snapshot)
+	held, err = lock.AcquireSession(ctx, s.domain.StateRoot, string(domainID), string(name))
+	if err != nil {
+		return Record{}, fmt.Errorf("reacquire session lock after supervisor launch: %w", err)
+	}
+	current, err := LoadRecord(s.domain.StateRoot, string(domainID), string(name))
+	if err != nil {
+		return Record{}, fmt.Errorf("reload session after supervisor launch: %w", err)
+	}
+	if !sameLaunchIdentity(record, current) {
+		return Record{}, fmt.Errorf("session launch binding changed during supervisor handoff")
+	}
+	switch current.IntendedState {
+	case StateStarting:
+		return s.acceptStarted(current, snapshot)
+	case StateRunning:
+		return s.reconcileReady(ctx, current)
+	default:
+		return Record{}, fmt.Errorf("session intent changed to %q during supervisor handoff", current.IntendedState)
+	}
+}
+
+func sameLaunchIdentity(before, after Record) bool {
+	return before.Domain == after.Domain && before.Name == after.Name && before.ID == after.ID &&
+		before.Mode == after.Mode && before.Backend == after.Backend &&
+		before.GoldenRevision == after.GoldenRevision && before.StartGeneration == after.StartGeneration
 }
 
 func (s *Service) reconcileReady(ctx context.Context, record Record) (Record, error) {
@@ -169,8 +345,11 @@ func startBinding(record Record) supervisor.Binding {
 func (s *Service) acceptStarted(record Record, snapshot supervisor.Snapshot) (Record, error) {
 	want := startBinding(record)
 	now := s.start.Now()
-	if snapshot.Binding != want || !snapshot.BackendRunning || !snapshot.SerialHealthy || snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || now.Sub(snapshot.ObservedAt) > maxReadySnapshotAge {
-		return Record{}, fmt.Errorf("supervisor did not provide a fresh exact started snapshot")
+	if snapshot.Binding != want || !snapshot.BackendRunning || !snapshot.SerialHealthy || !snapshot.PinPresent || snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || now.Sub(snapshot.ObservedAt) > maxReadySnapshotAge {
+		return Record{}, fmt.Errorf("supervisor did not provide a fresh exact bootstrapped snapshot")
+	}
+	if snapshot.CertificateCurrent && snapshot.ProbeOK && snapshot.ZoneMatches {
+		return s.persistReady(record, snapshot)
 	}
 	return record, nil
 }
@@ -193,7 +372,7 @@ func (s *Service) validStartDependencies() error {
 	if _, err := domain.Parse(string(s.domain.ID)); err != nil || strings.TrimSpace(s.domain.StateRoot) == "" {
 		return fmt.Errorf("invalid configured domain")
 	}
-	if s.observer == nil || s.start.Host == nil || s.start.CA == nil || s.start.Supervisor == nil || s.start.NewGeneration == nil || s.start.Now == nil || len(s.start.ConfiguredDomains) == 0 || !filepath.IsAbs(s.start.RuntimeRoot) || filepath.Clean(s.start.RuntimeRoot) != s.start.RuntimeRoot || !filepath.IsAbs(s.start.ConfigPath) || filepath.Clean(s.start.ConfigPath) != s.start.ConfigPath {
+	if s.observer == nil || s.start.Host == nil || s.start.CA == nil || s.start.Supervisor == nil || s.start.Workspaces == nil || s.start.NewGeneration == nil || s.start.Now == nil || len(s.start.ConfiguredDomains) == 0 || !filepath.IsAbs(s.start.RuntimeRoot) || filepath.Clean(s.start.RuntimeRoot) != s.start.RuntimeRoot || !filepath.IsAbs(s.start.ConfigPath) || filepath.Clean(s.start.ConfigPath) != s.start.ConfigPath {
 		return fmt.Errorf("session start dependencies are required")
 	}
 	return nil

@@ -1,0 +1,123 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+
+# Prepare source artifacts only. This script never starts a VM or touches a disk.
+if [[ "$#" != 4 || ! -f "$1" || ! -f "$2" || ! -f "$3" ]]; then
+  echo 'usage: prepare_boot.sh <verified Ubuntu 24.04.4 ARM64 ISO> <e2fsck-static arm64 deb> <private-config-json> <domain>' >&2
+  exit 2
+fi
+iso=$1
+checker_deb=$2
+config=$3
+managed_domain=$4
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "$script_dir/../.." && pwd)"
+if [[ -n "$(git -C "$repo_root" status --porcelain)" ]]; then
+  echo 'the alpha worktree must be committed before preparing a formatter VM run' >&2
+  exit 1
+fi
+source_commit="$(git -C "$repo_root" rev-parse HEAD)"
+managed_root="$(python3 - "$config" "$managed_domain" <<'PY'
+import json
+import os
+from pathlib import Path
+import stat
+import sys
+
+path = Path(sys.argv[1])
+info = path.lstat()
+if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_nlink != 1:
+    raise SystemExit("formatter config is not a private regular one-link file")
+def unique(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate formatter config key")
+        result[key] = value
+    return result
+config = json.loads(path.read_text(), object_pairs_hook=unique)
+root = config["domains"][sys.argv[2]]["state_root"]
+if not isinstance(root, str) or "\n" in root or "\r" in root:
+    raise SystemExit("configured managed state root is invalid")
+print(root)
+PY
+)"
+expected_iso=c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe
+expected_deb=0a3d402fd7c7c07f63b8104d84a47378f57022e7c816190e6cc99950492d8cae
+expected_checker=e5e8f8b30641fab6e3f402c9746ce0537ad95c528e96cde2e446ca0968e63279
+read -r actual_iso _ < <(shasum -a 256 "$iso")
+read -r actual_deb _ < <(shasum -a 256 "$checker_deb")
+if [[ "$actual_iso" != "$expected_iso" || "$actual_deb" != "$expected_deb" ]]; then
+  echo 'formatter source digest mismatch' >&2
+  exit 1
+fi
+
+output_dir="$(mktemp -d /private/tmp/boxwarden-alpha-formatter.XXXXXX)"
+prepared=0
+trap 'if [[ "$prepared" != 1 ]]; then rm -rf -- "$output_dir"; fi' EXIT
+python3 "$script_dir/bind_root.py" "$managed_root" "$managed_domain" "$output_dir/binding.swift"
+bsdtar -xf "$iso" -C "$output_dir" casper/vmlinuz casper/initrd
+python3 "$repo_root/tools/alpha-inspector/kernel_image.py" \
+  "$output_dir/casper/vmlinuz" "$output_dir/kernel-image" \
+  000d59171b8e49f31f55c0d52123571ca8963718220fa8bacee1d65fdcbad617 \
+  a1586ff3cb7ced7c40dcb0aba5bf320ebb94a46d1a6505eb03157a8f9525632d
+ar -p "$checker_deb" data.tar.zst | bsdtar -xOf - ./usr/sbin/e2fsck.static > "$output_dir/e2fsck.static"
+read -r actual_checker _ < <(shasum -a 256 "$output_dir/e2fsck.static")
+if [[ "$actual_checker" != "$expected_checker" ]]; then
+  echo 'extracted static e2fsck digest mismatch' >&2
+  exit 1
+fi
+GOCACHE="$output_dir/gocache" GOMODCACHE="$output_dir/modcache" GOTOOLCHAIN=local \
+  CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+  go build -o "$output_dir/alpha-formatter" "$repo_root/tools/alpha-formatter/guest"
+python3 "$script_dir/pack_initramfs.py" \
+  "$output_dir/casper/initrd" "$output_dir/alpha-formatter" \
+  "$output_dir/e2fsck.static" "$output_dir/formatter-initrd"
+swiftc -D MANAGED_BOUND -module-cache-path "$output_dir/swift-cache" \
+  -o "$output_dir/alpha-formatter-host" \
+  "$script_dir/main.swift" "$script_dir/boot.swift" "$output_dir/binding.swift"
+codesign --force --sign - \
+  --entitlements "$repo_root/tools/alpha-inspector/virtualization.entitlements" \
+  "$output_dir/alpha-formatter-host"
+codesign --verify --strict "$output_dir/alpha-formatter-host"
+python3 - "$output_dir" "$source_commit" "$expected_iso" "$expected_deb" "$expected_checker" "$managed_root" "$managed_domain" <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+import plistlib
+import subprocess
+import sys
+
+root = Path(sys.argv[1])
+source_commit, iso_digest, deb_digest, checker_digest, state_root, domain = sys.argv[2:]
+runner = root / "alpha-formatter-host"
+result = subprocess.run(["codesign", "-d", "--entitlements", ":-", str(runner)], capture_output=True, check=True)
+if plistlib.loads(result.stdout) != {"com.apple.security.virtualization": True}:
+    raise SystemExit("formatter runner has unexpected entitlements")
+def digest(path):
+    value = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            value.update(chunk)
+    return value.hexdigest()
+names = ("kernel-image", "formatter-initrd", "alpha-formatter", "e2fsck.static", "alpha-formatter-host", "binding.swift")
+files = {name: digest(root / name) for name in names}
+if files["kernel-image"] != "a1586ff3cb7ced7c40dcb0aba5bf320ebb94a46d1a6505eb03157a8f9525632d" or files["e2fsck.static"] != checker_digest:
+    raise SystemExit("formatter artifact digest differs from verified source")
+manifest = {"version": 1, "source_commit": source_commit, "iso_sha256": iso_digest,
+            "checker_deb_sha256": deb_digest, "files": files,
+            "managed_state_root": state_root, "managed_domain": domain,
+            "runner_entitlements": {"com.apple.security.virtualization": True}}
+descriptor = os.open(root / "manifest.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+with os.fdopen(descriptor, "w") as output:
+    json.dump(manifest, output, sort_keys=True)
+    output.write("\n")
+    output.flush()
+    os.fsync(output.fileno())
+PY
+file "$output_dir/alpha-formatter" "$output_dir/e2fsck.static"
+shasum -a 256 "$output_dir/kernel-image" "$output_dir/formatter-initrd"
+printf 'prepared formatter boot artifacts: %s\n' "$output_dir"
+prepared=1

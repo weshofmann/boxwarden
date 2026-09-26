@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -10,15 +11,221 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/backend/fake"
+	"github.com/weshofmann/boxwarden/internal/basebuild"
 	"github.com/weshofmann/boxwarden/internal/config"
+	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/golden"
 	"github.com/weshofmann/boxwarden/internal/hostx"
+	"github.com/weshofmann/boxwarden/internal/recipe"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/sshx"
+	"github.com/weshofmann/boxwarden/internal/supervisor"
+	"github.com/weshofmann/boxwarden/internal/workspaceformat"
+	"github.com/weshofmann/boxwarden/internal/workspacex"
 )
+
+type appFormatFunc func(context.Context, workspaceformat.FormatRequest) (workspaceformat.FormatEvidence, error)
+
+func (f appFormatFunc) FormatAndVerify(ctx context.Context, request workspaceformat.FormatRequest) (workspaceformat.FormatEvidence, error) {
+	return f(ctx, request)
+}
+
+func TestWorkspaceCreateRoutesExactAlphaRequest(t *testing.T) {
+	configPath, selected := writeV2DomainFixture(t, "alpha")
+	input := AlphaWorkspaceCreateInput{VolumeID: "00112233-4455-4677-8899-aabbccddeeff",
+		FilesystemUUID: "10213243-5465-4768-899a-bbccddeeff00", SizeBytes: 64 << 20,
+		BundlePath: "/private/formatter.app", SourceRoot: "/private/clean-source"}
+	called := 0
+	var output bytes.Buffer
+	options := Options{Output: &output, AlphaWorkspaceCreate: func(_ context.Context, actual config.Domain, received AlphaWorkspaceCreateInput) (workspacex.Record, error) {
+		called++
+		if actual != selected || received != input {
+			t.Fatalf("create lost selected domain or request: %+v, %+v", actual, received)
+		}
+		return workspacex.Record{Domain: selected.ID, VolumeID: input.VolumeID, FilesystemUUID: input.FilesystemUUID,
+			SizeBytes: input.SizeBytes, State: workspacex.StateAvailable, Disk: &workspacex.DiskIdentity{Device: 1, Inode: 2}}, nil
+	}}
+	args := []string{"--config", configPath, "--domain", "alpha", "workspace", "create", "--bundle", input.BundlePath,
+		"--source-root", input.SourceRoot, "--filesystem-uuid", input.FilesystemUUID, "--size-mib", "64", input.VolumeID}
+	if err := Run(t.Context(), args, options); err != nil || called != 1 || !strings.Contains(output.String(), "workspace: available\n") {
+		t.Fatalf("public create = calls %d, output %q, error %v", called, output.String(), err)
+	}
+	for _, suffix := range [][]string{
+		{"--bundle", "relative", "--source-root", input.SourceRoot, "--filesystem-uuid", input.FilesystemUUID, "--size-mib", "64", input.VolumeID},
+		{"--bundle", input.BundlePath, "--source-root", input.SourceRoot, "--filesystem-uuid", input.FilesystemUUID, "--size-mib", "0", input.VolumeID},
+		{"--bundle", input.BundlePath, "--source-root", input.SourceRoot, "--filesystem-uuid", "invalid", "--size-mib", "64", input.VolumeID},
+	} {
+		if err := Run(t.Context(), append([]string{"--config", configPath, "--domain", "alpha", "workspace", "create"}, suffix...), options); err == nil || called != 1 {
+			t.Fatalf("invalid create reached formatter: %v; calls=%d", err, called)
+		}
+	}
+	workConfig, _ := writeV2DomainFixture(t, "work")
+	workArgs := append([]string{"--config", workConfig, "--domain", "work"}, args[4:]...)
+	if err := Run(t.Context(), workArgs, options); err == nil || called != 1 {
+		t.Fatalf("non-alpha domain used alpha formatter: %v; calls=%d", err, called)
+	}
+}
+
+func TestWorkspaceAttachAndDetachUseExactStoppedSessionAndQualifiedVolume(t *testing.T) {
+	configPath, selected := writeDomainFixture(t, "work")
+	observer := fake.New(backend.Observation{ObjectID: "golden-work-r1", Exists: true, State: backend.ObjectStopped})
+	options := Options{Observer: observer, Creator: observer, Output: &bytes.Buffer{}}
+	for _, suffix := range [][]string{{"golden", "register", "golden-work-r1"}, {"session", "create", "dev"}} {
+		if err := Run(t.Context(), append([]string{"--config", configPath, "--domain", "work"}, suffix...), options); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const volumeID = "00112233-4455-4677-8899-aabbccddeeff"
+	const fsUUID = "10213243-5465-4768-899a-bbccddeeff00"
+	held, err := workspacex.AcquireStorageOperation(t.Context(), selected.StateRoot, domain.ID("work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = workspacex.SaveRecord(selected.StateRoot, domain.ID("work"), workspacex.Record{Version: 1, Domain: "work", VolumeID: volumeID,
+		SizeBytes: 64 << 20, Format: workspacex.FormatRawExt4, FilesystemUUID: fsUUID, State: workspacex.StateCreating})
+	if releaseErr := held.Release(); err != nil || releaseErr != nil {
+		t.Fatalf("save creating record: %v; release: %v", err, releaseErr)
+	}
+	_, err = workspaceformat.Create(t.Context(), selected.StateRoot, workspaceformat.Request{Domain: "work", VolumeID: volumeID, FilesystemUUID: fsUUID, SizeBytes: 64 << 20},
+		appFormatFunc(func(_ context.Context, request workspaceformat.FormatRequest) (workspaceformat.FormatEvidence, error) {
+			raw, err := os.OpenFile(request.DiskPath, os.O_WRONLY, 0)
+			if err != nil {
+				return workspaceformat.FormatEvidence{}, err
+			}
+			defer raw.Close()
+			superblock := make([]byte, 1024)
+			superblock[0x38], superblock[0x39] = 0x53, 0xef
+			decoded, err := hex.DecodeString(strings.ReplaceAll(fsUUID, "-", ""))
+			if err != nil {
+				return workspaceformat.FormatEvidence{}, err
+			}
+			copy(superblock[0x68:], decoded)
+			if _, err := raw.WriteAt(superblock, 1024); err != nil {
+				return workspaceformat.FormatEvidence{}, err
+			}
+			return workspaceformat.FormatEvidence{ObservedUUID: fsUUID, WholeDevice: true, FilesystemClean: true}, nil
+		}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workspacex.PromoteVerified(t.Context(), selected.StateRoot, domain.ID("work"), volumeID); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	options.Output = &output
+	args := []string{"--config", configPath, "--domain", "work", "workspace", "attach", "--mount", "/home/boxwarden/workspaces/project", volumeID, "dev"}
+	if err := Run(t.Context(), args, options); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "workspace: attached") {
+		t.Fatalf("attach output: %q", output.String())
+	}
+	attached, err := workspacex.LoadRecord(selected.StateRoot, domain.ID("work"), volumeID)
+	if err != nil || attached.Attachment == nil || attached.Attachment.SessionName != "dev" {
+		t.Fatalf("attachment: %+v, %v", attached, err)
+	}
+	if err := Run(t.Context(), args, options); err == nil {
+		t.Fatal("already attached workspace accepted twice")
+	}
+	output.Reset()
+	if err := Run(t.Context(), []string{"--config", configPath, "--domain", "work", "workspace", "detach", volumeID, "dev"}, options); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "workspace: detached") {
+		t.Fatalf("detach output: %q", output.String())
+	}
+	detached, err := workspacex.LoadRecord(selected.StateRoot, domain.ID("work"), volumeID)
+	if err != nil || detached.Attachment != nil || detached.Disk == nil || *detached.Disk != *attached.Disk {
+		t.Fatalf("detached volume lost disk identity: %+v, %v", detached, err)
+	}
+}
+
+func TestWorkspaceExportRoutesExactDomainSelectionAndInputs(t *testing.T) {
+	configPath, selected := writeV2DomainFixture(t, "alpha")
+	observer := fake.New()
+	const volumeID = "00112233-4455-4677-8899-aabbccddeeff"
+	const transaction = "10213243-5465-4768-899a-bbccddeeff00"
+	destination := filepath.Join(t.TempDir(), "returned")
+	input := AlphaExportInput{VolumeID: volumeID, DestinationParent: destination,
+		Selected: []string{"project/report.txt", "notes"}, SourceRoot: "/private/clean-source",
+		ISOPath: "/private/ubuntu.iso", GoBinary: "/private/bin/go"}
+	called := 0
+	var output bytes.Buffer
+	options := Options{Observer: observer, Output: &output,
+		AlphaExport: func(_ context.Context, actual config.Domain, received AlphaExportInput, actualObserver backend.Observer) (workspacex.ExportJournal, string, error) {
+			called++
+			if actual != selected || actualObserver != observer || !reflect.DeepEqual(received, input) {
+				return workspacex.ExportJournal{}, "", fmt.Errorf("export lost selected domain or inputs")
+			}
+			return workspacex.ExportJournal{ID: transaction, Domain: actual.ID,
+					DestinationParent: destination, Phase: workspacex.ExportPublished},
+				filepath.Join(destination, strings.ReplaceAll(transaction, "-", "")), nil
+		}}
+	args := []string{"--config", configPath, "--domain", "alpha", "workspace", "export",
+		"--destination", destination, "--select", "project/report.txt", "--select", "notes",
+		"--source-root", input.SourceRoot, "--iso", input.ISOPath, "--go", input.GoBinary, volumeID}
+	if err := Run(t.Context(), args, options); err != nil || called != 1 || !strings.Contains(output.String(), "transaction: "+transaction+"\n") {
+		t.Fatalf("public export routing = called %d, output %q, error %v", called, output.String(), err)
+	}
+	for _, invalid := range [][]string{
+		{"--destination", destination, "--source-root", input.SourceRoot, "--iso", input.ISOPath, "--go", input.GoBinary, volumeID},
+		{"--destination", "relative", "--select", "project/report.txt", "--source-root", input.SourceRoot, "--iso", input.ISOPath, "--go", input.GoBinary, volumeID},
+	} {
+		if err := Run(t.Context(), append([]string{"--config", configPath, "--domain", "alpha", "workspace", "export"}, invalid...), options); err == nil {
+			t.Fatalf("invalid public export input accepted: %v", invalid)
+		}
+	}
+	if called != 1 {
+		t.Fatalf("invalid input invoked exporter %d times", called)
+	}
+	workConfig, _ := writeV2DomainFixture(t, "work")
+	workArgs := append([]string{"--config", workConfig, "--domain", "work", "workspace", "export"}, args[6:]...)
+	if err := Run(t.Context(), workArgs, options); err == nil || called != 1 {
+		t.Fatalf("non-alpha domain used v0.2 exporter: called %d, error %v", called, err)
+	}
+}
+
+func TestWorkspaceExportResumeRoutesExactJournalWithoutNewSelection(t *testing.T) {
+	configPath, selected := writeV2DomainFixture(t, "alpha")
+	const transaction = "10213243-5465-4768-899a-bbccddeeff00"
+	input := AlphaExportResumeInput{TransactionID: transaction, SourceRoot: "/private/clean-source",
+		ISOPath: "/private/ubuntu.iso", GoBinary: "/private/bin/go"}
+	destination := filepath.Join(t.TempDir(), "returned")
+	called := 0
+	var output bytes.Buffer
+	options := Options{Output: &output, AlphaExportResume: func(_ context.Context, actual config.Domain, received AlphaExportResumeInput) (workspacex.ExportJournal, string, error) {
+		called++
+		if actual != selected || received != input {
+			t.Fatalf("resume lost exact domain or transaction: %+v, %+v", actual, received)
+		}
+		return workspacex.ExportJournal{ID: transaction, Domain: actual.ID,
+				DestinationParent: destination, Phase: workspacex.ExportPublished},
+			filepath.Join(destination, strings.ReplaceAll(transaction, "-", "")), nil
+	}}
+	args := []string{"--config", configPath, "--domain", "alpha", "workspace", "export", "resume",
+		"--source-root", input.SourceRoot, "--iso", input.ISOPath, "--go", input.GoBinary, transaction}
+	if err := Run(t.Context(), args, options); err != nil || called != 1 || !strings.Contains(output.String(), "transaction: "+transaction+"\n") {
+		t.Fatalf("public export resume = calls %d, output %q, error %v", called, output.String(), err)
+	}
+	for _, invalid := range [][]string{
+		{"--source-root", input.SourceRoot, "--iso", input.ISOPath, "--go", input.GoBinary, "bad-transaction"},
+		{"--source-root", input.SourceRoot, "--iso", input.ISOPath, "--go", input.GoBinary, "--select", "other", transaction},
+		{"--source-root", "relative", "--iso", input.ISOPath, "--go", input.GoBinary, transaction},
+	} {
+		if err := Run(t.Context(), append([]string{"--config", configPath, "--domain", "alpha", "workspace", "export", "resume"}, invalid...), options); err == nil || called != 1 {
+			t.Fatalf("invalid export resume reached callback: %v, calls=%d", err, called)
+		}
+	}
+	workConfig, _ := writeV2DomainFixture(t, "work")
+	workArgs := append([]string{"--config", workConfig, "--domain", "work"}, args[4:]...)
+	if err := Run(t.Context(), workArgs, options); err == nil || called != 1 {
+		t.Fatalf("foreign domain used alpha export resume: %v, calls=%d", err, called)
+	}
+}
 
 func TestBackendFactoryBindsRegisterCreateAndStatusToAdmittedConfigAndDomain(t *testing.T) {
 	path := writeV2DomainSetFixture(t)
@@ -68,6 +275,301 @@ func TestBackendFactoryBindsRegisterCreateAndStatusToAdmittedConfigAndDomain(t *
 	}
 }
 
+func TestAlphaRecipeCheckRequiresExactDomainAndInstaller(t *testing.T) {
+	configPath, _ := writeV2DomainFixture(t, "alpha")
+	recipePath := filepath.Join(t.TempDir(), "recipe.json")
+	recipeData := `{"version":1,"source":{"kind":"ubuntu-24.04.4-desktop-arm64","sha256":"c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"},"machine":{"cpus":4,"memory_mib":4096,"system_disk_gib":30}}`
+	if err := os.WriteFile(recipePath, []byte(recipeData), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	isoPath := filepath.Join(t.TempDir(), "wrong.iso")
+	if err := os.WriteFile(isoPath, []byte("wrong"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, prefix := range map[string][]string{
+		"missing-domain": {"--config", configPath},
+		"unknown-domain": {"--config", configPath, "--domain", "other"},
+		"wrong-iso":      {"--config", configPath, "--domain", "alpha"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var output bytes.Buffer
+			args := append(append([]string(nil), prefix...), "alpha", "recipe", "check", "--recipe", recipePath, "--iso", isoPath)
+			if err := Run(context.Background(), args, Options{Output: &output}); err == nil || output.Len() != 0 {
+				t.Fatalf("unverified recipe succeeded or emitted success: err=%v output=%q", err, output.String())
+			}
+		})
+	}
+	parsed, err := parseCommand([]string{"--config", configPath, "--domain", "alpha", "alpha", "recipe", "check", "--recipe", recipePath, "--iso", isoPath}, Options{})
+	if err != nil || parsed.kind != commandAlphaRecipeCheck || parsed.domain != "alpha" || parsed.recipePath != recipePath || parsed.isoPath != isoPath {
+		t.Fatalf("alpha recipe command = %+v, %v", parsed, err)
+	}
+}
+
+func TestAlphaRecipeCheckAdmitsOnceButRejectsUnexecutedLaunch(t *testing.T) {
+	configPath, _ := writeV2DomainFixture(t, "alpha")
+	recipePath := filepath.Join(t.TempDir(), "recipe.json")
+	data := `{"version":1,"source":{"kind":"ubuntu-24.04.4-desktop-arm64","sha256":"c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"},"machine":{"cpus":4,"memory_mib":4096,"system_disk_gib":30},"steps":[{"id":"setup","phase":"once","argv":["/bin/true"]}]}`
+	if err := os.WriteFile(recipePath, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	args := []string{"--config", configPath, "--domain", "alpha", "alpha", "recipe", "check", "--recipe", recipePath, "--iso", filepath.Join(t.TempDir(), "absent.iso")}
+	if err := Run(context.Background(), args, Options{Output: &output}); err == nil || !strings.Contains(err.Error(), "inspect installer") || output.Len() != 0 {
+		t.Fatalf("admitted once action did not reach installer check: err=%v output=%q", err, output.String())
+	}
+	launch := strings.Replace(data, `"steps":[{"id":"setup","phase":"once","argv":["/bin/true"]}]`, `"launch":[{"id":"chatgpt","argv":["/usr/bin/chatgpt"]}]`, 1)
+	if err := os.WriteFile(recipePath, []byte(launch), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err := Run(context.Background(), args, Options{Output: &output}); err == nil || !strings.Contains(err.Error(), "launch") || output.Len() != 0 {
+		t.Fatalf("unexecuted launch action accepted or hidden: err=%v output=%q", err, output.String())
+	}
+}
+
+func TestAlphaPrepareRoutesExactDomainAndReportsOnlyPassingCacheReceipt(t *testing.T) {
+	configPath, _ := writeV2DomainFixture(t, "alpha")
+	loaded, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := loaded.Domain("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	input := AlphaPrepareInput{RecipePath: filepath.Join(root, "recipe.json"), ISOPath: filepath.Join(root, "ubuntu.iso"), GuestDefinitionRoot: filepath.Join(root, "guest"), OpenSSLPath: "/usr/bin/openssl", OpenSSLSHA256: strings.Repeat("a", 64), XorrisoPath: "/opt/homebrew/bin/xorriso", XorrisoSHA256: strings.Repeat("b", 64)}
+	args := []string{"--config", configPath, "--domain", "alpha", "alpha", "prepare", "--recipe", input.RecipePath, "--iso", input.ISOPath, "--guest-definition", input.GuestDefinitionRoot, "--openssl", input.OpenSSLPath, "--openssl-sha256", input.OpenSSLSHA256, "--xorriso", input.XorrisoPath, "--xorriso-sha256", input.XorrisoSHA256}
+	called := 0
+	result := basebuild.PreparedResult{Disposition: basebuild.PreparedBuilt, Record: basebuild.PreparedRecord{Version: 2, CandidateID: "boxwarden-alpha-base-abc", CandidateIdentity: strings.Repeat("c", 64), PreparationKey: strings.Repeat("d", 64), AttemptDirectory: filepath.Join(selected.StateRoot, "prepared-attempts", "alpha-attempt-abc"), Qualification: basebuild.QualificationReceipt{CandidateID: "boxwarden-alpha-base-abc", PreparationKey: strings.Repeat("d", 64), CloneID: "boxwarden-alpha-clone-abc", EvidenceSHA256: strings.Repeat("e", 64), BOMSHA256: strings.Repeat("f", 64), Passed: true}}}
+	preparer := func(_ context.Context, loaded config.Config, selected config.Domain, path string, got AlphaPrepareInput) (AlphaPrepared, error) {
+		called++
+		admitted, err := loaded.Domain("alpha")
+		if err != nil || selected != admitted || path != configPath || got != input {
+			t.Fatalf("preparer binding = %+v, %q, %+v, %v", selected, path, got, err)
+		}
+		return AlphaPrepared{Base: result}, nil
+	}
+	var output bytes.Buffer
+	if err := Run(context.Background(), args, Options{Output: &output, AlphaPrepare: preparer}); err != nil || called != 1 || !strings.Contains(output.String(), "prepared-base: boxwarden-alpha-base-abc") {
+		t.Fatalf("prepare result = %v, calls=%d, output=%q", err, called, output.String())
+	}
+	output.Reset()
+	result.Record.Qualification.Passed = false
+	if err := Run(context.Background(), args, Options{Output: &output, AlphaPrepare: preparer}); err == nil || output.Len() != 0 {
+		t.Fatalf("invalid cache receipt emitted success: %v, %q", err, output.String())
+	}
+	output.Reset()
+	withoutDomain := append([]string{"--config", configPath}, args[4:]...)
+	if err := Run(context.Background(), withoutDomain, Options{Output: &output, AlphaPrepare: preparer}); err == nil || called != 2 {
+		t.Fatalf("missing domain reached preparer: %v, calls=%d", err, called)
+	}
+	for _, invalid := range [][]string{
+		args[:len(args)-2],
+		append(append([]string(nil), args...), "unexpected"),
+		func() []string { bad := append([]string(nil), args...); bad[11] = "relative/guest"; return bad }(),
+		func() []string {
+			bad := append([]string(nil), args...)
+			bad[len(bad)-1] = strings.Repeat("A", 64)
+			return bad
+		}(),
+	} {
+		output.Reset()
+		if err := Run(context.Background(), invalid, Options{Output: &output, AlphaPrepare: preparer}); err == nil || output.Len() != 0 || called != 2 {
+			t.Fatalf("invalid command reached preparer: %v, output=%q calls=%d", err, output.String(), called)
+		}
+	}
+}
+
+func TestRecipeSessionCreateUsesPreparedRevisionWithoutChangingCurrent(t *testing.T) {
+	configPath, selected := writeV2DomainFixture(t, "alpha")
+	legacy := "golden-alpha-legacy"
+	prepared := "boxwarden-alpha-base-prepared"
+	vm := fake.New(
+		backend.Observation{ObjectID: legacy, Exists: true, State: backend.ObjectStopped},
+		backend.Observation{ObjectID: prepared, Exists: true, State: backend.ObjectStopped},
+	)
+	if _, err := golden.Register(t.Context(), selected, legacy, vm); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	input := AlphaPrepareInput{RecipePath: filepath.Join(root, "recipe.json"), ISOPath: filepath.Join(root, "ubuntu.iso"), GuestDefinitionRoot: filepath.Join(root, "guest"), OpenSSLPath: "/usr/bin/openssl", OpenSSLSHA256: strings.Repeat("a", 64), XorrisoPath: "/usr/bin/xorriso", XorrisoSHA256: strings.Repeat("b", 64)}
+	args := []string{"--config", configPath, "--domain", "alpha", "session", "create", "--mode", "clean", "--recipe", input.RecipePath, "--iso", input.ISOPath, "--guest-definition", input.GuestDefinitionRoot, "--openssl", input.OpenSSLPath, "--openssl-sha256", input.OpenSSLSHA256, "--xorriso", input.XorrisoPath, "--xorriso-sha256", input.XorrisoSHA256, "dev"}
+	result := basebuild.PreparedResult{Disposition: basebuild.PreparedReused, Record: basebuild.PreparedRecord{Version: 2, CandidateID: prepared, CandidateIdentity: strings.Repeat("c", 64), PreparationKey: strings.Repeat("d", 64), AttemptDirectory: filepath.Join(selected.StateRoot, "prepared-attempts", "attempt-1"), Qualification: basebuild.QualificationReceipt{CandidateID: prepared, PreparationKey: strings.Repeat("d", 64), CloneID: "boxwarden-alpha-qualified-clone", EvidenceSHA256: strings.Repeat("e", 64), BOMSHA256: strings.Repeat("f", 64), Passed: true}}}
+	intent, err := session.PublishRecipeIntent(selected.StateRoot, recipe.Recipe{Version: 1, Source: recipe.Source{Kind: "ubuntu-24.04.4-desktop-arm64", SHA256: "c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"}, Machine: recipe.Machine{CPUs: 4, MemoryMiB: 4096, SystemDiskGiB: 30}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	preparer := func(_ context.Context, loaded config.Config, domain config.Domain, path string, got AlphaPrepareInput) (AlphaPrepared, error) {
+		calls++
+		admitted, err := loaded.Domain("alpha")
+		if err != nil || domain != admitted || path != configPath || got != input {
+			t.Fatalf("preparer binding: %+v %q %+v %v", domain, path, got, err)
+		}
+		if _, err := golden.RegisterRevision(t.Context(), selected, prepared, vm); err != nil {
+			t.Fatal(err)
+		}
+		return AlphaPrepared{Base: result, IntentDigest: intent}, nil
+	}
+	var output bytes.Buffer
+	options := Options{Observer: vm, Creator: vm, AlphaPrepare: preparer, Output: &output}
+	if err := Run(t.Context(), args, options); err != nil {
+		t.Fatal(err)
+	}
+	record, err := session.LoadRecord(selected.StateRoot, "alpha", "dev")
+	if err != nil || record.GoldenRevision != prepared || record.RecipeIntentDigest != intent || record.IntendedState != session.StateStopped || calls != 1 {
+		t.Fatalf("recipe create = %+v, calls %d, err %v", record, calls, err)
+	}
+	if clones := vm.CloneCalls(); len(clones) != 1 || clones[0].SourceID != prepared {
+		t.Fatalf("recipe create cloned wrong source: %+v", clones)
+	}
+	current, err := golden.LoadCurrent(t.Context(), selected)
+	if err != nil || current.Revision != legacy {
+		t.Fatalf("recipe create changed current golden: %+v, %v", current, err)
+	}
+	if output.String() != "domain: alpha\nsession: dev\nmode: clean\nstate: stopped\n" {
+		t.Fatalf("recipe create output: %q", output.String())
+	}
+}
+
+func TestRecipeSessionCreateRejectsIncompleteOrInvalidReceiptBeforeClone(t *testing.T) {
+	configPath, selected := writeV2DomainFixture(t, "alpha")
+	vm := fake.New(backend.Observation{ObjectID: "golden-alpha-legacy", Exists: true, State: backend.ObjectStopped})
+	if _, err := golden.Register(t.Context(), selected, "golden-alpha-legacy", vm); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	base := []string{"--config", configPath, "--domain", "alpha", "session", "create"}
+	for _, suffix := range [][]string{
+		{"--recipe", "", "dev"},
+		{"--recipe", filepath.Join(root, "recipe.json"), "dev"},
+		{"--iso", filepath.Join(root, "ubuntu.iso"), "dev"},
+	} {
+		called := false
+		err := Run(t.Context(), append(append([]string(nil), base...), suffix...), Options{Observer: vm, Creator: vm, Output: &bytes.Buffer{}, AlphaPrepare: func(context.Context, config.Config, config.Domain, string, AlphaPrepareInput) (AlphaPrepared, error) {
+			called = true
+			return AlphaPrepared{}, nil
+		}})
+		if err == nil || called || len(vm.CloneCalls()) != 0 {
+			t.Fatalf("incomplete recipe flags reached preparation or clone: %q, %v", suffix, err)
+		}
+	}
+	input := AlphaPrepareInput{RecipePath: filepath.Join(root, "recipe.json"), ISOPath: filepath.Join(root, "ubuntu.iso"), GuestDefinitionRoot: filepath.Join(root, "guest"), OpenSSLPath: "/usr/bin/openssl", OpenSSLSHA256: strings.Repeat("a", 64), XorrisoPath: "/usr/bin/xorriso", XorrisoSHA256: strings.Repeat("b", 64)}
+	args := append(append([]string(nil), base...), "--recipe", input.RecipePath, "--iso", input.ISOPath, "--guest-definition", input.GuestDefinitionRoot, "--openssl", input.OpenSSLPath, "--openssl-sha256", input.OpenSSLSHA256, "--xorriso", input.XorrisoPath, "--xorriso-sha256", input.XorrisoSHA256, "dev")
+	err := Run(t.Context(), args, Options{Observer: vm, Creator: vm, Output: &bytes.Buffer{}, AlphaPrepare: func(context.Context, config.Config, config.Domain, string, AlphaPrepareInput) (AlphaPrepared, error) {
+		return AlphaPrepared{Base: basebuild.PreparedResult{Disposition: basebuild.PreparedBuilt, Record: basebuild.PreparedRecord{Version: 2, CandidateID: "golden-alpha-legacy"}}}, nil
+	}})
+	if err == nil || len(vm.CloneCalls()) != 0 {
+		t.Fatalf("invalid preparation receipt reached clone: %v", err)
+	}
+}
+
+func TestSessionRebuildRoutesExactBaseAndJournalResume(t *testing.T) {
+	configPath := writeStatusFixture(t, "work", "dev")
+	selectedRoot := filepath.Dir(configPath)
+	called := 0
+	var output bytes.Buffer
+	rebuild := func(_ context.Context, loaded config.Config, selected config.Domain, path, name, revision, intentDigest string) (session.Record, error) {
+		called++
+		if path != configPath || name != "dev" || selected.ID != "work" || selected.StateRoot != selectedRoot {
+			t.Fatalf("rebuild routed to foreign authority: %q %q %+v", path, name, selected)
+		}
+		if _, err := loaded.Domain("work"); err != nil {
+			t.Fatal(err)
+		}
+		if called == 1 && revision != "golden-work-r2" || called == 2 && revision != "" || intentDigest != "" {
+			t.Fatalf("rebuild revision %d = %q", called, revision)
+		}
+		return session.Record{Domain: "work", Name: "dev", IntendedState: session.StateRunning, GoldenRevision: "golden-work-r2"}, nil
+	}
+	base := []string{"--config", configPath, "--domain", "work", "session", "rebuild"}
+	if err := Run(context.Background(), append(append([]string(nil), base...), "--base", "golden-work-r2", "dev"), Options{AlphaRebuild: rebuild, Output: &output}); err != nil || called != 1 || !strings.Contains(output.String(), "base: golden-work-r2\n") {
+		t.Fatalf("explicit rebuild = %q, %v, calls=%d", output.String(), err, called)
+	}
+	output.Reset()
+	if err := Run(context.Background(), append(append([]string(nil), base...), "dev"), Options{AlphaRebuild: rebuild, Output: &output}); err != nil || called != 2 {
+		t.Fatalf("journal resume routing = %q, %v, calls=%d", output.String(), err, called)
+	}
+	for _, args := range [][]string{
+		{"--config", configPath, "session", "rebuild", "--base", "golden-work-r2", "dev"},
+		append(append([]string(nil), base...), "--base", "--all", "dev"),
+		append(append([]string(nil), base...), "--base", "golden-work-r2", "--recipe", "recipe.json", "dev"),
+	} {
+		if err := Run(context.Background(), args, Options{AlphaRebuild: rebuild, Output: &bytes.Buffer{}}); err == nil || called != 2 {
+			t.Fatalf("invalid rebuild reached mutation: %v, calls=%d", err, called)
+		}
+	}
+}
+
+func TestSessionDeleteRoutesOnlyExplicitDomainAndExactName(t *testing.T) {
+	configPath := writeStatusFixture(t, "work", "dev")
+	called := 0
+	var output bytes.Buffer
+	deleter := func(_ context.Context, loaded config.Config, selected config.Domain, name string) error {
+		called++
+		if selected.ID != "work" || selected.StateRoot != filepath.Dir(configPath) || name != "dev" {
+			t.Fatalf("deletion routed to foreign authority: %+v %q", selected, name)
+		}
+		if _, err := loaded.Domain("work"); err != nil {
+			t.Fatal(err)
+		}
+		return nil
+	}
+	args := []string{"--config", configPath, "--domain", "work", "session", "delete", "dev"}
+	if err := Run(context.Background(), args, Options{AlphaDelete: deleter, Output: &output}); err != nil || called != 1 ||
+		!strings.Contains(output.String(), "state: deleted\nworkspaces: retained\n") {
+		t.Fatalf("delete route = %q, %v, calls=%d", output.String(), err, called)
+	}
+	for _, invalid := range [][]string{
+		{"--config", configPath, "session", "delete", "dev"},
+		{"--config", configPath, "--domain", "work", "session", "delete", "../dev"},
+		{"--config", configPath, "--domain", "work", "session", "delete", "--all", "dev"},
+	} {
+		if err := Run(context.Background(), invalid, Options{AlphaDelete: deleter, Output: &bytes.Buffer{}}); err == nil || called != 1 {
+			t.Fatalf("invalid delete reached mutation: %v, calls=%d", err, called)
+		}
+	}
+}
+
+func TestSessionRebuildRecipeRequiresQualifiedPreparedReceipt(t *testing.T) {
+	configPath, selected := writeV2DomainFixture(t, "alpha")
+	root := t.TempDir()
+	input := AlphaPrepareInput{RecipePath: filepath.Join(root, "recipe.json"), ISOPath: filepath.Join(root, "ubuntu.iso"), GuestDefinitionRoot: filepath.Join(root, "guest"), OpenSSLPath: "/usr/bin/openssl", OpenSSLSHA256: strings.Repeat("a", 64), XorrisoPath: "/usr/bin/xorriso", XorrisoSHA256: strings.Repeat("b", 64)}
+	args := []string{"--config", configPath, "--domain", "alpha", "session", "rebuild", "--recipe", input.RecipePath, "--iso", input.ISOPath, "--guest-definition", input.GuestDefinitionRoot, "--openssl", input.OpenSSLPath, "--openssl-sha256", input.OpenSSLSHA256, "--xorriso", input.XorrisoPath, "--xorriso-sha256", input.XorrisoSHA256, "dev"}
+	prepared := "boxwarden-alpha-base-prepared"
+	valid := basebuild.PreparedResult{Disposition: basebuild.PreparedReused, Record: basebuild.PreparedRecord{Version: 2, CandidateID: prepared, CandidateIdentity: strings.Repeat("c", 64), PreparationKey: strings.Repeat("d", 64), AttemptDirectory: filepath.Join(selected.StateRoot, "prepared-attempts", "attempt-1"), Qualification: basebuild.QualificationReceipt{CandidateID: prepared, PreparationKey: strings.Repeat("d", 64), CloneID: "boxwarden-alpha-qualified-clone", EvidenceSHA256: strings.Repeat("e", 64), BOMSHA256: strings.Repeat("f", 64), Passed: true}}}
+	intentDigest := strings.Repeat("a", 64)
+	called := 0
+	rebuild := func(_ context.Context, _ config.Config, got config.Domain, _ string, name, revision, digest string) (session.Record, error) {
+		called++
+		if got != selected || name != "dev" || revision != prepared || digest != intentDigest {
+			t.Fatalf("rebuild did not use exact prepared receipt: %+v %q %q %q", got, name, revision, digest)
+		}
+		return session.Record{Domain: "alpha", Name: "dev", IntendedState: session.StateRunning, GoldenRevision: prepared}, nil
+	}
+	if err := Run(context.Background(), args, Options{AlphaPrepare: func(_ context.Context, _ config.Config, got config.Domain, _ string, received AlphaPrepareInput) (AlphaPrepared, error) {
+		if got != selected || received != input {
+			t.Fatalf("wrong preparation input: %+v %+v", got, received)
+		}
+		return AlphaPrepared{Base: valid, IntentDigest: intentDigest}, nil
+	}, AlphaRebuild: rebuild, Output: &bytes.Buffer{}}); err != nil || called != 1 {
+		t.Fatalf("qualified recipe rebuild = %v, calls=%d", err, called)
+	}
+	invalid := valid
+	invalid.Record.Qualification.Passed = false
+	if err := Run(context.Background(), args, Options{AlphaPrepare: func(context.Context, config.Config, config.Domain, string, AlphaPrepareInput) (AlphaPrepared, error) {
+		return AlphaPrepared{Base: invalid}, nil
+	}, AlphaRebuild: rebuild, Output: &bytes.Buffer{}}); err == nil || called != 1 {
+		t.Fatalf("invalid receipt reached rebuild: %v, calls=%d", err, called)
+	}
+	if err := Run(context.Background(), args, Options{AlphaPrepare: func(context.Context, config.Config, config.Domain, string, AlphaPrepareInput) (AlphaPrepared, error) {
+		return AlphaPrepared{Base: valid}, nil
+	}, AlphaRebuild: rebuild, Output: &bytes.Buffer{}}); err == nil || called != 1 {
+		t.Fatalf("missing intent digest reached rebuild: %v, calls=%d", err, called)
+	}
+}
+
 func TestBackendFactoryIsUnreachableForInvalidInputAndOtherCommands(t *testing.T) {
 	path, _ := writeV2DomainFixture(t, "work")
 	for _, args := range [][]string{
@@ -79,7 +581,6 @@ func TestBackendFactoryIsUnreachableForInvalidInputAndOtherCommands(t *testing.T
 		{"--config", path, "--domain", "work", "golden", "register", "../bad"},
 		{"--config", path, "--domain", "work", "session", "create", "--mode", "bad", "dev"},
 		{"--config", path, "--domain", "work", "session", "status", "dev", "extra"},
-		{"--config", path, "--domain", "work", "session", "stop", "dev"},
 		{"--config", path, "--domain", "work", "session", "start", "dev"},
 		{"--config", path, "--domain", "work", "domain", "init"},
 		{"--config", path, "init"},
@@ -224,6 +725,72 @@ func TestSessionStarterFactoryFailureAndNilStarterAreErrors(t *testing.T) {
 	}
 }
 
+func TestAlphaRecipeStartReportsAutomaticCompletionAfterManagementReady(t *testing.T) {
+	path, selected := writeV2DomainFixture(t, "alpha")
+	record := session.Record{Domain: selected.ID, Name: "dev", ID: "13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0",
+		IntendedState: session.StateRunning, Backend: session.BackendRef{Kind: "tart", ObjectID: "boxwarden-alpha-dev"},
+		RecipeIntentDigest: strings.Repeat("a", 64), StartGeneration: "00000000-0000-4000-8000-000000000003",
+		Readiness: session.ReadinessRecord{Status: session.ReadinessReady}}
+	starter := &sessionStarterFake{record: record}
+	var output bytes.Buffer
+	called := false
+	err := Run(t.Context(), []string{"--config", path, "--domain", "alpha", "session", "start", "dev"}, Options{
+		SessionStarter: starter, Output: &output,
+		AlphaAutomatic: func(_ context.Context, domain config.Domain, started session.Record) ([]session.ActionAttempt, error) {
+			called = true
+			if starter.name != "dev" || domain != selected || started != record {
+				t.Fatalf("automatic runner received wrong start: %+v, %+v", domain, started)
+			}
+			return nil, nil
+		},
+	})
+	if err != nil || !called || output.String() != "domain: alpha\nsession: dev\nstate: running\nmanagement-readiness: ready\nactions: complete\n" {
+		t.Fatalf("alpha automatic start = %v, called=%t, output=%q", err, called, output.String())
+	}
+}
+
+func TestAlphaRecipeStartReportsUncertainAttemptWithoutClaimingSetupComplete(t *testing.T) {
+	path, selected := writeV2DomainFixture(t, "alpha")
+	record := session.Record{Domain: selected.ID, Name: "dev", ID: "13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0",
+		IntendedState: session.StateRunning, Backend: session.BackendRef{Kind: "tart", ObjectID: "boxwarden-alpha-dev"},
+		RecipeIntentDigest: strings.Repeat("a", 64), StartGeneration: "00000000-0000-4000-8000-000000000003",
+		Readiness: session.ReadinessRecord{Status: session.ReadinessReady}}
+	attempt := session.ActionAttempt{Version: 1, Domain: selected.ID, SessionName: "dev", SessionID: record.ID,
+		BackendObject: record.Backend.ObjectID, Generation: record.StartGeneration, RecipeDigest: record.RecipeIntentDigest,
+		ActionID: "configure-agent", ActionPhase: "once", AttemptID: "00112233-4455-4677-8899-aabbccddeeff", State: session.ActionAttemptIndeterminate}
+	var output bytes.Buffer
+	want := errors.New("guest reply lost")
+	err := Run(t.Context(), []string{"--config", path, "--domain", "alpha", "session", "start", "dev"}, Options{
+		SessionStarter: &sessionStarterFake{record: record}, Output: &output,
+		AlphaAutomatic: func(context.Context, config.Domain, session.Record) ([]session.ActionAttempt, error) {
+			return []session.ActionAttempt{attempt}, want
+		},
+	})
+	if !errors.Is(err, want) || !strings.Contains(output.String(), "management-readiness: ready\nactions: blocked\n") ||
+		!strings.Contains(output.String(), "attempt: "+attempt.AttemptID+"\n") || strings.Contains(output.String(), "actions: complete") {
+		t.Fatalf("uncertain automatic start = %v, output=%q", err, output.String())
+	}
+}
+
+func TestAlphaRecipeStartDoesNotRunActionsBeforeManagementReady(t *testing.T) {
+	path, selected := writeV2DomainFixture(t, "alpha")
+	record := session.Record{Domain: selected.ID, Name: "dev", ID: "13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0",
+		IntendedState: session.StateStarting, Backend: session.BackendRef{Kind: "tart", ObjectID: "boxwarden-alpha-dev"},
+		RecipeIntentDigest: strings.Repeat("a", 64), StartGeneration: "00000000-0000-4000-8000-000000000003",
+		Readiness: session.ReadinessRecord{Status: session.ReadinessStarting}}
+	var output bytes.Buffer
+	err := Run(t.Context(), []string{"--config", path, "--domain", "alpha", "session", "start", "dev"}, Options{
+		SessionStarter: &sessionStarterFake{record: record}, Output: &output,
+		AlphaAutomatic: func(context.Context, config.Domain, session.Record) ([]session.ActionAttempt, error) {
+			t.Fatal("automatic runner called before management READY")
+			return nil, nil
+		},
+	})
+	if err == nil || output.Len() != 0 {
+		t.Fatalf("unready alpha recipe start = %v, output=%q", err, output.String())
+	}
+}
+
 type sessionStarterFake struct {
 	name   string
 	record session.Record
@@ -232,6 +799,52 @@ type sessionStarterFake struct {
 func (s *sessionStarterFake) Start(_ context.Context, name string) (session.Record, error) {
 	s.name = name
 	return s.record, nil
+}
+
+type sessionStopperFake struct {
+	name   string
+	record session.Record
+}
+
+func (s *sessionStopperFake) Stop(_ context.Context, name string) (session.Record, error) {
+	s.name = name
+	return s.record, nil
+}
+
+func TestSessionStopUsesExactAdmittedFactoryAndReportsStoppedState(t *testing.T) {
+	path, selected := writeV2DomainFixture(t, "work")
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopper := &sessionStopperFake{record: session.Record{Domain: selected.ID, Name: "dev", IntendedState: session.StateStopped, Readiness: session.ReadinessRecord{Status: session.ReadinessNotReady}}}
+	var output bytes.Buffer
+	calls := 0
+	err = Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "stop", "dev"}, Options{
+		Output: &output,
+		SessionStopperFactory: func(got config.Config, domain config.Domain, exactPath string) (SessionStopper, error) {
+			calls++
+			if !reflect.DeepEqual(got, loaded) || domain != selected || exactPath != path {
+				t.Fatalf("stop factory inputs = %#v, %#v, %q", got, domain, exactPath)
+			}
+			return stopper, nil
+		},
+	})
+	if err != nil || calls != 1 || stopper.name != "dev" || output.String() != "domain: work\nsession: dev\nstate: stopped\nreadiness: not_ready\n" {
+		t.Fatalf("stop = %v; calls=%d name=%q output=%q", err, calls, stopper.name, output.String())
+	}
+}
+
+func TestStoppedSessionReportsPersistedStopOutcome(t *testing.T) {
+	record := session.Record{Domain: "work", Name: "dev", IntendedState: session.StateStopped,
+		Readiness: session.ReadinessRecord{Status: session.ReadinessNotReady, Diagnostic: "request=tart_fallback forced=true workspace_cleanliness=unverified"}}
+	var output bytes.Buffer
+	if err := writeStoppedSession(&output, record); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "stop-outcome: request=tart_fallback forced=true workspace_cleanliness=unverified\n") {
+		t.Fatalf("missing stop outcome: %q", output.String())
+	}
 }
 
 func TestSessionStatusRendersPersistedAndObservedState(t *testing.T) {
@@ -247,6 +860,10 @@ func TestSessionStatusRendersPersistedAndObservedState(t *testing.T) {
 			"boxwarden-work-dev": {ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectStopped},
 		}},
 		Output: &output,
+		StatusSnapshotFactory: func(config.Config, config.Domain) (StatusSnapshotReader, error) {
+			t.Fatal("stopped status must not ask for supervisor evidence")
+			return nil, nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -262,6 +879,311 @@ func TestSessionStatusRendersPersistedAndObservedState(t *testing.T) {
 	}
 	if !bytes.Equal(after, before) {
 		t.Fatalf("session status rewrote version 1 record = %q, want %q", after, before)
+	}
+}
+
+func TestAlphaRecipeStatusSeparatesManagementReadinessFromActionProgress(t *testing.T) {
+	path := writeStatusFixture(t, "alpha", "dev")
+	root := filepath.Dir(path)
+	value := recipe.Recipe{Version: 1,
+		Source:  recipe.Source{Kind: "ubuntu-24.04.4-desktop-arm64", SHA256: "c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"},
+		Machine: recipe.Machine{CPUs: 4, MemoryMiB: 4096, SystemDiskGiB: 30},
+		Steps:   []recipe.Step{{ID: "configure-agent", Phase: "once", Argv: []string{"/usr/bin/true"}}},
+	}
+	digest, err := session.PublishRecipeIntent(root, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := session.Record{Version: 2, Domain: "alpha", Name: "dev", ID: "13b0bf73-3bd5-4f1c-8bdc-71d50c36d6d0",
+		Mode: session.ModeClean, IntendedState: session.StateRunning,
+		Backend: session.BackendRef{Kind: "tart", ObjectID: "boxwarden-alpha-dev"}, GoldenRevision: "golden-r1",
+		RecipeIntentDigest: digest, StartGeneration: "00000000-0000-4000-8000-000000000003",
+		Readiness: session.ReadinessRecord{Status: session.ReadinessReady}}
+	if err := session.SaveRecord(root, record.Domain, record); err != nil {
+		t.Fatal(err)
+	}
+	binding := supervisor.Binding{Domain: "alpha", SessionID: record.ID, BackendKind: "tart", BackendObject: record.Backend.ObjectID, Generation: record.StartGeneration}
+	reader := &statusSnapshotFake{snapshot: supervisor.Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true,
+		PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true, ObservedAt: time.Now()}}
+	options := Options{Observer: fake.Observer{Observations: map[string]backend.Observation{
+		record.Backend.ObjectID: {ObjectID: record.Backend.ObjectID, Exists: true, State: backend.ObjectRunning}}},
+		StatusSnapshotFactory: func(config.Config, config.Domain) (StatusSnapshotReader, error) { return reader, nil }}
+	run := func() string {
+		t.Helper()
+		var output bytes.Buffer
+		options.Output = &output
+		if err := Run(t.Context(), []string{"--config", path, "--domain", "alpha", "session", "status", "dev"}, options); err != nil {
+			t.Fatal(err)
+		}
+		return output.String()
+	}
+	if got := run(); !strings.Contains(got, "readiness: ready\n") || !strings.Contains(got, "actions: pending\n") {
+		t.Fatalf("ready management hid pending action: %q", got)
+	}
+	attempt := session.ActionAttempt{Version: 1, Domain: record.Domain, SessionName: "dev", SessionID: record.ID,
+		BackendObject: record.Backend.ObjectID, Generation: record.StartGeneration, RecipeDigest: digest,
+		ActionID: "configure-agent", ActionPhase: "once", AttemptID: "00112233-4455-4677-8899-aabbccddeeff", State: session.ActionAttemptReserved}
+	if err := session.ReserveActionAttempt(root, attempt); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(); !strings.Contains(got, "actions: blocked\n") || !strings.Contains(got, "recovery: session action list dev\n") {
+		t.Fatalf("reserved action was hidden: %q", got)
+	}
+	reader.snapshot.ProbeOK = false
+	reader.snapshot.ObservedAt = time.Now()
+	if got := run(); !strings.Contains(got, "readiness: drift\n") || !strings.Contains(got, "actions: unavailable\n") {
+		t.Fatalf("drifted management claimed action progress: %q", got)
+	}
+	reader.snapshot.ProbeOK = true
+	reader.snapshot.ObservedAt = time.Now()
+	if err := os.WriteFile(filepath.Join(root, "action-attempts", record.ID, "unexpected"), []byte("unexpected"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(); !strings.Contains(got, "readiness: ready\n") || !strings.Contains(got, "actions: unknown\n") {
+		t.Fatalf("corrupt action journal claimed completion: %q", got)
+	}
+}
+
+type statusSnapshotFake struct {
+	snapshot supervisor.Snapshot
+	err      error
+	calls    int
+	binding  supervisor.Binding
+}
+
+func (f *statusSnapshotFake) Snapshot(_ context.Context, binding supervisor.Binding) (supervisor.Snapshot, error) {
+	f.calls++
+	f.binding = binding
+	return f.snapshot, f.err
+}
+
+func writeRunningStatusFixture(t *testing.T, readiness session.ReadinessStatus) (string, []byte) {
+	t.Helper()
+	path := writeStatusFixture(t, "work", "dev")
+	recordPath := filepath.Join(filepath.Dir(path), "sessions", "dev.json")
+	record := []byte(fmt.Sprintf(`{"version":2,"domain":"work","name":"dev","id":"00000000-0000-4000-8000-000000000001","mode":"clean","intended_state":"running","backend":{"kind":"tart","object_id":"boxwarden-work-dev"},"golden_revision":"golden-work-r1","start_generation":"11111111-2222-4333-8444-555555555555","readiness":{"status":%q,"diagnostic":""}}`, readiness))
+	if err := os.WriteFile(recordPath, record, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path, record
+}
+
+func TestSessionStatusRequiresFreshExactReadyEvidence(t *testing.T) {
+	now := time.Now().UTC()
+	binding := supervisor.Binding{Domain: "work", SessionID: "00000000-0000-4000-8000-000000000001", BackendKind: "tart", BackendObject: "boxwarden-work-dev", Generation: "11111111-2222-4333-8444-555555555555"}
+	ready := supervisor.Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true, ObservedAt: now}
+	for _, test := range []struct {
+		name      string
+		mutate    func(*supervisor.Snapshot)
+		readerErr error
+		want      string
+	}{
+		{name: "ready", want: "ready"},
+		{name: "wrong generation", mutate: func(s *supervisor.Snapshot) { s.Binding.Generation = "foreign" }, want: "drift"},
+		{name: "stale", mutate: func(s *supervisor.Snapshot) { s.ObservedAt = now.Add(-time.Minute) }, want: "drift"},
+		{name: "future", mutate: func(s *supervisor.Snapshot) { s.ObservedAt = now.Add(time.Minute) }, want: "drift"},
+		{name: "backend not proved", mutate: func(s *supervisor.Snapshot) { s.BackendRunning = false }, want: "drift"},
+		{name: "serial poisoned", mutate: func(s *supervisor.Snapshot) { s.SerialHealthy = false }, want: "drift"},
+		{name: "pin absent", mutate: func(s *supervisor.Snapshot) { s.PinPresent = false }, want: "drift"},
+		{name: "certificate stale", mutate: func(s *supervisor.Snapshot) { s.CertificateCurrent = false }, want: "drift"},
+		{name: "probe failed", mutate: func(s *supervisor.Snapshot) { s.ProbeOK = false }, want: "drift"},
+		{name: "zone mismatch", mutate: func(s *supervisor.Snapshot) { s.ZoneMatches = false }, want: "drift"},
+		{name: "supervisor unavailable", readerErr: errors.New("control socket unavailable"), want: "drift"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path, before := writeRunningStatusFixture(t, session.ReadinessReady)
+			snapshot := ready
+			if test.mutate != nil {
+				test.mutate(&snapshot)
+			}
+			reader := &statusSnapshotFake{snapshot: snapshot, err: test.readerErr}
+			var output bytes.Buffer
+			err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "status", "dev"}, Options{
+				Observer: fake.Observer{Observations: map[string]backend.Observation{"boxwarden-work-dev": {ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectRunning}}},
+				StatusSnapshotFactory: func(loaded config.Config, selected config.Domain) (StatusSnapshotReader, error) {
+					if selected.ID != "work" || selected.StateRoot != filepath.Dir(path) {
+						t.Fatalf("status factory got wrong domain: %#v", selected)
+					}
+					return reader, nil
+				},
+				Output: &output,
+			})
+			if err != nil || reader.calls != 1 || reader.binding != binding {
+				t.Fatalf("status error/calls/binding = %v/%d/%#v", err, reader.calls, reader.binding)
+			}
+			if !strings.Contains(output.String(), "readiness: "+test.want+"\n") || !strings.Contains(output.String(), "consistency: "+map[string]string{"ready": "consistent", "drift": "drift"}[test.want]+"\n") {
+				t.Fatalf("status output = %q, want live readiness %q", output.String(), test.want)
+			}
+			after, err := os.ReadFile(filepath.Join(filepath.Dir(path), "sessions", "dev.json"))
+			if err != nil || !bytes.Equal(after, before) {
+				t.Fatalf("status changed durable record: %v", err)
+			}
+		})
+	}
+}
+
+func TestSessionStatusNamesFailedLiveChecksWithoutEchoingSnapshotText(t *testing.T) {
+	binding := supervisor.Binding{Domain: "work", SessionID: "00000000-0000-4000-8000-000000000001", BackendKind: "tart", BackendObject: "boxwarden-work-dev", Generation: "11111111-2222-4333-8444-555555555555"}
+	for _, test := range []struct {
+		name     string
+		change   func(*supervisor.Snapshot)
+		want     string
+		mustOmit string
+	}{
+		{name: "SSH probe", change: func(s *supervisor.Snapshot) {
+			s.ProbeOK = false
+			s.ZoneMatches = false
+			s.Diagnostic = "strict management SSH probe failed"
+		}, want: "unproven checks: ssh probe, guest time zone; strict management SSH probe failed"},
+		{name: "expired observation", change: func(s *supervisor.Snapshot) {
+			s.BackendRunning = false
+			s.SerialHealthy = false
+			s.PinPresent = false
+			s.CertificateCurrent = false
+			s.ProbeOK = false
+			s.ZoneMatches = false
+			s.Diagnostic = "snapshot observation expired"
+		}, want: "unproven checks: backend, serial, host-key pin, certificate, ssh probe, guest time zone; snapshot observation expired"},
+		{name: "untrusted diagnostic", change: func(s *supervisor.Snapshot) { s.ProbeOK = false; s.Diagnostic = "private-token-value" }, want: "unproven checks: ssh probe", mustOmit: "private-token-value"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path, before := writeRunningStatusFixture(t, session.ReadinessReady)
+			snapshot := supervisor.Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true, ObservedAt: time.Now()}
+			test.change(&snapshot)
+			var output bytes.Buffer
+			err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "status", "dev"}, Options{
+				Observer: fake.Observer{Observations: map[string]backend.Observation{"boxwarden-work-dev": {ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectRunning}}},
+				StatusSnapshotFactory: func(config.Config, config.Domain) (StatusSnapshotReader, error) {
+					return &statusSnapshotFake{snapshot: snapshot}, nil
+				},
+				Output: &output,
+			})
+			if err != nil || !strings.Contains(output.String(), "consistency: drift\nreadiness: drift\n") || !strings.Contains(output.String(), test.want) || (test.mustOmit != "" && strings.Contains(output.String(), test.mustOmit)) {
+				t.Fatalf("status = %q, error = %v", output.String(), err)
+			}
+			after, err := os.ReadFile(filepath.Join(filepath.Dir(path), "sessions", "dev.json"))
+			if err != nil || !bytes.Equal(after, before) {
+				t.Fatalf("status changed durable state: %v", err)
+			}
+		})
+	}
+}
+
+func TestSessionStatusReportsPendingOrCorruptRebuildAsDriftWithoutMutation(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		journal    string
+		diagnostic string
+	}{
+		{name: "pending", journal: `{"version":1,"domain":"work","session_name":"dev","session_id":"00000000-0000-4000-8000-000000000001","operation_id":"00112233-4455-4677-8899-aabbccddeeff","phase":"reserved","old_backend":"boxwarden-work-dev","old_revision":"golden-work-r1","candidate_backend":"boxwarden-work-00112233445546778899aabbccddeeff","candidate_revision":"golden-work-r2","old_pin_present":false,"old_pin_digest":""}`, diagnostic: "system rebuild in progress"},
+		{name: "corrupt", journal: `{"version":1}`, diagnostic: "system rebuild journal is unavailable or invalid"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path, before := writeRunningStatusFixture(t, session.ReadinessReady)
+			root := filepath.Dir(path)
+			if err := os.Mkdir(filepath.Join(root, "rebuilds"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			journalPath := filepath.Join(root, "rebuilds", "dev.json")
+			if err := os.WriteFile(journalPath, []byte(test.journal), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			binding := supervisor.Binding{Domain: "work", SessionID: "00000000-0000-4000-8000-000000000001", BackendKind: "tart", BackendObject: "boxwarden-work-dev", Generation: "11111111-2222-4333-8444-555555555555"}
+			reader := &statusSnapshotFake{snapshot: supervisor.Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true, ObservedAt: time.Now()}}
+			var output bytes.Buffer
+			err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "status", "dev"}, Options{
+				Observer:              fake.Observer{Observations: map[string]backend.Observation{"boxwarden-work-dev": {ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectRunning}}},
+				StatusSnapshotFactory: func(config.Config, config.Domain) (StatusSnapshotReader, error) { return reader, nil },
+				Output:                &output,
+			})
+			if err != nil || reader.calls != 0 || !strings.Contains(output.String(), "consistency: drift\nreadiness: drift\n") || !strings.Contains(output.String(), test.diagnostic) {
+				t.Fatalf("rebuild status = %q, %v", output.String(), err)
+			}
+			after, err := os.ReadFile(filepath.Join(root, "sessions", "dev.json"))
+			if err != nil || !bytes.Equal(after, before) {
+				t.Fatalf("status changed session: %v", err)
+			}
+		})
+	}
+}
+
+func TestSessionStatusKeepsContradictoryTartListingVisibleWithExactReadyOwner(t *testing.T) {
+	path, before := writeRunningStatusFixture(t, session.ReadinessReady)
+	binding := supervisor.Binding{Domain: "work", SessionID: "00000000-0000-4000-8000-000000000001", BackendKind: "tart", BackendObject: "boxwarden-work-dev", Generation: "11111111-2222-4333-8444-555555555555"}
+	reader := &statusSnapshotFake{snapshot: supervisor.Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true, ObservedAt: time.Now()}}
+	var output bytes.Buffer
+	err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "status", "dev"}, Options{
+		Observer:              fake.Observer{Observations: map[string]backend.Observation{"boxwarden-work-dev": {ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectStopped}}},
+		StatusSnapshotFactory: func(config.Config, config.Domain) (StatusSnapshotReader, error) { return reader, nil },
+		Output:                &output,
+	})
+	if err != nil || reader.calls != 1 || reader.binding != binding || !strings.Contains(output.String(), "observed: stopped\n") || !strings.Contains(output.String(), "consistency: consistent\nreadiness: ready\n") || !strings.Contains(output.String(), "Tart listing reports stopped") {
+		t.Fatalf("contradictory status = %q; error=%v; reader=%+v", output.String(), err, reader)
+	}
+	after, err := os.ReadFile(filepath.Join(filepath.Dir(path), "sessions", "dev.json"))
+	if err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("status mutated durable state: %v", err)
+	}
+}
+
+func TestSessionStatusReportsDriftWithoutSupervisorReader(t *testing.T) {
+	path, _ := writeRunningStatusFixture(t, session.ReadinessReady)
+	var output bytes.Buffer
+	err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "status", "dev"}, Options{
+		Observer: fake.Observer{Observations: map[string]backend.Observation{"boxwarden-work-dev": {ObjectID: "boxwarden-work-dev", Exists: true, State: backend.ObjectRunning}}},
+		Output:   &output,
+	})
+	if err != nil || !strings.Contains(output.String(), "consistency: drift\nreadiness: drift\n") || !strings.Contains(output.String(), "exact live supervisor readiness is unavailable") {
+		t.Fatalf("missing supervisor status = %q, %v", output.String(), err)
+	}
+}
+
+func TestSessionStatusDoesNotPromotePersistedDriftOrStoppedBackend(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		readiness session.ReadinessStatus
+		backend   backend.ObjectState
+	}{
+		{name: "persisted drift", readiness: session.ReadinessDrift, backend: backend.ObjectRunning},
+		{name: "backend stopped", readiness: session.ReadinessReady, backend: backend.ObjectStopped},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path, _ := writeRunningStatusFixture(t, test.readiness)
+			var output bytes.Buffer
+			readerCalls := 0
+			err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "status", "dev"}, Options{
+				Observer: fake.Observer{Observations: map[string]backend.Observation{"boxwarden-work-dev": {ObjectID: "boxwarden-work-dev", Exists: true, State: test.backend}}},
+				StatusSnapshotFactory: func(config.Config, config.Domain) (StatusSnapshotReader, error) {
+					readerCalls++
+					return &statusSnapshotFake{}, nil
+				},
+				Output: &output,
+			})
+			wantCalls := 0
+			if test.backend == backend.ObjectStopped && test.readiness == session.ReadinessReady {
+				wantCalls = 1
+			}
+			if err != nil || !strings.Contains(output.String(), "readiness: drift\n") || !strings.Contains(output.String(), "consistency: drift\n") || readerCalls != wantCalls {
+				t.Fatalf("status = %q, err=%v reader calls=%d", output.String(), err, readerCalls)
+			}
+		})
+	}
+}
+
+func TestSessionStatusRejectsForeignBackendObservationBeforeSupervisor(t *testing.T) {
+	path, _ := writeRunningStatusFixture(t, session.ReadinessReady)
+	var output bytes.Buffer
+	readerCalls := 0
+	err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "status", "dev"}, Options{
+		Observer: fake.Observer{Observations: map[string]backend.Observation{"boxwarden-work-dev": {ObjectID: "boxwarden-work-foreign", Exists: true, State: backend.ObjectRunning}}},
+		StatusSnapshotFactory: func(config.Config, config.Domain) (StatusSnapshotReader, error) {
+			readerCalls++
+			return &statusSnapshotFake{}, nil
+		},
+		Output: &output,
+	})
+	if err != nil || readerCalls != 0 || !strings.Contains(output.String(), "consistency: drift\n") || !strings.Contains(output.String(), "readiness: drift\n") {
+		t.Fatalf("foreign backend status = %q, err=%v reader calls=%d", output.String(), err, readerCalls)
 	}
 }
 

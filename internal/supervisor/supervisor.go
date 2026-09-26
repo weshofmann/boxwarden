@@ -17,6 +17,21 @@ import (
 // instead of interpreting that error as authority to remove its outer namespace.
 var ErrRuntimeCleanupUnproven = errors.New("runtime cleanup is unproven; preserve exact generation")
 
+var gracefulStopWait = gracefulStopTimeout
+
+func waitForGuestStop(ctx context.Context, reaped <-chan struct{}, window time.Duration) bool {
+	timer := time.NewTimer(window)
+	defer timer.Stop()
+	select {
+	case <-reaped:
+		return true
+	case <-timer.C:
+		return false
+	case <-ctx.Done():
+		return false
+	}
+}
+
 // RuntimeOwner retains actual backend/serial handles. Start failure must finish
 // its owned-handle stop/reap and serial cleanup path before returning. If final
 // runtime cleanup proof remains incomplete, it wraps ErrRuntimeCleanupUnproven.
@@ -25,6 +40,13 @@ var ErrRuntimeCleanupUnproven = errors.New("runtime cleanup is unproven; preserv
 // other runtime resources before returning; the generation lock outlives it.
 type RuntimeOwner interface {
 	Start(context.Context, LaunchRequest) error
+	// Bootstrap performs only the fixed guest-trust and host-key-pin exchange.
+	// It is idempotent after an exact validated result and has no generic guest
+	// command authority.
+	Bootstrap(context.Context) error
+	// Ready converges the exact generation's host-owned SSH credential and
+	// guest time zone after bootstrap; it has no generic guest command surface.
+	Ready(context.Context) error
 	// Snapshot must observe within the bounded context supplied by control.
 	Snapshot(context.Context) Snapshot
 	Stop(context.Context) error
@@ -79,19 +101,46 @@ func Run(ctx context.Context, path string, owner RuntimeOwner) error {
 	reaped := make(chan struct{})
 	var waitErr error
 	go func() { waitErr = owner.Wait(context.Background()); close(reaped) }()
-	var stopOnce sync.Once
-	var stopErr error
+	var stopMu sync.Mutex
+	stopSent := false
+	graceRequested := false
+	var lastStopErr error
 	stop := func() error {
-		waitCtx, cancel := context.WithTimeout(context.Background(), lifecycleTimeout)
+		waitCtx, cancel := context.WithTimeout(context.Background(), lifecycleTimeout+GuestShutdownRequestTimeout+gracefulStopTimeout)
 		defer cancel()
-		stopOnce.Do(func() {
-			stopErr = owner.Stop(waitCtx)
-		})
+		stopMu.Lock()
+		defer stopMu.Unlock()
 		select {
 		case <-reaped:
-			return errors.Join(stopErr, waitErr)
+			return errors.Join(lastStopErr, waitErr)
+		default:
+		}
+		if !stopSent {
+			if requester, ok := owner.(interface{ RequestStop(context.Context) error }); ok && !graceRequested {
+				graceRequested = true
+				if err := requester.RequestStop(waitCtx); err == nil {
+					if waitForGuestStop(waitCtx, reaped, gracefulStopWait) {
+						return waitErr
+					}
+				}
+			}
+			select {
+			case <-reaped:
+				return waitErr
+			default:
+			}
+			if err := owner.Stop(waitCtx); err != nil {
+				lastStopErr = err
+				return err
+			}
+			stopSent = true
+			lastStopErr = nil
+		}
+		select {
+		case <-reaped:
+			return waitErr
 		case <-waitCtx.Done():
-			return errors.Join(stopErr, waitCtx.Err())
+			return waitCtx.Err()
 		}
 	}
 	finish := func(cause error) error {
@@ -124,7 +173,7 @@ func Run(ctx context.Context, path string, owner RuntimeOwner) error {
 		cause = errors.Join(cause, <-serveDone)
 	}
 	result := finish(cause)
-	if closeErr != nil {
+	if closeErr != nil || errors.Is(result, ErrRuntimeCleanupUnproven) {
 		// An exact socket cleanup refusal cannot become generic namespace
 		// cleanup authority. Preserve request/lock for reconciliation.
 		return result
@@ -198,7 +247,7 @@ func (detachedLauncher) Launch(ctx context.Context, request LaunchRequest) error
 		// A started supervisor owns cleanup: ask it to stop, never reconstruct or
 		// signal backend process identities from disk. If control is unavailable,
 		// retain the detached child for subsequent exact-generation reconciliation.
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), lifecycleTimeout+controlIOTimeout)
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), lifecycleTimeout+GuestShutdownRequestTimeout+gracefulStopTimeout+controlIOTimeout)
 		stopErr := client.Stop(stopCtx, request.Binding)
 		stopCancel()
 		return errors.Join(err, stopErr)

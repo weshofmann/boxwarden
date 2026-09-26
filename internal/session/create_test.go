@@ -15,7 +15,88 @@ import (
 	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/golden"
 	"github.com/weshofmann/boxwarden/internal/lock"
+	"github.com/weshofmann/boxwarden/internal/recipe"
 )
+
+func TestCreateFromRevisionWithIntentBindsBeforeCloneAndRetriesExactly(t *testing.T) {
+	configured, backendFake, service := createFixture(t)
+	value := recipe.Recipe{Version: 1, Source: recipe.Source{Kind: "ubuntu-24.04.4-desktop-arm64", SHA256: "c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"}, Machine: recipe.Machine{CPUs: 4, MemoryMiB: 4096, SystemDiskGiB: 30}}
+	digest, err := PublishRecipeIntent(configured.StateRoot, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.hook = func(stage createStage, record Record) error {
+		if stage == createAfterIntent && record.RecipeIntentDigest != digest {
+			t.Fatalf("clone reservation lacks exact recipe binding: %#v", record)
+		}
+		return nil
+	}
+	created, err := service.CreateFromRevisionWithIntent(context.Background(), "dev", ModeClean, "golden-r1", digest)
+	if err != nil || created.RecipeIntentDigest != digest || created.IntendedState != StateStopped {
+		t.Fatalf("bound create = %#v, %v", created, err)
+	}
+	if again, err := service.CreateFromRevisionWithIntent(context.Background(), "dev", ModeClean, "golden-r1", digest); err != nil || again != created {
+		t.Fatalf("exact retry = %#v, %v", again, err)
+	}
+	if len(backendFake.CloneCalls()) != 1 {
+		t.Fatalf("clone calls = %d, want one", len(backendFake.CloneCalls()))
+	}
+	value.Workspaces = []recipe.Workspace{{Name: "data", Mount: "/home/boxwarden/workspaces/data"}}
+	other, err := PublishRecipeIntent(configured.StateRoot, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CreateFromRevisionWithIntent(context.Background(), "dev", ModeClean, "golden-r1", other); err == nil {
+		t.Fatal("changed intent reused existing session")
+	}
+	if len(backendFake.CloneCalls()) != 1 {
+		t.Fatal("mismatched retry mutated backend")
+	}
+}
+
+func TestCreateFromRevisionWithIntentRejectsMissingObjectBeforeReservation(t *testing.T) {
+	configured, backendFake, service := createFixture(t)
+	if _, err := service.CreateFromRevisionWithIntent(context.Background(), "dev", ModeClean, "golden-r1", strings.Repeat("a", 64)); err == nil {
+		t.Fatal("missing recipe object accepted")
+	}
+	if _, err := LoadRecord(configured.StateRoot, "work", "dev"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing object created session: %v", err)
+	}
+	if len(backendFake.CloneCalls()) != 0 {
+		t.Fatal("missing object cloned backend")
+	}
+}
+
+func TestCreateFromRevisionWithIntentRejectsCorruptBoundObjectOnRetry(t *testing.T) {
+	configured, backendFake, service := createFixture(t)
+	value := recipe.Recipe{Version: 1, Source: recipe.Source{Kind: "ubuntu-24.04.4-desktop-arm64", SHA256: "c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"}, Machine: recipe.Machine{CPUs: 4, MemoryMiB: 4096, SystemDiskGiB: 30}}
+	digest, err := PublishRecipeIntent(configured.StateRoot, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.hook = func(stage createStage, _ Record) error {
+		if stage == createAfterIntent {
+			return errors.New("crash after reservation")
+		}
+		return nil
+	}
+	if _, err := service.CreateFromRevisionWithIntent(context.Background(), "dev", ModeClean, "golden-r1", digest); err == nil {
+		t.Fatal("injected reservation interruption was ignored")
+	}
+	if record, err := LoadRecord(configured.StateRoot, "work", "dev"); err != nil || record.RecipeIntentDigest != digest || record.IntendedState != StateCreating {
+		t.Fatalf("creating intent = %#v, %v", record, err)
+	}
+	if err := os.WriteFile(filepath.Join(configured.StateRoot, "recipe-intents", digest+".json"), []byte("corrupt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service.hook = nil
+	if _, err := service.CreateFromRevisionWithIntent(context.Background(), "dev", ModeClean, "golden-r1", digest); err == nil {
+		t.Fatal("corrupt bound snapshot resumed clone")
+	}
+	if len(backendFake.CloneCalls()) != 0 {
+		t.Fatal("corrupt snapshot caused backend mutation")
+	}
+}
 
 const (
 	testSessionID = "00112233-4455-4677-8899-aabbccddeeff"
@@ -422,6 +503,88 @@ func TestCreateRetryUsesRecordedGoldenAfterCurrentPointerChanges(t *testing.T) {
 	}
 	if got := backendFake.CloneCalls(); len(got) != 1 || got[0].SourceID != "golden-r1" {
 		t.Fatalf("CloneCalls() = %#v, want recorded golden-r1", got)
+	}
+}
+
+func TestCreateFromRevisionSelectsExactRegisteredBase(t *testing.T) {
+	domainConfig, backendFake, service := createFixture(t)
+	backendFake.SetObservation(backend.Observation{ObjectID: "golden-r2", Exists: true, State: backend.ObjectStopped})
+	if _, err := golden.Register(context.Background(), domainConfig, "golden-r2", backendFake); err != nil {
+		t.Fatal(err)
+	}
+
+	record, err := service.CreateFromRevision(context.Background(), "dev", ModeClean, "golden-r1")
+	if err != nil {
+		t.Fatalf("CreateFromRevision: %v", err)
+	}
+	if record.GoldenRevision != "golden-r1" {
+		t.Fatalf("recorded revision = %q", record.GoldenRevision)
+	}
+	if got := backendFake.CloneCalls(); len(got) != 1 || got[0].SourceID != "golden-r1" {
+		t.Fatalf("clone source = %#v, want exact requested base", got)
+	}
+	if _, err := service.CreateFromRevision(context.Background(), "dev", ModeClean, "golden-r2"); err == nil {
+		t.Fatal("existing session accepted a different requested base")
+	}
+	if len(backendFake.CloneCalls()) != 1 {
+		t.Fatal("mismatched retry cloned another base")
+	}
+}
+
+func TestCreateFreshFromRevisionRejectsExistingSession(t *testing.T) {
+	_, backendFake, service := createFixture(t)
+	created, err := service.CreateFreshFromRevision(context.Background(), "dev", ModeClean, "golden-r1")
+	if err != nil || !created.Created || created.Record.IntendedState != StateStopped || created.Record.GoldenRevision != "golden-r1" {
+		t.Fatalf("fresh creation = %+v, %v", created, err)
+	}
+	if reused, err := service.CreateFreshFromRevision(context.Background(), "dev", ModeClean, "golden-r1"); err == nil || reused.Created {
+		t.Fatalf("existing record returned fresh witness: %+v, %v", reused, err)
+	}
+	if got := backendFake.CloneCalls(); len(got) != 1 {
+		t.Fatalf("clone calls = %#v, want one", got)
+	}
+}
+
+func TestCreateFreshFromRevisionSerializesSameName(t *testing.T) {
+	_, backendFake, service := createFixture(t)
+	start := make(chan struct{})
+	type result struct {
+		creation FreshCreation
+		err      error
+	}
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			<-start
+			creation, err := service.CreateFreshFromRevision(context.Background(), "dev", ModeClean, "golden-r1")
+			results <- result{creation, err}
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	successes := 0
+	for _, got := range []result{first, second} {
+		if got.err == nil && got.creation.Created && got.creation.Record.IntendedState == StateStopped {
+			successes++
+		} else if got.err == nil || got.creation.Created {
+			t.Fatalf("ambiguous concurrent result: %+v", got)
+		}
+	}
+	if successes != 1 || len(backendFake.CloneCalls()) != 1 {
+		t.Fatalf("fresh successes=%d clone calls=%#v", successes, backendFake.CloneCalls())
+	}
+}
+
+func TestCreateFromRevisionRejectsUnregisteredBaseBeforeIntent(t *testing.T) {
+	domainConfig, backendFake, service := createFixture(t)
+	if _, err := service.CreateFromRevision(context.Background(), "dev", ModeClean, "golden-unregistered"); err == nil {
+		t.Fatal("unregistered base was accepted")
+	}
+	if _, err := LoadRecord(domainConfig.StateRoot, "work", "dev"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unregistered base persisted intent: %v", err)
+	}
+	if len(backendFake.CloneCalls()) != 0 {
+		t.Fatal("unregistered base was cloned")
 	}
 }
 

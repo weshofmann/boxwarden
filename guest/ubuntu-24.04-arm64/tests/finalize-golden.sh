@@ -121,7 +121,7 @@ cat >"${sshd_good}" <<'EOF'
 pubkeyauthentication yes
 trustedusercakeys /etc/ssh/boxwarden/active/trusted-user-ca.pub
 authorizedprincipalsfile /etc/ssh/boxwarden/active/authorized_principals/%u
-authorizedkeysfile none
+authorizedkeysfile .ssh/authorized_keys
 permituserenvironment no
 permituserrc no
 passwordauthentication no
@@ -136,20 +136,21 @@ permittunnel no
 EOF
 
 make_fixture() {
-  local root="$1"
+  local root="$1" run_id="${2:-run-1}"
   mkdir -p "$root/etc/ssh/boxwarden" "$root/etc/ssh/sshd_config.d" \
     "$root/etc/systemd/system" "$root/etc/gdm3" "$root/etc/sudoers.d" \
     "$root/usr/local/libexec" "$root/var/lib/NetworkManager" \
     "$root/var/lib/dhcp" "$root/var/lib/systemd" "$root/var/backups" \
     "$root/var/lib/cloud/instances" "$root/var/lib/cloud/seed" \
+    "$root/var/lib/boxwarden" \
     "$root/var/log/installer" "$root/root/.cache" \
     "$root/home/boxwarden/.cache" "$root/home/boxwarden/.mozilla"
   printf '%s\n' 'boxwarden:$6$fixture$BUILD_VERIFIER:20000:0:99999:7:::' >"$root/etc/shadow"
   cp "$root/etc/shadow" "$root/var/backups/shadow.bak"
   printf '%s\n' 'boxwarden:x:1000:1000:Boxwarden:/home/boxwarden:/bin/bash' >"$root/etc/passwd"
-  printf '%s\n' 'boxwarden-task0-run-1' >"$root/etc/hostname"
-  printf '%s\n' '127.0.0.1 localhost' '127.0.1.1 boxwarden-task0-run-1' >"$root/etc/hosts"
-  printf '%s\n' 'run-1' >"$root/etc/boxwarden-task0-spike"
+  printf '%s\n' "boxwarden-task0-${run_id}" >"$root/etc/hostname"
+  printf '%s\n' '127.0.0.1 localhost' "127.0.1.1 boxwarden-task0-${run_id}" >"$root/etc/hosts"
+  printf '%s\n' "$run_id" >"$root/etc/boxwarden-task0-spike"
   printf '%s\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' >"$root/etc/machine-id"
   printf '%s\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' >"$root/var/lib/dbus-machine-id-placeholder"
   mkdir -p "$root/var/lib/dbus"
@@ -169,6 +170,7 @@ make_fixture() {
   printf '%s\n' 'AutomaticLoginEnable = true' 'AutomaticLogin = boxwarden' >"$root/etc/gdm3/custom.conf"
   printf '%s\n' 'boxwarden ALL=(ALL:ALL) NOPASSWD: ALL' >"$root/etc/sudoers.d/90-boxwarden"
   cp "$guest_dir/artifacts/boxwarden-guest-bootstrap" "$root/usr/local/libexec/boxwarden-guest-bootstrap"
+  chmod 0700 "$root/var/lib/boxwarden"
 }
 
 run_finalizer() {
@@ -188,6 +190,25 @@ run_firstboot() {
 good="$test_dir/good"
 make_fixture "$good"
 run_finalizer "$good" >"$test_dir/good.out" || fail 'finalizer rejected a valid candidate fixture'
+
+fresh_run="$test_dir/fresh-run"
+make_fixture "$fresh_run" run-0123456789ab
+run_finalizer "$fresh_run" >"$test_dir/fresh-run.out" || fail 'finalizer rejected a valid public preparation run ID'
+[[ -f "$fresh_run/var/lib/boxwarden/golden-clone-ready" && ! -e "$fresh_run/etc/boxwarden-task0-spike" ]] || fail 'public preparation run was not finalized'
+! grep -Fq boxwarden-task0-run-0123456789ab "$fresh_run/etc/hosts" || fail 'public preparation hostname survived finalization'
+
+invalid_run="$test_dir/invalid-run"
+make_fixture "$invalid_run" run-0123456789ABC
+if run_finalizer "$invalid_run" >"$test_dir/invalid-run.out" 2>&1; then fail 'malformed public preparation run ID was admitted'; fi
+[[ ! -e "$invalid_run/var/lib/boxwarden/golden-clone-ready" ]] || fail 'malformed run produced clone-ready marker'
+
+builder_ssh="$test_dir/builder-ssh"
+make_fixture "$builder_ssh"
+mkdir -p "$builder_ssh/root/.ssh" "$builder_ssh/home/boxwarden/.ssh"
+printf '%s\n' 'builder-root-key' >"$builder_ssh/root/.ssh/authorized_keys"
+printf '%s\n' 'builder-workstation-key' >"$builder_ssh/home/boxwarden/.ssh/authorized_keys"
+run_finalizer "$builder_ssh" >"$test_dir/builder-ssh.out" || fail 'finalizer rejected removable builder SSH state'
+[[ ! -e "$builder_ssh/root/.ssh" && ! -e "$builder_ssh/home/boxwarden/.ssh" ]] || fail 'builder SSH authentication state survived finalization'
 [[ "$(awk -F: '$1=="boxwarden" {print $2}' "$good/etc/shadow")" == '!' ]] || fail 'build password verifier survived'
 [[ ! -e "$good/etc/shadow-" ]] || fail 'shadow backup retained build password verifier'
 [[ ! -e "$good/var/backups/shadow.bak" ]] || fail 'periodic shadow backup retained build password verifier'
@@ -205,6 +226,7 @@ run_finalizer "$good" >"$test_dir/good.out" || fail 'finalizer rejected a valid 
 [[ ! -e "$good/var/log/installer/autoinstall-user-data" && ! -e "$good/home/boxwarden/.bash_history" ]] || fail 'build log/history survived'
 [[ ! -e "$good/home/boxwarden/.cache/item" && ! -e "$good/home/boxwarden/.mozilla/profile" ]] || fail 'profile/cache survived'
 [[ -f "$good/var/lib/boxwarden/golden-clone-ready" ]] || fail 'clone-ready marker missing'
+[[ "$(PATH="${stub_bin}:${PATH}" stat -c '%u:%g:%a' "$good/var/lib/boxwarden")" == 0:0:700 ]] || fail 'finalization widened private action state directory'
 [[ -x "$good/usr/local/libexec/boxwarden-firstboot-identity" ]] || fail 'first-boot identity helper missing'
 [[ -f "$good/etc/systemd/system/boxwarden-firstboot-identity.service" ]] || fail 'first-boot identity unit missing'
 for service in NetworkManager ssh gdm3 display-manager serial-getty@hvc0; do
@@ -236,6 +258,12 @@ if run_finalizer "$active" >"$test_dir/active.out" 2>&1; then fail 'active domai
 [[ ! -e "$active/var/lib/boxwarden/golden-clone-ready" ]] || fail 'active trust produced clone-ready marker'
 [[ "$(awk -F: '$1=="boxwarden" {print $2}' "$active/etc/shadow")" == '$6$fixture$BUILD_VERIFIER' ]] || fail 'active-trust refusal mutated account'
 
+public_state="$test_dir/public-state"
+make_fixture "$public_state"
+chmod 0755 "$public_state/var/lib/boxwarden"
+if run_finalizer "$public_state" >"$test_dir/public-state.out" 2>&1; then fail 'public action state directory was admitted'; fi
+[[ ! -e "$public_state/var/lib/boxwarden/golden-clone-ready" ]] || fail 'public action state produced clone-ready marker'
+
 bad_trust_mode="$test_dir/bad-trust-mode"
 make_fixture "$bad_trust_mode"
 chmod 0777 "$bad_trust_mode/etc/ssh/boxwarden"
@@ -265,7 +293,7 @@ if run_finalizer "$wrong_helper" >"$test_dir/wrong-helper.out" 2>&1; then fail '
 
 bad_sshd="$test_dir/bad-sshd"
 make_fixture "$bad_sshd"
-sed 's/^authorizedkeysfile none$/authorizedkeysfile .ssh\/authorized_keys/' "$sshd_good" >"$test_dir/sshd-bad"
+sed 's#^authorizedkeysfile .ssh/authorized_keys$#authorizedkeysfile none#' "$sshd_good" >"$test_dir/sshd-bad"
 if BW_TEST_SSHD_OUTPUT="$test_dir/sshd-bad" run_finalizer "$bad_sshd" >"$test_dir/bad-sshd.out" 2>&1; then fail 'weak sshd policy was admitted'; fi
 [[ ! -e "$bad_sshd/var/lib/boxwarden/golden-clone-ready" ]] || fail 'weak sshd produced clone-ready marker'
 

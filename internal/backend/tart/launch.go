@@ -2,11 +2,14 @@ package tart
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os/exec"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 	"unicode"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
@@ -65,29 +68,57 @@ func (l Launcher) Start(ctx context.Context, request backend.StartRequest) (back
 	if l.process == nil {
 		return nil, fmt.Errorf("start Tart: process starter is required")
 	}
+	var disks []*backend.ManagedDiskLifetime
+	if request.ManagedDisks != nil {
+		var err error
+		disks, err = request.ManagedDisks.TakeForStart(request)
+		if err != nil {
+			return nil, fmt.Errorf("start Tart: acquire managed disk lifetimes: %w", err)
+		}
+	}
+	scratch, scratchInfo, err := createScratch(request.GenerationDirectory)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("start Tart: %w", err), closeManagedDiskLifetimes(disks))
+	}
+	args := []string{"run", "--net-softnet", "--no-audio", "--no-clipboard", "--serial-path", request.SerialDevice}
+	for _, disk := range disks {
+		// Tart defaults extra file disks to automatic caching, unlike its
+		// cached Linux root disk. Keep managed ext4 on the same cache mode.
+		args = append(args, "--disk", disk.Operand()+":caching=cached")
+	}
+	args = append(args, request.ObjectID)
 	spec := processSpec{
 		path: l.config.TartPath,
-		args: []string{"run", "--net-softnet", "--no-audio", "--no-clipboard", "--serial-path", request.SerialDevice, request.ObjectID},
+		args: args,
 		env: []string{
 			"PATH=" + l.config.SoftnetBinDir,
 			"HOME=" + l.config.OperatorHome,
 			"USER=" + l.config.OperatorName,
 			"LOGNAME=" + l.config.OperatorName,
 			"TART_HOME=" + l.config.TartHome,
-			"TMPDIR=" + request.GenerationDirectory,
+			"TMPDIR=" + scratch,
 			"LANG=C",
 			"LC_ALL=C",
 		},
-		dir: request.GenerationDirectory,
+		dir: scratch,
 	}
 	handle, err := l.process.start(ctx, spec)
-	if err != nil {
-		return nil, fmt.Errorf("start Tart process: %w", err)
-	}
 	if handle == nil {
-		return nil, fmt.Errorf("start Tart process: no owned handle returned")
+		if err == nil {
+			err = fmt.Errorf("start Tart process: no owned handle returned")
+		}
+		return nil, errors.Join(err, cleanupScratch(scratch, scratchInfo), closeManagedDiskLifetimes(disks))
 	}
-	return handle, nil
+	owned := backend.Handle(&scratchHandle{Handle: handle, path: scratch, info: scratchInfo})
+	if len(disks) != 0 {
+		owned = &managedDiskHandle{Handle: owned, disks: disks}
+	}
+	if err != nil {
+		// A returned handle remains the sole stop/reap authority even when
+		// startup reports an error after creating the process.
+		return owned, fmt.Errorf("start Tart process: %w", err)
+	}
+	return owned, nil
 }
 
 func validateLaunchConfig(config LaunchConfig) error {
@@ -118,7 +149,7 @@ var _ backend.Starter = Launcher{}
 // supervisor, rather than a transient launch request context, owns shutdown.
 // It is private because the fixed Launcher is the only allowed caller.
 type osProcessStarter struct {
-	spawn func(*exec.Cmd) error
+	spawn func(string, []string, *os.ProcAttr) (*os.Process, error)
 }
 
 func (s osProcessStarter) start(ctx context.Context, spec processSpec) (backend.Handle, error) {
@@ -128,58 +159,137 @@ func (s osProcessStarter) start(ctx context.Context, spec processSpec) (backend.
 	if !supportsOwnedProcessGroups() {
 		return nil, fmt.Errorf("start Tart process: owned process groups are unsupported on this platform")
 	}
-	command := newOwnedCommand(spec)
+	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open null standard streams: %w", err)
+	}
+	defer devNull.Close()
+	attr := &os.ProcAttr{
+		Dir:   spec.dir,
+		Env:   append([]string(nil), spec.env...),
+		Files: []*os.File{devNull, devNull, devNull},
+		Sys:   ownedProcessGroupAttributes(),
+	}
 	spawn := s.spawn
 	if spawn == nil {
-		spawn = func(command *exec.Cmd) error { return command.Start() }
+		spawn = os.StartProcess
 	}
-	if err := spawn(command); err != nil {
+	process, err := spawn(spec.path, append([]string{spec.path}, spec.args...), attr)
+	if err != nil {
 		return nil, err
 	}
-	return &osProcessHandle{command: command, done: make(chan struct{}), signalGroup: signalOwnedProcessGroup, waitCommand: command.Wait}, nil
-}
-
-func newOwnedCommand(spec processSpec) *exec.Cmd {
-	command := exec.Command(spec.path, spec.args...)
-	command.Env = append([]string(nil), spec.env...)
-	command.Dir = spec.dir
-	configureOwnedProcessGroup(command)
-	return command
+	if process == nil {
+		return nil, fmt.Errorf("start Tart process: spawn returned no process")
+	}
+	return &osProcessHandle{process: process, done: make(chan struct{}), signalGroup: signalOwnedProcessGroup}, nil
 }
 
 type osProcessHandle struct {
-	command     *exec.Cmd
-	done        chan struct{}
-	signalGroup func(int) error
-	stopOnce    sync.Once
-	stopErr     error
-	waitOnce    sync.Once
-	waitErr     error
-	waitCommand func() error
+	process        *os.Process
+	done           chan struct{}
+	signalGroup    func(int) error
+	requestStop    func(int) error
+	stopMu         sync.Mutex
+	stopSent       bool
+	requestSent    bool
+	reaped         bool
+	authorityLost  bool
+	waitOnce       sync.Once
+	waitErr        error
+	pollWait       func(int) (int, syscall.WaitStatus, error)
+	releaseProcess func() error
 }
+
+func (h *osProcessHandle) RetainedChildLive() bool {
+	if h == nil || h.process == nil {
+		return false
+	}
+	h.stopMu.Lock()
+	defer h.stopMu.Unlock()
+	if h.reaped || h.authorityLost || h.done == nil {
+		return false
+	}
+	select {
+	case <-h.done:
+		return false
+	default:
+		return true
+	}
+}
+
+// RequestStop asks the exact retained Tart child to request guest OS shutdown.
+// It never substitutes for Stop: a noncooperating guest still needs a bounded
+// process-group SIGINT followed by the normal exact reap.
+func (h *osProcessHandle) RequestStop(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if h == nil || h.process == nil {
+		return fmt.Errorf("owned Tart process is unavailable")
+	}
+	request := h.requestStop
+	if request == nil {
+		request = requestOwnedProcessStop
+	}
+	h.stopMu.Lock()
+	defer h.stopMu.Unlock()
+	if h.reaped {
+		return nil
+	}
+	if h.authorityLost {
+		return ErrReapUnproven
+	}
+	if h.requestSent || h.stopSent {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := request(h.process.Pid); err != nil {
+		return err
+	}
+	h.requestSent = true
+	return nil
+}
+
+// ErrReapUnproven means the retained direct-child wait no longer proves that
+// the fixed Tart process was reaped. Callers must preserve generation state.
+var ErrReapUnproven = errors.New("owned Tart process reap is unproven")
 
 func (h *osProcessHandle) Stop(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if h == nil || h.command == nil || h.command.Process == nil {
+	if h == nil || h.process == nil {
 		return fmt.Errorf("owned Tart process is unavailable")
-	}
-	select {
-	case <-h.done:
-		return nil
-	default:
 	}
 	signalGroup := h.signalGroup
 	if signalGroup == nil {
 		signalGroup = signalOwnedProcessGroup
 	}
-	h.stopOnce.Do(func() { h.stopErr = signalGroup(-h.command.Process.Pid) })
-	return h.stopErr
+	h.stopMu.Lock()
+	defer h.stopMu.Unlock()
+	if h.reaped {
+		return nil
+	}
+	if h.authorityLost {
+		return ErrReapUnproven
+	}
+	if h.stopSent {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := signalGroup(-h.process.Pid); err != nil {
+		return err
+	}
+	h.stopSent = true
+	return nil
 }
 
 func (h *osProcessHandle) Wait(ctx context.Context) error {
-	if h == nil || h.command == nil {
+	if h == nil || h.process == nil {
 		return fmt.Errorf("owned Tart process is unavailable")
 	}
 	select {
@@ -187,20 +297,68 @@ func (h *osProcessHandle) Wait(ctx context.Context) error {
 		return h.waitErr
 	default:
 	}
-	h.waitOnce.Do(func() {
-		go func() {
-			waitCommand := h.waitCommand
-			if waitCommand == nil {
-				waitCommand = h.command.Wait
-			}
-			h.waitErr = waitCommand()
-			close(h.done)
-		}()
-	})
+	h.waitOnce.Do(func() { go h.reap() })
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-h.done:
 		return h.waitErr
+	}
+}
+
+// reap and Stop share stopMu. The child stays unreaped while Stop can address
+// its process group, so the group ID cannot be recycled before the signal.
+func (h *osProcessHandle) reap() {
+	poll := h.pollWait
+	if poll == nil {
+		poll = func(childID int) (int, syscall.WaitStatus, error) {
+			var status syscall.WaitStatus
+			got, err := syscall.Wait4(childID, &status, syscall.WNOHANG, nil)
+			return got, status, err
+		}
+	}
+	for {
+		h.stopMu.Lock()
+		childID := h.process.Pid
+		pid, status, err := poll(childID)
+		if errors.Is(err, syscall.EINTR) {
+			h.stopMu.Unlock()
+			continue
+		}
+		if pid == 0 && err == nil {
+			h.stopMu.Unlock()
+			time.Sleep(25 * time.Millisecond)
+			continue
+		}
+		if err != nil || pid != childID {
+			if err != nil {
+				h.waitErr = fmt.Errorf("%w: wait for process %d: %w", ErrReapUnproven, childID, err)
+			} else {
+				h.waitErr = fmt.Errorf("%w: wait for process %d returned pid %d", ErrReapUnproven, childID, pid)
+			}
+			h.authorityLost = true
+			close(h.done)
+			h.stopMu.Unlock()
+			return
+		}
+		switch {
+		case status.Signaled():
+			h.waitErr = fmt.Errorf("owned Tart process %d terminated by signal %s", pid, status.Signal())
+		case !status.Exited():
+			h.waitErr = fmt.Errorf("owned Tart process %d exited with unknown status %#x", childID, status)
+		case status.ExitStatus() != 0:
+			h.waitErr = fmt.Errorf("owned Tart process %d exited with status %d", childID, status.ExitStatus())
+		}
+		release := h.releaseProcess
+		if release == nil {
+			release = h.process.Release
+		}
+		if releaseErr := release(); releaseErr != nil {
+			h.waitErr = errors.Join(h.waitErr, fmt.Errorf("release owned Tart process %d: %w", childID, releaseErr))
+		}
+		h.reaped = true
+		close(h.done)
+		h.stopMu.Unlock()
+		return
 	}
 }

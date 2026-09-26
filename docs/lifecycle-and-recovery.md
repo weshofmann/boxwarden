@@ -10,9 +10,9 @@ The current Ubuntu source path is `guest/ubuntu-24.04-arm64/autoinstall/user-dat
 
 After installation and attended candidate checks, run `sudo -n -- /usr/local/libexec/boxwarden-finalize-golden --acknowledge-generic-golden-finalization` **inside the candidate**, then power it off without another boot. Finalization refuses a missing or wrong fixed helper, invalid effective sshd baseline, unexpected build marker/hostname, unsafe root ownership/mode of the SSH trust ancestry, or any material beneath `/etc/ssh/boxwarden`. It replaces the `boxwarden` shadow verifier with the exact non-verifier `!`, removes known shadow backups and build logs, removes the build marker, and sets the on-disk hostname to neutral `boxwarden-golden`. It clears SSH host keys, `/etc/machine-id` (an empty regular file), NetworkManager secret/leases, DHCP state, cloud-init instance/seed state, and named build-session history/cache. It stops and runtime-masks `systemd-random-seed.service` before deleting its last shutdown-written seed; the mask vanishes on the clone's next boot. `/var/lib/dbus/machine-id` becomes a link to `/etc/machine-id`. A clone-ready marker is published only after final checks and sync. A failure after host-key removal leaves a non-ready partial candidate: without host keys, `sshd -t/-T` cannot rerun the mandatory policy preflight, so preserve the failed candidate for investigation and qualify from a fresh baseline.
 
-The generic `boxwarden-firstboot-identity.service` is enabled for cloned boots. It creates or confirms a fresh machine ID, derives `boxwarden-<machine-id-prefix>` as the clone hostname, then generates SSH host keys and removes its marker last. NetworkManager, SSH, GDM/display-manager, and the `hvc0` serial getty require and start after that oneshot so a failed identity step blocks services that consume clone identity. The installer preserves GUI and serial automatic login and unrestricted passwordless guest sudo; no domain trust is installed by finalization or first boot. The sshd drop-in explicitly disables authorized-key files and matches `internal/guestproto`'s strict effective-policy baseline for later certificate bootstrap.
+The generic `boxwarden-firstboot-identity.service` is enabled for cloned boots. It creates or confirms a fresh machine ID, derives `boxwarden-<machine-id-prefix>` as the clone hostname, then generates SSH host keys and removes its marker last. NetworkManager, SSH, GDM/display-manager, and the `hvc0` serial getty require and start after that oneshot so a failed identity step blocks services that consume clone identity. The installer preserves GUI and serial automatic login and unrestricted passwordless guest sudo; no domain trust is installed by finalization or first boot. Finalization removes root and workstation `.ssh` directories, including installer-created scaffolding. The sshd drop-in permits later owner-created `.ssh/authorized_keys` while retaining the other strict effective-policy defaults for certificate bootstrap.
 
-Source tests verify the file-state transitions, service dependency definitions, and policy consistency. They cannot prove Ubuntu's PAM/GDM/agetty behavior, actual systemd ordering or shutdown, NetworkManager DHCP/DUID regeneration, cloud-init post-boot behavior, or a two-clone Tart result. A fresh Phase 3 attended candidate must verify that the temporary build password fails authentication after finalization while GUI/serial automatic login and passwordless sudo still work; inspect the **stopped** clone-ready image for the listed file states, absent post-shutdown random seed, and trust absence; then boot two fresh clones and verify distinct machine IDs, host keys, MACs, DHCP/DUID identity, and usable certificate-only management SSH. After cloud-init settles on each clone, verify both `/etc/hostname` and the effective hostname equal `boxwarden-<that clone's machine-id prefix>`, not the build-run hostname. Historical Task 0 qualification does not transfer to this corrected artifact.
+Source tests verify the file-state transitions, service dependency definitions, and policy consistency. They cannot prove Ubuntu's PAM/GDM/agetty behavior, actual systemd ordering or shutdown, NetworkManager DHCP/DUID regeneration, cloud-init post-boot behavior, or a two-clone Tart result. A fresh Phase 3 attended candidate must verify that the temporary build password fails authentication after finalization while GUI/serial automatic login and passwordless sudo still work; inspect the **stopped** clone-ready image for the listed file states, absent post-shutdown random seed, and trust absence; then boot two fresh clones and verify distinct machine IDs, host keys, MACs, DHCP/DUID identity, and usable certificate-only Boxwarden management SSH. After cloud-init settles on each clone, verify both `/etc/hostname` and the effective hostname equal `boxwarden-<that clone's machine-id prefix>`, not the build-run hostname. Historical Task 0 qualification does not transfer to this corrected artifact.
 
 The attended V2 register/clone gate must use an artifact built or rebuilt from
 that corrected generic guest definition and qualified accordingly. An unchanged
@@ -45,11 +45,17 @@ That check is operational product evidence, not formal qualification; later
 checks continue at the serial-bootstrap and SSH boundaries. See
 `docs/evidence/slice-b-controlled-exact-start.md`.
 
-The eventual supervisor owns generation SSH credentials, CA-validated renewal,
-and periodic strict read-only probes. READY requires a fresh exact-generation
-snapshot with running backend, healthy serial drain, exact pin, current
-certificate, strict probe, and host/guest-zone agreement. Status reads current
-observations without creating credentials, applying configuration, or repairing.
+The supervisor owns generation SSH credentials, CA-validated renewal, and
+periodic strict read-only probes. READY requires a fresh exact-generation
+snapshot with a retained direct child that has not reaped or lost ownership,
+a structurally valid exact Tart listing, healthy serial drain, exact pin,
+current certificate, strict probe, and host/guest-zone agreement. Tart 2.32.1
+can list a demonstrably live owned VM as `stopped`; status retains that raw
+observation and reports the contradiction when the exact owner passes every
+fresh readiness check. An absent or unprovable owner remains drift/non-ready.
+The listing alone cannot authorize stopped-only operations or release a live
+managed-volume use. Status reads current observations without creating
+credentials, applying configuration, or repairing.
 
 The supervisor owns the outer generation namespace; `serialx` exclusively
 creates, validates, and cleans its new `serial/` subtree. Ownership stays held

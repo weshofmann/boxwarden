@@ -1,0 +1,4 @@
+{
+  "title": "alpha workspace persistence",
+  "items": ["import", "stop", "export", "verify"]
+}

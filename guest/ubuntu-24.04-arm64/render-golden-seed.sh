@@ -9,7 +9,7 @@ die() { printf 'generic golden seed: %s\n' "$*" >&2; exit 1; }
 run_id="$1"
 hash_file="$2"
 output_dir="$3"
-[[ "$run_id" =~ ^run-[12]$ ]] || die 'build run ID must be run-1 or run-2'
+[[ "$run_id" =~ ^run-([12]|[0-9a-f]{12})$ ]] || die 'build run ID must be run-1, run-2, or a 12-digit lowercase hex run'
 [[ -f "$hash_file" && ! -L "$hash_file" ]] || die 'password hash file is missing or unsafe'
 [[ ! -e "$output_dir" && ! -L "$output_dir" ]] || die 'refusing to overwrite seed output'
 case "$(uname -s)" in

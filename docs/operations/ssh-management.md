@@ -46,7 +46,9 @@ exact key, certificate, alias, and known-hosts file. The client disables global
 known hosts, hostname canonicalization, host-key DNS, ambient agents/config,
 proxies, multiplexing, TTY allocation, password and keyboard-interactive auth,
 agent/X11/TCP/stream-local/tunnel forwarding, local commands, and host-key
-updates. It requires strict Ed25519 pin validation, literal resolved address
+updates. It permits only the Ed25519 certificate algorithm for client public-key
+authentication, preventing a raw-key retry if the certificate fails. It requires
+strict Ed25519 pin validation, literal resolved address
 transport, and bounded connect/keepalive timeouts. It logs in only as
 `boxwarden` and always runs:
 
@@ -59,6 +61,12 @@ bounded stdin requests are readiness probe, time-zone apply, and time-zone
 read. The guest helper validates the durable binding before performing those
 operations. SSH success is therefore not a general guest-control channel and
 does not establish identity by TOFU or address reachability.
+
+The generic guest starts with `AuthorizedKeysFile .ssh/authorized_keys` and no
+builder `.ssh` directories or domain trust. An owner may add guest-local keys
+after cloning. The current bootstrap still checks the other strict effective
+sshd defaults before it reports success, and the fixed SSH probe must succeed
+with the Boxwarden certificate for readiness.
 
 `sshx` deliberately owns a small argv/stdin runner interface. Production
 composition supplies a lossless adapter to the shared bounded `execx` runner;

@@ -14,9 +14,12 @@ import (
 	"unicode"
 
 	"github.com/weshofmann/boxwarden/internal/guestproto"
+	"github.com/weshofmann/boxwarden/internal/privateacl"
 )
 
 var ErrPoisoned = errors.New("serial transport is poisoned")
+
+var serialACLInspector privateacl.Inspector = privateacl.OSInspector{}
 
 // Runtime owns the PTY, its only reader, and a newly created serial subtree.
 // The supervisor owns the enclosing generation and must close this runtime
@@ -27,10 +30,13 @@ type Runtime struct {
 	slave                           *os.File
 	directory, endpoint, generation string
 	attempted, resolved             bool
+	loginSeen                       bool
+	loginPrompt                     promptScanner
+	installer                       *installerExchange
 	parser                          *bootstrapParser
 	result                          guestproto.SerialResult
 	err                             error
-	ready, pumpDone                 chan struct{}
+	ready, loginReady, pumpDone     chan struct{}
 	stopOnce, closeOnce             sync.Once
 	closeErr                        error
 }
@@ -42,7 +48,20 @@ func CreateRuntime(ctx context.Context, generationDirectory string) (*Runtime, e
 	return createRuntime(ctx, generationDirectory, allocatePTY)
 }
 
+// CreateInstallerRuntime owns the same single private PTY but enables only
+// the fixed generic-base installer exchange instead of session bootstrap.
+func CreateInstallerRuntime(ctx context.Context, generationDirectory, runID string) (*Runtime, error) {
+	if !validInstallerRunID(runID) {
+		return nil, fmt.Errorf("installer run ID is invalid")
+	}
+	return createRuntimeKind(ctx, generationDirectory, allocatePTY, runID)
+}
+
 func createRuntime(ctx context.Context, generationDirectory string, allocate func() (*os.File, *os.File, error)) (*Runtime, error) {
+	return createRuntimeKind(ctx, generationDirectory, allocate, "")
+}
+
+func createRuntimeKind(ctx context.Context, generationDirectory string, allocate func() (*os.File, *os.File, error), installerRunID string) (*Runtime, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -56,10 +75,22 @@ func createRuntime(ctx context.Context, generationDirectory string, allocate fun
 	if !info.IsDir() || info.Mode().Perm() != 0o700 || !ownedByCurrentUser(info) {
 		return nil, fmt.Errorf("generation directory is not owner-private")
 	}
+	if err := privateacl.Check(generationDirectory, info, serialACLInspector); err != nil {
+		return nil, fmt.Errorf("generation ACL: %w", err)
+	}
 	directory := filepath.Join(generationDirectory, "serial")
 	// Mkdir is the admission boundary. Never adopt even an empty existing tree.
 	if err := os.Mkdir(directory, 0o700); err != nil {
 		return nil, fmt.Errorf("create exclusive serial subtree: %w", err)
+	}
+	serialInfo, err := os.Lstat(directory)
+	if err != nil || !serialInfo.IsDir() || serialInfo.Mode().Perm() != 0700 || !ownedByCurrentUser(serialInfo) {
+		_ = os.Remove(directory)
+		return nil, fmt.Errorf("serial subtree is not owner-private")
+	}
+	if err := privateacl.Check(directory, serialInfo, serialACLInspector); err != nil {
+		_ = os.Remove(directory)
+		return nil, fmt.Errorf("serial subtree ACL: %w", err)
 	}
 	master, slave, err := allocate()
 	if err != nil {
@@ -77,16 +108,26 @@ func createRuntime(ctx context.Context, generationDirectory string, allocate fun
 	if err != nil || info.Mode()&os.ModeCharDevice == 0 || info.Mode().Perm() != 0o600 || !ownedByCurrentUser(info) {
 		return cleanup(fmt.Errorf("serial slave is not an owner-private character device"))
 	}
+	if err := privateacl.Check(slave.Name(), info, serialACLInspector); err != nil {
+		return cleanup(fmt.Errorf("serial slave ACL: %w", err))
+	}
 	if err := os.Symlink(slave.Name(), endpoint); err != nil {
 		return cleanup(fmt.Errorf("publish Tart endpoint: %w", err))
 	}
-	r := newRuntime(master, filepath.Base(generationDirectory))
+	r := newRuntimeKind(master, filepath.Base(generationDirectory), installerRunID)
 	r.slave, r.directory, r.endpoint = slave, directory, endpoint
 	return r, nil
 }
 
 func newRuntime(stream io.ReadWriteCloser, generation string) *Runtime {
-	r := &Runtime{stream: stream, generation: generation, ready: make(chan struct{}), pumpDone: make(chan struct{})}
+	return newRuntimeKind(stream, generation, "")
+}
+
+func newRuntimeKind(stream io.ReadWriteCloser, generation, installerRunID string) *Runtime {
+	r := &Runtime{stream: stream, generation: generation, ready: make(chan struct{}), loginReady: make(chan struct{}), pumpDone: make(chan struct{})}
+	if installerRunID != "" {
+		r.installer = newInstallerExchange(installerRunID)
+	}
 	go r.pump()
 	return r
 }
@@ -103,6 +144,9 @@ func (r *Runtime) fail(err error) {
 		r.err = fmt.Errorf("%w: %w", ErrPoisoned, err)
 	}
 	r.parser = nil
+	if r.installer != nil {
+		r.installer.notify()
+	}
 	if !r.resolved {
 		r.resolved = true
 		close(r.ready)
@@ -118,6 +162,10 @@ func (r *Runtime) pump() {
 		n, readErr := r.stream.Read(chunk[:])
 		r.mu.Lock()
 		var parseErr error
+		if n > 0 && !r.loginSeen && r.loginPrompt.feed(chunk[:n]) {
+			r.loginSeen = true
+			close(r.loginReady)
+		}
 		if n > 0 && r.parser != nil {
 			result, complete, err := r.parser.feed(chunk[:n])
 			parseErr = err
@@ -129,6 +177,9 @@ func (r *Runtime) pump() {
 				r.resolved = true
 				close(r.ready)
 			}
+		}
+		if n > 0 && r.installer != nil {
+			r.installer.feed(chunk[:n])
 		}
 		r.mu.Unlock()
 		if parseErr != nil {

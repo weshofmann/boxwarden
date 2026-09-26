@@ -29,12 +29,15 @@ func (osPrivateACLInspector) HasExtendedACL(path string) (bool, error) {
 		return false, fmt.Errorf("inspect ACL for %q: %w", path, err)
 	}
 	line := result.Stdout
+	entries := ""
 	if newline := strings.IndexByte(line, '\n'); newline >= 0 {
+		entries = line[newline+1:]
 		line = line[:newline]
 	}
 	fields := strings.Fields(line)
 	if len(fields) == 0 {
 		return false, fmt.Errorf("inspect ACL for %q: malformed ls output", path)
 	}
-	return strings.HasSuffix(fields[0], "+"), nil
+	// macOS can show @ on the mode line while -e prints ACL entries below it.
+	return strings.HasSuffix(fields[0], "+") || strings.TrimSpace(entries) != "", nil
 }
