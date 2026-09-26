@@ -7,6 +7,54 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Current checkpoint
 
+Published source: `93e835e56a74153009651ed0b793d790c1057254`.
+[Hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36244901864)
+passed its deterministic matrix, including the new EFI filesystem fixture.
+
+### Completed and verified
+
+- Recipe/base/cache, generation-bound management readiness, guest actions,
+  independent workspace volumes, import, retained-volume rebuild/replacement
+  and stopped export are implemented. Earlier bounded generic synthetic trials
+  verified desktop readiness and selected workspace byte comparisons; they do
+  not qualify the complete fresh ChatGPT workflow.
+- The latest reviewed source correction gives required EFI a finite ten-minute
+  device wait with guarded, synced atomic fstab replacement. Nine behavioral
+  filesystem fixtures, generic seed/fake-ISO/finalizer fixtures, eight preparation
+  and eight installer tests, and fresh affected Go packages passed locally.
+  Independent re-review found no remaining Important/Critical defect. These
+  were targeted local checks; the full deterministic matrix passed in hosted CI.
+- The last diagnostic reached every required normal target and serial-getty
+  with individual active/zero-exit results, then stopped. Original/predecessor
+  identities were unchanged. Snapd seeding and the disk manager still failed;
+  cloud-init's final stage completed later. This is target evidence, not healthy
+  services, visible GUI, prepared-base qualification or cache admission.
+
+### Current work and next step
+
+- One fresh disposable diagnostic is running with finite startup limits for
+  snapd and the disk manager only, alongside the tested EFI wait. Exact unit
+  contracts were inspected read-only first. The probe checks effective limits,
+  each target/service separately, pending jobs and failures within fixed bounds.
+  It will stop/reap its own VM; no failed or forensic object is an acceptance base.
+- Next: adjudicate the original process result, authoritative stopped state and
+  exact private receipts. Propagate the result before a reviewed service input
+  correction or another expensive fresh preparation.
+- All twelve fresh workflow acceptance gates remain pending. No reusable
+  ChatGPT base or graphical application has passed this workflow. The remaining
+  sequence is listed below. Real sign-in and subjective GUI acceptance may need
+  human participation later; no current human action is required.
+- Disk capacity is not currently blocking work. Keep the existing external image
+  layout; relocation remains paused until Wes supplies a separate disk and direction.
+
+<details>
+<summary>Earlier checkpoint and implementation evidence</summary>
+
+The following records describe their respective checkpoints; the current
+status above supersedes historical pending/running statements.
+
+## Earlier checkpoint details
+
 - Published `c94c915` removes the stale 90-minute serial wait that overrode
   the builder's four-hour installer deadline. The new regression failed
   before the fix; targeted serial/basebuild tests and the full local Go suite
@@ -657,10 +705,13 @@ prototype with material acceptance gaps, not an alpha-ready release.
   Existing external image storage remains in use; image relocation is deferred
   until the operator provides a separate disk and direction.
 
+</details>
+
 ## Remaining acceptance
 
-1. Require terminal success from the current fresh ChatGPT base preparation,
-   an exact stopped candidate, and a passed independent-clone qualification.
+1. Complete a new fresh ChatGPT base preparation from reviewed tracked inputs.
+   Require original terminal success, exact admitted journal/cache, stopped
+   candidate/clone, passed independent-clone qualification and healthy doctor.
    Then create a public session and verify ordered `once` and `startup`
    actions, actual desktop launch, and waiting-for-sign-in without treating
    management READY as application proof.
