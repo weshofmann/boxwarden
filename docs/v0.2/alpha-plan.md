@@ -277,35 +277,42 @@ on synthetic data before the fresh end-to-end repetition.
 
 ## Native Tart storage migration (operator direction, 2026-09-26)
 
-Migrate at the next safe transition before further expensive VM trials. The
-pre-cleanup shared capacity could not retain a full replica and the mission
-free-space floor. Perform the authorized reviewed selective VM cleanup first,
-then measure the retained set and actual outer allocation before sizing staging. Native replication is
-preferred because cross-filesystem file copies cannot retain the existing APFS
-clone sharing. Documented metadata compaction provides no sizing guarantee.
+Migrate before further expensive VM trials. Selective cleanup retired 46
+redundant bundles, retaining nine alpha objects plus protected history and all
+workspace data. The source container now uses about 97 GiB. A 117 GiB restore
+budget plus the 93 GiB outer floor fits 405 GiB free while the original 432 GiB
+bundle remains intact. The earlier temporary-staging dependency is withdrawn;
+no source compaction is required. These are capacity observations, not a
+completed migration or permission to erase an existing volume.
 
-1. Adjudicate the one live copy using its original process result and exact
-   private receipt; verify all VMs stopped with full host visibility.
-2. Inventory and independently review the actual staging disk, encryption,
-   capacity, exact volume identities and cutover commands before mutation.
-3. Cleanly detach the Tart sparsebundle and stage its complete intact tree on
-   temporary storage. Verify its inventory, every member's bytes and metadata,
-   then verify attachment and filesystem consistency without guest boot.
-4. Retire only the verified old bundle instance from the original SSD as an
-   exact migration step, retaining the staged source for rollback. Rediscover
-   devices by persistent identity; create the encrypted native target and use
-   native APFS replication with verification. Only the exact new target volume
-   may be erased; no existing volume, disk or container is an erase target.
-5. Verify migrated content and metadata, encryption, clone behavior and free
-   space; preserve historical journals and record old-to-new identity provenance.
-   Restore the canonical Tart mount and require healthy full-host doctor and
-   stopped objects before any guest operation.
-6. Measure the resulting layout without competing heavy writes, then refresh
-   diagnostic and acceptance plans for the new storage identities. A migration
-   or benchmark does not admit a failed base or qualify the alpha.
+1. Preserve the original failed-copy result and retirement evidence. Require
+   all operation handles terminal, full-host stopped observations and no live use.
+2. Check source/outer filesystem consistency after the disk disconnect. Review
+   exact commands, persistent volume/container identities, current capacity,
+   noninteractive encryption handling, bounded process and free-space guards.
+3. Cleanly detach and remount the exact source image read-only. Keep its intact
+   contents for rollback. Create one new encrypted native APFS volume in the
+   rediscovered external container using the approved host-only key path.
+4. Use native ASR replication with verification into that exact new volume.
+   Bind the target leaf-volume identity and container immediately before restore.
+   The bounded capacity monitor must be able to stop and reap its own root ASR.
+   Only that new volume is an erase target; never an existing volume, physical
+   disk or container. Do not bypass verification or reconstruct clone sharing
+   with file-by-file copies. Resolve any platform privilege step after concrete
+   preparation; a failure leaves the source intact and the partial target unused.
+5. Verify source/target content and metadata, encryption/noninteractive unlock,
+   clone behavior, capacity and old-to-new storage-identity provenance. Native
+   verification plus metadata parity is not independent equality of every disk byte. Historical
+   attempt journals stay unchanged; migrated identities do not confer admission.
+6. Cut over only after verification. Preserve the canonical Tart mount and an
+   exact rollback procedure, then require healthy full-host doctor and stopped
+   objects before guest operations. Source retirement is a separate migration
+   step after verification, not part of selective disposable-VM cleanup.
+7. Measure the resulting layout without competing heavy writes, refresh the
+   diagnostic/acceptance plans, then resume product qualification. Migration and
+   benchmarking do not admit failed bases or qualify the alpha.
 
-The exact disk-specific commands and private evidence remain outside Git.
-Temporary storage was required by the pre-cleanup inventory; that conclusion
-must be reassessed after selective retirement and measured image allocation.
-No migration staging or cutover has been executed. The existing noninteractive
-host-only passphrase policy applies.
+The concrete commands and private evidence remain outside Git. If current
+capacity no longer fits the retained source plus restore budget and floor,
+return to the reviewed intact-image staging fallback; never assume compaction
+savings or relax the floor. No native restore or cutover has been executed.

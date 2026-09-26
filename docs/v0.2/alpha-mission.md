@@ -93,7 +93,7 @@ Wes authorized migration of the existing Tart image store to a native encrypted
 APFS volume at the next safe transition, superseding the earlier hold for a
 separate disk. Finish or bound the current owned storage operation first;
 migration takes priority before another VM boot or expensive fresh baseline.
-Preserve the admitted canonical Tart mount, historical disk bytes and journals,
+Preserve the admitted canonical Tart mount, retained historical disks and journals,
 clone relationships, durable storage-identity provenance and noninteractive
 unlock handling. Review the concrete capacity and cutover plan independently.
 Do not erase existing volumes or containers, delete unrelated data, assume

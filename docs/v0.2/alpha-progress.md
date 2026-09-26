@@ -41,6 +41,62 @@ limits and supervisor fixture correction retain their recorded targeted checks.
 
 ### Current work and next step
 
+- [Retention-policy checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36265108243)
+  passed the full deterministic matrix. Hosted checks do not qualify VM,
+  provider, graphical or destructive host behavior.
+- The latest fresh installer failed its deadline. Retained diagnostic controls
+  show the two scoped daemons active, but Firefox's configure hook exceeded its
+  five-minute limit and seeding rolled back. Readiness ordering alone did not
+  resolve it. Storage performance remains a hypothesis, not a proven cause.
+- The disk copy failed after the SSD disconnect/reconnect; all old operation
+  handles ended. The encrypted filesystem was reconnected noninteractively.
+  No copy retry or VM boot occurred. The partial derivative has been retired
+  with its interruption observations retained.
+- One fresh bounded review approved selective retirement, excluding an extra
+  uncertain-provenance clone. **46 disposable bundles were retired; nine alpha
+  bundles plus protected history remain.** Seven session deletions used the
+  public lifecycle; fourteen older attached sessions required reviewed,
+  lock-held exact-target operator retirement after recorded filesystem-device
+  identities differed from current observations. Their proofs were preserved;
+  this does not requalify them. Twenty-five standalone bundles and nine obsolete
+  active registration/cache pointers were retired; journals and conclusions remain.
+- All **17 workspace disk identities, sizes and modification times** match the
+  pre-cleanup inventory. Formatter proofs are unchanged; only obsolete matching
+  attachments were cleared. Historical import resumptions tied to retired
+  sessions are abandoned, not completed; their journals and export snapshots
+  remain. Retained VM metadata/configuration is unchanged, all ten are stopped,
+  no VM files are open, and full-host doctor is healthy. The corrected read-only
+  verifier passed; its first version stopped on a null-field handling error.
+- Effective available space increased **197 GiB**, from 208 to 405 GiB. Actual
+  inner APFS free space is 543 GiB, constrained by the outer volume's 405 GiB
+  available capacity. The sparsebundle still allocates **432 GiB** (only about
+  1.4 MiB less); outer free space did not materially increase. This is measured
+  inner reclamation, not a claim that deletion shrank the backing image.
+- Native encrypted APFS migration remains authorized. The retained source
+  container uses about **97 GiB**; a 117 GiB restore budget plus the 93 GiB outer
+  floor fits the measured 405 GiB free with about 195 GiB spare. Temporary staging
+  and source compaction are unnecessary for this plan. Keep the intact source
+  as rollback while restoring only into a new encrypted native volume. Independent method review requires an exact new leaf-volume target and
+  a privileged stop/reap path for the bounded restore. Concrete driver checks
+  precede mutation. Source and outer filesystem
+  checks exited zero and reported healthy; no native volume, replication or
+  cutover has been executed.
+- The reviewed conditional diagnostic tools need refreshed source/storage
+  identities before use. Their fake-tool checks qualify harness behavior only.
+  All twelve fresh ChatGPT acceptance gates remain pending. Next: complete the
+  native-storage transition, then diagnose on a fresh bounded control and run
+  the corrected exact-source public builder before fresh session acceptance.
+
+<details>
+<summary>Earlier checkpoint and implementation evidence</summary>
+
+The following records describe their respective checkpoints; the current
+status above supersedes historical pending/running statements.
+
+## Earlier checkpoint details
+
+### Pre-retirement checkpoint observations
+
 - The latest documentation checkpoint's hosted CI failed a supervisor fixture
   whose 200 ms startup budget expired during filesystem setup (370 ms observed).
   The correction raises only that test budget to five seconds; exact error,
@@ -122,13 +178,6 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   and outer headroom before deciding whether temporary staging is still
   necessary. Preserve the canonical Tart mount and migration rollback gates.
 
-<details>
-<summary>Earlier checkpoint and implementation evidence</summary>
-
-The following records describe their respective checkpoints; the current
-status above supersedes historical pending/running statements.
-
-## Earlier checkpoint details
 
 - Published `c94c915` removes the stale 90-minute serial wait that overrode
   the builder's four-hour installer deadline. The new regression failed

@@ -251,8 +251,8 @@ boot, guest behavior and all alpha acceptance gates remain unexecuted.
 ## Native migration capacity review (2026-09-26)
 
 Independent read-only review checked installed ASR, diskutil, clonefile and
-hdiutil contracts plus Apple's primary APFS replication explanation. A full
-replica cannot fit alongside the current source while retaining the mission
+hdiutil contracts plus Apple's primary APFS replication explanation. At the pre-cleanup inventory, a full
+replica could not fit alongside the source while retaining the mission
 free-space floor. Internal staging does not close that gap; source snapshots
 and caches offer no measured reclamation. Cross-filesystem clone calls fail,
 and snapshot deltas require an existing baseline on the target. No documented
@@ -263,4 +263,46 @@ storage, then restores into the exact new encrypted native volume, preserving
 canonical mounting and historical evidence provenance. Incremental source
 deletions and bespoke clone reconstruction are not the selected approach.
 This is a capacity/method review, not approval of unprepared device-specific
-commands or executed migration evidence. Suitable staging storage is pending.
+commands or executed migration evidence. The post-cleanup reassessment below
+supersedes the temporary-staging capacity dependency.
+
+
+## Selective retirement and capacity reassessment (2026-09-26)
+
+A fresh bounded private-manifest review checked ownership, protected history,
+dependencies, live-use exclusions and exact disk/configuration identities.
+It excluded one uncertain-provenance derivative. Follow-up review required
+cooperating transition, volume-use, session and storage locks for older attached
+sessions whose filesystem-device records differed after remount; it approved
+exact-target operator retirement preserving raw disks and proofs. This is an
+operator cleanup procedure, not public lifecycle admission or a source fix.
+
+All 46 approved bundles are absent; nine alpha bundles and protected history
+remain stopped. Exact before/after checks preserved all 17 workspace identities,
+sizes/mtimes, formatter proofs and unrelated snapshotted records, with only
+expected attachment clearances and retired session/cache/registration records.
+Full-host doctor is healthy. The read-only verification harness initially
+failed on a null session field; its corrected execution passed.
+
+Effective inner availability increased 197 GiB; actual inner APFS free is
+543 GiB but constrained by outer free capacity of 405 GiB. The sparsebundle's
+432 GiB allocation barely changed; no outer reclamation is claimed. Source
+container usage is now 97 GiB, so the retained-source native replication plan
+fits a 117 GiB budget and 93 GiB outer floor with 195 GiB spare. Staging and
+compaction are unnecessary on these observations. Source and outer filesystem
+checks exited zero and reported healthy after the disconnect. Concrete migration
+driver verification remains pending; no native volume or cutover exists.
+
+
+A bounded independent native-plan review found no Critical issue and required
+an exact newly created leaf-volume ASR target, with fresh UUID/container binding,
+and a privileged signal/reap path for the bounded root restore. Container/physical
+disk erase targets remain prohibited. The measured capacity receipt matched.
+
+The review recommends native restore verification, filesystem consistency,
+complete file/metadata inventory and small configuration digests, encryption
+lock/unlock, and a tiny clone isolation check while keeping the source intact.
+These checks must not be reported as independent equality of every VM disk byte.
+[Apple's APFS replication explanation](https://developer.apple.com/videos/play/wwdc2019/710/)
+supports the encrypted destination and sibling-volume preservation mechanism.
+This is method review; concrete driver preflight and actual migration remain.
