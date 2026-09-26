@@ -86,14 +86,20 @@ prototype with material acceptance gaps, not an alpha-ready release.
   before the change; seven installer tests now pass, including metadata
   timeout and apt nonzero attribution without private child data. Seed/ISO
   fixtures, all eight preparation tests, and fresh affected base preparation
-  and qualification package tests also pass. Real-guest diagnostic
-  use and hosted CI for this increment remain pending.
-- One bounded diagnostic probe is running on a separate journal-recovered
-  disposable copy. It will check and invoke the original source-pinned helper
-  with a closed guest environment and privately retain stderr and its exit.
-  The extended boot window follows the observed slow service startup. The
-  failed original is unchanged; this probe is not qualification and its
-  result remains pending. No new full preparation attempt is running.
+  and qualification package tests also pass. [Hosted CI for `9a36fd8`](https://github.com/weshofmann/boxwarden/actions/runs/36220077079)
+  passed the complete deterministic matrix with both diagnostic changes.
+  Real-guest use of the new records remains pending.
+- A bounded diagnostic copy verified the original helper digest, then the
+  helper exited 1 before download with temporary DNS resolution failure.
+  Its boot logs show a D-Bus startup timeout and failed NetworkManager
+  dependency. The copy stopped normally and its exact result is retained
+  privately. Host resolution works; the original attempt's logs show a
+  connected NetworkManager, so this does not attribute that earlier failure.
+- One new disposable diagnostic copy is running. It captures service state,
+  starts guest NetworkManager if inactive, requires network/DNS readiness,
+  and retries the original source-pinned helper with stderr retained privately.
+  Its result is pending. The failed original and prior probes are preserved;
+  this is not qualification. No new full preparation attempt is running.
 - Next: inspect the diagnostic result, propagate any established cause across
   remaining phases, and review the source before starting a fresh
   baseline. Require terminal success, stopped candidate, passed independent-clone
