@@ -161,14 +161,21 @@ prototype with material acceptance gaps, not an alpha-ready release.
   passed its deterministic matrix.
   [Hosted CI for `4fea9ef`](https://github.com/weshofmann/boxwarden/actions/runs/36223070383)
   also passed.
-- Next: start a fresh public preparation from the corrected tracked source.
-  The initial and software-changing recipes use the same fixed downloader. Require terminal success, stopped candidate, passed independent-clone
+- A fresh public preparation from clean published `11ba8ce` has entered
+  `installer-running`. Its single original process is live, and no terminal
+  result is claimed. Full-host doctor, pinned recipe/ISO, regular remaster tool
+  pins, capacity, stopped predecessor inventory and the successful diagnostic
+  receipt passed preflight. The staged downloader and preparation helper match
+  the corrected tracked source byte for byte. Failed and forensic images remain
+  preserved and cannot be used for acceptance. Full download, installation,
+  finalization, independent-clone qualification and cache admission are pending.
+- Next: adjudicate this original preparation's exact terminal result and
+  journal. Require stopped candidate, matching cache and passed independent-clone
   qualification, and healthy host doctor before public session create. Then
-  exercise graphical launch, import, initial stopped
-  export and import verification, stop/start, software-changing rebuild and
-  explicit start, replacement attach, a second stopped export with independent
-  byte comparison, and a separate fresh repeat. Real sign-in remains a human
-  acceptance action.
+  exercise graphical launch, import, initial stopped export and public import
+  verification, stop/start, software-changing rebuild and explicit start,
+  replacement attach, a new independently compared export, and the separate
+  fresh repeat. Real sign-in remains a human acceptance action.
 - Current external image storage remains in use. Relocation is deferred until
   Wes supplies a separate disk and explicit direction. No capacity guard is
   currently blocking investigation.
