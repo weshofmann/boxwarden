@@ -52,6 +52,59 @@ autoinstall:
     - x11-apps
     - xwayland
   late-commands:
+    # Required EFI can appear after systemd's default device deadline during
+    # a slow boot. Keep the mount required, with a finite guest-only wait.
+    - |
+      python3 - /target/etc/fstab <<'BW_EFI_PY'
+      import os, pathlib, re, stat, sys, tempfile
+      path = pathlib.Path(sys.argv[1])
+      fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+      with os.fdopen(fd, "rb") as source:
+          before = os.fstat(source.fileno())
+          if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_size > 65536:
+              raise SystemExit("unexpected installer fstab file")
+          data = source.read(65537)
+      if len(data) > 65536:
+          raise SystemExit("installer fstab exceeds bound")
+      rows = data.splitlines(keepends=True)
+      entries = []
+      for index, row in enumerate(rows):
+          fields = list(re.finditer(rb"\S+", row.split(b"#", 1)[0]))
+          if len(fields) > 1 and fields[1].group() == b"/boot/efi":
+              entries.append((index, fields))
+      if len(entries) != 1:
+          raise SystemExit("installer fstab needs exactly one required EFI entry")
+      index, fields = entries[0]
+      values = [field.group() for field in fields]
+      options = b"defaults,x-systemd.device-timeout=10min"
+      if (len(values) != 6 or not re.fullmatch(rb"(?:/dev/disk/by-uuid/|UUID=)[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}", values[0])
+              or values[2] != b"vfat" or values[3] not in (b"defaults", options) or values[4:] != [b"0", b"1"]):
+          raise SystemExit("unexpected installer EFI entry")
+      if values[3] == options:
+          raise SystemExit(0)
+      row = rows[index]
+      rows[index] = row[:fields[3].start()] + options + row[fields[3].end():]
+      current = path.lstat()
+      if (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns) != (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns):
+          raise SystemExit("installer fstab changed before replacement")
+      fd, temporary = tempfile.mkstemp(prefix=".boxwarden-efi-", dir=path.parent)
+      try:
+          with os.fdopen(fd, "wb") as output:
+              os.fchown(output.fileno(), before.st_uid, before.st_gid)
+              os.fchmod(output.fileno(), stat.S_IMODE(before.st_mode))
+              output.write(b"".join(rows))
+              output.flush()
+              os.fsync(output.fileno())
+          os.replace(temporary, path)
+          directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+          try:
+              os.fsync(directory)
+          finally:
+              os.close(directory)
+      finally:
+          if os.path.exists(temporary):
+              os.unlink(temporary)
+      BW_EFI_PY
     - install -d -o root -g root -m 0755 /target/etc/ssh/sshd_config.d /target/etc/ssh/boxwarden
     - |
       cat > /target/etc/ssh/sshd_config.d/60-boxwarden-task0.conf <<'EOF'

@@ -244,9 +244,21 @@ prototype with material acceptance gaps, not an alpha-ready release.
   passed its deterministic matrix. No source tests were rerun for this
   documentation checkpoint; exact diagnostic evidence and sanitized diffs were
   checked.
-- Next: implement and test the finite required EFI device wait in tracked
-  installation inputs, preserving the mount and identity with explicit failure
-  on unexpected fstab structure. Investigate the service deadline failures on
+- Tracked autoinstall now assigns the required EFI entry a finite ten-minute
+  device wait. It preserves the source UUID, filesystem type, dump/pass,
+  required mount, unrelated bytes and ownership/mode; unexpected, duplicate,
+  missing, linked, special or oversized fstabs fail before modification. The
+  replacement is atomic and file/directory-synced. Behavioral fixtures execute
+  the exact installer block: missing correction failed before implementation,
+  and review reproduced a FIFO open hang that failed its regression before
+  nonblocking open fixed it. All nine filesystem fixtures now pass. Seed,
+  fake-ISO, finalizer, eight preparation and eight installer fixtures pass;
+  fresh recipe/basebuild/golden/app Go tests pass. Independent delta re-review
+  found no remaining Important/Critical issue. These are targeted source and
+  synthetic checks, not a fresh full local suite or real installer execution.
+  [Hosted CI for `2bdeacb`](https://github.com/weshofmann/boxwarden/actions/runs/36244364347)
+  passed; CI for this source correction is pending publication.
+- Next: investigate the service deadline failures on
   fresh diagnostic derivatives before another expensive baseline. Preserve all
   failed and completed forensic objects; keep the host installer deadline intact.
   All twelve fresh acceptance gates remain pending. A successful fresh preparation

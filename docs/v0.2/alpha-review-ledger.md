@@ -128,3 +128,28 @@ checks management readiness, declared apt packages and clone identity;
 arbitrary preparation-step results and ChatGPT GUI behavior need their own
 acceptance evidence. Full download/install, graphical launch, retained bytes
 through rebuild/replacement, exports and a fresh repeat remain pending.
+
+## Required EFI device wait correction
+
+An independent read-only reviewer checked the installer-input and CI delta
+from `2bdeacb`, including the new fixture that executes the exact inline
+installer Python against disposable filesystem entries. Required EFI uses
+a finite ten-minute device wait, retaining its UUID/type/dump/pass and required
+semantics. Other bytes and ownership/mode are preserved by a synced atomic
+replacement; unexpected structure or file types fail before mutation.
+
+The reviewer found an Important blocking FIFO open before the regular-file
+check. A bounded regression reproduced that hang. Nonblocking open fixed it;
+re-review found no remaining Important/Critical issue. All nine filesystem
+fixtures pass, including hard links, symlinks, missing files, directories,
+oversized/malformed entries, idempotence and private permission preservation.
+The extracted shell/heredoc passes syntax checking. User-data already belongs
+to the guest-definition digest and staging list; the new fixture is in CI.
+
+The coordinator ran fresh affected recipe/basebuild/golden/app Go tests,
+generic seed/fake-ISO/finalizer fixtures, eight preparation and eight installer
+tests, and diff checks. This targeted verification is not a fresh full local
+suite. Separate forensic boot evidence supports finite EFI wait and individual
+normal-target completion, but still records failed snapd seeding and udisks2.
+No successful fresh installation, visible GUI, cache admission or independent
+clone qualification is claimed by this delta review.

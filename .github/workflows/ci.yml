@@ -38,6 +38,7 @@ jobs:
           bash guest/ubuntu-24.04-arm64/tests/finalize-golden.sh
           bash guest/ubuntu-24.04-arm64/tests/remaster-golden-iso.sh
           python3 guest/ubuntu-24.04-arm64/tests/install_chatgpt_test.py
+          python3 guest/ubuntu-24.04-arm64/tests/efi_device_wait_test.py
           python3 guest/ubuntu-24.04-arm64/tests/launch_chatgpt_test.py
 
       - name: Require a module for tracked Go source
