@@ -277,9 +277,10 @@ on synthetic data before the fresh end-to-end repetition.
 
 ## Native Tart storage migration (operator direction, 2026-09-26)
 
-Migrate at the next safe transition before further expensive VM trials. Current
-shared capacity cannot retain both a full replica and the mission free-space
-floor; the internal disk cannot supply the difference. Native replication is
+Migrate at the next safe transition before further expensive VM trials. The
+pre-cleanup shared capacity could not retain a full replica and the mission
+free-space floor. Perform the authorized reviewed selective VM cleanup first,
+then measure the retained set and actual outer allocation before sizing staging. Native replication is
 preferred because cross-filesystem file copies cannot retain the existing APFS
 clone sharing. Documented metadata compaction provides no sizing guarantee.
 
@@ -304,5 +305,7 @@ clone sharing. Documented metadata compaction provides no sizing guarantee.
    or benchmark does not admit a failed base or qualify the alpha.
 
 The exact disk-specific commands and private evidence remain outside Git.
-Temporary storage is currently required; no staging, retirement or cutover has
-been executed. The existing noninteractive host-only passphrase policy applies.
+Temporary storage was required by the pre-cleanup inventory; that conclusion
+must be reassessed after selective retirement and measured image allocation.
+No migration staging or cutover has been executed. The existing noninteractive
+host-only passphrase policy applies.

@@ -82,15 +82,13 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   environment change would not extend those existing tasks, so that predictable
   rerun is rejected. Read-only task inspection detached with unchanged disks;
   packaging equivalence and a supported recovery path remain unverified.
-- The independently reviewed disk-layout experiment is now running. It
-  copies one stopped diagnostic disk into a freshly allocated file within the
-  current encrypted Tart store, verifies every logical byte, then compares
-  paired reads. Capacity covers the worst-case copy and retained margin. The
-  three-hour bound, exact parent checks and private phase/exit evidence are active.
-  Full-host doctor, stopped-state, identity and capacity gates passed before
-  copying began. VM activity stays exclusive throughout. No VM is booted or
-  admitted by this copy. Completed/failed derivatives remain immutable. Storage causality and
-  supported seeding recovery remain unverified.
+- The bounded disk-layout copy exited 120 after the operator disconnected and
+  reconnected the SSD to resolve a file-I/O hang. Recovered progress shows a
+  partial copy; its terminal receipt and wrapper exit file are absent. It is
+  failed, not a completed copy or admission. All retained stalled command
+  handles have ended. The qualification filesystem was reconnected using the
+  approved noninteractive key path; full-host doctor is healthy, all 56 VMs
+  are stopped and no VM-tree files are open. No copy retry or VM boot occurred.
 - [Hosted CI for the latest prior documentation checkpoint](https://github.com/weshofmann/boxwarden/actions/runs/36255927638)
   passed the deterministic matrix. The earlier superseded run was cancelled.
 - While the copy runs, the next private diagnostic observer was hardened and
@@ -111,20 +109,18 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   syntax and isolated exit-recording checks passed. No clone was prepared or
   booted by these checks; exact copy adjudication remains a prerequisite.
 - All twelve fresh workflow acceptance gates remain pending. No reusable
-  ChatGPT base or graphical application has passed this workflow. The remaining
-  sequence is listed below. Real sign-in and subjective GUI acceptance may need
-  human participation later. Temporary staging storage is the current
-  operator dependency for migration; source and synthetic work may continue.
-- Wes has authorized migration to a native encrypted APFS volume at the next
-  safe storage transition, superseding the earlier relocation hold. The bounded
-  copy remains the sole live write operation; migration takes priority before
-  another VM boot. Read-only inventory found insufficient shared capacity for
-  a complete second copy while retaining the mission free-space floor. Native
-  replication was reviewed against Apple documentation. The recommended path
-  needs temporary storage for the intact sparsebundle before restoration into
-  the exact new native volume; suitable staging storage has been requested.
-  No new volume, cutover or source retirement has occurred. Preserve the canonical Tart mount, clone
-  relationships, failed evidence and noninteractive unlock handling.
+  ChatGPT base or graphical application has passed this workflow.
+- Wes now authorizes selective cleanup of redundant disposable alpha VMs,
+  retaining logs/provenance without archiving every disk. An exact private
+  manifest proposes retaining eight useful alpha objects plus protected
+  history and retiring 47 stopped synthetic objects. One fresh reviewer is
+  checking ownership, dependencies and live-use exclusions before execution.
+  All workspace volumes, credentials, unrelated data and uncertain objects
+  remain excluded; no deletion has occurred at this checkpoint.
+- Native encrypted APFS migration remains authorized. Reassess its capacity
+  using measured post-cleanup inner free space, actual sparsebundle allocation
+  and outer headroom before deciding whether temporary staging is still
+  necessary. Preserve the canonical Tart mount and migration rollback gates.
 
 <details>
 <summary>Earlier checkpoint and implementation evidence</summary>

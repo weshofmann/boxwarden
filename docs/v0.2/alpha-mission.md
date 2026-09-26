@@ -99,3 +99,28 @@ unlock handling. Review the concrete capacity and cutover plan independently.
 Do not erase existing volumes or containers, delete unrelated data, assume
 compaction savings, or relax the free-space floor to make staging fit. A
 verified migration is infrastructure preparation, not alpha qualification.
+
+## Selective disposable VM retention (operator direction, 2026-09-26)
+
+Wes authorizes selective retirement of stopped, unused, clearly alpha-owned
+synthetic tests, superseded candidates, resolved failures and redundant
+diagnostic derivatives without fully hashing or archiving every disk. Losing
+their exact final experimental state is accepted. Preserve existing logs,
+source/configuration identities, observations, conclusions and a retirement
+note. Retain a complete disk only for a named unresolved question or concrete
+product purpose. Aim for five to eight alpha bundles, excluding protected
+history and user data; this is not a deletion quota.
+
+The protected historical VM, workspace volumes, real user data, credentials,
+unrelated objects, useful bases/active candidates and anything with uncertain
+ownership, dependencies or live use remain excluded. Resolve all active or
+stalled storage operations first. Use one exact private keep/delete manifest
+and one fresh bounded review, then small batches of supported lifecycle or
+exact-target operations that reconcile registries. No broad globs, whole-image
+deletion, disk erase, force-unmount or competing copies are authorized.
+
+Measure inner free space, actual bundle allocation and outer capacity after
+retirement; deletion inside an image does not prove the image shrank. Reassess
+native migration using the retained set before requiring temporary storage.
+Retire new unnecessary experiments promptly. Failed runs still never become
+qualification checkpoints; this exception changes disposable disk retention.
