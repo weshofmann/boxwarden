@@ -38,12 +38,16 @@ passed its deterministic matrix, including the new EFI filesystem fixture.
   multi-user and graphical targets remained inactive after the bounded wait.
   Zero failed units did not establish completed initialization. Original and
   predecessor identities were unchanged; the exact private receipt is retained.
-- One fresh diagnostic is now running with the same guest changes. It allows
-  thirty minutes for seeding after the prompt and captures bounded snap task
-  progress every two minutes before its own shutdown. The stopped predecessor's
-  hook termination occurred near shutdown, so it cannot establish the original
-  cause. Next: adjudicate the original result and pre-shutdown progress, then
-  propagate the remaining gap before another expensive preparation.
+- The next probe failed in its diagnostic harness: the actual host query
+  deadline remained fifteen minutes, contradicting the intended thirty-five
+  minutes needed for the guest observation. Seven pre-shutdown task snapshots
+  were retained, but final unit results and the completion marker are absent.
+  The error belongs to the harness; it does not prove seeding failed. All VMs
+  are stopped and original/predecessor identities are unchanged.
+- Next: enforce the generated harness's actual deadline, then run one fresh
+  derivative with the same guest inputs. A regression detected the stale
+  fifteen-minute value and passed after the exact replacement. Preserve failed
+  evidence and verify the effective bounds before another expensive operation.
 - All twelve fresh workflow acceptance gates remain pending. No reusable
   ChatGPT base or graphical application has passed this workflow. The remaining
   sequence is listed below. Real sign-in and subjective GUI acceptance may need
