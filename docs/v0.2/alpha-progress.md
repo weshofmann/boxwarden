@@ -54,15 +54,21 @@ prototype with material acceptance gaps, not an alpha-ready release.
   matches the tracked example byte for byte. Guest attach/import and the
   retained-workspace loop remain pending.
 - A fresh public ChatGPT base preparation from clean published `52bfd49` is
-  in guest-only recipe preparation. It reached the exact installed-guest
+  failed evidence. It reached the exact installed-guest
   prompt at 2026-09-26 03:40 UTC, after about two hours 51 minutes of installer
-  runtime. The source-bound CLI, pinned ISO and tools,
+  runtime, then failed during recipe preparation at about 04:01 UTC. The
+  retained public process exited 1, the exact journal records `failed`, and
+  full-visibility Tart observation confirms the candidate stopped. The
+  source-bound CLI, pinned ISO and tools,
   full-visibility host doctor, and recipe admission passed preflight. Its
-  private exact attempt and process result are retained. No prepared base or
-  ChatGPT installation is claimed while the attempt remains live. Finalization,
-  independent-clone qualification, and cache admission remain pending.
-- Next: adjudicate the retained builder's exact terminal result and journal.
-  Require terminal success, stopped candidate, passed independent-clone
+  private exact attempt and process result are retained. The fixed failure
+  marker does not identify the guest command. No prepared base or ChatGPT
+  installation is claimed. Finalization, independent-clone qualification,
+  and cache admission did not run. [Hosted CI for the `36b6551` documentation checkpoint](https://github.com/weshofmann/boxwarden/actions/runs/36216356185)
+  passed its deterministic matrix; it does not prove host qualification.
+- Next: inspect a separate stopped forensic clone read-only to identify the
+  failing preparation step before correcting source and starting a fresh
+  baseline. Require terminal success, stopped candidate, passed independent-clone
   qualification, and healthy host doctor before public session create. Then
   exercise graphical launch, import, initial stopped
   export and import verification, stop/start, software-changing rebuild and
@@ -71,7 +77,7 @@ prototype with material acceptance gaps, not an alpha-ready release.
   acceptance action.
 - Current external image storage remains in use. Relocation is deferred until
   Wes supplies a separate disk and explicit direction. No capacity guard is
-  currently blocking the running attempt.
+  currently blocking investigation.
 
 ## Verified behavior
 
