@@ -106,11 +106,19 @@ prototype with material acceptance gaps, not an alpha-ready release.
   serial transport already handles short writes. This diagnostic defect does
   not attribute the original preparation failure, and no helper execution or
   qualification is claimed from this probe. No new full preparation is running.
-- One fresh disposable diagnostic copy is now running with the corrected
-  full-write harness. Exact ownership and hashes, stopped objects, full-host
-  doctor, and capacity checks passed before launch. Network/DNS readiness and
-  the original source-pinned helper result remain pending. The failed original
-  disk identity and journal are unchanged; all prior copies are stopped.
+- The corrected diagnostic delivered its complete command and stopped normally.
+  NetworkManager started and reported readiness, but the DNS/digest/helper
+  chain returned 2 without proving DNS resolution or helper invocation. The
+  chain's exit label is not an independently captured helper exit. Read-only
+  stopped-copy logs show a DHCP lease and a DNS-plugin readiness
+  warning; the original attempt also contains that warning. This suggests a
+  common resolver problem but does not establish the original failed command.
+- One fresh disposable copy now tests guest resolver restart with separately
+  reported DNS, helper-digest, invocation, and actual helper-exit gates.
+  Its exact full command passed an isolated host PTY delivery check. Ownership,
+  hashes, stopped objects, full-host doctor, and capacity passed before launch.
+  The result is pending. The failed original disk identity and journal are
+  unchanged; prior copies are stopped and the read-only inspection is detached.
 - [Hosted CI for `a66d939`](https://github.com/weshofmann/boxwarden/actions/runs/36220982974)
   passed its deterministic matrix. A CLI built from that clean source passed
   full-host doctor and the pinned recipe/ISO check. A replacement conditional
@@ -123,6 +131,8 @@ prototype with material acceptance gaps, not an alpha-ready release.
   also passed. These checks do not prove real-guest behavior or admission.
   [Hosted CI for the `be31d38` review record](https://github.com/weshofmann/boxwarden/actions/runs/36221984837)
   passed its deterministic matrix.
+  [Hosted CI for `4fea9ef`](https://github.com/weshofmann/boxwarden/actions/runs/36223070383)
+  also passed.
 - Next: inspect the diagnostic result, propagate any established cause across
   remaining phases, and review the source before starting a fresh
   baseline. Require terminal success, stopped candidate, passed independent-clone
