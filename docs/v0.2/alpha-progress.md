@@ -44,16 +44,16 @@ prototype with material acceptance gaps, not an alpha-ready release.
   that output with bare values. Its existing success test reproduced the
   mismatch with the documented output before the source correction and passed
   afterward. The guest source fixtures, relevant Go packages, and full local
-  Go test suite passed after the correction. Guest stderr was discarded by the
-  preparation runner, so the exact failed guest command is not independently
-  recorded. Hosted CI and a fresh real-VM preparation and qualification are
-  still required.
+  Go test suite passed after the correction. [Hosted CI for `56793ca`](https://github.com/weshofmann/boxwarden/actions/runs/36205538671)
+  passed gofmt, full Go tests, race tests, vet, and build. Guest stderr was
+  discarded by the preparation runner, so the exact failed guest command is
+  not independently recorded. A fresh real-VM preparation and qualification
+  are still required.
 - Two separate 64 MiB workspace volumes are formatted, identity-checked,
   available, and unattached. The staged credential-free three-file source
   matches the tracked example byte for byte. Guest attach/import and the
   retained-workspace loop remain pending.
-- Next: require hosted CI for the metadata correction, then run a fresh base
-  attempt from corrected inputs. Require that
+- Next: run a fresh base attempt from corrected inputs. Require that
   new builder's terminal success, stopped candidate, passed independent-clone
   qualification, and healthy host doctor before public session create. Then
   exercise graphical launch, import, initial stopped
