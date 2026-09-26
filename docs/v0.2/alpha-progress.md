@@ -7,10 +7,10 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Current checkpoint
 
-Last completed hosted source matrix: `5f0d40aaaf3e5b7aa9571b24dab3702e659d6f1e`.
-[Hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36249873500)
-passed its full deterministic matrix. Required EFI wait and the supervisor
-fixture budget correction are verified in their recorded targeted checks.
+Published source: `d401c17126e2ff2b9e23ab75af1c781fae032fff`.
+[Hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36256683649)
+passed its full deterministic matrix. Required EFI wait, scoped daemon startup
+limits and supervisor fixture correction retain their recorded targeted checks.
 
 ### Completed and verified
 
@@ -20,7 +20,8 @@ fixture budget correction are verified in their recorded targeted checks.
   and passed afterward; nine EFI fixtures, generic seed/fake-ISO/finalizer,
   eight preparation/eight installer tests and fresh affected Go packages passed.
   Independent read-only review found no Important/Critical issue. These are
-  targeted checks; the new hosted matrix and real installer execution are pending.
+  targeted local checks; the full hosted matrix passed. Real installer execution
+  remains pending.
 - Recipe/base/cache, generation-bound management readiness, guest actions,
   independent workspace volumes, import, retained-volume rebuild/replacement
   and stopped export are implemented. Earlier bounded generic synthetic trials
@@ -81,9 +82,14 @@ fixture budget correction are verified in their recorded targeted checks.
   environment change would not extend those existing tasks, so that predictable
   rerun is rejected. Read-only task inspection detached with unchanged disks;
   packaging equivalence and a supported recovery path remain unverified.
-- Next: inspect packaged configure-hook behavior and design bounded seed recovery
-  before another full builder. Future probes must disable pagers and retain
-  terminal-phase evidence. Completed/failed derivatives remain immutable.
+- Next: run the prepared, independently reviewed disk-layout experiment. It
+  copies one stopped diagnostic disk into a freshly allocated file within the
+  current encrypted Tart store, verifies every logical byte, then compares
+  paired reads. Capacity covers the worst-case copy and retained margin. The
+  three-hour bound, exact parent checks and private phase/exit evidence are ready;
+  VM activity stays exclusive throughout. No VM is booted or admitted by this
+  copy. Completed/failed derivatives remain immutable. Storage causality and
+  supported seeding recovery remain unverified.
 - [Hosted CI for the latest prior documentation checkpoint](https://github.com/weshofmann/boxwarden/actions/runs/36255927638)
   passed the deterministic matrix. The earlier superseded run was cancelled.
 - All twelve fresh workflow acceptance gates remain pending. No reusable
