@@ -42,7 +42,7 @@ func TestTrackedChatGPTRecipeUsesPinnedGuestPreparation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tracked ChatGPT recipe is not runnable: %v", err)
 	}
-	if len(recipe.Steps) != 2 || recipe.Steps[0].Phase != "prepare" ||
+	if len(recipe.Steps) != 3 || recipe.Steps[0].Phase != "prepare" ||
 		len(recipe.Steps[0].Argv) != 1 || recipe.Steps[0].Argv[0] != "/usr/local/libexec/boxwarden-install-pinned-chatgpt" {
 		t.Fatalf("tracked ChatGPT preparation changed: %+v", recipe.Steps)
 	}
@@ -291,6 +291,44 @@ func TestLoadRunnableRejectsUnexecutableActionArgv(t *testing.T) {
 			_, err = LoadRunnable(filename)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("runnable admission error = %v, want error %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestTrackedChatGPTRecipesOfferExplicitWorkspaceEditWithoutChangingBase(t *testing.T) {
+	for _, filename := range []string{"v0.2-alpha-chatgpt.json", "v0.2-alpha-chatgpt-jq.json"} {
+		t.Run(filename, func(t *testing.T) {
+			value, err := LoadRunnable(filepath.Join("..", "..", "examples", filename))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var step *Step
+			for i := range value.Steps {
+				if value.Steps[i].ID == "edit-project" {
+					step = &value.Steps[i]
+				}
+			}
+			if step == nil || step.Phase != "reconfigure" || len(step.Argv) != 4 ||
+				step.Argv[0] != "/usr/bin/node" || step.Argv[1] != "-e" ||
+				step.Argv[3] != "/home/boxwarden/workspaces/project" {
+				t.Fatalf("explicit workspace edit is not runnable: %+v", step)
+			}
+			const guestSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+			withEdit, err := PreparationKey(value, guestSHA)
+			if err != nil {
+				t.Fatal(err)
+			}
+			without := value
+			without.Steps = nil
+			for _, action := range value.Steps {
+				if action.ID != "edit-project" {
+					without.Steps = append(without.Steps, action)
+				}
+			}
+			withoutEdit, err := PreparationKey(without, guestSHA)
+			if err != nil || withEdit != withoutEdit {
+				t.Fatalf("explicit workspace edit invalidates reusable base: %s != %s, err=%v", withEdit, withoutEdit, err)
 			}
 		})
 	}

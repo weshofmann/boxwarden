@@ -387,3 +387,29 @@ VMs stopped and doctor healthy. Final independent rereview found no remaining
 Important/Critical issue, verified durable helper/wrapper pins, and reran all
 seventeen fixtures plus syntax checks. The concrete attended retry is approved.
 Native replication, cutover and the fresh alpha workflow remain unverified.
+
+## Explicit synthetic edit increment (2026-09-26)
+
+The read-only demo could not prove the mission's required guest creation/edit
+retention. The demo now exposes explicit `--edit`; both ChatGPT recipes offer
+`edit-project` as a reconfigure action. Ordinary execution and startup do not
+change the imported files. The action selects exactly one ordinary import
+directory at its declared guest mount, with refusal for missing, ambiguous or
+linked candidates. Foreign note/task content is not silently overwritten.
+
+Five new filesystem cases failed before demo implementation; eight recipe
+action cases and both runnable-recipe subtests failed before the steps were
+added. Fourteen Node filesystem fixtures now pass. Fresh targeted recipe,
+session and app Go checks, targeted vet, gofmt and diff checks passed. The
+preparation-key comparison confirms the non-prepare action leaves reusable
+base identity unchanged. Independent bounded review reran the fixtures, Go
+checks and formatting; no Important/Critical issue remains. CI pins the
+official Node setup action and exact tested Node distribution, with package
+caching disabled and no npm dependency installation.
+
+These are source/fixture checks, not real guest or lifecycle acceptance. Keep
+the initial pristine stopped export/public import verification before any
+edit. Then compare independently expected modified task/new note and unchanged
+other source files before adopting a new edited-data baseline. Later stop/start,
+rebuild and replacement require new independent comparisons. Private staged
+source and acceptance input hashes from the prior revision require refresh.

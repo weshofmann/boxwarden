@@ -137,6 +137,36 @@ when finished. Rebuild, replacement reattachment, GUI acceptance, and a fresh
 independent repetition are tracked in [alpha progress](alpha-progress.md)
 until they pass the complete matrix.
 
+## Explicit synthetic edits and persistence
+
+For the ChatGPT recipes, complete the initial stopped export and original-owner
+`workspace import verify` **before** changing the imported project. Then start
+sandbox A and run its declared, guest-only action:
+
+```sh
+"$BW" --config "$CONFIG" --domain alpha session start "$SESSION"
+"$BW" --config "$CONFIG" --domain alpha session action run reconfigure edit-project "$SESSION"
+```
+
+The action requires exactly one ordinary `boxwarden-import-<UUID>` directory
+at the declared workspace mount. It runs that imported demo with `--edit`,
+updates `task.json` and creates `guest-note.txt`. The host source remains
+unchanged. This explicit action is not an ordinary startup step. Missing,
+ambiguous or linked import candidates stop the demo action before editing.
+
+Stop A and export the whole import directory into a **new** private destination.
+Independently require the task title `alpha workspace persistence (guest edited)`,
+items `["import", "stop", "export", "verify", "guest-edit"]`, and the note
+`Created inside sandbox A; retain through restart, rebuild and replacement.`
+followed by one newline. Compare `app.js` and `README.md` to the captured
+source and refuse unexpected entries before retaining this export as the
+edited-data baseline. Compare these bytes after stop/start,
+after rebuild plus explicit public start, and after replacement using another
+new stopped export. The original pristine import journal has already been
+verified; do not compare the edited tree to it or invoke that journal against a
+replacement owner. Repeat on the second fresh workspace independently. These
+commands and retention behavior await real-VM qualification.
+
 For the pending software-changing rebuild trial, the tracked
 `examples/v0.2-alpha-chatgpt-jq.json` recipe retains the ChatGPT preparation,
 startup action, and workspace declaration while adding the [Ubuntu 24.04 ARM64

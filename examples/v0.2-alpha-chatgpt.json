@@ -20,6 +20,16 @@
       "id": "open-chatgpt",
       "phase": "startup",
       "argv": ["/usr/local/libexec/boxwarden-launch-chatgpt"]
+    },
+    {
+      "id": "edit-project",
+      "phase": "reconfigure",
+      "argv": [
+        "/usr/bin/node",
+        "-e",
+        "const fs = require('node:fs');\nconst path = require('node:path');\nconst { spawnSync } = require('node:child_process');\nconst mount = process.argv[1];\nif (!fs.lstatSync(mount).isDirectory()) throw new Error('workspace must be an ordinary directory');\nconst imports = fs.readdirSync(mount, { withFileTypes: true }).filter(entry => /^boxwarden-import-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(entry.name));\nif (imports.length !== 1 || !imports[0].isDirectory()) throw new Error('edit-project requires exactly one ordinary synthetic import directory');\nconst app = path.join(mount, imports[0].name, 'app.js');\nconst info = fs.lstatSync(app);\nif (!info.isFile() || info.nlink !== 1) throw new Error('synthetic app must be an ordinary unlinked file');\nconst result = spawnSync(process.execPath, [app, '--edit'], { stdio: 'inherit' });\nif (result.error) throw result.error;\nprocess.exit(result.status === null ? 1 : result.status);",
+        "/home/boxwarden/workspaces/project"
+      ]
     }
   ],
   "workspaces": [

@@ -270,8 +270,10 @@ on synthetic data before the fresh end-to-end repetition.
    before real use. Keep the original synthetic host source unchanged.
 3. **Fresh acceptance and handoff.** From committed source, create a separate
    clean sandbox using the example recipe, import a tracked synthetic project,
-   check the GUI/application, stop/start, rebuild, delete while retaining the
-   workspace, attach it to a fresh replacement, and export selected files.
+   check the GUI/application, complete initial stopped export and original-owner
+   import verification, then explicitly create/edit synthetic files in A.
+   Capture a new edited-data export baseline and compare it through stop/start,
+   rebuild, deletion with retention, replacement attachment and new export.
    Record exact source/build SHA, observed outcomes, test commands, host limits,
    and owner-only sign-in actions. Leave all owned VMs stopped.
 

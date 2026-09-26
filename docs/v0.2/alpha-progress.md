@@ -7,7 +7,7 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Current checkpoint
 
-Published source: `d401c17126e2ff2b9e23ab75af1c781fae032fff`.
+Latest installer source: `d401c17126e2ff2b9e23ab75af1c781fae032fff`.
 [Hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36256683649)
 passed its full deterministic matrix. Required EFI wait, scoped daemon startup
 limits and supervisor fixture correction retain their recorded targeted checks.
@@ -145,6 +145,20 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   The plan keeps all twelve gates pending and executable commands disabled
   until a successful new migration attempt and admitted builder succeed; format/header and
   storage observations must be refreshed immediately before attachment.
+- The synthetic demo now has an explicit guest edit mode, and both ChatGPT
+  recipes declare an `edit-project` reconfigure action. It changes the imported
+  task and creates a known note only after original-owner import verification.
+  Later comparisons must use a new edited-data baseline. Fourteen filesystem
+  fixtures cover ordinary no-write behavior, edits/creation, repeat bytes,
+  foreign content preservation, links, and missing/ambiguous imports. They
+  failed before the corresponding behavior was added and pass afterward.
+  Fresh targeted recipe/session/app Go tests, targeted vet, gofmt and diff
+  checks passed. Independent review reran the fixtures and Go checks and found
+  no Important/Critical issue. The CI increment pins Node and its setup action
+  for these source fixtures; the new full hosted matrix is pending. Real guest
+  edits and lifecycle persistence remain pending; the
+  private old-source synthetic staging and acceptance plan need refreshed
+  input hashes before use. No VM operation has run for this correction.
 - The reviewed conditional diagnostic tools need refreshed source/storage
   identities before use. Their fake-tool checks qualify harness behavior only.
   All twelve fresh ChatGPT acceptance gates remain pending. Next: complete the
