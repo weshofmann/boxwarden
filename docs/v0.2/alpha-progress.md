@@ -12,7 +12,8 @@ prototype with material acceptance gaps, not an alpha-ready release.
   before the fix; targeted serial/basebuild tests and the full local Go suite
   passed afterward. [Hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36188021072)
   passed its deterministic matrix. Independent read-only delta review found
-  no Critical or Important issue; real installer success remains unproved.
+  no Critical or Important issue. Real installer completion was unproved at
+  that source checkpoint.
 - Published `5c686d1` updated the sanitized progress, review, and quickstart
   records; its [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36190652530)
   passed. A read-only public-path audit of that head found no new Critical or
@@ -24,14 +25,15 @@ prototype with material acceptance gaps, not an alpha-ready release.
   ledger for that order. Its [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36191518555)
   passed. These source and documentation checks do not qualify the running
   installer or its future clone.
-- A fresh public ChatGPT base preparation from published `c94c915` is now
-  `installer-running` with one owned candidate. At 2026-09-25 16:33 MDT, its
-  exact builder, Tart, and Virtualization processes were still live after
-  about 101 minutes, and the candidate disk was being written. This passes
-  the previous premature 90-minute transport cap, but neither the installer
-  nor the four-hour bounded attempt has completed. The two earlier timed-out
-  candidates remain stopped as failed evidence. Neither a prepared base nor
-  the ChatGPT package or window is qualified yet.
+- A fresh public ChatGPT base preparation from published `c94c915` reached
+  the exact installed-guest prompt and entered `preparing` by 2026-09-25
+  18:11 MDT, after more than three hours of owned installer runtime. This
+  demonstrates that the corrected serial wait did not cut off the installer
+  at the old 90-minute cap. Guest-only recipe preparation is still running;
+  finalization, independent-clone qualification, and cache admission remain
+  pending. The two earlier timed-out candidates remain stopped as failed
+  evidence. Neither a prepared ChatGPT base nor its package or window is
+  qualified yet.
 - Two separate 64 MiB workspace volumes are formatted, identity-checked,
   available, and unattached. The staged credential-free three-file source
   matches the tracked example byte for byte. Guest attach/import and the
