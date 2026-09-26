@@ -78,3 +78,16 @@ owner can make a new stopped export for independent byte comparison. Rebuild
 reports management state but does not invoke automatic actions; public
 `session start` must follow it before checking action completion and the GUI.
 These are acceptance-order findings, not real-host qualification.
+
+At published `5af7277`, `/root/typed_diagnostic_review` independently reviewed
+the `52bfd49..5af7277` guest preparation and pinned-installer diagnostic delta.
+The requested routing was GPT-6 Astra at high effort. No Important or Critical
+defect was found. The review confirmed private mode-0600 atomic replacement,
+file and directory sync, completion recording before the success marker,
+failure suppression of that marker, unchanged subprocess argument boundaries,
+and exclusion of child output, argv, environment, and exception text. The
+installer creates the private parent before execution, and host admission
+does not consume these diagnostic files. All 15 affected Python tests passed
+with bytecode writes disabled; the checkout remained clean. Real guest use,
+GUI behavior, power-loss durability, and filesystem fault injection were not
+tested. This is delta review, not final cumulative approval or admission.
