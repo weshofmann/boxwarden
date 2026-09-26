@@ -214,8 +214,23 @@ prototype with material acceptance gaps, not an alpha-ready release.
   This supports an interrupted startup hypothesis; it is not yet a demonstrated
   source fix. The full query returned fewer records than its fixed bound, its
   explicit exit marker was zero, and the exact raw evidence is retained privately.
-- Next: test a finite guest EFI device-wait change on a new disposable
-  diagnostic derivative while preserving the required mount and exact identity.
+- A fresh disposable experiment with a ten-minute required EFI device wait
+  completed and stopped normally. The effective wait matched, EFI mounted,
+  and basic/local-fs/serial-getty were active without an emergency event in the
+  bounded current journal. Multi-user and graphical targets were inactive at
+  the snapshot, and several daemons had startup timeouts. This is partial
+  evidence, not normal boot completion or a demonstrated source fix. Each
+  query, the wrapper and Tart exited zero; full-host observation confirmed all
+  VMs stopped and original/predecessor identities unchanged. Exact results
+  are archived privately. The multi-unit `systemctl is-active` exit means
+  **any** active unit, so its zero exit was not treated as all targets passing.
+  Future probes check required targets individually.
+- [Hosted CI for `ca7c51d`](https://github.com/weshofmann/boxwarden/actions/runs/36241567405)
+  passed its deterministic matrix. This documentation checkpoint uses exact
+  diagnostic evidence and sanitized diff checks; no source tests were rerun.
+- Next: on a fresh disposable derivative with the same finite EFI wait,
+  allow a bounded additional ten minutes after serial login and capture each
+  target's state/exit plus pending jobs and failed services before/after.
   Verify normal boot-target and serial-login completion before changing tracked
   installation inputs or starting another expensive fresh baseline. Preserve all
   failed and completed forensic objects; keep the host installer deadline intact.
