@@ -206,14 +206,22 @@ prototype with material acceptance gaps, not an alpha-ready release.
   explain the remaining original prompt wait. No serial-getty start event was
   found in that selected unit query; this is an observation, not proof that the
   service never ran. Original/predecessor identities remained unchanged.
-- Next: use a fresh diagnostic derivative to recover bounded runtime
-  original-boot target and serial-login scheduling evidence before another expensive
-  baseline. Preserve the original and completed forensic derivative. Do not
-  increase the deadline or attribute slow storage without evidence. All twelve
-  fresh acceptance gates remain pending. After a successful fresh preparation,
-  require the exact stopped candidate, cache, passed independent-clone receipt
-  and healthy doctor before public session creation and the complete workspace/
-  GUI acceptance sequence. Real sign-in remains a human acceptance action.
+- A broader original-boot journal probe completed and stopped normally.
+  The retained journal shows the graphical target queued, then emergency mode
+  reached after the required EFI device timed out. Emergency mode later stopped
+  and EFI recovered, but the retained journal contains no serial-getty start or
+  basic/multi-user/graphical target completion during the remaining runtime.
+  This supports an interrupted startup hypothesis; it is not yet a demonstrated
+  source fix. The full query returned fewer records than its fixed bound, its
+  explicit exit marker was zero, and the exact raw evidence is retained privately.
+- Next: test a finite guest EFI device-wait change on a new disposable
+  diagnostic derivative while preserving the required mount and exact identity.
+  Verify normal boot-target and serial-login completion before changing tracked
+  installation inputs or starting another expensive fresh baseline. Preserve all
+  failed and completed forensic objects; keep the host installer deadline intact.
+  All twelve fresh acceptance gates remain pending. A successful fresh preparation
+  must still prove exact journal/cache, independent-clone admission, stopped
+  objects and healthy doctor before the full workspace/GUI acceptance sequence.
 - Current external image storage remains in use. Relocation is deferred until
   Wes supplies a separate disk and explicit direction. No capacity guard is
   currently blocking investigation.
