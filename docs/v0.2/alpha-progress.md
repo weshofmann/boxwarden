@@ -77,8 +77,9 @@ prototype with material acceptance gaps, not an alpha-ready release.
   environment, or exception text and is not an admission receipt. The missing
   failure-record regression failed before the change; all eight preparation
   tests, generic seed/finalizer/ISO fixtures, ChatGPT installer tests, and the
-  full local Go suite passed afterward. Hosted CI and real-guest use of this
-  new diagnostic record remain pending.
+  full local Go suite passed afterward. [Hosted CI for `6c9815b`](https://github.com/weshofmann/boxwarden/actions/runs/36219520293)
+  passed the deterministic matrix. Real-guest use of this new record remains
+  pending.
 - The pinned ChatGPT installer also retains a private typed stage record:
   pinned package digest, last started stage, outcome, failure category, and
   exit code. Download and validation failures reproduced missing records
@@ -87,8 +88,14 @@ prototype with material acceptance gaps, not an alpha-ready release.
   fixtures, all eight preparation tests, and fresh affected base preparation
   and qualification package tests also pass. Real-guest diagnostic
   use and hosted CI for this increment remain pending.
-- Next: review the diagnostic changes and use a bounded diagnostic copy
-  to investigate the pinned helper before starting a fresh
+- One bounded diagnostic probe is running on a separate journal-recovered
+  disposable copy. It will check and invoke the original source-pinned helper
+  with a closed guest environment and privately retain stderr and its exit.
+  The extended boot window follows the observed slow service startup. The
+  failed original is unchanged; this probe is not qualification and its
+  result remains pending. No new full preparation attempt is running.
+- Next: inspect the diagnostic result, propagate any established cause across
+  remaining phases, and review the source before starting a fresh
   baseline. Require terminal success, stopped candidate, passed independent-clone
   qualification, and healthy host doctor before public session create. Then
   exercise graphical launch, import, initial stopped
