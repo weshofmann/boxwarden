@@ -354,4 +354,36 @@ corrected red/green repeat passed. Actual full-host read-only preflight passed
 after sandbox diskutil access was refused. Independent bounded correction
 review found no Important/Critical issue, verified both artifact pins, reran all
 three regressions and checked wrapper syntax. The attended retry is approved;
-no second root helper, new destination or native copy has executed.
+at that checkpoint no second root helper, new destination or native copy had
+executed. The actual second attempt is recorded below.
+
+## Native locked-volume correction (2026-09-26)
+
+The second attended driver and original parent exited 1 after encrypted volume
+creation succeeded. `-nomount` left the new destination locked; the helper's
+unlocked-state assertion was wrong. No ASR started. Rollback confirmed the
+source already canonical and read-only. Stateless key verification first
+required an explicit crypto-user; the corrected command exited zero and left
+the exact destination locked and unmounted. Failed receipts remain unchanged.
+
+The next correction reuses only the original empty leaf, checking creation,
+terminal failure, no restore, successful rollback, key verification, current
+UUID/container/store and unchanged sibling volume set. It separates identity
+from locked-state expectations, unlocks explicitly and inspects emptiness
+read-only before erase. Bounded review found two Important sibling gaps:
+unmount could re-lock the target before source detach, and the old mount
+LaunchAgent could race cutover. Both are corrected: observe/re-unlock first,
+and require the idle old job disabled and unloaded. Original helper/plist files
+were archived unchanged. An initial quiescence verifier expected `true`, while
+the installed launchctl prints `disabled`; the read-only corrected recheck passed.
+
+Seventeen targeted synthetic cases passed, including prior recovery,
+provenance/refusal, empty inspection, encryption transitions and the automatic
+mount guard. The learned locked/cutover gaps failed on the prior helper and
+passed on the correction. An initial sibling fixture combined locked state
+with a mountpoint; the corrected consistent fixture passed. Full-host read-only
+preflight passed with source inventory/small digests unchanged, all retained
+VMs stopped and doctor healthy. Final independent rereview found no remaining
+Important/Critical issue, verified durable helper/wrapper pins, and reran all
+seventeen fixtures plus syntax checks. The concrete attended retry is approved.
+Native replication, cutover and the fresh alpha workflow remain unverified.

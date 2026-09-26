@@ -290,9 +290,12 @@ completed migration or permission to erase an existing volume.
 2. Check source/outer filesystem consistency after the disk disconnect. Review
    exact commands, persistent volume/container identities, current capacity,
    noninteractive encryption handling, bounded process and free-space guards.
-3. Cleanly detach and remount the exact source image read-only. Keep its intact
-   contents for rollback. Create one new encrypted native APFS volume in the
-   rediscovered external container using the approved host-only key path.
+3. Keep the verified read-only source intact for rollback. The second attended
+   attempt created one encrypted native APFS volume before its guard failed.
+   Reuse only that exact owned empty leaf, bound to the original creation
+   receipts and current container identity; create no additional destination.
+   Verify the key noninteractively, explicitly unlock without mounting, and
+   inspect the destination read-only for emptiness before restoring.
 4. Use native ASR replication with verification into that exact new volume.
    Bind the target leaf-volume identity and container immediately before restore.
    The bounded capacity monitor must be able to stop and reap its own root ASR.
@@ -304,9 +307,13 @@ completed migration or permission to erase an existing volume.
    clone behavior, capacity and old-to-new storage-identity provenance. Native
    verification plus metadata parity is not independent equality of every disk byte. Historical
    attempt journals stay unchanged; migrated identities do not confer admission.
-6. Cut over only after verification. Preserve the canonical Tart mount and an
-   exact rollback procedure, then require healthy full-host doctor and stopped
-   objects before guest operations. Source retirement is a separate migration
+6. Cut over only after verification. Require the old automatic sparsebundle
+   mount job disabled and unloaded so it cannot race source detach. Observe and
+   re-unlock the verified destination after unmount, before detaching the source.
+   Preserve the canonical Tart mount and exact rollback procedure, then require
+   healthy full-host doctor and stopped objects. Adapt and verify persistent
+   mounting for the admitted native UUID before guest operations; actual reboot
+   remains untested. Source retirement is a separate migration
    step after verification, not part of selective disposable-VM cleanup.
 7. Measure the resulting layout without competing heavy writes, refresh the
    diagnostic/acceptance plans, then resume product qualification. Migration and

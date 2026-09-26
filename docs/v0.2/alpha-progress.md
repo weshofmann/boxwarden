@@ -79,8 +79,8 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   as rollback while restoring only into a new encrypted native volume. Independent method review requires an exact new leaf-volume target and
   a privileged stop/reap path for the bounded restore. Concrete driver checks
   precede mutation. Source and outer filesystem
-  checks exited zero and reported healthy; no native volume, replication or
-  cutover has been executed.
+  checks exited zero and reported healthy; native replication and cutover
+  remain pending.
 - [Cleanup checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36267146739)
   passed the full deterministic matrix. The concrete private migration helper
   now passes read-only preflight on the installed interpreter. Target/capacity/
@@ -106,8 +106,35 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   A sandbox preflight lacked diskutil access; the full-host repeat passed.
   The new one-shot retry preserves the first attempt and recovery receipts.
   Independent correction review found no Important/Critical issue and reran all
-  three regressions successfully. The corrected one-shot wrapper is ready for
-  attended administrator execution; no second root attempt has begun.
+  three regressions successfully. The second attended attempt then created its
+  encrypted destination but failed before ASR, as recorded below.
+- The second attended attempt exited 1 after successful encrypted volume
+  creation. The helper incorrectly required the `-nomount` destination to be
+  unlocked. ASR never started; the source remains read-only at the canonical
+  path, with successful rollback. The exact empty destination is retained for
+  reuse. Stateless key verification exited zero and left it locked/unmounted;
+  the installed command requires an explicit crypto-user for that verification.
+- The next private correction separates locked identity checks from the unlocked
+  restore gate, explicitly unlocks the exact owned destination, and inspects it
+  read-only for emptiness before the only authorized erase. It creates no extra
+  volume. Review also caught unmount-triggered relocking and an old automatic
+  source-mount job that could race cutover. The correction observes/re-unlocks
+  before detaching the source; the idle old job is now disabled and unloaded,
+  with its original files preserved. Its initial state verifier expected a
+  different launchctl output token; a corrected read-only recheck passed.
+- Seventeen targeted synthetic cases and full-host read-only preflight passed
+  for the corrected helper, with source metadata and small digests unchanged,
+  all ten objects stopped and doctor healthy. Earlier credentials/recovery
+  regressions remain covered. The first sibling-state fixture modeled an
+  inconsistent locked-and-mounted volume; its corrected repeat passed. These
+  are helper checks, not native copy or alpha qualification. Independent final
+  correction review found no Important/Critical issue and reran all seventeen
+  cases successfully. The new one-shot wrapper awaits attended administrator
+  execution; no third migration attempt has started. Native success also
+  requires verified cutover and a reviewed persistent mount helper before any
+  new VM trial; the old source job must stay disabled during the transition.
+- [Source-recovery checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36270559670)
+  passed the full deterministic matrix.
 - [Migration-helper checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36268800118)
   passed the full deterministic matrix. A clean `f7efc15` CLI build completed
   with exact source metadata and `vcs.modified=false`; full-host read-only doctor
