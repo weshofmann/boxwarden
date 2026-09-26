@@ -82,13 +82,14 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   environment change would not extend those existing tasks, so that predictable
   rerun is rejected. Read-only task inspection detached with unchanged disks;
   packaging equivalence and a supported recovery path remain unverified.
-- Next: run the prepared, independently reviewed disk-layout experiment. It
+- The independently reviewed disk-layout experiment is now running. It
   copies one stopped diagnostic disk into a freshly allocated file within the
   current encrypted Tart store, verifies every logical byte, then compares
   paired reads. Capacity covers the worst-case copy and retained margin. The
-  three-hour bound, exact parent checks and private phase/exit evidence are ready;
-  VM activity stays exclusive throughout. No VM is booted or admitted by this
-  copy. Completed/failed derivatives remain immutable. Storage causality and
+  three-hour bound, exact parent checks and private phase/exit evidence are active.
+  Full-host doctor, stopped-state, identity and capacity gates passed before
+  copying began. VM activity stays exclusive throughout. No VM is booted or
+  admitted by this copy. Completed/failed derivatives remain immutable. Storage causality and
   supported seeding recovery remain unverified.
 - [Hosted CI for the latest prior documentation checkpoint](https://github.com/weshofmann/boxwarden/actions/runs/36255927638)
   passed the deterministic matrix. The earlier superseded run was cancelled.
