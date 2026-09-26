@@ -168,21 +168,25 @@ prototype with material acceptance gaps, not an alpha-ready release.
   quickstart output-label mismatch, now corrected to `actions: complete`.
   No tests or real-host acceptance were rerun by that review. Clone qualification
   alone does not independently prove custom preparation results or the GUI.
-- A fresh public preparation from clean published `11ba8ce` has entered
-  `installer-running`. Its single original process is live, and no terminal
-  result is claimed. Full-host doctor, pinned recipe/ISO, regular remaster tool
-  pins, capacity, stopped predecessor inventory and the successful diagnostic
-  receipt passed preflight. The staged downloader and preparation helper match
-  the corrected tracked source byte for byte. Failed and forensic images remain
-  preserved and cannot be used for acceptance. Full download, installation,
-  finalization, independent-clone qualification and cache admission are pending.
-- Next: adjudicate this original preparation's exact terminal result and
-  journal. Require stopped candidate, matching cache and passed independent-clone
-  qualification, and healthy host doctor before public session create. Then
-  exercise graphical launch, import, initial stopped export and public import
-  verification, stop/start, software-changing rebuild and explicit start,
-  replacement attach, a new independently compared export, and the separate
-  fresh repeat. Real sign-in remains a human acceptance action.
+- The fresh public preparation from clean published `11ba8ce` terminally
+  failed during `installer-running` at 2026-09-26 11:18 UTC. The original
+  process and its private wrapper result both exited 1; the exact attempt
+  journal records `failed`. The installed-guest marker did not arrive before
+  the four-hour phase deadline. Full-host observation confirms the candidate
+  stopped and no VMs running. Its exact terminal result and disk identity are
+  archived privately. This failure precedes recipe preparation, so it does
+  not test the corrected downloader or new typed preparation records.
+  Full-host doctor, pinned inputs, capacity and source staging passed preflight;
+  they do not establish installer completion. Failed images remain immutable.
+  No finalization, independent-clone qualification or cache admission is claimed.
+- Next: inspect a separate disposable derivative of the stopped failed image
+  to determine the installer state and retained guest logs before another
+  expensive baseline. Do not increase the deadline or attribute slow storage
+  without evidence. All twelve fresh acceptance gates remain pending. After
+  a successful fresh preparation, require the exact stopped candidate, cache,
+  passed independent-clone receipt and healthy doctor before public session
+  creation and the complete workspace/GUI acceptance sequence. Real sign-in
+  remains a human acceptance action.
 - Current external image storage remains in use. Relocation is deferred until
   Wes supplies a separate disk and explicit direction. No capacity guard is
   currently blocking investigation.
