@@ -29,18 +29,22 @@ prototype with material acceptance gaps, not an alpha-ready release.
   the exact installed-guest prompt and entered `preparing` by 2026-09-25
   18:11 MDT, after more than three hours of owned installer runtime. This
   demonstrates that the corrected serial wait did not cut off the installer
-  at the old 90-minute cap. Guest-only recipe preparation is still running;
-  finalization, independent-clone qualification, and cache admission remain
-  pending. The two earlier timed-out candidates remain stopped as failed
-  evidence. Neither a prepared ChatGPT base nor its package or window is
-  qualified yet.
+  at the old 90-minute cap. The public prepare then exited nonzero during
+  guest-only recipe preparation at about 18:20 MDT. Its exact journal records
+  `failed`, and the candidate is stopped. The fixed guest failure marker does
+  not identify the failed command; investigation is in progress. This attempt
+  and the two earlier timed-out candidates remain failed evidence.
+  Finalization, independent-clone qualification, and cache admission did not
+  run. Neither a prepared ChatGPT base nor its package or window is qualified.
 - Two separate 64 MiB workspace volumes are formatted, identity-checked,
   available, and unattached. The staged credential-free three-file source
   matches the tracked example byte for byte. Guest attach/import and the
   retained-workspace loop remain pending.
-- Next: require the builder's terminal success, stopped candidate, passed
-  independent-clone qualification, and healthy host doctor before public
-  session create. Then exercise graphical launch, import, initial stopped
+- Next: diagnose the guest preparation failure from a separate forensic copy,
+  correct and verify its cause, then run a fresh base attempt. Require that
+  new builder's terminal success, stopped candidate, passed independent-clone
+  qualification, and healthy host doctor before public session create. Then
+  exercise graphical launch, import, initial stopped
   export and import verification, stop/start, software-changing rebuild and
   explicit start, replacement attach, a second stopped export with independent
   byte comparison, and a separate fresh repeat. Real sign-in remains a human
