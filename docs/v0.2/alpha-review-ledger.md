@@ -330,3 +330,28 @@ first exposed inherited blocked child signals; restoring the child mask before
 exec made the actual child promptly terminate/reap. Final read-only preflight
 passed. No root helper, native copy or cutover has executed; attended administrator
 authentication is the remaining platform prerequisite, not a new migration scope.
+
+
+## Native source remount failure and recovery (2026-09-26)
+
+The attended first migration exited 1 after clean source detach and failed
+read-only attach authentication, before target creation or ASR. The helper
+stripped the existing credential file's line ending and added a NUL; the
+established mount path passes unchanged file bytes through EOF. Rollback
+then failed by querying the unmounted canonical directory as a disk.
+
+One bounded exact-source recovery with raw-file stdin exited zero, leaving
+the source read-only at the canonical mount with ownership enabled. All ten
+retained VMs are stopped, no VM files are open, payload metadata and small
+digests match, and full-host doctor passed. No VM disk was fully hashed;
+workspace data and original failed-attempt receipts remain unchanged.
+
+The retry preserves exact credential bytes, handles the unmounted directory
+without that disk query, and avoids detaching an already read-only source.
+Three regressions failed on the original and passed on the correction. A
+missing inventory mock initially failed the corrected rollback fixture; the
+corrected red/green repeat passed. Actual full-host read-only preflight passed
+after sandbox diskutil access was refused. Independent bounded correction
+review found no Important/Critical issue, verified both artifact pins, reran all
+three regressions and checked wrapper syntax. The attended retry is approved;
+no second root helper, new destination or native copy has executed.

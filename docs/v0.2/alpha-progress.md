@@ -90,12 +90,24 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   Independent review required failed-cutover rollback and explicit target
   ownership; the corrected helper has no remaining Important/Critical finding.
   These are helper checks, not native migration or alpha acceptance.
-- **Required human action:** native ASR needs root and noninteractive sudo
-  reports that administrator authentication is required. A single hash-pinned,
-  reviewed command has been presented privately for attended execution. It retains
-  the source, uses noninteractive volume unlock and records the original driver
-  exit. No native volume, copy or cutover has started. Continue safe synthetic
-  preparation while this platform privilege step is pending.
+- The first attended migration exited 1 during the source read-only remount,
+  before destination creation or ASR. The helper changed the approved credential
+  file's stdin bytes, causing authentication failure; its rollback also queried
+  an unmounted directory as a disk. The original failure receipts are retained.
+  One exact read-only recovery using the established raw-file stdin contract
+  exited zero. All ten retained objects are stopped, no VM files are open,
+  payload metadata and small digests match the pre-attempt inventory, and doctor
+  is healthy. The source is now mounted read-only; no VM boot occurred.
+- The corrected private retry preserves credential bytes through EOF, handles
+  an unmounted canonical directory during rollback, and reuses the already
+  read-only source. Three behavioral regressions failed on the original helper
+  and passed on the correction; full-host read-only preflight passed. An initial
+  fixture omitted a native inventory mock; its corrected red/green repeat passed.
+  A sandbox preflight lacked diskutil access; the full-host repeat passed.
+  The new one-shot retry preserves the first attempt and recovery receipts.
+  Independent correction review found no Important/Critical issue and reran all
+  three regressions successfully. The corrected one-shot wrapper is ready for
+  attended administrator execution; no second root attempt has begun.
 - [Migration-helper checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36268800118)
   passed the full deterministic matrix. A clean `f7efc15` CLI build completed
   with exact source metadata and `vcs.modified=false`; full-host read-only doctor
@@ -104,7 +116,7 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   A private acceptance plan and CLI are durably archived with verified readback.
   Both reserved volume identities and all three synthetic source files match.
   The plan keeps all twelve gates pending and executable commands disabled
-  until native migration and a new admitted builder succeed; format/header and
+  until a successful new migration attempt and admitted builder succeed; format/header and
   storage observations must be refreshed immediately before attachment.
 - The reviewed conditional diagnostic tools need refreshed source/storage
   identities before use. Their fake-tool checks qualify harness behavior only.
