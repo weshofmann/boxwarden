@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-25 UTC. Integration branch:
+Updated: 2026-09-26 UTC. Integration branch:
 `weshofmann/feature/v02-alpha`; [Draft PR #12](https://github.com/weshofmann/boxwarden/pull/12).
 The mission deadline is 2026-10-03 14:44 UTC. This remains a functional
 prototype with material acceptance gaps, not an alpha-ready release.
@@ -53,8 +53,13 @@ prototype with material acceptance gaps, not an alpha-ready release.
   available, and unattached. The staged credential-free three-file source
   matches the tracked example byte for byte. Guest attach/import and the
   retained-workspace loop remain pending.
-- Next: run a fresh base attempt from corrected inputs. Require that
-  new builder's terminal success, stopped candidate, passed independent-clone
+- A fresh public ChatGPT base preparation from clean published `52bfd49` is
+  running in the installer phase. The source-bound CLI, pinned ISO and tools,
+  full-visibility host doctor, and recipe admission passed preflight. Its
+  private exact attempt and process result are retained. No prepared base or
+  ChatGPT installation is claimed while the attempt remains live.
+- Next: adjudicate the retained builder's exact terminal result and journal.
+  Require terminal success, stopped candidate, passed independent-clone
   qualification, and healthy host doctor before public session create. Then
   exercise graphical launch, import, initial stopped
   export and import verification, stop/start, software-changing rebuild and
