@@ -60,9 +60,12 @@ fixture budget correction are verified in their recorded targeted checks.
   ModemManager also failed. This is partial service evidence, not admission.
 - Read-only unit inspection detached cleanly and preserved its parent. The
   seeding waiter requires and follows snapd's socket, without ordering after
-  daemon readiness. Next: test scoped daemon-readiness ordering on a fresh
-  disposable derivative and retain remaining failures before production changes
-  or a new full builder attempt. Prior failed/completed evidence is immutable.
+  daemon readiness. One fresh disposable derivative is now running with only an added seeding
+  waiter dependency/order after the notify-ready daemon. EFI and the two daemon
+  limits are unchanged; ModemManager is unchanged. Exact readback, syntax/PTY
+  delivery, actual harness bounds, healthy doctor and stopped-parent checks
+  passed before launch. Next: adjudicate effective ordering and final results
+  before production changes or a new full builder. Prior evidence is immutable.
 - All twelve fresh workflow acceptance gates remain pending. No reusable
   ChatGPT base or graphical application has passed this workflow. The remaining
   sequence is listed below. Real sign-in and subjective GUI acceptance may need
