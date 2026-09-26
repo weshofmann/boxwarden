@@ -102,3 +102,29 @@ eight preparation tests successfully. The new regression exercises the
 actual Request and pinned-byte validation; its header assertion covers
 explicitly configured headers, not every wire header. Host HTTP success
 does not qualify guest download, installation, or the historical failure.
+
+## Integration audit at `54c185f`
+
+A fresh read-only reviewer audited the delta from the reviewed `8edbd665`
+snapshot, checked the earlier finding dispositions, and traced preparation
+and cache admission, management readiness and actions, original-owner import
+verification, stopped export, stop/start, rebuild recovery, explicit start
+after rebuild, and replacement attachment/export. The actual PR merge base
+remains `e16f239`. No new Important or Critical defect was confirmed in these
+bounded paths. The requested routing was GPT-6 Astra at extra-high effort.
+
+One Minor documentation mismatch was confirmed: the quickstart required
+`automatic-actions: complete`, while the public start formatter emits
+`actions: complete`. This checkpoint corrects the quickstart; acceptance
+checks must use the actual emitted field. Management readiness and GUI
+observation remain separate gates.
+
+The reviewer used exact-ref Git reads and diff checks. No tests were rerun,
+private evidence accessed, files changed, or host VM operations performed.
+The live builder's `11ba8ce` differs from the frozen review head only in the
+progress document. This is bounded integration review, not exhaustive
+line-by-line approval or real-host acceptance. Independent-clone qualification
+checks management readiness, declared apt packages and clone identity;
+arbitrary preparation-step results and ChatGPT GUI behavior need their own
+acceptance evidence. Full download/install, graphical launch, retained bytes
+through rebuild/replacement, exports and a fresh repeat remain pending.

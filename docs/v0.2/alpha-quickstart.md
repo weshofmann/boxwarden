@@ -157,6 +157,6 @@ the public command:
 
 Rebuild reports management state but does not invoke the recipe's automatic
 `once` and `startup` actions. Require the subsequent start to report
-`automatic-actions: complete`, then check the workspace bytes and actual GUI.
+`actions: complete`, then check the workspace bytes and actual GUI.
 These commands still require a fresh real-host qualification. Do not infer
 retained data or a usable desktop from rebuild's exit status alone.

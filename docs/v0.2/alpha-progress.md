@@ -161,6 +161,13 @@ prototype with material acceptance gaps, not an alpha-ready release.
   passed its deterministic matrix.
   [Hosted CI for `4fea9ef`](https://github.com/weshofmann/boxwarden/actions/runs/36223070383)
   also passed.
+- The `11ba8ce` documentation/source-identity checkpoint's
+  [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36226186030)
+  passed the deterministic matrix. A fresh frozen-source integration audit
+  found no new Important or Critical defect in the reviewed paths. It found a
+  quickstart output-label mismatch, now corrected to `actions: complete`.
+  No tests or real-host acceptance were rerun by that review. Clone qualification
+  alone does not independently prove custom preparation results or the GUI.
 - A fresh public preparation from clean published `11ba8ce` has entered
   `installer-running`. Its single original process is live, and no terminal
   result is claimed. Full-host doctor, pinned recipe/ISO, regular remaster tool
