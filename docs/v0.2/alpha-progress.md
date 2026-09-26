@@ -24,7 +24,7 @@ passed its deterministic matrix, including the new EFI filesystem fixture.
   and eight installer tests, and fresh affected Go packages passed locally.
   Independent re-review found no remaining Important/Critical defect. These
   were targeted local checks; the full deterministic matrix passed in hosted CI.
-- The last diagnostic reached every required normal target and serial-getty
+- An earlier diagnostic reached every required normal target and serial-getty
   with individual active/zero-exit results, then stopped. Original/predecessor
   identities were unchanged. Snapd seeding and the disk manager still failed;
   cloud-init's final stage completed later. This is target evidence, not healthy
@@ -38,9 +38,12 @@ passed its deterministic matrix, including the new EFI filesystem fixture.
   multi-user and graphical targets remained inactive after the bounded wait.
   Zero failed units did not establish completed initialization. Original and
   predecessor identities were unchanged; the exact private receipt is retained.
-- Next: inspect the remaining seeding dependency and progress on a fresh
-  derivative. The daemon result is partial evidence; propagate the remaining
-  gap before any service input correction or another expensive preparation.
+- One fresh diagnostic is now running with the same guest changes. It allows
+  thirty minutes for seeding after the prompt and captures bounded snap task
+  progress every two minutes before its own shutdown. The stopped predecessor's
+  hook termination occurred near shutdown, so it cannot establish the original
+  cause. Next: adjudicate the original result and pre-shutdown progress, then
+  propagate the remaining gap before another expensive preparation.
 - All twelve fresh workflow acceptance gates remain pending. No reusable
   ChatGPT base or graphical application has passed this workflow. The remaining
   sequence is listed below. Real sign-in and subjective GUI acceptance may need
