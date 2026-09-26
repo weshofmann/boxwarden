@@ -44,10 +44,12 @@ passed its deterministic matrix, including the new EFI filesystem fixture.
   were retained, but final unit results and the completion marker are absent.
   The error belongs to the harness; it does not prove seeding failed. All VMs
   are stopped and original/predecessor identities are unchanged.
-- Next: enforce the generated harness's actual deadline, then run one fresh
-  derivative with the same guest inputs. A regression detected the stale
-  fifteen-minute value and passed after the exact replacement. Preserve failed
-  evidence and verify the effective bounds before another expensive operation.
+- One fresh derivative is now running with the same guest inputs. Both
+  preparation and launch checked the actual generated thirty-five-minute host
+  query deadline and rejected the stale fifteen-minute value; the guest wait
+  remains thirty minutes. Syntax and exact PTY command roundtrip checks passed.
+  Next: adjudicate pre-shutdown task progress, original terminal result and
+  stopped-state receipt. All earlier failed diagnostics remain immutable.
 - All twelve fresh workflow acceptance gates remain pending. No reusable
   ChatGPT base or graphical application has passed this workflow. The remaining
   sequence is listed below. Real sign-in and subjective GUI acceptance may need
