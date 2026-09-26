@@ -92,10 +92,20 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   These are helper checks, not native migration or alpha acceptance.
 - **Required human action:** native ASR needs root and noninteractive sudo
   reports that administrator authentication is required. A single hash-pinned,
-  reviewed command is prepared privately for attended execution. It retains
+  reviewed command has been presented privately for attended execution. It retains
   the source, uses noninteractive volume unlock and records the original driver
   exit. No native volume, copy or cutover has started. Continue safe synthetic
   preparation while this platform privilege step is pending.
+- [Migration-helper checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36268800118)
+  passed the full deterministic matrix. A clean `f7efc15` CLI build completed
+  with exact source metadata and `vcs.modified=false`; full-host read-only doctor
+  passed. Go reported a denied stat-cache write, but the original build exited
+  zero. The current source has no code/guest/tool/workflow delta from `d401c17`.
+  A private acceptance plan and CLI are durably archived with verified readback.
+  Both reserved volume identities and all three synthetic source files match.
+  The plan keeps all twelve gates pending and executable commands disabled
+  until native migration and a new admitted builder succeed; format/header and
+  storage observations must be refreshed immediately before attachment.
 - The reviewed conditional diagnostic tools need refreshed source/storage
   identities before use. Their fake-tool checks qualify harness behavior only.
   All twelve fresh ChatGPT acceptance gates remain pending. Next: complete the
