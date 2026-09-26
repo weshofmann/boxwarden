@@ -54,10 +54,13 @@ prototype with material acceptance gaps, not an alpha-ready release.
   matches the tracked example byte for byte. Guest attach/import and the
   retained-workspace loop remain pending.
 - A fresh public ChatGPT base preparation from clean published `52bfd49` is
-  running in the installer phase. The source-bound CLI, pinned ISO and tools,
+  in guest-only recipe preparation. It reached the exact installed-guest
+  prompt at 2026-09-26 03:40 UTC, after about two hours 51 minutes of installer
+  runtime. The source-bound CLI, pinned ISO and tools,
   full-visibility host doctor, and recipe admission passed preflight. Its
   private exact attempt and process result are retained. No prepared base or
-  ChatGPT installation is claimed while the attempt remains live.
+  ChatGPT installation is claimed while the attempt remains live. Finalization,
+  independent-clone qualification, and cache admission remain pending.
 - Next: adjudicate the retained builder's exact terminal result and journal.
   Require terminal success, stopped candidate, passed independent-clone
   qualification, and healthy host doctor before public session create. Then
