@@ -114,8 +114,14 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   ChatGPT base or graphical application has passed this workflow. The remaining
   sequence is listed below. Real sign-in and subjective GUI acceptance may need
   human participation later; no current human action is required.
-- Disk capacity is not currently blocking work. Keep the existing external image
-  layout; relocation remains paused until Wes supplies a separate disk and direction.
+- Wes has authorized migration to a native encrypted APFS volume at the next
+  safe storage transition, superseding the earlier relocation hold. The bounded
+  copy remains the sole live write operation; migration takes priority before
+  another VM boot. Read-only inventory found insufficient shared capacity for
+  a complete second copy while retaining the mission free-space floor. Native
+  replication and staging options are under review; no new volume, cutover or
+  source retirement has occurred. Preserve the canonical Tart mount, clone
+  relationships, failed evidence and noninteractive unlock handling.
 
 <details>
 <summary>Earlier checkpoint and implementation evidence</summary>

@@ -86,3 +86,16 @@ policy, temporary directory, download, package identity, repository policy,
 package install, installed identity, final source policy, and cleanup.
 It uses the same private atomic file/directory-sync discipline, excludes
 exception text and child data, and carries no qualification authority.
+
+## Operator storage direction (2026-09-26)
+
+Wes authorized migration of the existing Tart image store to a native encrypted
+APFS volume at the next safe transition, superseding the earlier hold for a
+separate disk. Finish or bound the current owned storage operation first;
+migration takes priority before another VM boot or expensive fresh baseline.
+Preserve the admitted canonical Tart mount, historical disk bytes and journals,
+clone relationships, durable storage-identity provenance and noninteractive
+unlock handling. Review the concrete capacity and cutover plan independently.
+Do not erase existing volumes or containers, delete unrelated data, assume
+compaction savings, or relax the free-space floor to make staging fit. A
+verified migration is infrastructure preparation, not alpha qualification.
