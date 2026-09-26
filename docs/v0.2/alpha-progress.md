@@ -102,6 +102,14 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   these checks establish harness behavior, not guest qualification.
 - [Hosted CI for the active-copy documentation checkpoint](https://github.com/weshofmann/boxwarden/actions/runs/36257773375)
   passed the full deterministic matrix.
+- The conditional stopped-clone setup for the next controlled observation is
+  archived and reviewed. It preserves the earlier guest changes so layout is
+  the trial variable. Its first gate rejected execution while the copy is live,
+  before any native tool or VM call. Review found attachment-cleanup gaps;
+  exact-image reconciliation now covers ambiguous attach outcomes and logging
+  errors. Eight fake-tool checks passed locally and independently. Wrapper
+  syntax and isolated exit-recording checks passed. No clone was prepared or
+  booted by these checks; exact copy adjudication remains a prerequisite.
 - All twelve fresh workflow acceptance gates remain pending. No reusable
   ChatGPT base or graphical application has passed this workflow. The remaining
   sequence is listed below. Real sign-in and subjective GUI acceptance may need

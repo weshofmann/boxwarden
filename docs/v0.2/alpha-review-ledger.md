@@ -218,3 +218,32 @@ remain immutable private evidence. The observer has not been launched against
 Tart; this is diagnostic-tool verification, not repository-wide approval or
 real-host qualification. Historical exact child-exit receipts remain separately
 required; a harness capability defect alone does not change a recorded exit.
+
+
+## Conditional diagnostic preparation review (2026-09-26)
+
+The next stopped-copy setup preserves the earlier EFI and two scoped daemon
+changes, making file layout the intended trial variable. Its conditional driver
+also requires the original preparation's numeric zero exit, exact final disk
+identity and detach receipt before any boot. Current-state execution rejected
+the absent terminal copy exit before any native tool or VM call.
+
+Read-only review found an Important cleanup gap: native attach and plist parsing
+preceded cleanup protection, and detach-phase logging could suppress detach.
+An exact old attachment-code span with a fake malformed result reproduced the
+missing cleanup. The replacement protects the complete attempt, refuses to
+adopt pre-existing attachments, reconciles only the exact new owned image, and
+performs bounded cleanup before propagating logging errors. Unresolved cleanup
+prevents a successful preparation receipt. The preparation body has a finite
+thirty-minute bound; cleanup has separate finite native-command bounds.
+
+Eight fake-tool checks passed locally and independently: successful cleanup;
+attach timeout, nonzero exit, malformed result and missing GUID; detach-log
+failure; refusal to adopt an existing attachment; and finite repeated detach
+failure. Helper/preparation compile and driver syntax/placeholder checks passed.
+Both wrappers passed shell syntax, and isolated exit recorders preserved a
+numeric failure while rejecting overwrite and invalid input. Re-review found
+no remaining Important/Critical issue in the bounded delta. Private artifacts
+are durably archived; none of these tests operated a real VM or native disk
+tool. The copy remains the sole live operation, and fresh clone preparation,
+boot, guest behavior and all alpha acceptance gates remain unexecuted.
