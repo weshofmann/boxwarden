@@ -6,9 +6,12 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
 
 PAYLOAD_PATH = "/var/lib/boxwarden/recipe-prepare.json"
+RESULT_PATH = Path("/var/lib/boxwarden/recipe-prepare-result.json")
 READY_MARKER = "boxwarden recipe prepare complete"
 MAX_PAYLOAD = 1 << 20
 PACKAGE = re.compile(r"^[a-z][a-z0-9+.-]{0,127}$")
@@ -82,16 +85,47 @@ def command_plan(payload):
     return commands
 
 
+def record_result(payload, index, identifier, outcome, exit_code=None):
+    # Preserve attribution before the host reacts to the failure marker. Never
+    # retain child output, argv, environment, or arbitrary exception text here.
+    result = {"version": 1, "preparation_key": payload["preparation_key"],
+              "command_index": index, "step_id": identifier,
+              "outcome": outcome, "exit_code": exit_code}
+    raw = (json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    fd, temporary = tempfile.mkstemp(prefix=".recipe-prepare-result-", dir=RESULT_PATH.parent)
+    try:
+        with os.fdopen(fd, "wb") as output:
+            output.write(raw)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, RESULT_PATH)
+        directory = os.open(RESULT_PATH.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
 def execute_payload(payload):
-    for identifier, argv in command_plan(payload):
+    for index, (identifier, argv) in enumerate(command_plan(payload)):
+        record_result(payload, index, identifier, "started")
         try:
             completed = subprocess.run(argv, cwd="/", env=RUN_ENV, stdin=subprocess.DEVNULL,
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                        timeout=1800, check=False, start_new_session=True)
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except subprocess.TimeoutExpired as exc:
+            record_result(payload, index, identifier, "timeout")
+            raise RuntimeError(f"recipe preparation {identifier} could not finish") from exc
+        except OSError as exc:
+            record_result(payload, index, identifier, "spawn-error")
             raise RuntimeError(f"recipe preparation {identifier} could not finish") from exc
         if completed.returncode != 0:
+            record_result(payload, index, identifier, "nonzero", completed.returncode)
             raise RuntimeError(f"recipe preparation {identifier} exited nonzero")
+    record_result(payload, None, None, "complete")
 
 
 def main(args):

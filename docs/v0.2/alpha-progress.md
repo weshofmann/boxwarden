@@ -66,8 +66,21 @@ prototype with material acceptance gaps, not an alpha-ready release.
   installation is claimed. Finalization, independent-clone qualification,
   and cache admission did not run. [Hosted CI for the `36b6551` documentation checkpoint](https://github.com/weshofmann/boxwarden/actions/runs/36216356185)
   passed its deterministic matrix; it does not prove host qualification.
-- Next: inspect a separate stopped forensic clone read-only to identify the
-  failing preparation step before correcting source and starting a fresh
+- Separate forensic copies preserved the failed original. Read-only log
+  inspection and journal-only replay on a disposable copy recovered no exact
+  failure attribution. A bounded diagnostic boot timed out before serial
+  readiness; that copy is stopped. These observations do not prove that slow
+  storage, apt, or the ChatGPT helper caused the preparation failure.
+- The guest preparation helper now atomically retains a private typed result
+  before each command and before reporting failure: preparation key, command
+  position, step ID, outcome, and exit code. It retains no child text, argv,
+  environment, or exception text and is not an admission receipt. The missing
+  failure-record regression failed before the change; all eight preparation
+  tests, generic seed/finalizer/ISO fixtures, ChatGPT installer tests, and the
+  full local Go suite passed afterward. Hosted CI and real-guest use of this
+  new diagnostic record remain pending.
+- Next: finish safe stage attribution for the pinned guest installer and
+  review the diagnostic changes before starting a fresh
   baseline. Require terminal success, stopped candidate, passed independent-clone
   qualification, and healthy host doctor before public session create. Then
   exercise graphical launch, import, initial stopped

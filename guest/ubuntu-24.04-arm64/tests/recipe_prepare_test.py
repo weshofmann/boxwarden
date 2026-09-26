@@ -6,8 +6,10 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 HELPER = Path(__file__).resolve().parents[1] / "recipe-prepare.py"
@@ -49,6 +51,7 @@ class RecipePrepareTests(unittest.TestCase):
         helper = load_helper()
         with tempfile.TemporaryDirectory() as root:
             report = Path(root) / "report.json"
+            helper.RESULT_PATH = Path(root) / "result.json"
             child = Path(root) / "child.py"
             child.write_text("import json, os, sys\nfrom pathlib import Path\nPath(sys.argv[1]).write_text(json.dumps({'argv':sys.argv[2:], 'host_var':os.environ.get('BOXWARDEN_TEST_HOST_SECRET')}))\n")
             payload = helper.parse_payload(json.dumps({
@@ -73,6 +76,7 @@ class RecipePrepareTests(unittest.TestCase):
         helper = load_helper()
         with tempfile.TemporaryDirectory() as root:
             marker = Path(root) / "later"
+            helper.RESULT_PATH = Path(root) / "result.json"
             payload = helper.parse_payload(json.dumps({
                 "version": 1,
                 "preparation_key": "c" * 64,
@@ -85,6 +89,87 @@ class RecipePrepareTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "fails"):
                 helper.execute_payload(payload)
             self.assertFalse(marker.exists())
+
+    def test_failed_step_retains_private_typed_result_without_child_text(self):
+        helper = load_helper()
+        with tempfile.TemporaryDirectory() as root:
+            result = Path(root) / "result.json"
+            helper.RESULT_PATH = result
+            payload = helper.parse_payload(json.dumps({
+                "version": 1, "preparation_key": "d" * 64, "apt_packages": [],
+                "steps": [
+                    {"id": "first", "argv": [sys.executable, "-c", "raise SystemExit(0)"]},
+                    {"id": "fails", "argv": [sys.executable, "-c",
+                    "import sys; print('private child text', file=sys.stderr); raise SystemExit(7)"]}],
+            }).encode())
+            with self.assertRaises(RuntimeError):
+                helper.execute_payload(payload)
+            self.assertTrue(result.exists(), "failed step lost its diagnostic result")
+            self.assertEqual(json.loads(result.read_bytes()), {
+                "version": 1, "preparation_key": "d" * 64, "step_id": "fails",
+                "command_index": 1, "outcome": "nonzero", "exit_code": 7,
+            })
+            self.assertEqual(result.stat().st_mode & 0o777, 0o600)
+            self.assertNotIn(b"private child text", result.read_bytes())
+
+    def test_started_result_precedes_child_and_complete_follows_success(self):
+        helper = load_helper()
+        with tempfile.TemporaryDirectory() as root:
+            result = Path(root) / "result.json"
+            observed = Path(root) / "observed.json"
+            helper.RESULT_PATH = result
+            payload = helper.parse_payload(json.dumps({
+                "version": 1, "preparation_key": "e" * 64, "apt_packages": [],
+                "steps": [{"id": "observe", "argv": [sys.executable, "-c",
+                    "from pathlib import Path; import sys; Path(sys.argv[2]).write_bytes(Path(sys.argv[1]).read_bytes())",
+                    str(result), str(observed)]}],
+            }).encode())
+            helper.execute_payload(payload)
+            self.assertEqual(json.loads(observed.read_bytes()), {
+                "version": 1, "preparation_key": "e" * 64, "step_id": "observe",
+                "command_index": 0, "outcome": "started", "exit_code": None,
+            })
+            self.assertEqual(json.loads(result.read_bytes()), {
+                "version": 1, "preparation_key": "e" * 64, "step_id": None,
+                "command_index": None, "outcome": "complete", "exit_code": None,
+            })
+
+    def test_spawn_failure_retains_category_without_exception_path(self):
+        helper = load_helper()
+        with tempfile.TemporaryDirectory() as root:
+            result = Path(root) / "result.json"
+            helper.RESULT_PATH = result
+            payload = helper.parse_payload(json.dumps({
+                "version": 1, "preparation_key": "f" * 64, "apt_packages": [],
+                "steps": [{"id": "missing", "argv": [str(Path(root) / "absent-child")]}],
+            }).encode())
+            with self.assertRaises(RuntimeError):
+                helper.execute_payload(payload)
+            self.assertEqual(json.loads(result.read_bytes()), {
+                "version": 1, "preparation_key": "f" * 64, "step_id": "missing",
+                "command_index": 0, "outcome": "spawn-error", "exit_code": None,
+            })
+            self.assertNotIn(root.encode(), result.read_bytes())
+
+    def test_timeout_retains_category_without_child_argv(self):
+        helper = load_helper()
+        with tempfile.TemporaryDirectory() as root:
+            result = Path(root) / "result.json"
+            helper.RESULT_PATH = result
+            payload = helper.parse_payload(json.dumps({
+                "version": 1, "preparation_key": "a" * 64, "apt_packages": [],
+                "steps": [{"id": "slow", "argv": ["/bin/sleep", "1801"]}],
+            }).encode())
+            # Exercise the outcome handler without a thirty-minute child wait.
+            with mock.patch.object(helper.subprocess, "run",
+                    side_effect=subprocess.TimeoutExpired(["private child argv"], 1800)):
+                with self.assertRaises(RuntimeError):
+                    helper.execute_payload(payload)
+            self.assertEqual(json.loads(result.read_bytes()), {
+                "version": 1, "preparation_key": "a" * 64, "step_id": "slow",
+                "command_index": 0, "outcome": "timeout", "exit_code": None,
+            })
+            self.assertNotIn(b"private child argv", result.read_bytes())
 
 
 if __name__ == "__main__":

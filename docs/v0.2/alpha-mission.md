@@ -63,3 +63,17 @@ The active execution sequence and actual status are in
 The current source-tracked operator commands are in
 [`alpha-quickstart.md`](alpha-quickstart.md); that guide does not replace the
 fresh acceptance evidence required before calling the alpha ready.
+
+## Guest preparation diagnosis
+
+The fixed guest preparation helper retains its latest command outcome at
+`/var/lib/boxwarden/recipe-prepare-result.json`. Version 1 records the exact
+preparation key, zero-based command index (including generated apt commands),
+step ID, outcome (`started`, `nonzero`, `timeout`, `spawn-error`, or `complete`),
+and exit code when available. `complete` has no command index or step ID.
+The mode-0600 file is atomically replaced and file/directory synced before
+execution or the terminal marker. It contains no child output, argv,
+environment, or exception text. It is diagnostic guest state, never a trusted
+qualification or cache-admission receipt. A crash can leave `started`; that
+means indeterminate execution, not success or permission to rerun a failed
+qualification candidate.
