@@ -143,8 +143,10 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   All 26 synthetic cases, exact archived full-host read-only preflight, Python
   syntax, wrapper syntax and ShellCheck passed. Fresh independent review found
   no Important/Critical issue and reran the 26 cases. These are helper checks;
-  the new one-shot fourth attempt awaits administrator execution. Native
-  success requires verified cutover and a reviewed persistent mount helper
+  the fourth attended attempt passed empty-target preparation and entered
+  native ASR replication after source and destination validation. Its original
+  parent, copy result and acceptance receipts remain pending; no completion or
+  cutover is claimed. Native success requires verified cutover and a reviewed persistent mount helper
   before new VM trials; the old source job stays disabled during the transition.
 - At the operator's request, the recurring continuation automation was deleted.
   Storage completion is the current priority; product implementation resumes

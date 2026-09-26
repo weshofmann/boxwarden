@@ -327,7 +327,8 @@ completed migration or permission to erase an existing volume.
 The concrete commands and private evidence remain outside Git. If current
 capacity no longer fits the retained source plus restore budget and floor,
 return to the reviewed intact-image staging fallback; never assume compaction
-savings or relax the floor. No native restore or cutover has been executed.
+savings or relax the floor. The fourth attended attempt has entered native
+replication; original process, verification and cutover results remain pending.
 
 The operator deleted the recurring continuation automation and directed storage
 completion first. Do not recreate the automation without a new request. Preserve
