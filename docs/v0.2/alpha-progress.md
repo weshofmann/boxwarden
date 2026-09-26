@@ -129,19 +129,22 @@ prototype with material acceptance gaps, not an alpha-ready release.
   generic guest fixtures, and fresh affected Go package tests passed.
   Independent delta review found no Important or Critical finding.
   A full local Go rerun and real-guest use of the new header were not performed
-  at this checkpoint. The fresh guest comparison stopped normally, but its
-  DNS gate failed before either HTTP request ran. The exact result is retained
-  privately; it proves no header behavior. A new disposable copy now uses
-  bounded guest-only network recovery when DNS fails, then separately checks
-  DNS and the default-versus-named requests, reading one response byte each.
-  Exact command delivery, ownership, stopped predecessor, full-host doctor and
-  capacity passed preflight. This diagnostic does not change product network
-  behavior or qualify a base. Its exact result is pending.
+  at this checkpoint. The first guest comparison stopped normally, but DNS
+  failed before either HTTP request ran. The next fresh disposable copy
+  completed the actual comparison: default Python request HTTP 403, named
+  Boxwarden request HTTP 200, exact pinned URL, expected content length, and
+  one byte read. DNS worked before the conditional recovery, so no recovery
+  was needed. The original process, wrapper and Tart exited zero, and full-host
+  observation confirms all diagnostic VMs stopped. Exact results are retained
+  privately. This proves the request-header constraint in the guest; it does
+  not prove full download, installation, original-failure attribution, or base
+  admission. A fresh public preparation using the corrected tracked helper is
+  next; failed and forensic images will not be reused.
   [Hosted CI for `85c11d5`](https://github.com/weshofmann/boxwarden/actions/runs/36224786585)
   passed the deterministic matrix. A clean source-bound CLI passed host doctor
   and pinned recipe/ISO checks. A conditional acceptance plan is
   durably retained with all twelve gates pending and commands disabled; the
-  next baseline remains gated on the pending guest comparison.
+  next baseline must retain its own exact source, process and admission gates.
   [Hosted CI for `fd41e36`](https://github.com/weshofmann/boxwarden/actions/runs/36225132633)
   also passed its deterministic matrix.
 - [Hosted CI for `a66d939`](https://github.com/weshofmann/boxwarden/actions/runs/36220982974)
@@ -158,9 +161,8 @@ prototype with material acceptance gaps, not an alpha-ready release.
   passed its deterministic matrix.
   [Hosted CI for `4fea9ef`](https://github.com/weshofmann/boxwarden/actions/runs/36223070383)
   also passed.
-- Next: verify the downloader header in a fresh disposable guest, propagate
-  the established download constraint across remaining phases, and review
-  the source before starting a fresh baseline. Require terminal success, stopped candidate, passed independent-clone
+- Next: start a fresh public preparation from the corrected tracked source.
+  The initial and software-changing recipes use the same fixed downloader. Require terminal success, stopped candidate, passed independent-clone
   qualification, and healthy host doctor before public session create. Then
   exercise graphical launch, import, initial stopped
   export and import verification, stop/start, software-changing rebuild and
