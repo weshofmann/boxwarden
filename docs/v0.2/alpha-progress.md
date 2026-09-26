@@ -7,13 +7,20 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Current checkpoint
 
-Published source: `5f0d40aaaf3e5b7aa9571b24dab3702e659d6f1e`.
+Last completed hosted source matrix: `5f0d40aaaf3e5b7aa9571b24dab3702e659d6f1e`.
 [Hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36249873500)
 passed its full deterministic matrix. Required EFI wait and the supervisor
 fixture budget correction are verified in their recorded targeted checks.
 
 ### Completed and verified
 
+- The latest reviewed installer correction adds fixed ten-minute startup limits
+  only for snapd and the disk manager, preserving global limits, hook limits and
+  waiter ordering. Three actual filesystem fixtures failed before implementation
+  and passed afterward; nine EFI fixtures, generic seed/fake-ISO/finalizer,
+  eight preparation/eight installer tests and fresh affected Go packages passed.
+  Independent read-only review found no Important/Critical issue. These are
+  targeted checks; the new hosted matrix and real installer execution are pending.
 - Recipe/base/cache, generation-bound management readiness, guest actions,
   independent workspace volumes, import, retained-volume rebuild/replacement
   and stopped export are implemented. Earlier bounded generic synthetic trials
@@ -69,11 +76,16 @@ fixture budget correction are verified in their recorded targeted checks.
   failed again. Ordering alone did not resolve the initialization failure and
   will not be promoted as a source fix. Its effective-order query also timed out;
   partial fields are not a successful verification.
-- Next: inspect exact-version hook behavior and retained task evidence before
-  another costly guest attempt. Future probes must disable pagers and retain
+- Exact upstream snapd 2.76 exposes a configure timeout at task creation, but the
+  immutable parent already contains explicit five-minute Firefox tasks. A daemon
+  environment change would not extend those existing tasks, so that predictable
+  rerun is rejected. Read-only task inspection detached with unchanged disks;
+  packaging equivalence and a supported recovery path remain unverified.
+- Next: inspect packaged configure-hook behavior and design bounded seed recovery
+  before another full builder. Future probes must disable pagers and retain
   terminal-phase evidence. Completed/failed derivatives remain immutable.
-- [Hosted CI for the preceding documentation checkpoint](https://github.com/weshofmann/boxwarden/actions/runs/36252721425)
-  passed the deterministic matrix. The superseded documentation run was cancelled.
+- [Hosted CI for the latest prior documentation checkpoint](https://github.com/weshofmann/boxwarden/actions/runs/36255927638)
+  passed the deterministic matrix. The earlier superseded run was cancelled.
 - All twelve fresh workflow acceptance gates remain pending. No reusable
   ChatGPT base or graphical application has passed this workflow. The remaining
   sequence is listed below. Real sign-in and subjective GUI acceptance may need

@@ -105,6 +105,19 @@ autoinstall:
           if os.path.exists(temporary):
               os.unlink(temporary)
       BW_EFI_PY
+    # These two desktop daemons exceeded the default startup deadline on the
+    # current storage layout. Keep finite limits scoped to their services.
+    - |
+      sh -s -- /target <<'BW_SERVICE_WAIT_SH'
+      set -eu
+      root=$1
+      for unit in snapd.service udisks2.service; do
+          directory="$root/etc/systemd/system/$unit.d"
+          install -d -m 0755 "$directory"
+          printf '%s\n' '[Service]' 'TimeoutStartSec=10min' > "$directory/10-boxwarden-start-timeout.conf"
+          chmod 0644 "$directory/10-boxwarden-start-timeout.conf"
+      done
+      BW_SERVICE_WAIT_SH
     - install -d -o root -g root -m 0755 /target/etc/ssh/sshd_config.d /target/etc/ssh/boxwarden
     - |
       cat > /target/etc/ssh/sshd_config.d/60-boxwarden-task0.conf <<'EOF'

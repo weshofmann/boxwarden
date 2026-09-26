@@ -169,3 +169,31 @@ tests ten times and three times with the race detector; both passed. The first
 race invocation could not access the default build cache; the executed repeat
 used a writable disposable cache. Formatting and diff checks passed. This is
 targeted verification, not a fresh full local suite or host qualification.
+
+## Scoped desktop daemon startup limits
+
+A bounded independent read-only review checked the installer-input, filesystem
+fixture and CI delta from `65db6b3`. No Important/Critical finding remained.
+The existing late-command path writes fixed `TimeoutStartSec=10min` drop-ins
+only for snapd and udisks2 with directory/file modes 0755/0644. Global deadlines,
+configure-hook limits and waiter ordering are unchanged. The target is the
+existing trusted fresh Canonical installer tree; this does not add a generalized
+hostile-filesystem writer or a host integration surface.
+
+Three behavioral fixtures execute the actual shell block against disposable
+targets. All failed before the block existed, then passed: exact two finite
+service limits/modes, repeated bytes, and preserved global/unrelated settings.
+Nine existing EFI fixtures, generic seed/fake-ISO/finalizer, eight preparation
+and eight installer tests passed. Fresh affected recipe/basebuild/golden/app
+Go tests passed using a writable disposable cache; the initial app invocation
+failed because the default cache was inaccessible. Diff checks passed. This
+is targeted local verification, not a fresh full local suite. New hosted CI
+and real installer execution remain pending. Repeated diagnostic daemon-active
+results support the limits, while seeding/ModemManager gaps remain unqualified.
+
+The later ordering-only experiment is not promoted: Firefox configure exceeded
+a persisted five-minute task limit and seeding rolled back before owned cleanup.
+Exact upstream 2.76 source exposes a configure timeout when new tasks are made,
+but the immutable parent already contains five-minute tasks. Simply changing
+the daemon environment cannot extend those existing tasks. Packaging equivalence
+and supported recovery are not yet verified; failed evidence remains immutable.
