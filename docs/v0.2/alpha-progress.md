@@ -198,8 +198,16 @@ prototype with material acceptance gaps, not an alpha-ready release.
   EFI identity and does not attribute the original prompt timeout. A small idle
   sequential write/fsync sample was fast on physical APFS and slower inside the
   qualification image; it does not measure VM random I/O or prove storage cause.
+- A subsequent bounded diagnostic read the original installed boot journal.
+  Its individual queries, wrapper and Tart exited zero, and all VMs stopped.
+  The original boot recovered: EFI mounted and `local-fs.target` was reached
+  about 333 seconds after boot, and cloud-init's network stage finished at
+  about 358 seconds. The earlier EFI timeout therefore does not by itself
+  explain the remaining original prompt wait. No serial-getty start event was
+  found in that selected unit query; this is an observation, not proof that the
+  service never ran. Original/predecessor identities remained unchanged.
 - Next: use a fresh diagnostic derivative to recover bounded runtime
-  original-boot journal evidence for that failure before another expensive
+  original-boot target and serial-login scheduling evidence before another expensive
   baseline. Preserve the original and completed forensic derivative. Do not
   increase the deadline or attribute slow storage without evidence. All twelve
   fresh acceptance gates remain pending. After a successful fresh preparation,
