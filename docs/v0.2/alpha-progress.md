@@ -179,14 +179,24 @@ prototype with material acceptance gaps, not an alpha-ready release.
   Full-host doctor, pinned inputs, capacity and source staging passed preflight;
   they do not establish installer completion. Failed images remain immutable.
   No finalization, independent-clone qualification or cache admission is claimed.
-- Next: inspect a separate disposable derivative of the stopped failed image
-  to determine the installer state and retained guest logs before another
-  expensive baseline. Do not increase the deadline or attribute slow storage
-  without evidence. All twelve fresh acceptance gates remain pending. After
-  a successful fresh preparation, require the exact stopped candidate, cache,
-  passed independent-clone receipt and healthy doctor before public session
-  creation and the complete workspace/GUI acceptance sequence. Real sign-in
-  remains a human acceptance action.
+- Read-only inspection of a separate stopped derivative recovered installer
+  completion followed by an installed-system boot failure. The boot log reports
+  a timeout waiting for the EFI filesystem identity, followed by failed
+  `boot-efi.mount` and `local-fs.target` dependencies. The actual EFI filesystem
+  identity matches `/etc/fstab`, so a simple stale-UUID mismatch is refuted.
+  The missing runtime device-link cause remains unknown. No boot, filesystem
+  repair or journal replay was performed by this inspection; attachments were
+  detached and the original disk identity remained unchanged. Exact logs and
+  the comparison are archived privately. These observations are diagnostic,
+  not preparation success or base admission.
+- Next: use a fresh diagnostic derivative to recover bounded runtime
+  device/udev/systemd evidence for that boot failure before another expensive
+  baseline. Preserve the original and completed forensic derivative. Do not
+  increase the deadline or attribute slow storage without evidence. All twelve
+  fresh acceptance gates remain pending. After a successful fresh preparation,
+  require the exact stopped candidate, cache, passed independent-clone receipt
+  and healthy doctor before public session creation and the complete workspace/
+  GUI acceptance sequence. Real sign-in remains a human acceptance action.
 - Current external image storage remains in use. Relocation is deferred until
   Wes supplies a separate disk and explicit direction. No capacity guard is
   currently blocking investigation.
