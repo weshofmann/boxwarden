@@ -144,10 +144,38 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   syntax, wrapper syntax and ShellCheck passed. Fresh independent review found
   no Important/Critical issue and reran the 26 cases. These are helper checks;
   the fourth attended attempt passed empty-target preparation and entered
-  native ASR replication after source and destination validation. Its original
-  parent, copy result and acceptance receipts remain pending; no completion or
-  cutover is claimed. Native success requires verified cutover and a reviewed persistent mount helper
-  before new VM trials; the old source job stays disabled during the transition.
+  native ASR replication after source and destination validation. ASR then
+  reached 100%, exited zero and its original root child was reaped. The driver
+  and wrapper exited 1 afterward: the native operation recreated the leaf with
+  encryption off, so the post-copy guard rejected it before cutover. The copy
+  is complete; native migration and acceptance are incomplete. No recopy ran.
+- ASR also remounted the unchanged source at an automatic path with ownership
+  disabled. The old rollback rejected this native state. A freshly reviewed
+  exact source-only recovery exited zero: clean detach and approved raw-file
+  stdin read-only reattachment restored the canonical source with ownership.
+  Its metadata and small digests match the original inventory, all ten retained
+  objects are stopped, no VM files are open, and doctor is healthy. The copied
+  destination was untouched. Original copy/failure/recovery receipts remain.
+- The native copy currently allocates about **139 GiB**, exceeding the earlier
+  117 GiB restore estimate. Outer free space is about **266 GiB**, above the
+  93 GiB floor, while the intact 432 GiB source bundle remains rollback.
+  Existing cross-volume clone-extent sharing has not been independently proved.
+- The reviewed terminal-only continuation binds that exact completed copy,
+  verifies payload metadata/small digests before encryption, enables native
+  encryption using approved raw stdin and waits for background conversion to
+  finish. It then requires filesystem verification, repeated parity, clone
+  isolation and noninteractive lock/unlock before canonical cutover. It runs
+  no ASR, erase or new-volume creation. Conversion-space headroom uses the
+  measured copied allocation, checked before encryption with the outer floor.
+  Thirty local synthetic cases, exact archived full-host read-only preflight,
+  Python/wrapper syntax and ShellCheck passed. Review caught and corrected a
+  verification-unmount relock gap; fresh final review found no Important/Critical
+  issue and reran all thirty cases. The archived continuation awaits attended
+  administrator execution; actual encryption and cutover remain pending.
+  Native success also requires independent checks and a reviewed persistent
+  mount helper before VM trials; the old source job stays disabled.
+- [Native-copy checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36274438213)
+  passed its full deterministic matrix. Hosted CI does not qualify migration.
 - At the operator's request, the recurring continuation automation was deleted.
   Storage completion is the current priority; product implementation resumes
   after the storage transition. This does not cancel the alpha mission.
@@ -157,7 +185,7 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   passed the full deterministic matrix. A clean `f7efc15` CLI build completed
   with exact source metadata and `vcs.modified=false`; full-host read-only doctor
   passed. Go reported a denied stat-cache write, but the original build exited
-  zero. The current source has no code/guest/tool/workflow delta from `d401c17`.
+  zero. At that checkpoint there was no code/guest/tool/workflow delta from `d401c17`.
   A private acceptance plan and CLI are durably archived with verified readback.
   Both reserved volume identities and all three synthetic source files match.
   The plan keeps all twelve gates pending and executable commands disabled

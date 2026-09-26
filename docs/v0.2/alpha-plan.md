@@ -328,7 +328,17 @@ The concrete commands and private evidence remain outside Git. If current
 capacity no longer fits the retained source plus restore budget and floor,
 return to the reviewed intact-image staging fallback; never assume compaction
 savings or relax the floor. The fourth attended attempt has entered native
-replication; original process, verification and cutover results remain pending.
+replication and completed the native copy with original exit zero and child
+reaping. The post-copy driver rejected the recreated unencrypted leaf before
+cutover. Preserve successful copy receipts separately from the failed driver;
+continue only against the uniquely bound copied leaf after all original handles
+are terminal. Reconcile the exact source read-only, verify copied content, then
+enable native encryption and require background conversion completion before
+lock/unlock and cutover. No recopy, erase or new-volume creation is needed.
+Use the measured copied allocation for conversion headroom and retain the outer
+floor. Native verification can remount or relock a leaf: observe identity and
+state separately, and unlock the exact encrypted leaf before mounting it again.
+Actual encryption, cutover and persistent-mount acceptance remain pending.
 
 The operator deleted the recurring continuation automation and directed storage
 completion first. Do not recreate the automation without a new request. Preserve
