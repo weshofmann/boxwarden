@@ -95,11 +95,22 @@ prototype with material acceptance gaps, not an alpha-ready release.
   dependency. The copy stopped normally and its exact result is retained
   privately. Host resolution works; the original attempt's logs show a
   connected NetworkManager, so this does not attribute that earlier failure.
-- One new disposable diagnostic copy is running. It captures service state,
-  starts guest NetworkManager if inactive, requires network/DNS readiness,
-  and retries the original source-pinned helper with stderr retained privately.
-  Its result is pending. The failed original and prior probes are preserved;
-  this is not qualification. No new full preparation attempt is running.
+- One disposable diagnostic copy reached its installed prompt, but its probe
+  command was not delivered completely. An isolated host PTY regression
+  reproduced a short write that the diagnostic harness ignored; the guest
+  received the same prefix without the terminal newline. The regression failed
+  on that harness and passed after bounded full-write handling. The corrected
+  future harness is retained privately; it has not run in a VM. The current
+  harness remains live and owns bounded shutdown. Boxwarden's production
+  serial transport already handles short writes. This diagnostic defect does
+  not attribute the original preparation failure, and no helper execution or
+  qualification is claimed from this probe. No new full preparation is running.
+- [Hosted CI for `a66d939`](https://github.com/weshofmann/boxwarden/actions/runs/36220982974)
+  passed its deterministic matrix. A CLI built from that clean source passed
+  full-host doctor and the pinned recipe/ISO check. A replacement conditional
+  acceptance plan is durably retained with all twelve host gates pending and
+  no executable commands or candidate binding. The earlier plan depended on
+  a failed builder and different guest inputs and must not be used.
 - Next: inspect the diagnostic result, propagate any established cause across
   remaining phases, and review the source before starting a fresh
   baseline. Require terminal success, stopped candidate, passed independent-clone
