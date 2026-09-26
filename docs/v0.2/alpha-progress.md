@@ -32,14 +32,15 @@ passed its deterministic matrix, including the new EFI filesystem fixture.
 
 ### Current work and next step
 
-- One fresh disposable diagnostic is running with finite startup limits for
-  snapd and the disk manager only, alongside the tested EFI wait. Exact unit
-  contracts were inspected read-only first. The probe checks effective limits,
-  each target/service separately, pending jobs and failures within fixed bounds.
-  It will stop/reap its own VM; no failed or forensic object is an acceptance base.
-- Next: adjudicate the original process result, authoritative stopped state and
-  exact private receipts. Propagate the result before a reviewed service input
-  correction or another expensive fresh preparation.
+- The service-deadline diagnostic finished and all VMs are stopped. Both
+  snapd and the disk manager reported active with individual zero exits and
+  effective ten-minute startup limits. Snap seeding remained activating;
+  multi-user and graphical targets remained inactive after the bounded wait.
+  Zero failed units did not establish completed initialization. Original and
+  predecessor identities were unchanged; the exact private receipt is retained.
+- Next: inspect the remaining seeding dependency and progress on a fresh
+  derivative. The daemon result is partial evidence; propagate the remaining
+  gap before any service input correction or another expensive preparation.
 - All twelve fresh workflow acceptance gates remain pending. No reusable
   ChatGPT base or graphical application has passed this workflow. The remaining
   sequence is listed below. Real sign-in and subjective GUI acceptance may need
