@@ -228,11 +228,26 @@ prototype with material acceptance gaps, not an alpha-ready release.
 - [Hosted CI for `ca7c51d`](https://github.com/weshofmann/boxwarden/actions/runs/36241567405)
   passed its deterministic matrix. This documentation checkpoint uses exact
   diagnostic evidence and sanitized diff checks; no source tests were rerun.
-- Next: on a fresh disposable derivative with the same finite EFI wait,
-  allow a bounded additional ten minutes after serial login and capture each
-  target's state/exit plus pending jobs and failed services before/after.
-  Verify normal boot-target and serial-login completion before changing tracked
-  installation inputs or starting another expensive fresh baseline. Preserve all
+- A second fresh derivative with the same finite EFI wait completed its
+  bounded target check and stopped normally. Basic, multi-user, graphical,
+  local-fs and serial-getty each reported active with an individually captured
+  zero exit. EFI mounted without a retained emergency event. Full-host
+  observation confirmed all VMs stopped and original/predecessor identities
+  unchanged; exact evidence is archived privately. This verifies diagnostic
+  target completion, not healthy services, a visible GUI or base admission.
+  Snapd seeding and `udisks2` remained failed at the final snapshot; cloud-init's
+  final stage completed later in the captured journal. Snapd repeatedly hit
+  startup deadlines before its server finally started, after the seeding
+  client's response timeout. Brief private process samples showed disk workers
+  waiting in read/write calls, but do not establish the underlying storage cause.
+- [Hosted CI for `3f2907c`](https://github.com/weshofmann/boxwarden/actions/runs/36242934591)
+  passed its deterministic matrix. No source tests were rerun for this
+  documentation checkpoint; exact diagnostic evidence and sanitized diffs were
+  checked.
+- Next: implement and test the finite required EFI device wait in tracked
+  installation inputs, preserving the mount and identity with explicit failure
+  on unexpected fstab structure. Investigate the service deadline failures on
+  fresh diagnostic derivatives before another expensive baseline. Preserve all
   failed and completed forensic objects; keep the host installer deadline intact.
   All twelve fresh acceptance gates remain pending. A successful fresh preparation
   must still prove exact journal/cache, independent-clone admission, stopped
