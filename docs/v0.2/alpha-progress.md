@@ -129,10 +129,26 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   inconsistent locked-and-mounted volume; its corrected repeat passed. These
   are helper checks, not native copy or alpha qualification. Independent final
   correction review found no Important/Critical issue and reran all seventeen
-  cases successfully. The new one-shot wrapper awaits attended administrator
-  execution; no third migration attempt has started. Native success also
-  requires verified cutover and a reviewed persistent mount helper before any
-  new VM trial; the old source job must stay disabled during the transition.
+  cases successfully. The third attended attempt then exited 1 before ASR:
+  native unlock, read-only empty inspection and unmount succeeded, but the OS
+  removed the temporary mount directory and the helper's redundant removal
+  raised FileNotFoundError. Original parent exit and successful rollback are
+  recorded; the source remains canonical/read-only and the destination remains
+  empty, encrypted, locked and unmounted. No restore or cutover occurred.
+- The corrected private helper models temporary mount directories explicitly.
+  It accepts removal by the native unmount; any remaining directory must match
+  its own created inode, owner and mode, remain unmounted and be empty. This
+  applies to inspection, qualification/cutover and failure cleanup. The new
+  regression reproduced the original failure and passes with the correction.
+  All 26 synthetic cases, exact archived full-host read-only preflight, Python
+  syntax, wrapper syntax and ShellCheck passed. Fresh independent review found
+  no Important/Critical issue and reran the 26 cases. These are helper checks;
+  the new one-shot fourth attempt awaits administrator execution. Native
+  success requires verified cutover and a reviewed persistent mount helper
+  before new VM trials; the old source job stays disabled during the transition.
+- At the operator's request, the recurring continuation automation was deleted.
+  Storage completion is the current priority; product implementation resumes
+  after the storage transition. This does not cancel the alpha mission.
 - [Source-recovery checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36270559670)
   passed the full deterministic matrix.
 - [Migration-helper checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36268800118)
@@ -155,7 +171,8 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   Fresh targeted recipe/session/app Go tests, targeted vet, gofmt and diff
   checks passed. Independent review reran the fixtures and Go checks and found
   no Important/Critical issue. The CI increment pins Node and its setup action
-  for these source fixtures; the new full hosted matrix is pending. Real guest
+  for these source fixtures; its [full hosted matrix](https://github.com/weshofmann/boxwarden/actions/runs/36273287982)
+  passed. Real guest
   edits and lifecycle persistence remain pending; the
   private old-source synthetic staging and acceptance plan need refreshed
   input hashes before use. No VM operation has run for this correction.

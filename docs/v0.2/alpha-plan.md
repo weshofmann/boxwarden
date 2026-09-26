@@ -297,7 +297,10 @@ completed migration or permission to erase an existing volume.
    Reuse only that exact owned empty leaf, bound to the original creation
    receipts and current container identity; create no additional destination.
    Verify the key noninteractively, explicitly unlock without mounting, and
-   inspect the destination read-only for emptiness before restoring.
+   inspect the destination read-only for emptiness before restoring. Native
+   unmount may remove its temporary directory: accept absence; remove a remaining
+   directory only when its created inode/owner/mode still match, it is unmounted
+   and empty. Apply this contract to qualification and failure cleanup too.
 4. Use native ASR replication with verification into that exact new volume.
    Bind the target leaf-volume identity and container immediately before restore.
    The bounded capacity monitor must be able to stop and reap its own root ASR.
@@ -325,3 +328,8 @@ The concrete commands and private evidence remain outside Git. If current
 capacity no longer fits the retained source plus restore budget and floor,
 return to the reviewed intact-image staging fallback; never assume compaction
 savings or relax the floor. No native restore or cutover has been executed.
+
+The operator deleted the recurring continuation automation and directed storage
+completion first. Do not recreate the automation without a new request. Preserve
+failed migration attempts and require a new one-shot run after each reviewed
+correction; a successful native mount command alone is not migration completion.
