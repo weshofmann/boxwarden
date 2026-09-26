@@ -58,14 +58,22 @@ fixture budget correction are verified in their recorded targeted checks.
   and EFI was mounted. Seeding completed before shutdown, but its waiter had
   already failed with a server-response timeout before snapd became ready.
   ModemManager also failed. This is partial service evidence, not admission.
-- Read-only unit inspection detached cleanly and preserved its parent. The
-  seeding waiter requires and follows snapd's socket, without ordering after
-  daemon readiness. One fresh disposable derivative is now running with only an added seeding
-  waiter dependency/order after the notify-ready daemon. EFI and the two daemon
-  limits are unchanged; ModemManager is unchanged. Exact readback, syntax/PTY
-  delivery, actual harness bounds, healthy doctor and stopped-parent checks
-  passed before launch. Next: adjudicate effective ordering and final results
-  before production changes or a new full builder. Prior evidence is immutable.
+- The isolated readiness-ordering derivative terminally failed in the harness
+  after final guest observations and an exact completion marker were captured.
+  Its precise terminal loop stage was not durably recorded; clean Tart success
+  is unproved. All VMs are stopped and original/predecessor identities unchanged.
+  Normal targets and the two daemons were active; seeding and ModemManager failed.
+- The journal confirms the waiter started after daemon readiness, but Firefox's
+  configure hook exceeded its five-minute limit before harness cleanup. Seeding
+  rolled back to Error; daemon self-update interrupted the waiter, which later
+  failed again. Ordering alone did not resolve the initialization failure and
+  will not be promoted as a source fix. Its effective-order query also timed out;
+  partial fields are not a successful verification.
+- Next: inspect exact-version hook behavior and retained task evidence before
+  another costly guest attempt. Future probes must disable pagers and retain
+  terminal-phase evidence. Completed/failed derivatives remain immutable.
+- [Hosted CI for the preceding documentation checkpoint](https://github.com/weshofmann/boxwarden/actions/runs/36252721425)
+  passed the deterministic matrix. The superseded documentation run was cancelled.
 - All twelve fresh workflow acceptance gates remain pending. No reusable
   ChatGPT base or graphical application has passed this workflow. The remaining
   sequence is listed below. Real sign-in and subjective GUI acceptance may need
