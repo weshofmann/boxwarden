@@ -153,3 +153,19 @@ suite. Separate forensic boot evidence supports finite EFI wait and individual
 normal-target completion, but still records failed snapd seeding and udisks2.
 No successful fresh installation, visible GUI, cache admission or independent
 clone qualification is claimed by this delta review.
+
+## Supervisor invalid-generation fixture budget
+
+Hosted CI at `62f43a3` failed the coexisting invalid-generation case when its
+200 ms test context expired during a 370 ms fixture operation. The fixture
+publishes and syncs files/directories before classification. This delta raises
+only that test budget to five seconds; production deadlines are unchanged.
+Both malformed and coexisting cases still require their specific classification
+error, reject deadline expiration, and assert one launch with zero snapshots.
+
+An independent read-only reviewer found no Important/Critical issue and no
+weakened behavior assertion. The coordinator ran all targeted `TestExactStart`
+tests ten times and three times with the race detector; both passed. The first
+race invocation could not access the default build cache; the executed repeat
+used a writable disposable cache. Formatting and diff checks passed. This is
+targeted verification, not a fresh full local suite or host qualification.

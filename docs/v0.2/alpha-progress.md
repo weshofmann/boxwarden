@@ -32,6 +32,12 @@ passed its deterministic matrix, including the new EFI filesystem fixture.
 
 ### Current work and next step
 
+- The latest documentation checkpoint's hosted CI failed a supervisor fixture
+  whose 200 ms startup budget expired during filesystem setup (370 ms observed).
+  The correction raises only that test budget to five seconds; exact error,
+  one-launch and zero-snapshot assertions remain. Ten repeated targeted runs
+  and three race runs passed; independent review found no Important/Critical
+  issue. Full hosted verification for the correction remains pending.
 - The service-deadline diagnostic finished and all VMs are stopped. Both
   snapd and the disk manager reported active with individual zero exits and
   effective ten-minute startup limits. Snap seeding remained activating;

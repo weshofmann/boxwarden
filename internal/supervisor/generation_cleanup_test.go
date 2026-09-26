@@ -608,7 +608,10 @@ func TestExactStartFailsClosedAfterSuccessfulLaunchBecomesInvalid(t *testing.T) 
 			exact := &exactStartController{
 				launcher:   fixture,
 				controller: fixture,
-				policy:     startupPolicy{timeout: 200 * time.Millisecond, interval: time.Millisecond},
+				// Fixture publication syncs files and directories. Allow that I/O
+				// to finish on loaded CI; classification must still return the
+				// exact error without any snapshot or additional launch.
+				policy: startupPolicy{timeout: 5 * time.Second, interval: time.Millisecond},
 			}
 
 			_, err := exact.startExact(context.Background(), request)
