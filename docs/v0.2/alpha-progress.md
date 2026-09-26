@@ -79,8 +79,16 @@ prototype with material acceptance gaps, not an alpha-ready release.
   tests, generic seed/finalizer/ISO fixtures, ChatGPT installer tests, and the
   full local Go suite passed afterward. Hosted CI and real-guest use of this
   new diagnostic record remain pending.
-- Next: finish safe stage attribution for the pinned guest installer and
-  review the diagnostic changes before starting a fresh
+- The pinned ChatGPT installer also retains a private typed stage record:
+  pinned package digest, last started stage, outcome, failure category, and
+  exit code. Download and validation failures reproduced missing records
+  before the change; seven installer tests now pass, including metadata
+  timeout and apt nonzero attribution without private child data. Seed/ISO
+  fixtures, all eight preparation tests, and fresh affected base preparation
+  and qualification package tests also pass. Real-guest diagnostic
+  use and hosted CI for this increment remain pending.
+- Next: review the diagnostic changes and use a bounded diagnostic copy
+  to investigate the pinned helper before starting a fresh
   baseline. Require terminal success, stopped candidate, passed independent-clone
   qualification, and healthy host doctor before public session create. Then
   exercise graphical launch, import, initial stopped

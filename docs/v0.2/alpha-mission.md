@@ -77,3 +77,12 @@ environment, or exception text. It is diagnostic guest state, never a trusted
 qualification or cache-admission receipt. A crash can leave `started`; that
 means indeterminate execution, not success or permission to rerun a failed
 qualification candidate.
+
+The standalone pinned ChatGPT installer similarly retains
+`/var/lib/boxwarden/chatgpt-install-result.json`: version, pinned package
+digest, last started fixed stage, outcome (`started`, `failed`, `complete`),
+failure category, and child exit code when available. Stages cover source
+policy, temporary directory, download, package identity, repository policy,
+package install, installed identity, final source policy, and cleanup.
+It uses the same private atomic file/directory-sync discipline, excludes
+exception text and child data, and carries no qualification authority.
