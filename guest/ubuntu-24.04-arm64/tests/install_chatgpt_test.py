@@ -56,7 +56,7 @@ class PinnedChatGPTInstallTests(unittest.TestCase):
         def run(argv, **_):
             commands.append(argv)
             if argv[0] == "/usr/bin/dpkg-deb":
-                return mock.Mock(stdout="chatgpt\n26.917.71314\narm64\n")
+                return mock.Mock(stdout="Package: chatgpt\nVersion: 26.917.71314\nArchitecture: arm64\n")
             if argv[0] == "/usr/bin/apt-get":
                 self.assertEqual(argv[1:-1], ["install", "-y", "--no-remove", "--no-install-recommends"])
                 self.assertEqual(self.defaults.read_text(), 'repo_add_once="false"\n')
@@ -94,7 +94,7 @@ class PinnedChatGPTInstallTests(unittest.TestCase):
 
         def run(argv, **_):
             self.assertEqual(argv[0], "/usr/bin/dpkg-deb")
-            return mock.Mock(stdout="chatgpt\nwrong-version\narm64\n")
+            return mock.Mock(stdout="Package: chatgpt\nVersion: wrong-version\nArchitecture: arm64\n")
 
         with mock.patch.object(installer, "DEFAULTS_FILE", self.defaults), \
              mock.patch.object(installer, "SOURCES_FILE", self.sources), \

@@ -36,12 +36,24 @@ prototype with material acceptance gaps, not an alpha-ready release.
   and the two earlier timed-out candidates remain failed evidence.
   Finalization, independent-clone qualification, and cache admission did not
   run. Neither a prepared ChatGPT base nor its package or window is qualified.
+- Read-only inspection of a separate stopped forensic clone found the recipe's
+  apt packages installed and no ChatGPT defaults file, placing failure before
+  the package install. The pinned package's control fields are correct, but
+  [Ubuntu's `dpkg-deb` contract](https://manpages.ubuntu.com/manpages/noble/man1/dpkg-deb.1.html)
+  prefixes names when several fields are requested. The guest helper compared
+  that output with bare values. Its existing success test reproduced the
+  mismatch with the documented output before the source correction and passed
+  afterward. The guest source fixtures, relevant Go packages, and full local
+  Go test suite passed after the correction. Guest stderr was discarded by the
+  preparation runner, so the exact failed guest command is not independently
+  recorded. Hosted CI and a fresh real-VM preparation and qualification are
+  still required.
 - Two separate 64 MiB workspace volumes are formatted, identity-checked,
   available, and unattached. The staged credential-free three-file source
   matches the tracked example byte for byte. Guest attach/import and the
   retained-workspace loop remain pending.
-- Next: diagnose the guest preparation failure from a separate forensic copy,
-  correct and verify its cause, then run a fresh base attempt. Require that
+- Next: require hosted CI for the metadata correction, then run a fresh base
+  attempt from corrected inputs. Require that
   new builder's terminal success, stopped candidate, passed independent-clone
   qualification, and healthy host doctor before public session create. Then
   exercise graphical launch, import, initial stopped

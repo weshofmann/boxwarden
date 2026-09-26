@@ -82,9 +82,10 @@ def install():
     with tempfile.TemporaryDirectory(prefix="boxwarden-chatgpt-", dir=TEMP_ROOT) as temporary:
         package = Path(temporary) / "chatgpt.deb"
         fetch_verified_package(package)
+        # Multi-field dpkg-deb --field output prefixes each value with its name.
         fields = run_checked(["/usr/bin/dpkg-deb", "--field", str(package),
                               "Package", "Version", "Architecture"], 30).stdout.strip().splitlines()
-        if fields != ["chatgpt", PACKAGE_VERSION, "arm64"]:
+        if fields != ["Package: chatgpt", "Version: " + PACKAGE_VERSION, "Architecture: arm64"]:
             raise RuntimeError("package identity differs from pin")
         disable_repository_registration()
         run_checked(["/usr/bin/apt-get", "install", "-y", "--no-remove", "--no-install-recommends", str(package)], 1200, capture=False)
