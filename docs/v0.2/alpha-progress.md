@@ -7,9 +7,10 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Current checkpoint
 
-Published source: `93e835e56a74153009651ed0b793d790c1057254`.
-[Hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36244901864)
-passed its deterministic matrix, including the new EFI filesystem fixture.
+Published source: `5f0d40aaaf3e5b7aa9571b24dab3702e659d6f1e`.
+[Hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36249873500)
+passed its full deterministic matrix. Required EFI wait and the supervisor
+fixture budget correction are verified in their recorded targeted checks.
 
 ### Completed and verified
 
@@ -37,7 +38,7 @@ passed its deterministic matrix, including the new EFI filesystem fixture.
   The correction raises only that test budget to five seconds; exact error,
   one-launch and zero-snapshot assertions remain. Ten repeated targeted runs
   and three race runs passed; independent review found no Important/Critical
-  issue. Full hosted verification for the correction remains pending.
+  issue. The full hosted deterministic matrix passed for the correction.
 - The service-deadline diagnostic finished and all VMs are stopped. Both
   snapd and the disk manager reported active with individual zero exits and
   effective ten-minute startup limits. Snap seeding remained activating;
@@ -50,12 +51,18 @@ passed its deterministic matrix, including the new EFI filesystem fixture.
   were retained, but final unit results and the completion marker are absent.
   The error belongs to the harness; it does not prove seeding failed. All VMs
   are stopped and original/predecessor identities are unchanged.
-- One fresh derivative is now running with the same guest inputs. Both
-  preparation and launch checked the actual generated thirty-five-minute host
-  query deadline and rejected the stale fifteen-minute value; the guest wait
-  remains thirty minutes. Syntax and exact PTY command roundtrip checks passed.
-  Next: adjudicate pre-shutdown task progress, original terminal result and
-  stopped-state receipt. All earlier failed diagnostics remain immutable.
+- The corrected thirty-five-minute harness completed with original process and
+  wrapper exit zero, an exact completion marker, all VMs stopped and unchanged
+  original/predecessor identities. Normal targets, snapd and the disk manager
+  were individually active with zero exits; cloud-init finalization succeeded
+  and EFI was mounted. Seeding completed before shutdown, but its waiter had
+  already failed with a server-response timeout before snapd became ready.
+  ModemManager also failed. This is partial service evidence, not admission.
+- Read-only unit inspection detached cleanly and preserved its parent. The
+  seeding waiter requires and follows snapd's socket, without ordering after
+  daemon readiness. Next: test scoped daemon-readiness ordering on a fresh
+  disposable derivative and retain remaining failures before production changes
+  or a new full builder attempt. Prior failed/completed evidence is immutable.
 - All twelve fresh workflow acceptance gates remain pending. No reusable
   ChatGPT base or graphical application has passed this workflow. The remaining
   sequence is listed below. Real sign-in and subjective GUI acceptance may need
