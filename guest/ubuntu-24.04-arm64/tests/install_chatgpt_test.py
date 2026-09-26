@@ -42,6 +42,26 @@ class PinnedChatGPTInstallTests(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
+    def test_download_identifies_boxwarden_and_retains_pinned_bytes(self):
+        package = b"synthetic pinned package"
+
+        def open_package(request, timeout):
+            # The public artifact endpoint rejects the default Python agent.
+            # Exercise the actual Request sent by the helper, not a header stub.
+            self.assertEqual(request.full_url, installer.PACKAGE_URL)
+            self.assertEqual(request.get_header("User-agent"),
+                             "Boxwarden/0.2 package-verifier")
+            self.assertEqual(set(request.headers), {"User-agent"})
+            self.assertEqual(timeout, 30)
+            return FakeResponse(package)
+
+        target = self.root / "package.deb"
+        with mock.patch.object(installer, "PACKAGE_SIZE", len(package)), \
+             mock.patch.object(installer, "PACKAGE_SHA256", hashlib.sha256(package).hexdigest()), \
+             mock.patch.object(installer, "urlopen", side_effect=open_package):
+            installer.fetch_verified_package(target)
+        self.assertEqual(target.read_bytes(), package)
+
     def test_digest_mismatch_never_invokes_guest_package_manager(self):
         with mock.patch.object(installer, "DEFAULTS_FILE", self.defaults), \
              mock.patch.object(installer, "SOURCES_FILE", self.sources), \

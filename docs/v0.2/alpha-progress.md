@@ -113,12 +113,23 @@ prototype with material acceptance gaps, not an alpha-ready release.
   stopped-copy logs show a DHCP lease and a DNS-plugin readiness
   warning; the original attempt also contains that warning. This suggests a
   common resolver problem but does not establish the original failed command.
-- One fresh disposable copy now tests guest resolver restart with separately
-  reported DNS, helper-digest, invocation, and actual helper-exit gates.
-  Its exact full command passed an isolated host PTY delivery check. Ownership,
-  hashes, stopped objects, full-host doctor, and capacity passed before launch.
-  The result is pending. The failed original disk identity and journal are
-  unchanged; prior copies are stopped and the read-only inspection is detached.
+- The latest disposable probe completed and stopped normally. DNS already
+  worked before resolver restart; the exact original helper digest matched,
+  invocation was recorded, and its actual exit was 1 with HTTP 403 from the
+  pinned package endpoint. Resolver restart necessity is not established.
+  This fresh diagnostic failure does not attribute the historical preparation.
+- On the host, the same Python request received HTTP 403 with its default
+  User-Agent and HTTP 200 with only an honest `Boxwarden/0.2 package-verifier`
+  User-Agent added. The pinned URL and expected content length matched;
+  only one response byte was read. The existing owned package matches the
+  pinned digest. The installer now identifies its downloader with that fixed
+  header while retaining URL, size, digest, and package identity checks.
+  The actual-request regression failed before the fix and passed afterward.
+  Eight installer tests, eight preparation tests, seven launcher tests,
+  generic guest fixtures, and fresh affected Go package tests passed.
+  Independent delta review found no Important or Critical finding.
+  A full local Go rerun and real-guest use of the new header were not performed
+  at this checkpoint; a fresh bounded guest comparison is next.
 - [Hosted CI for `a66d939`](https://github.com/weshofmann/boxwarden/actions/runs/36220982974)
   passed its deterministic matrix. A CLI built from that clean source passed
   full-host doctor and the pinned recipe/ISO check. A replacement conditional
@@ -133,9 +144,9 @@ prototype with material acceptance gaps, not an alpha-ready release.
   passed its deterministic matrix.
   [Hosted CI for `4fea9ef`](https://github.com/weshofmann/boxwarden/actions/runs/36223070383)
   also passed.
-- Next: inspect the diagnostic result, propagate any established cause across
-  remaining phases, and review the source before starting a fresh
-  baseline. Require terminal success, stopped candidate, passed independent-clone
+- Next: verify the downloader header in a fresh disposable guest, propagate
+  the established download constraint across remaining phases, and review
+  the source before starting a fresh baseline. Require terminal success, stopped candidate, passed independent-clone
   qualification, and healthy host doctor before public session create. Then
   exercise graphical launch, import, initial stopped
   export and import verification, stop/start, software-changing rebuild and

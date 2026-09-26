@@ -16,6 +16,7 @@ PACKAGE_URL = "https://persistent.oaistatic.com/codex-app-prod/linux/deb/pool/ma
 PACKAGE_SHA256 = "2114883623dae34a4bc7a67faad3e6652dd9bfdc7a28f57c36ed03e350be1cf1"
 PACKAGE_SIZE = 399743370
 PACKAGE_VERSION = "26.917.71314"
+PACKAGE_USER_AGENT = "Boxwarden/0.2 package-verifier"
 DEFAULTS_FILE = Path("/etc/default/chatgpt")
 SOURCES_FILE = Path("/etc/apt/sources.list.d/chatgpt.sources")
 TEMP_ROOT = Path("/var/tmp")
@@ -32,7 +33,9 @@ RUN_ENV = {
 def fetch_verified_package(target):
     digest = hashlib.sha256()
     count = 0
-    request = Request(PACKAGE_URL)
+    # Identify this downloader honestly; the public endpoint rejects Python's
+    # default user agent. The URL, byte limits and artifact pin remain exact.
+    request = Request(PACKAGE_URL, headers={"User-Agent": PACKAGE_USER_AGENT})
     with urlopen(request, timeout=30) as response:
         if response.url != PACKAGE_URL:
             raise RuntimeError("package source redirected away from the pinned URL")

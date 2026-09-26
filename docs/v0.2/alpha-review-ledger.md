@@ -91,3 +91,14 @@ does not consume these diagnostic files. All 15 affected Python tests passed
 with bytecode writes disabled; the checkout remained clean. Real guest use,
 GUI behavior, power-loss durability, and filesystem fault injection were not
 tested. This is delta review, not final cumulative approval or admission.
+
+## Pinned downloader identity follow-up
+
+Independent read-only review of the two-file downloader delta from `4101382`
+found no Important or Critical finding. The named User-Agent contains no
+private identifier; URL, redirect refusal, byte bounds, digest and package
+identity checks remain intact. The reviewer reran all eight installer and
+eight preparation tests successfully. The new regression exercises the
+actual Request and pinned-byte validation; its header assertion covers
+explicitly configured headers, not every wire header. Host HTTP success
+does not qualify guest download, installation, or the historical failure.
