@@ -81,6 +81,21 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   precede mutation. Source and outer filesystem
   checks exited zero and reported healthy; no native volume, replication or
   cutover has been executed.
+- [Cleanup checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36267146739)
+  passed the full deterministic matrix. The concrete private migration helper
+  now passes read-only preflight on the installed interpreter. Target/capacity/
+  privilege guards, stdin framing, exact rollback/refusal, and owned-child
+  termination/reap checks passed. An injected logging failure exposed inherited
+  blocked child signals; the correction passed its actual-child regression.
+  Independent review required failed-cutover rollback and explicit target
+  ownership; the corrected helper has no remaining Important/Critical finding.
+  These are helper checks, not native migration or alpha acceptance.
+- **Required human action:** native ASR needs root and noninteractive sudo
+  reports that administrator authentication is required. A single hash-pinned,
+  reviewed command is prepared privately for attended execution. It retains
+  the source, uses noninteractive volume unlock and records the original driver
+  exit. No native volume, copy or cutover has started. Continue safe synthetic
+  preparation while this platform privilege step is pending.
 - The reviewed conditional diagnostic tools need refreshed source/storage
   identities before use. Their fake-tool checks qualify harness behavior only.
   All twelve fresh ChatGPT acceptance gates remain pending. Next: complete the

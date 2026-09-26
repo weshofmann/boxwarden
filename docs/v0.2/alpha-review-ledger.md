@@ -306,3 +306,27 @@ These checks must not be reported as independent equality of every VM disk byte.
 [Apple's APFS replication explanation](https://developer.apple.com/videos/play/wwdc2019/710/)
 supports the encrypted destination and sibling-volume preservation mechanism.
 This is method review; concrete driver preflight and actual migration remain.
+
+
+## Concrete native helper review (2026-09-26)
+
+The first read-only preflight refused an unreadable root-owned filesystem event
+log; payload live-use checks now cover VM/cache/tmp trees while clean detach
+remains mandatory. Independent payload comparison excludes only the mutable
+root-owned event-log subtree; native restore verification still covers the volume.
+The installed Python lacked its xattr API, so metadata comparison uses the native
+xattr tool. Corrected read-only preflight passed on the installed interpreter.
+
+Review found an Important failed-cutover recovery gap and required explicit
+new-volume ownership. The correction attempts exact-source restoration while
+locks remain held, refuses unknown canonical mounts, records recovery outcome,
+and enables/checks ownership only on the new leaf. The root wrapper pins the
+helper digest and retains the actual original driver process exit separately.
+Bounded correction review found no new Important/Critical issue.
+
+Target/capacity/privilege guards, stdin framing, exact-target rollback, unknown-
+mount refusal and owned-child stop/reap checks passed. A logging-error regression
+first exposed inherited blocked child signals; restoring the child mask before
+exec made the actual child promptly terminate/reap. Final read-only preflight
+passed. No root helper, native copy or cutover has executed; attended administrator
+authentication is the remaining platform prerequisite, not a new migration scope.
