@@ -93,6 +93,15 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   supported seeding recovery remain unverified.
 - [Hosted CI for the latest prior documentation checkpoint](https://github.com/weshofmann/boxwarden/actions/runs/36255927638)
   passed the deterministic matrix. The earlier superseded run was cancelled.
+- While the copy runs, the next private diagnostic observer was hardened and
+  independently reviewed. Fake PTY regressions reproduced nonzero-child and
+  pre-query completion-marker false passes. The replacement requires original
+  child exit zero, a fresh query-specific completion token and durable terminal
+  phases. Six behavioral fake-child checks passed locally and independently,
+  with no skips. The observer is archived but has not run against a real VM;
+  these checks establish harness behavior, not guest qualification.
+- [Hosted CI for the active-copy documentation checkpoint](https://github.com/weshofmann/boxwarden/actions/runs/36257773375)
+  passed the full deterministic matrix.
 - All twelve fresh workflow acceptance gates remain pending. No reusable
   ChatGPT base or graphical application has passed this workflow. The remaining
   sequence is listed below. Real sign-in and subjective GUI acceptance may need

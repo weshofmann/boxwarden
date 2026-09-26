@@ -197,3 +197,24 @@ Exact upstream 2.76 source exposes a configure timeout when new tasks are made,
 but the immutable parent already contains five-minute tasks. Simply changing
 the daemon environment cannot extend those existing tasks. Packaging equivalence
 and supported recovery are not yet verified; failed evidence remains immutable.
+
+
+## Private diagnostic observer review (2026-09-26)
+
+The next bounded host observer received read-only review while the same-store
+copy remained the sole live operation. The reviewer reproduced two Important
+false passes: accepting a completion marker from accumulated boot bytes, then
+accepting queued boot output in a later PTY read. Both regressions failed before
+correction. The replacement generates a fresh 128-bit token first exposed in
+the submitted query, excludes received boot bytes, requires original-child exit
+zero, and preserves synced phase/result evidence with bounded own-child cleanup.
+
+Six fake-PTY behavioral cases passed locally and independently: zero-exit
+success, nonzero child rejection, missing-marker query timeout, shutdown timeout,
+same-chunk pre-query marker rejection and queued pre-query marker rejection.
+No tests were skipped in the final run. Re-review found no remaining
+Important/Critical issue in this bounded observer/test delta. Failed versions
+remain immutable private evidence. The observer has not been launched against
+Tart; this is diagnostic-tool verification, not repository-wide approval or
+real-host qualification. Historical exact child-exit receipts remain separately
+required; a harness capability defect alone does not change a recorded exit.
