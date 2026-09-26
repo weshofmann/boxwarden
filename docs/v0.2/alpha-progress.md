@@ -189,8 +189,17 @@ prototype with material acceptance gaps, not an alpha-ready release.
   detached and the original disk identity remained unchanged. Exact logs and
   the comparison are archived privately. These observations are diagnostic,
   not preparation success or base admission.
+- A fresh bounded diagnostic copy reproduced the EFI mount dependency failure,
+  then reached the exact serial prompt. Its fixed read-only queries found the
+  correct EFI filesystem and UUID link present, with udev active. The first
+  automatic login timed out; a subsequent login succeeded. The diagnostic
+  process, wrapper and Tart exited zero, all VMs are stopped, and original/
+  predecessor identities remained unchanged. This refutes a permanently missing
+  EFI identity and does not attribute the original prompt timeout. A small idle
+  sequential write/fsync sample was fast on physical APFS and slower inside the
+  qualification image; it does not measure VM random I/O or prove storage cause.
 - Next: use a fresh diagnostic derivative to recover bounded runtime
-  device/udev/systemd evidence for that boot failure before another expensive
+  original-boot journal evidence for that failure before another expensive
   baseline. Preserve the original and completed forensic derivative. Do not
   increase the deadline or attribute slow storage without evidence. All twelve
   fresh acceptance gates remain pending. After a successful fresh preparation,
