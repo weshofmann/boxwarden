@@ -129,14 +129,21 @@ prototype with material acceptance gaps, not an alpha-ready release.
   generic guest fixtures, and fresh affected Go package tests passed.
   Independent delta review found no Important or Critical finding.
   A full local Go rerun and real-guest use of the new header were not performed
-  at this checkpoint. One fresh disposable guest is running a bounded
-  default-versus-named-header comparison, reading only one response byte
-  per request. Its command delivery, ownership, full-host doctor and capacity
-  passed preflight; its exact result is pending.
+  at this checkpoint. The fresh guest comparison stopped normally, but its
+  DNS gate failed before either HTTP request ran. The exact result is retained
+  privately; it proves no header behavior. A new disposable copy now uses
+  bounded guest-only network recovery when DNS fails, then separately checks
+  DNS and the default-versus-named requests, reading one response byte each.
+  Exact command delivery, ownership, stopped predecessor, full-host doctor and
+  capacity passed preflight. This diagnostic does not change product network
+  behavior or qualify a base. Its exact result is pending.
   [Hosted CI for `85c11d5`](https://github.com/weshofmann/boxwarden/actions/runs/36224786585)
   passed the deterministic matrix. A clean source-bound CLI passed host doctor
-  and pinned recipe/ISO checks. A fresh conditional acceptance plan is
-  durably retained with all twelve gates pending and commands disabled.
+  and pinned recipe/ISO checks. A conditional acceptance plan is
+  durably retained with all twelve gates pending and commands disabled; the
+  next baseline remains gated on the pending guest comparison.
+  [Hosted CI for `fd41e36`](https://github.com/weshofmann/boxwarden/actions/runs/36225132633)
+  also passed its deterministic matrix.
 - [Hosted CI for `a66d939`](https://github.com/weshofmann/boxwarden/actions/runs/36220982974)
   passed its deterministic matrix. A CLI built from that clean source passed
   full-host doctor and the pinned recipe/ISO check. A replacement conditional
