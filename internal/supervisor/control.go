@@ -76,7 +76,7 @@ type ActionRetrier interface {
 
 func validControlAction(request controlRequest) bool {
 	switch request.Action {
-	case "snapshot", "bootstrap", "ready", "stop", "inspect_identity":
+	case "snapshot", "bootstrap", "ready", "stop", "inspect_identity", "clipboard_read", "clipboard_write":
 		return len(request.Packages) == 0 && request.Import == nil && request.GuestAction == nil
 	case "inspect_packages":
 		if request.Import != nil || request.GuestAction != nil || len(request.Packages) == 0 || len(request.Packages) > 32 {
@@ -248,6 +248,10 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 	}
 	if request.Version != 1 || request.Binding != binding || !validControlAction(request) ||
 		(request.Action == "run_action" || request.Action == "retry_action") && !exactControlActionBinding(binding, *request.GuestAction) {
+		return
+	}
+	if request.Action == "clipboard_read" || request.Action == "clipboard_write" {
+		handleClipboardControl(ctx, connection, binding, owner, request, acceptedAt)
 		return
 	}
 	if request.Action == "bootstrap" {

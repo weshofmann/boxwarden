@@ -40,8 +40,21 @@ type Held struct {
 	err       error
 }
 
+// ErrBusy reports a conflicting live holder. Clipboard callers refuse rather
+// than waiting with captured text for another operation to finish.
+var ErrBusy = errors.New("operation is busy")
+
 // Acquire obtains an owner-private lock named by a safe scope below stateRoot.
 func Acquire(ctx context.Context, stateRoot, scope string) (*Held, error) {
+	return acquire(ctx, stateRoot, scope, false)
+}
+
+// TryAcquire obtains the same protected lock without waiting for another holder.
+func TryAcquire(ctx context.Context, stateRoot, scope string) (*Held, error) {
+	return acquire(ctx, stateRoot, scope, true)
+}
+
+func acquire(ctx context.Context, stateRoot, scope string, nonblocking bool) (*Held, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -102,6 +115,10 @@ func Acquire(ctx context.Context, stateRoot, scope string) (*Held, error) {
 		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
 			file.Close()
 			return nil, fmt.Errorf("acquire lock %q: %w", scope, err)
+		}
+		if nonblocking {
+			file.Close()
+			return nil, ErrBusy
 		}
 		select {
 		case <-ctx.Done():

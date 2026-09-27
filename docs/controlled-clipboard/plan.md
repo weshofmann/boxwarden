@@ -18,7 +18,7 @@ ambiguous commit acknowledgement and focus changes before/after click.
 - [ ] Independently review design; prove synthetic desktop copy and later paste
   over pinned SSH on one disposable non-logged-in guest. Record exact packages,
   clipboard ownership and transport results. No alpha rebuild campaign.
-- [ ] Add internal/clipboardx bounded text/frame and transfer service tests first;
+- [x] Add internal/clipboardx bounded text/frame and transfer service tests first;
   implement shared validation, immutable target and commit outcome contracts.
 - [ ] Add fixed guest clipboard helper and SSH/supervisor/session runtime capability.
   Test protocol framing, sanitized errors, generation/deadline/lock behavior and
