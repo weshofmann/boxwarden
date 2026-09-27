@@ -28,22 +28,35 @@ across the two independent workspace histories.
 Second session C independently completed public create/attach/start, actual
 ChatGPT sign-in observation, pristine import and pinned readback. Its initial
 stopped export matched its own pristine source/live bytes, and public import
-verification passed under C's original backend before edits or rebuild. All
-sixteen VMs are stopped. A driver import invocation omitted the required volume
-UUID and was rejected at parsing; the corrected invocation passed.
+verification passed under C's original backend before edits or rebuild. C then
+ran the explicit guest edit, produced its own NEW edited export matching all
+four predetermined/live files, and retained those bytes through an actual
+restart. Counter `3`, one once execution, one explicit edit and three startup
+pairs matched independently. C is stopped; sixteen VMs were stopped before
+launching the one fresh public tree preparation. No tree base is admitted yet.
+
+Bounded launch review caught a private runner bookkeeping failure that could
+lose the original builder result after launch. Corrected runners retain the
+same child through receipt failures and distinguish child exit from bookkeeping
+errors. The old failure reproduced; five isolated fault cases passed and fresh
+delta review found no remaining Important/Critical launch issue. A corrected
+export observer used the actual build directory; its earlier error is retained.
+These runner checks do not qualify the running installer.
 
 Fresh uncached full Go tests, race detection and vet passed at `f5113f0`, as did
 host/Linux guest builds, Node, guest/helper fixtures, shell syntax, gofmt and
 ShellCheck. Failed driver attempts are retained separately: missing `USER` for
 an ACL fixture, Darwin linking of Linux-only guest targets, and Python isolation
 excluding a sibling fixture module. Corrected targeted/tail checks passed; this
-is source verification, not VM acceptance. Swift compilation, final artifact
-identity and current-source final gates remain pending. [Hosted checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36296446219)
-passed its full deterministic matrix.
+is source verification, not VM acceptance. [Current source CI](https://github.com/weshofmann/boxwarden/actions/runs/36297904967)
+passed the full deterministic matrix, including both Swift helper builds. A fresh
+current-source bootstrap build reproduced the exact tracked digest lock. Final
+host gates remain pending.
 
-Next: finish C's edit/restart baseline, admit a fresh tree base, and complete the
-actual absent-to-installed rebuild/start plus NEW replacement export on each
-workspace. Preserve all historical workspaces, protected VM and detached rollback.
+Next: resolve the single running public tree preparation by its original result,
+then independently match journal/cache/passed clone receipt/stopped objects and
+doctor. After admission, complete B → E and C → D actual absent-to-installed
+rebuild/start plus NEW replacement exports. Preserve all historical workspaces, protected VM and detached rollback.
 
 
 Latest installer source: `d401c17126e2ff2b9e23ab75af1c781fae032fff`.

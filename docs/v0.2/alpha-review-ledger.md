@@ -629,3 +629,26 @@ admission/key/intent regression, both Go/Node fixture loops and corrected active
 commands/claims matched. Read-only diff check passed; suites and VMs were not
 rerun by the reviewer. Two minor wording fixes (all three variants; explicitly
 historical next-step paragraph) were applied before publication.
+
+
+### Tree launch runner delta and second workspace checkpoint
+
+Fresh bounded review caught an Important evidence-retention failure in the
+private launch runner: a receipt exception after spawning could bypass waiting
+on the original builder. Corrected post-launch bookkeeping retains that same
+child and records its exit/reaping separately; bookkeeping errors fail the
+runner. The original failure reproduced with an isolated fake child, and five
+corrected fault cases passed. Fresh delta review found no remaining
+Important/Critical blocker for the exact tree preparation. Model routing was
+requested as Astra/extra-high and is not independently attested. The reviewer
+performed static checks only; no tests or VM operations.
+
+The updated private plan labels original builder and jq replacement evidence
+historical, with fresh tree attempt/candidate admission pending. Before later
+replacement gating, active descriptions use B → E and independently C → D.
+C's own public pristine import verification, explicit edit, NEW edited export,
+restart data comparison and once/edit/startup counts passed. Those observations
+do not complete the tree rebuild or fresh-repeat gate. One fresh public tree
+preparation is running from published `e10fe50`; its terminal result remains
+required. Current deterministic CI passed, and a fresh bootstrap build exactly
+reproduced the tracked artifact lock.
