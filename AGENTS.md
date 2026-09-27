@@ -1,20 +1,33 @@
 # Boxwarden agent invariants
 
-## v0.2 alpha branch scope
+## Current development baseline: v0.2 prototype
 
 The owner-approved v0.2 alpha mission is recorded in `docs/v0.2/alpha-mission.md`.
-For this branch, implement one supported Ubuntu Desktop ARM64 recipe with
-automatic prepared-base reuse, named persistent sandboxes, and independent
+Its delivered state is **FUNCTIONAL PROTOTYPE — MATERIAL GAPS LISTED**, not a
+production release or a claim of complete guest-to-host isolation. Use
+`docs/v0.2/alpha-progress.md`, `docs/v0.2/alpha-review-ledger.md`, and
+`docs/v0.2/alpha-quickstart.md` for current behavior, evidence, and limitations.
+
+The v0.2 baseline supports one Ubuntu Desktop ARM64 recipe path with automatic
+prepared-base reuse, named persistent sandboxes, and independent
 Boxwarden-managed workspace disk files. A workspace disk is attached to one
 stopped sandbox at a time with one writable owner; it is not host filesystem
 sharing. The normal alpha workflow must not require manual golden registration.
 Owner-added guest SSH public keys may coexist with Boxwarden's certificate-only,
-host-key-pinned management client. These v0.2 scope choices supersede the
-v0.1-only exclusions below for this branch. Preserve the guest-root threat
-model, admitted Tart/Softnet host boundary, exact ownership, data safety,
-private-network restrictions, and evidence requirements. Do not claim a
-capability has been implemented or qualified merely because this scope permits
-it.
+host-key-pinned management client. These v0.2 scope choices supersede conflicting
+v0.1-only exclusions below on `main` and subsequent feature branches. Preserve
+the guest-root threat model, admitted Tart/Softnet host boundary, exact ownership,
+data safety, private-network restrictions, and evidence requirements. Do not
+claim a capability has been implemented or qualified merely because this scope
+permits it.
+
+The autonomous alpha mission is complete. Historical V1-V4 and Slice A-D
+pending statements are historical context, not instructions to restart that
+mission. New work uses focused branches/PRs and the follow-ups in
+`docs/v0.2/next-steps.md`. Planned clipboard integration is not implemented by
+this documentation closeout; automatic clipboard sharing remains disabled.
+Existing tested binaries, handoff artifacts, workspaces, and their source paths
+must not be deleted or replaced merely because the integration PR is merged.
 
 - The repository is a host-neutral framework for disposable AI-agent workstations. M1A uses Tart as the security boundary on macOS; future backends must satisfy the same policy properties. Boxwarden does not prescribe guest workload execution: native processes, language runtimes, Docker, Podman, other guest-local runtimes, and no runtime are all compatible with the model. OCI is an optional portability format, not a substitute for VM isolation.
 - The explicit agent workstation account has full control of its disposable guest, including unrestricted passwordless sudo. Backend containment must hold against a malicious guest root; do not treat sudoers restrictions, guest firewall state, routes, or other guest-enforced policy as a host security boundary.
@@ -41,7 +54,7 @@ it.
 - Repository-owned control-plane software is Go-first, with a deliberately small dependency surface. Node/npm is available for third-party tools and workloads, not as the default implementation platform.
 - Treat npm installs, package scripts, build scripts, hostile repositories, and third-party executable configuration as potentially hostile code execution. Quarantine sessions contain no reusable provider or GitHub credentials.
 - Every session belongs to one explicit security domain such as `personal` or `work`. Golden selection, profiles, age recipients/identities, credentials, memory, projects, session registry, and runtime paths are domain-scoped; never search or fall back across domains implicitly.
-- Quarantine blocks `boxwarden` profile and credential injection, but cannot prevent a human from logging in manually. Use public source or narrowly scoped, short-lived, read-only ingress credentials; never reusable write credentials.
+- Quarantine blocks `boxwarden` profile and credential injection, but cannot prevent a human from logging in manually. Use public source or narrowly scoped short-lived read-only ingress credentials; never reusable write credentials.
 - Treat portable guest definitions and host/backend-specific golden artifacts as different objects. Autoinstall, provisioning, manifests, identity initialization, firewall/guest-runtime/SSH policy, profile adapters, memory conventions, and guest acceptance tests remain portable; Tart images are M1A build artifacts.
 - Workloads we build remain independent of Tart. OCI is a portable option, not a required execution model.
 - Prefer first-party official AI-tool distributions; do not replace them with community wrappers.

@@ -7,9 +7,37 @@ autonomous AI agents. Its security model places the agent in a full graphical
 virtual machine, rather than trying to contain each command individually on the
 trusted host.
 
-## Status
+## Current development baseline: v0.2 prototype
 
-Boxwarden is in early development and is **not ready for general use**.
+**FUNCTIONAL PROTOTYPE — MATERIAL GAPS LISTED. Not ready for general use.**
+
+The owner-approved v0.2 baseline is the prototype delivered by PR #12:
+recipe-driven prepared-base reuse, persistent graphical sandboxes, independent
+workspace disks, explicit import/edit workflows, system rebuild/replacement,
+and controlled stopped-workspace export. The published evidence records two
+independent synthetic workspace histories, including a recovered start rather
+than uninterrupted first-start success in one replacement history.
+
+Start with the [v0.2 operator quickstart](docs/v0.2/alpha-quickstart.md).
+The [progress record](docs/v0.2/alpha-progress.md) and
+[review ledger](docs/v0.2/alpha-review-ledger.md) distinguish implementation,
+source checks, observed guest behavior, and remaining gaps. The
+[next steps](docs/v0.2/next-steps.md) capture the approved clipboard feature
+and outstanding reliability, network, and user-acceptance work.
+
+Complete guest-to-host network isolation is **not claimed**: services on the
+vmnet gateway remain reachable. Workspace remount/device-identity reconciliation,
+reboot/reconnect, and some interruption cases retain documented limits.
+Provider sign-in and authenticated agent use have not been demonstrated.
+Merging this baseline is not a release or a change to those claims. Automatic
+clipboard sharing remains disabled; the proposed explicit transfers are not
+implemented yet.
+
+<details>
+<summary>Historical v0.1 status and qualification context</summary>
+
+The following snapshot is retained as history, not the current v0.2 work queue.
+Use the linked v0.2 records above for current implementation and acceptance.
 
 Task 0 qualified the M1A platform **PASS WITH CONDITIONS**: an Apple Silicon
 macOS 26.6.2 host, Tart 2.32.1, Softnet 0.19.0, and an Ubuntu 24.04 ARM64
@@ -64,6 +92,8 @@ continues controlled product checks at the Slice C bootstrap and Slice D SSH
 boundaries. File transfer, provider authentication, and operator-console UX
 remain deferred. See the
 [Slice B controlled exact-start evidence](docs/evidence/slice-b-controlled-exact-start.md).
+
+</details>
 
 ## Model
 
@@ -125,7 +155,8 @@ not claims about arbitrary host configurations.
   [ADR 015](docs/decisions/015-network-compatibility-before-host-gateway-isolation.md).
 - Credentials, browser sessions, and data intentionally placed in a guest.
 
-These are design decisions with explicit rationale, not implementation gaps.
+These exclusions retain their documented rationale. The vmnet-gateway exposure
+is also a tracked post-prototype follow-up; merging v0.2 does not resolve it.
 
 Read [the security model](docs/security-model.md) and
 [architecture](docs/architecture.md) for the full specification.
@@ -150,7 +181,9 @@ qualification; these dimensions are orthogonal.
 The full claim inventory, assurance matrix, platform qualification matrix, and
 evidence gaps are in [`docs/assurance.md`](docs/assurance.md).
 
-**Selected entries — current status:**
+**Selected v0.1 assurance entries — historical scope:**
+The current v0.2 evidence and limits are in the
+[prototype progress record](docs/v0.2/alpha-progress.md).
 
 | Property | Evidence basis | Notes |
 |---|---|---|
@@ -196,7 +229,7 @@ migration. Softnet runtime behavior awaits a separate gate whose procedure has
 been approved. Attended evidence has been produced and is committed on the
 current tree.
 
-**Pending gates:**
+**Historical v0.1 pending gates (not the current v0.2 work queue):**
 - Softnet runtime behavior (privilege transition/drop, closed-environment
   execution, signal handling) — partial attended runtime work produced
   non-final forensic evidence and exposed harness assumptions that are being
@@ -207,8 +240,9 @@ current tree.
 - V2 real-host register/clone gate (requires artifact from corrected generic
   guest definition)
 
-See [`docs/assurance.md`](docs/assurance.md) for the full qualification matrix
-and evidence gaps.
+See [`docs/assurance.md`](docs/assurance.md) for the historical qualification
+matrix and [`docs/v0.2/alpha-progress.md`](docs/v0.2/alpha-progress.md) for the
+current prototype's recorded evidence and remaining limits.
 
 ## Important security limitations
 
@@ -223,18 +257,25 @@ and evidence gaps.
 - Host filesystem sharing, display-server sharing, clipboard and audio sharing,
   host runtime sockets, host credential stores, SSH-agent forwarding, bridged
   networking, port exposure, and nested virtualization are absent by default.
-- The implemented V3 host/domain gate proves exact host installation,
-  read-only diagnosis, manifest migration, unsafe-Homebrew init refusal, and
-  domain-CA separation only. Softnet privilege transition/drop, dependency and
-  signal/filesystem behavior, runtime network behavior, hostile-guest evidence,
-  and V4 lifecycle behavior remain Pending; Boxwarden is not production-ready.
+- Earlier V3 host/domain evidence is not a claim of complete runtime or
+  hostile-guest qualification. Current v0.2 synthetic lifecycle results and
+  their remaining limitations are recorded separately; Boxwarden is not
+  production-ready.
 
 Read [the security model](docs/security-model.md),
 [architecture](docs/architecture.md), and the [Task 0 evidence
 summary](docs/evidence/m1a-task0-final-summary.md) before evaluating the
 project for sensitive work.
 
-## Current commands
+## Command reference
+
+Use the [v0.2 operator quickstart](docs/v0.2/alpha-quickstart.md) for the current
+recipe-driven create/start/stop, workspace, rebuild/replacement, and export
+workflow, including its explicit prerequisites. The examples below retain the
+historical v0.1 command surface; manual golden registration is not the normal
+v0.2 path.
+
+### Historical v0.1 command examples
 
 ```sh
 boxwarden init

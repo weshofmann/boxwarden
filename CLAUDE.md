@@ -2,6 +2,17 @@
 
 Guidance for Claude Code sessions in this repository. `docs/development-workflow.md` is the canonical Git/GitHub workflow policy, `AGENTS.md` holds concise operational invariants, and this file is subordinate guidance. Where they disagree, the workflow document and `AGENTS.md` win.
 
+## Current baseline
+
+V0.2 is the current experimental development baseline, delivered as a functional
+prototype with material gaps, not a general-use release. Read the v0.2 scope in
+`AGENTS.md`, then `docs/v0.2/alpha-progress.md`, `alpha-review-ledger.md`,
+`alpha-quickstart.md`, and `next-steps.md` in that same directory.
+The M1A/V1-V4 instructions below retain historical scope and rationale. They do
+not restart the completed autonomous mission or override the explicit v0.2
+workspace, preparation, and guest-authentication scope. No new clipboard bridge
+or patched Tart binary is enabled by this documentation closeout.
+
 ## What Boxwarden is
 
 Boxwarden creates and manages secure, routinely disposable VM workstations for autonomous AI agents.
@@ -9,7 +20,7 @@ Boxwarden creates and manages secure, routinely disposable VM workstations for a
 - **The VM is the trust boundary** between autonomous agents and the trusted host. Boxwarden does not prescribe how workloads execute inside the guest: native processes, language runtimes, Docker, Podman, other guest-local runtimes, and no runtime are all valid. None substitutes for VM isolation.
 - **Tart is the first backend, not the product.** M1A is macOS host + Tart + Ubuntu 24.04 ARM64 guest. A Linux/KVM backend is an intended future evolution. Keep the backend seam narrow; do not build a generic hypervisor framework.
 - **Go-first.** The `boxwarden` control plane is Go with a deliberately small dependency surface. Module: `github.com/weshofmann/boxwarden`. Shell is for small guest bootstrap/provisioning tasks only. Node exists *inside the guest* for third-party tooling; it is never Boxwarden's implementation platform.
-- **Current scope: Milestone 1A.** Determine actual progress from Git history, the worktree, and the M1A plan rather than from a snapshot in this file.
+- **Current scope: v0.2 prototype.** Determine actual progress from Git history, the worktree, and the current v0.2 records rather than historical milestone snapshots. Start subsequent features on focused branches from the integrated baseline.
 
 ## Read before changing anything architectural
 
@@ -20,9 +31,9 @@ In order:
 3. `docs/security-model.md` — threat model and required backend properties.
 4. `docs/state-model.md` — the five layers and the two classification axes.
 5. `docs/decisions/` — the accepted and provisional architecture decisions. Read their current status and supersession notes rather than assuming every numbered ADR remains authoritative.
-6. `docs/superpowers/plans/2026-09-01-boxwarden-v0.1.md` — the executable
-   V1-V4 plan and corrected roadmap. The 2026-08-30 milestone plan is retained
-   only as superseded planning history and must not be executed.
+6. `docs/superpowers/plans/2026-09-01-boxwarden-v0.1.md` — historical
+   V1-V4 plan, not the current work queue. The 2026-08-30 milestone plan is also
+   retained only as superseded planning history and must not be executed.
 7. `docs/reviews/2026-08-30-independent-architecture-review.md` — historical review evidence and rationale. Canonical docs and later ADRs contain the reconciled dispositions. **Read this before starting Task 0.**
 8. `memory/knowledge/tart-and-guest-platform-facts.md` — verified external facts (Tart CLI, Softnet policy, Ubuntu imaging). Check here before re-deriving or guessing platform behavior.
 
@@ -68,7 +79,7 @@ Never weaken these to make something work. If a task appears to require it, stop
 - Write intent before mutation; lock conflicting operations; reconcile against observed state; make retries idempotent.
 - **Fail closed.** Unknown, unverifiable, or ambiguous state blocks the operation.
 - Test failure paths before success paths count as done. Express security requirements as properties, not as flag-string assertions — a test that greps for Tart flags is not evidence of a policy.
-- Keep M1A scope narrow. No speculative generalized abstractions. Check the plan's "Explicitly deferred" list before adding anything.
+- Keep the current feature scope narrow. No speculative generalized abstractions. Check `docs/v0.2/next-steps.md` and the active feature brief before adding anything.
 
 ## Workflow expectations
 
