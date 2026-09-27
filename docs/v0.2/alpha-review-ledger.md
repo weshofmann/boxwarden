@@ -458,3 +458,30 @@ A frozen-source synthetic regression reproduced all four blocked lifecycle
 paths and confirmed internal recovery releases the exact volume. Existing
 interrupted-copy, recovery and resume tests also passed. Fix this public-path
 composition before exercising stopped exports; base preparation is unaffected.
+
+### Interrupted-export correction delta
+
+The driver reproduced RED failures for the lost durable copy transaction,
+public Copying-phase resume, and CLI error recovery ID. This correction returns
+the exact transaction on post-reservation failure, reports its validated UUID
+in the public error, and composes the existing exact stopped-backend snapshot
+recovery into public resume. A partial copy aborts and releases its reservation;
+`export: aborted` never claims published files. Ready snapshots continue through
+the existing inspector path after any matching crash-left marker is cleared.
+
+Bounded delta review reproduced an Important availability regression in the
+first draft: ready-snapshot resume acquired the original volume's live lease
+even after Pending cleared. The held-lease regression failed, then passed after
+limiting recovery to this transaction's matching Pending. Completed snapshots
+remain independent of the source's later runtime and attachment.
+
+The final affected export/recovery and app routing tests, full local Go suite,
+targeted vet, formatting and diff checks passed. Tests verify nil/running/foreign
+backend refusal preserves evidence, exact stopped recovery clears Pending,
+normal start becomes available, admitted observer routing and distinct aborted
+output. Fresh delta source review found no remaining Important/Critical defect.
+Its small held-lease check passed without a helper; a broader independent repeat
+hit actual internal free-space reserve during fixture setup and was not green.
+The guard was retained. Hard termination before UUID output still requires exact
+private-journal inspection; public transaction listing remains unimplemented.
+No real export recovery or GUI/durability proof is claimed.

@@ -273,7 +273,7 @@ func TestRecoverInterruptedExportCopyRequiresStopAndClearsExactPending(t *testin
 	if err := os.Chmod(parent, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	_, err := createExportSnapshot(context.Background(), root, domain.ID("work"), testVolumeID, parent, []string{"project/report.txt"}, stoppedObserver{state: backend.ObjectStopped, object: stopped.Backend.ObjectID},
+	returned, err := createExportSnapshot(context.Background(), root, domain.ID("work"), testVolumeID, parent, []string{"project/report.txt"}, stoppedObserver{state: backend.ObjectStopped, object: stopped.Backend.ObjectID},
 		func(_ context.Context, _ string, _ workspaceformat.Request, _ *os.File, dir *os.Root, _ ExportJournal) (ExportSnapshot, error) {
 			partial, err := dir.OpenFile("snapshot.raw", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 			if err != nil {
@@ -295,6 +295,9 @@ func TestRecoverInterruptedExportCopyRequiresStopAndClearsExactPending(t *testin
 		t.Fatalf("copy did not retain Pending: %#v, %v", volume.Pending, err)
 	}
 	id := volume.Pending.ID
+	if returned.ID != id || returned.Phase != ExportCopying {
+		t.Fatalf("copy failure lost durable recovery handle: returned=%+v, pending=%s", returned, id)
+	}
 	foreign := filepath.Join(root, "exports", id, "foreign")
 	if err := os.WriteFile(foreign, []byte("unexpected"), 0o600); err != nil {
 		t.Fatal(err)

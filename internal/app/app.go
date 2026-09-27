@@ -142,7 +142,7 @@ func Run(ctx context.Context, args []string, options Options) error {
 	if command.requiresBackend() {
 		if command.kind == commandGoldenRegister {
 			err = backend.ValidateObjectID(command.name)
-		} else if command.kind != commandWorkspaceExport && command.kind != commandWorkspaceImportVerify {
+		} else if command.kind != commandWorkspaceExport && command.kind != commandWorkspaceExportResume && command.kind != commandWorkspaceImportVerify {
 			_, err = session.ParseName(command.name)
 		}
 		if err != nil {
@@ -439,17 +439,20 @@ func Run(ctx context.Context, args []string, options Options) error {
 		}
 		journal, published, err := options.AlphaExport(ctx, selectedDomain, command.alphaExport, options.Observer)
 		if err != nil {
+			if journal.Domain == selectedDomain.ID && alphaCreateUUID(journal.ID) {
+				return fmt.Errorf("export workspace transaction %s: %w", journal.ID, err)
+			}
 			return fmt.Errorf("export workspace: %w", err)
 		}
 		return writeAlphaExport(options.Output, selectedDomain, journal, published)
 	case commandWorkspaceExportResume:
-		if options.AlphaExportResume == nil {
+		if options.Observer == nil || options.AlphaExportResume == nil {
 			return errors.New("workspace export resume requires alpha recovery composition")
 		}
 		if selectedDomain.ID != "alpha" {
 			return errors.New("v0.2 workspace export resume is limited to the explicit alpha domain")
 		}
-		journal, published, err := options.AlphaExportResume(ctx, selectedDomain, command.alphaExportResume)
+		journal, published, err := options.AlphaExportResume(ctx, selectedDomain, command.alphaExportResume, options.Observer)
 		if err != nil {
 			return fmt.Errorf("resume workspace export: %w", err)
 		}
@@ -545,7 +548,7 @@ func (c parsedCommand) requiresDomain() bool {
 }
 
 func (c parsedCommand) requiresBackend() bool {
-	return c.kind == commandGoldenRegister || c.kind == commandSessionCreate || c.kind == commandSessionStatus || c.kind == commandWorkspaceAttach || c.kind == commandWorkspaceDetach || c.kind == commandWorkspaceExport || c.kind == commandWorkspaceImportVerify
+	return c.kind == commandGoldenRegister || c.kind == commandSessionCreate || c.kind == commandSessionStatus || c.kind == commandWorkspaceAttach || c.kind == commandWorkspaceDetach || c.kind == commandWorkspaceExport || c.kind == commandWorkspaceExportResume || c.kind == commandWorkspaceImportVerify
 }
 
 func parseCommand(args []string, options Options) (parsedCommand, error) {

@@ -27,10 +27,38 @@ func ExportSelectedWorkspace(ctx context.Context, stateRoot string, domainID dom
 
 type exportContinuation func(context.Context, string, domain.ID, ExportJournal, string, string, string) (ExportJournal, string, error)
 
-// ResumeSelectedWorkspace reuses only an exact durable snapshot-ready or
-// inspected transaction. An existing destination is ambiguous after a
-// possible receiver rename and is never overwritten or marked published.
-func ResumeSelectedWorkspace(ctx context.Context, stateRoot string, domainID domain.ID, transactionID, sourceRoot, isoPath, goBinary string) (ExportJournal, string, error) {
+// ResumeSelectedWorkspace safely aborts an interrupted copy, or clears an
+// exact ready snapshot's Pending marker before continuing inspection. Aborted
+// copies never publish output: the caller may start a new export afterward.
+// Existing receiver destinations remain ambiguous and are never overwritten.
+func ResumeSelectedWorkspace(ctx context.Context, stateRoot string, domainID domain.ID, transactionID, sourceRoot, isoPath, goBinary string, observer backend.Observer) (ExportJournal, string, error) {
+	journal, err := loadExportJournal(stateRoot, domainID, transactionID)
+	if err != nil {
+		return ExportJournal{}, "", err
+	}
+	recoverPending := journal.Phase == ExportCopying || journal.Phase == ExportAborted
+	if journal.Phase == ExportSnapshotReady {
+		// A completed snapshot is independent of the original volume, which
+		// may now be running, reattached or deleted. Take its use lock only
+		// when this exact copy still owns a crash-left Pending marker.
+		record, recordErr := LoadRecord(stateRoot, domainID, journal.VolumeID)
+		if recordErr != nil && !errors.Is(recordErr, os.ErrNotExist) {
+			return journal, "", recordErr
+		}
+		recoverPending = recordErr == nil && record.Pending != nil && record.Pending.Kind == "export-snapshot" && record.Pending.ID == journal.ID
+	}
+	if recoverPending {
+		if observer == nil {
+			return journal, "", fmt.Errorf("export snapshot recovery requires backend observation")
+		}
+		journal, err = RecoverExportSnapshot(ctx, stateRoot, domainID, transactionID, observer)
+		if err != nil {
+			return journal, "", err
+		}
+		if journal.Phase == ExportAborted {
+			return journal, "", nil
+		}
+	}
 	return resumeSelectedWorkspace(ctx, stateRoot, domainID, transactionID, sourceRoot, isoPath, goBinary, completeSelectedWorkspace)
 }
 

@@ -197,10 +197,16 @@ func TestWorkspaceExportResumeRoutesExactJournalWithoutNewSelection(t *testing.T
 	destination := filepath.Join(t.TempDir(), "returned")
 	called := 0
 	var output bytes.Buffer
-	options := Options{Output: &output, AlphaExportResume: func(_ context.Context, actual config.Domain, received AlphaExportResumeInput) (workspacex.ExportJournal, string, error) {
+	observer := fake.New()
+	options := Options{Output: &output, BackendFactory: func(actual config.Config, domain config.Domain) (BackendDependencies, error) {
+		if domain != selected {
+			return BackendDependencies{}, errors.New("wrong resume backend domain")
+		}
+		return BackendDependencies{Observer: observer}, nil
+	}, AlphaExportResume: func(_ context.Context, actual config.Domain, received AlphaExportResumeInput, actualObserver backend.Observer) (workspacex.ExportJournal, string, error) {
 		called++
-		if actual != selected || received != input {
-			t.Fatalf("resume lost exact domain or transaction: %+v, %+v", actual, received)
+		if actual != selected || received != input || actualObserver != observer {
+			t.Fatalf("resume lost exact domain, transaction or observer: %+v, %+v", actual, received)
 		}
 		return workspacex.ExportJournal{ID: transaction, Domain: actual.ID,
 				DestinationParent: destination, Phase: workspacex.ExportPublished},
@@ -1838,4 +1844,40 @@ func (f *caStoreFake) Init(_ context.Context, selected sshx.Domain, configured [
 		return f.result, f.initErr
 	}
 	return sshx.CAInitResult{Disposition: sshx.CAInitialized}, f.initErr
+}
+
+func TestWorkspaceExportFailureReportsRecoveryTransaction(t *testing.T) {
+	configPath, _ := writeV2DomainFixture(t, "alpha")
+	const id = "10213243-5465-4768-899a-bbccddeeff00"
+	var output bytes.Buffer
+	options := Options{Observer: fake.New(), Output: &output, AlphaExport: func(context.Context, config.Domain, AlphaExportInput, backend.Observer) (workspacex.ExportJournal, string, error) {
+		return workspacex.ExportJournal{ID: id, Domain: "alpha", Phase: workspacex.ExportCopying}, "", errors.New("injected copy failure")
+	}}
+	args := []string{"--config", configPath, "--domain", "alpha", "workspace", "export", "--destination", "/private/returned", "--select", "project/report.txt", "--source-root", "/private/source", "--iso", "/private/ubuntu.iso", "--go", "/private/bin/go", "00112233-4455-4677-8899-aabbccddeeff"}
+	err := Run(t.Context(), args, options)
+	if err == nil || !strings.Contains(err.Error(), id) {
+		t.Fatalf("copy failure lost public recovery transaction: %v", err)
+	}
+	if strings.Contains(output.String(), "export:") {
+		t.Fatalf("failed copy claimed export: %q", output.String())
+	}
+}
+
+func TestWorkspaceExportAbortedResumeNeverClaimsPublication(t *testing.T) {
+	configPath, selected := writeV2DomainFixture(t, "alpha")
+	const id = "10213243-5465-4768-899a-bbccddeeff00"
+	var output bytes.Buffer
+	options := Options{Observer: fake.New(), Output: &output, AlphaExportResume: func(_ context.Context, domain config.Domain, in AlphaExportResumeInput, observer backend.Observer) (workspacex.ExportJournal, string, error) {
+		if domain != selected || observer == nil {
+			t.Fatal("resume lost exact backend binding")
+		}
+		return workspacex.ExportJournal{ID: id, Domain: domain.ID, Phase: workspacex.ExportAborted}, "", nil
+	}}
+	args := []string{"--config", configPath, "--domain", "alpha", "workspace", "export", "resume", "--source-root", "/private/source", "--iso", "/private/ubuntu.iso", "--go", "/private/bin/go", id}
+	if err := Run(t.Context(), args, options); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "domain: alpha\ntransaction: "+id+"\nexport: aborted\n" {
+		t.Fatalf("aborted recovery claimed output: %q", output.String())
+	}
 }

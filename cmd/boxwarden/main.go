@@ -155,9 +155,9 @@ func publicOptions(output io.Writer) app.Options {
 			return workspacex.ExportSelectedWorkspace(ctx, selected.StateRoot, selected.ID, input.VolumeID,
 				input.DestinationParent, input.Selected, observer, input.SourceRoot, input.ISOPath, input.GoBinary)
 		},
-		AlphaExportResume: func(ctx context.Context, selected config.Domain, input app.AlphaExportResumeInput) (workspacex.ExportJournal, string, error) {
+		AlphaExportResume: func(ctx context.Context, selected config.Domain, input app.AlphaExportResumeInput, observer backend.Observer) (workspacex.ExportJournal, string, error) {
 			return workspacex.ResumeSelectedWorkspace(ctx, selected.StateRoot, selected.ID, input.TransactionID,
-				input.SourceRoot, input.ISOPath, input.GoBinary)
+				input.SourceRoot, input.ISOPath, input.GoBinary, observer)
 		},
 		AlphaImport: func(ctx context.Context, selected config.Domain, input app.AlphaImportInput) (workspacex.ImportJournal, supervisor.ImportResult, error) {
 			controller, err := supervisor.NewExactImportController(filepath.Join(selected.StateRoot, "runtime"))

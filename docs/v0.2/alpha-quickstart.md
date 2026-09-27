@@ -142,6 +142,22 @@ when finished. Rebuild, replacement reattachment, GUI acceptance, and a fresh
 independent repetition are tracked in [alpha progress](alpha-progress.md)
 until they pass the complete matrix.
 
+If export copying is interrupted and reports a transaction UUID, keep its
+session stopped and recover that exact transaction:
+
+```sh
+"$BW" --config "$CONFIG" --domain alpha workspace export resume \
+  --source-root "$SOURCE_ROOT" --iso "$ISO" --go "$GO_BIN" "$EXPORT_UUID"
+```
+
+A partial-copy recovery reports `export: aborted`, clears only its exact
+reservation after stopped-backend and disk checks, and publishes no files.
+Start a new export into a new empty destination afterward. A complete private
+snapshot resumes inspection. Unexpected files, changed identities, uncertain
+backend state, and ambiguous prior publication still refuse recovery. If the
+process died before printing its UUID, retain the exact private export journal
+for operator diagnosis; no public transaction listing is implemented yet.
+
 ## Explicit synthetic edits and persistence
 
 For the ChatGPT recipes, complete the initial stopped export and original-owner

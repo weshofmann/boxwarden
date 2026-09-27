@@ -25,7 +25,7 @@ type AlphaExportResumeInput struct {
 	TransactionID, SourceRoot, ISOPath, GoBinary string
 }
 
-type AlphaExportResumeFunc func(context.Context, config.Domain, AlphaExportResumeInput) (workspacex.ExportJournal, string, error)
+type AlphaExportResumeFunc func(context.Context, config.Domain, AlphaExportResumeInput, backend.Observer) (workspacex.ExportJournal, string, error)
 
 type exportSelections []string
 
@@ -83,6 +83,10 @@ func validAlphaExportResumeInput(input AlphaExportResumeInput) error {
 }
 
 func writeAlphaExport(output io.Writer, selected config.Domain, journal workspacex.ExportJournal, published string) error {
+	if journal.Phase == workspacex.ExportAborted && journal.Domain == selected.ID && alphaCreateUUID(journal.ID) && published == "" {
+		_, err := fmt.Fprintf(output, "domain: %s\ntransaction: %s\nexport: aborted\n", selected.ID, journal.ID)
+		return err
+	}
 	if journal.ID == "" || journal.Domain != selected.ID || journal.Phase != workspacex.ExportPublished ||
 		published != filepath.Join(journal.DestinationParent, strings.ReplaceAll(journal.ID, "-", "")) {
 		return errors.New("workspace export returned an invalid publication receipt")

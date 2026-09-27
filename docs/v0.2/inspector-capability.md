@@ -164,7 +164,7 @@ marker and release the volume lease. The journal remains live after Pending
 clears, so the original volume may safely restart while inspection continues.
 
 A crash during copying leaves Pending and an untrusted partial copy. The
-snapshot-stage recovery implementation reacquires the volume, session, and
+public `workspace export resume` snapshot-stage recovery reacquires the volume, session, and
 storage locks and rechecks the exact session/volume binding, stopped backend,
 source identity, and transaction journal. It rejects unexpected transaction
 directory entries, removes only the recognized partial copy, durably records

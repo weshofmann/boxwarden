@@ -41,6 +41,23 @@ limits and supervisor fixture correction retain their recorded targeted checks.
 
 ### Current work and next step
 
+- Focused lifecycle review's interrupted-export recovery defect is corrected:
+  failed copying retains its transaction handle; public resume performs guarded
+  exact snapshot recovery and reports aborted copying separately from published
+  output. A ready snapshot remains independent of a later source runtime lease.
+  Red/green regressions, affected tests, final full local Go suite, targeted vet
+  and bounded delta source review passed. Broader independent fixture repetition
+  hit the actual disk reserve and was not green. Real-host recovery remains pending.
+- The fresh native-store preparation was cancelled by the **internal-state disk
+  reserve**, with original process exit one and exact failed journal. The driver
+  selected an older internal-state configuration, staging ISO inputs internally;
+  concurrent disposable build caches exhausted its small stopping margin. The
+  candidate is stopped and unadmitted. Its records remain immutable; do not retry
+  it. Only this run's disposable Go caches were removed, without changing guards
+  or unrelated files. Verify the existing external qualification configuration
+  before the next fresh attempt, keeping host staging off the constrained internal
+  state root. This failure does not establish a guest installer or native-SSD cause.
+
 - Focused post-migration review is frozen at `6588c88`. Its [hosted deterministic
   CI](https://github.com/weshofmann/boxwarden/actions/runs/36285329567) passed.
   Exact native mount/encryption/ownership, healthy doctor, ten stopped VMs,

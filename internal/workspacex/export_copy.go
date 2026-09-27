@@ -118,31 +118,31 @@ func createExportSnapshot(ctx context.Context, stateRoot string, domainID domain
 		return ExportJournal{}, err
 	}
 	if err := createExportJournal(stateRoot, journal); err != nil {
-		return ExportJournal{}, fmt.Errorf("persist export transaction before reservation: %w", err)
+		return journal, fmt.Errorf("persist export transaction before reservation: %w", err)
 	}
 	record.Pending = &Pending{Kind: "export-snapshot", ID: id}
 	if err := saveRecordTransition(stateRoot, domainID, record, mutationBeginExportSnapshot, nil); err != nil {
-		return ExportJournal{}, fmt.Errorf("persist export Pending marker: %w", err)
+		return journal, fmt.Errorf("persist export Pending marker: %w", err)
 	}
 	root, err := openStateRoot(stateRoot)
 	if err != nil {
-		return ExportJournal{}, err
+		return journal, err
 	}
 	defer root.Close()
 	exports, err := openChild(root, "exports", false)
 	if err != nil {
-		return ExportJournal{}, err
+		return journal, err
 	}
 	defer exports.Close()
 	if err := exports.Mkdir(id, 0o700); err != nil {
-		return ExportJournal{}, fmt.Errorf("create exact private export transaction directory: %w", err)
+		return journal, fmt.Errorf("create exact private export transaction directory: %w", err)
 	}
 	if err := syncDirectory(exports); err != nil {
-		return ExportJournal{}, err
+		return journal, err
 	}
 	transaction, err := openChild(exports, id, false)
 	if err != nil {
-		return ExportJournal{}, err
+		return journal, err
 	}
 	defer transaction.Close()
 	copyContext, cancel := context.WithTimeout(ctx, exportCopyDeadline)
@@ -153,16 +153,16 @@ func createExportSnapshot(ctx context.Context, stateRoot string, domainID domain
 		snapshot, copyErr = copier(guarded, stateRoot, request, source, transaction, journal)
 		return copyErr
 	}); err != nil {
-		return ExportJournal{}, fmt.Errorf("copy export snapshot: %w", err)
+		return journal, fmt.Errorf("copy export snapshot: %w", err)
 	}
 	ready := journal
 	ready.Phase = ExportSnapshotReady
 	ready.Snapshot = &snapshot
 	if err := advanceExportJournal(ctx, stateRoot, journal, ready); err != nil {
-		return ExportJournal{}, fmt.Errorf("publish durable snapshot identity: %w", err)
+		return journal, fmt.Errorf("publish durable snapshot identity: %w", err)
 	}
 	if err := finishExportSnapshotPending(stateRoot, domainID, ready); err != nil {
-		return ExportJournal{}, fmt.Errorf("clear exact export Pending after snapshot: %w", err)
+		return ready, fmt.Errorf("clear exact export Pending after snapshot: %w", err)
 	}
 	return ready, nil
 }

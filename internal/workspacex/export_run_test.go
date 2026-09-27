@@ -4,14 +4,18 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/exportx"
+	"github.com/weshofmann/boxwarden/internal/workspaceformat"
 )
 
 func TestResumeSelectedWorkspaceFromInspectedJournal(t *testing.T) {
@@ -124,5 +128,87 @@ func TestResumeSelectedWorkspaceFromInspectedJournal(t *testing.T) {
 	}
 	if body, err := os.ReadFile(filepath.Join(final, "project", "report.txt")); err != nil || strings.TrimSpace(string(body)) != "hello" {
 		t.Fatalf("resumed publication content = %q, %v", body, err)
+	}
+}
+
+func TestPublicResumeAbortsInterruptedCopyAndReleasesWorkspace(t *testing.T) {
+	root, stopped := stoppedLaunchFixture(t)
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0700); err != nil {
+		t.Fatal(err)
+	}
+	observer := stoppedObserver{state: backend.ObjectStopped, object: stopped.Backend.ObjectID}
+	returned, err := createExportSnapshot(t.Context(), root, "work", testVolumeID, parent, []string{"project/report.txt"}, observer,
+		func(_ context.Context, _ string, _ workspaceformat.Request, _ *os.File, dir *os.Root, _ ExportJournal) (ExportSnapshot, error) {
+			f, e := dir.OpenFile("snapshot.raw", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+			if e != nil {
+				return ExportSnapshot{}, e
+			}
+			_, e = f.Write([]byte("partial"))
+			e = errors.Join(e, f.Close())
+			if e != nil {
+				return ExportSnapshot{}, e
+			}
+			return ExportSnapshot{}, errors.New("injected copy interruption")
+		}, allowSyntheticExportHeadroom)
+	if err == nil || returned.ID == "" {
+		t.Fatalf("missing interrupted transaction: %+v %v", returned, err)
+	}
+	for _, unsafeObserver := range []backend.Observer{nil, stoppedObserver{state: backend.ObjectRunning, object: stopped.Backend.ObjectID}, stoppedObserver{state: backend.ObjectStopped, object: "foreign-backend"}} {
+		if _, _, err := ResumeSelectedWorkspace(t.Context(), root, "work", returned.ID, "/unused/source", "/unused/iso", "/unused/go", unsafeObserver); err == nil {
+			t.Fatal("uncertain or foreign backend cleared interrupted copy")
+		}
+		volume, err := LoadRecord(root, "work", testVolumeID)
+		if err != nil || volume.Pending == nil || volume.Pending.ID != returned.ID {
+			t.Fatalf("refusal changed Pending: %+v %v", volume, err)
+		}
+		if _, err := os.Stat(filepath.Join(root, returned.SnapshotPath)); err != nil {
+			t.Fatalf("refusal removed partial copy: %v", err)
+		}
+	}
+	result, path, err := ResumeSelectedWorkspace(t.Context(), root, "work", returned.ID, "/unused/source", "/unused/iso", "/unused/go", observer)
+	if err != nil || result.Phase != ExportAborted || path != "" {
+		t.Fatalf("public copy recovery: %+v %q %v", result, path, err)
+	}
+	volume, err := LoadRecord(root, "work", testVolumeID)
+	if err != nil || volume.Pending != nil || volume.Use != nil {
+		t.Fatalf("recovery stranded workspace: %+v %v", volume, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, returned.SnapshotPath)); !os.IsNotExist(err) {
+		t.Fatalf("partial snapshot survived: %v", err)
+	}
+	if _, err := PrepareSessionStart(t.Context(), root, "work", stopped, testGeneration, observer); err != nil {
+		t.Fatalf("recovered workspace cannot start: %v", err)
+	}
+}
+
+func TestReadySnapshotResumeDoesNotWaitForLiveVolumeLease(t *testing.T) {
+	root, stopped := stoppedLaunchFixture(t)
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0700); err != nil {
+		t.Fatal(err)
+	}
+	observer := stoppedObserver{state: backend.ObjectStopped, object: stopped.Backend.ObjectID}
+	ready, err := createExportSnapshot(t.Context(), root, "work", testVolumeID, parent, []string{"project/report.txt"}, observer, copyExportSnapshot, allowSyntheticExportHeadroom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := AcquireVolumeUse(t.Context(), root, "work", testVolumeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	// The nonexistent source root stops bundle preparation before a helper can
+	// launch. Independent snapshot admission must reach that check while the
+	// original workspace's live lease remains held.
+	_, _, err = ResumeSelectedWorkspace(ctx, root, "work", ready.ID, filepath.Join(t.TempDir(), "missing-source"), "/unused/iso", "/unused/go", observer)
+	if err == nil || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ready snapshot waited for live volume lease: %v", err)
+	}
+	record, err := LoadRecord(root, "work", testVolumeID)
+	if err != nil || record.Pending != nil {
+		t.Fatalf("snapshot resume changed volume: %+v %v", record, err)
 	}
 }
