@@ -1,6 +1,6 @@
 # Boxwarden v0.2 alpha progress
 
-Updated: 2026-09-26 UTC. Integration branch:
+Updated: 2026-09-27 UTC. Integration branch:
 `weshofmann/feature/v02-alpha`; [Draft PR #12](https://github.com/weshofmann/boxwarden/pull/12).
 The mission deadline is 2026-10-03 14:44 UTC. This remains a functional
 prototype with material acceptance gaps, not an alpha-ready release.
@@ -170,12 +170,41 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   Thirty local synthetic cases, exact archived full-host read-only preflight,
   Python/wrapper syntax and ShellCheck passed. Review caught and corrected a
   verification-unmount relock gap; fresh final review found no Important/Critical
-  issue and reran all thirty cases. The attended continuation is now running.
-  Copied-content parity passed before encryption; native APFS reports background
-  encryption conversion in progress. Original parent, encryption completion and
-  acceptance receipts remain pending; no cutover is claimed.
-  Native success also requires independent checks and a reviewed persistent
-  mount helper before VM trials; the old source job stays disabled.
+  issue and reran all thirty cases. The fifth attended continuation completed
+  encryption, native filesystem verification and clone isolation. The original
+  driver and wrapper then exited 1 before cutover: successful native rename
+  moved the verification mount to its automatic path, contradicting the old
+  path guard. No background conversion remains. The encrypted copy is retained
+  at the observed native path, and rollback confirms the original source remains
+  canonical/read-only. No copy or encryption retry is needed.
+- A terminal-only cutover preflight passed as the normal operator: exact copy,
+  encryption, verification and failure receipts; both payload metadata/small
+  digests; healthy doctor; all ten stopped and no VM files open. Seven synthetic
+  rename/state fixtures passed. Fresh bounded review approved the exact
+  continuation; normal-user lock/unlock and canonical cutover then completed
+  with original driver and wrapper exit zero. Independent checks confirm exact
+  native volume/container/store, encryption complete, canonical writable mount
+  with ownership, unchanged payload metadata/small digests, all ten stopped and
+  healthy doctor. The old image is detached and its 432 GiB bundle remains intact.
+  The native copy uses about 139 GiB; shared outer free remains about 266 GiB.
+  The persistent mount helper passed eighteen synthetic checks and independent
+  review. Its admission was refreshed against the successful continuation and
+  independent receipt. Controlled normal-user qualification then exited zero:
+  mounted no-op, clean exact-native unmount/lock, noninteractive unlock/canonical
+  remount and idempotent repeat. Metadata/small digests remain unchanged, all ten
+  are stopped and doctor is healthy. The reviewed native helper was installed
+  atomically into the existing user LaunchAgent; direct installed execution and
+  actual RunAtLoad both exited zero. It binds the admitted native UUID and
+  supplies the approved key noninteractively, with no old-image fallback.
+  Original helper/plist bytes remain archived. Reboot and reconnect are untested.
+- A final idle **128 MiB** native-volume sample used uncached file I/O:
+  approximately **465 MiB/s write** including fsync and **400 MiB/s read**
+  including digest comparison. The owned synthetic file was removed. This is
+  a short sequential sample, not sustained device throughput or proof of VM
+  installer performance. Final metadata/small digests, stopped inventory and
+  doctor checks passed; native use is about 139 GiB and shared free about 266 GiB.
+- [Running-conversion checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36283159629)
+  passed its full deterministic matrix.
 - [Encryption-continuation checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36276333420)
   passed its full deterministic matrix.
 - [Native-copy checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36274438213)
@@ -212,9 +241,12 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   input hashes before use. No VM operation has run for this correction.
 - The reviewed conditional diagnostic tools need refreshed source/storage
   identities before use. Their fake-tool checks qualify harness behavior only.
-  All twelve fresh ChatGPT acceptance gates remain pending. Next: complete the
-  native-storage transition, then diagnose on a fresh bounded control and run
-  the corrected exact-source public builder before fresh session acceptance.
+  All twelve fresh ChatGPT acceptance gates remain pending. Native Tart storage
+  cutover and controlled persistent mounting are verified. Next: refresh source,
+  storage and diagnostic/acceptance bindings, correct the second-volume repeat
+  coverage, then diagnose on a fresh bounded control and run the corrected
+  exact-source public builder before fresh session acceptance. Failed and
+  forensic objects remain excluded from admission.
 
 <details>
 <summary>Earlier checkpoint and implementation evidence</summary>

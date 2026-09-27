@@ -338,7 +338,26 @@ lock/unlock and cutover. No recopy, erase or new-volume creation is needed.
 Use the measured copied allocation for conversion headroom and retain the outer
 floor. Native verification can remount or relock a leaf: observe identity and
 state separately, and unlock the exact encrypted leaf before mounting it again.
-Actual encryption, cutover and persistent-mount acceptance remain pending.
+Encryption completed in the fifth continuation, as did native filesystem
+verification and clone isolation. Native rename moved the verification mount
+to its automatic path; the old path guard failed before cutover. Preserve
+completed copy/encryption receipts separately from that terminal failure.
+The next bounded continuation must accept only the observed exact encrypted
+leaf and known native mount path, repeat stopped/content/identity checks, and
+perform final noninteractive lock/unlock and canonical cutover. Do not copy,
+encrypt, create or rename again. Capture current native mount/lock/crypto state
+under lifecycle locks on failure. Refresh persistent-helper admission against
+the successful continuation. Normal-user lock/unlock and canonical native
+cutover have now succeeded with original driver/wrapper exit zero. Independent
+checks confirm encryption complete, exact identity, writable canonical ownership,
+unchanged metadata/small digests, stopped objects and healthy doctor. The old
+image is detached but retained intact. Controlled normal-user clean lock/unlock,
+canonical remount and idempotent repeat passed. The reviewed native helper is
+installed into the existing user LaunchAgent; direct execution and actual
+RunAtLoad both exited zero. Reboot/reconnect remain untested. An idle 128 MiB
+uncached sample measured about 465 MiB/s writes and 400 MiB/s reads; it does not
+qualify guest installer performance. Refresh remaining source/storage plans
+before any new VM trial; retain failed-attempt evidence and rollback source.
 
 The operator deleted the recurring continuation automation and directed storage
 completion first. Do not recreate the automation without a new request. Preserve
