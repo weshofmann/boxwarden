@@ -413,3 +413,48 @@ edit. Then compare independently expected modified task/new note and unchanged
 other source files before adopting a new edited-data baseline. Later stop/start,
 rebuild and replacement require new independent comparisons. Private staged
 source and acceptance input hashes from the prior revision require refresh.
+
+## Focused post-migration integration review (2026-09-27)
+
+Frozen revision: `6588c88e136c1d38316f245cf522f8dc044f1d05`.
+Fresh operational, lifecycle/data and recipe/usability reviewers were requested
+on GPT-6 Astra at extra-high effort; runtime model metadata was not independently
+exposed. Existing corrected findings were respected; this is a bounded review
+of subsequent changes and interactions, not exhaustive whole-PR approval.
+
+The operational reviewer found no new blocking native mount defect. Exact
+native volume/container/store, completed encryption, ownership, canonical
+writable mounting, healthy doctor and ten stopped VMs passed full-host checks.
+The old Tart image remains detached; the active LaunchAgent invokes only the
+native helper. Eighteen safe helper policy fixtures and wrapper/plist syntax
+passed. Reboot/reconnect remain untested, and no restore, benchmark or full VM
+disk hashing was repeated. Native Tart and DevelData share one outer capacity
+budget (about 266 GiB available); inner image availability is not additional
+physical capacity.
+
+**Important operational limitation:** qualification-image remount changed
+filesystem device numbers. The two old reserved workspace files retain their
+inode, size, mtime and record digests, but formatter/record admission rejects
+the new device. Metadata-only attach can still succeed; subsequent start/use
+fails. No supported reconciliation was found. Preserve all seventeen historical
+workspace volumes and proofs without identity edits; exclude the two old
+reserved volumes and use new independently named/formatted volumes for this
+acceptance run. General remount recovery is unqualified. This restriction does
+not block fresh public base preparation, which does not consume these volumes.
+
+The recipe/usability pass found no new Critical/Important source defect.
+Fifteen installer/launcher, eight preparation, fourteen Node filesystem/action
+fixtures and fresh targeted recipe/session/app Go checks passed. Once/startup
+ordering, generation-bound retry, explicit edit behavior and public start after
+rebuild remain distinct from actual GUI/durability proof. One Minor quickstart
+ordering defect is corrected here: the operator must set the printed export
+UUID before invoking import verification. No real VM behavior was exercised.
+
+**Important source finding:** interrupted export snapshot copy leaves a durable
+Copying journal and volume Pending, but returns no transaction ID and public
+resume refuses the Copying phase. Start, detach, rebuild and delete remain
+blocked. The existing safe internal snapshot recovery has no production caller.
+A frozen-source synthetic regression reproduced all four blocked lifecycle
+paths and confirmed internal recovery releases the exact volume. Existing
+interrupted-copy, recovery and resume tests also passed. Fix this public-path
+composition before exercising stopped exports; base preparation is unaffected.

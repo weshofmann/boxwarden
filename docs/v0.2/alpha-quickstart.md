@@ -121,12 +121,17 @@ mkdir -m 700 "$EXPORT_DEST"
 "$BW" --config "$CONFIG" --domain alpha workspace export \
   --destination "$EXPORT_DEST" --select "boxwarden-import-$IMPORT_UUID" \
   --source-root "$SOURCE_ROOT" --iso "$ISO" --go "$GO_BIN" "$VOLUME_UUID"
+```
+
+Set `EXPORT_UUID` from the successful export's printed transaction before
+running verification:
+
+```sh
 "$BW" --config "$CONFIG" --domain alpha workspace import verify \
   --export "$EXPORT_UUID" "$IMPORT_UUID"
 ```
 
-Set `EXPORT_UUID` from the successful export's printed transaction. The
-verify command reports `import: verified` only after the stopped backend,
+The verify command reports `import: verified` only after the stopped backend,
 qualified disk, published whole-directory export, and captured source all
 match. Complete this verification while the original importing session and
 backend still own the attachment: a rebuild changes backend identity, and a

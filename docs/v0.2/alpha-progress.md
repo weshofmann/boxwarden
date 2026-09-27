@@ -41,6 +41,29 @@ limits and supervisor fixture correction retain their recorded targeted checks.
 
 ### Current work and next step
 
+- Focused post-migration review is frozen at `6588c88`. Its [hosted deterministic
+  CI](https://github.com/weshofmann/boxwarden/actions/runs/36285329567) passed.
+  Exact native mount/encryption/ownership, healthy doctor, ten stopped VMs,
+  detached rollback and shared outer capacity passed bounded full-host checks.
+  A fresh reviewer found no new native mount blocker; eighteen safe policy
+  fixtures and shell/plist syntax passed. Reboot/reconnect remain untested.
+- The required qualification image was remounted noninteractively with its
+  exact volume UUID checked. Remount changed the filesystem device number;
+  the two old reserved workspace raw files and proofs remain unchanged but
+  cannot pass existing admission. Preserve all seventeen historical volumes;
+  use fresh names and formatting for acceptance, without rewriting stale
+  identities. General remount reconciliation remains an alpha limitation.
+- Recipe/usability review found no new Critical/Important issue and passed
+  targeted Python, Node and Go checks. The quickstart now requires assigning
+  the export UUID before verification. Lifecycle/data review reproduced an Important
+  interrupted-export recovery gap: public resume cannot clear a Copying-stage
+  reservation. Fix that path before any stopped export; base preparation is
+  unaffected.
+- Next: run fresh public ChatGPT preparation through the operationally admitted
+  native store while resolving any path-specific source blockers. All twelve
+  fresh host acceptance gates remain pending. No continuation automation is
+  recreated; the rollback image stays detached and intact.
+
 - [Retention-policy checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36265108243)
   passed the full deterministic matrix. Hosted checks do not qualify VM,
   provider, graphical or destructive host behavior.
