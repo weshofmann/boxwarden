@@ -92,11 +92,13 @@ never permit publication. SIGINT and SIGTERM share that path. Worker full Go,
 affected race/vet and Swift checks passed; fresh integration targeted race,
 shell and source gates passed. The first integration run hit the internal disk
 reserve; the corrected run used external scratch and retained the guard.
-Independent bounded delta reviews found no Important/Critical defect. Actual
-VZ cancellation and terminal process-group behavior remain unqualified;
-snapshot-ready alone is not an inspector cancellation barrier.
+Independent bounded delta reviews found no Important/Critical defect. The
+subsequent real inspector case below verifies one incomplete-stream
+SIGINT path and same-snapshot resume. Other cancellation phases and terminal
+process-group behavior are not thereby qualified; snapshot-ready alone is not
+an inspector cancellation barrier.
 
-The current-source real cancellation attempt is held after its prerequisite
+The earlier real cancellation attempt stopped after its prerequisite
 public start failed before payload import. The original start process exited
 one; authoritative backend observation showed all eighteen objects stopped.
 Public stop then failed reconciliation after the generation namespace had been
@@ -124,9 +126,22 @@ checks, independent targeted review tests and fresh integration stop tests
 passed. Exact runtime-residue and workspace-release checks remain unchanged.
 A clean current-source host CLI was built with CGO enabled; build metadata,
 real Darwin PTY race tests and full-host doctor passed. This is source/build
-verification; the refreshed real cancellation case has not run.
-Next: current-source bounded real cancellation/resume acceptance, selective
-retention and final source/host handoff gates. Preserve
+verification. The refreshed real case then completed at the same code revision:
+public E start/import/stop succeeded; SIGINT was sent only after observing the
+exact private stream header with less than the full 12 MiB payload. The public
+export returned the expected nonzero result, its original child was reaped,
+and independent checks found no publication or residual spool/build bundle.
+The snapshot and stopped raw bytes matched. E then started publicly and retained
+its live workspace lease while the SAME snapshot resumed successfully. All four
+exported payloads matched independently; pinned guest readback retained edited
+files, once/counter markers and seven package records. Public stop and original-
+owner import verification passed. All eighteen backends are stopped and doctor
+is healthy. The raw stopped/EOF helper receipt was not independently archived:
+its production admission and cleanup are inferred from the observed public
+result and artifact checks, not claimed as direct receipt inspection.
+The [CGO corrective checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36306591033)
+passed its full deterministic matrix.
+Next: selective retention and final source/host handoff gates. Preserve
 historical workspaces, protected VM and detached rollback. The auxiliary
 qualification sparsebundle remains in place per operator preference; its latest
 allocated footprint was about 71.2 GiB, with
@@ -139,7 +154,7 @@ Provider sign-in and subjective GUI acceptance remain human actions; the tree
 and independent-repeat checks above remain engineering gates. Softnet permits
 connections to vmnet-gateway services, so full guest-to-host network isolation
 is not claimed. Effectively IPv6-only upstreams, workspace remount identity
-reconciliation, native reboot/reconnect and real-host interrupted-export recovery
+reconciliation, native reboot/reconnect and interruption during snapshot copying
 remain unqualified. See the [quickstart limitations](alpha-quickstart.md#known-limits-and-remaining-human-actions).
 
 <details>

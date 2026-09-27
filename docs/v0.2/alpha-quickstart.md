@@ -305,13 +305,15 @@ formatted again when attached, rebuilt or replaced.
   pins the raw file's device/inode. A remount can change the device and cause
   refusal; general identity reconciliation is unqualified. Do not rewrite
   records to adopt whatever happens to be mounted.
-- Native storage reboot/reconnect and real-host interrupted-export recovery
-  remain unqualified. Source recovery regressions and completed exports do not
-  prove those scenarios. An export interrupted before UUID output still needs
-  exact private-journal diagnosis.
+- Native storage reboot/reconnect and interruption during snapshot copying
+  remain unqualified. A bounded real SIGINT during incomplete inspection output
+  and same-snapshot resume with a live original workspace lease passed. That
+  case does not prove the other interruption or remount scenarios. An export
+  interrupted before UUID output still needs exact private-journal diagnosis.
 - Provider sign-in and subjective desktop acceptance remain Wes's actions.
   Installation, an unauthenticated window and the synthetic workload do not
   prove an authenticated agent task or desktop computer-use capability.
 
-Keep synthetic data for this acceptance workflow. The pending tree rebuild and
-independent repeat are engineering gates, separate from those human actions.
+Keep synthetic data for this acceptance workflow. Both tree rebuild histories
+and independent repeats passed recorded engineering checks; final source/host
+handoff gates remain separate from those human actions.

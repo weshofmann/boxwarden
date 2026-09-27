@@ -782,3 +782,26 @@ The host CLI build now explicitly enables CGO. Clean current-source metadata,
 real Darwin PTY race tests and healthy doctor were observed. These are build
 and source checks; no refreshed VM start, inspector cancellation or resume is
 claimed yet. Earlier failed host results remain immutable.
+
+
+## Real incomplete-stream cancellation and live-source resume at `6d7c037`
+
+The frozen private driver passed seventeen synthetic guard/bookkeeping cases,
+full-host preflight and independent refresh review before launch. Its original
+public start/import/stop processes exited zero. An exact private 22-byte stream
+header bound the export UUID; SIGINT occurred while the stream remained below
+the selected 12 MiB payload. The public export exited one as expected, with its
+original child reaped and no bookkeeping error. Independent checks found the
+unchanged snapshot/raw digests, no publication, no open raw/snapshot files and
+no residual spool/build bundle. The production stopped/EOF receipt was not
+independently persisted, so it is not described as directly inspected.
+
+Public E start then succeeded. The original resume process exited zero while E
+held the live workspace lease. Independent comparison matched all four exported
+payloads to the unchanged host source and confirmed the SAME snapshot digest.
+Pinned guest readback matched the existing edited files, once/counter markers
+and seven package records. Public stop and original-owner import verification
+exited zero; the import journal is verified, all eighteen backends stopped and
+doctor healthy. Exact original process results and private evidence are retained.
+This qualifies this SIGINT/inspection-resume path; interrupted snapshot copying,
+other signal phases and storage remount recovery remain separate limits.
