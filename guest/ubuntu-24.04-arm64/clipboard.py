@@ -452,17 +452,12 @@ def owner_write(value, session, deadline=None):
         # cancellation path therefore makes the precommit lease readable EOF.
         os.close(lease_writer)
         status = b'error'
-        claim_started = False
-        def expired(_signum, _frame):
-            raise ClipboardError('clipboard timeout', unknown=claim_started)
         def before_claim():
-            nonlocal claim_started
             if time.monotonic() >= deadline:
                 raise ClipboardError('clipboard timeout')
             ready, _, _ = select.select([lease_reader], [], [], 0)
             if ready:
                 raise ClipboardError('clipboard operation cancelled')
-            claim_started = True
         def on_claim():
             # Ownership lifetime begins at successful native claim. It must
             # survive normal parent exit, receipt loss and the operation timer.
@@ -473,7 +468,10 @@ def owner_write(value, session, deadline=None):
             except OSError: pass
             finally: os.close(writer)
         try:
-            signal.signal(signal.SIGALRM, expired)
+            # Python signal handlers cannot run until a blocking ctypes call
+            # returns. Kernel termination bounds even stalled native GTK work;
+            # a successful claim disarms the timer before retaining ownership.
+            signal.signal(signal.SIGALRM, signal.SIG_DFL)
             # POSIX interval timers are not inherited across fork: arm this
             # explicitly before potentially blocking GTK/session initialization.
             remaining = deadline - time.monotonic()

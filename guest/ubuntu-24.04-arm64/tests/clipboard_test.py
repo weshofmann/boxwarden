@@ -1,4 +1,5 @@
 import importlib.util
+import ctypes
 import io
 import json
 import os
@@ -165,6 +166,55 @@ class PreclaimLifetimeTests(unittest.TestCase):
         finally:
             os.close(reader)
             if writer is not None: os.close(writer)
+
+    def test_native_preclaim_stall_exits_without_retaining_payload(self):
+        reader, writer = os.pipe()
+        child = []
+        real_fork = os.fork
+        def tracked_fork():
+            pid = real_fork()
+            if pid > 0:
+                child.append(pid)
+            return pid
+        class NativeStall:
+            def __init__(self):
+                os.write(writer, b's')
+                ctypes.CDLL(None).system(b'/bin/sleep 1')
+            def claim(self, value):
+                os.write(writer, b'c')
+                return True
+            def retain(self, check): pass
+        try:
+            with mock.patch.object(helper.os, 'fork', side_effect=tracked_fork), \
+                 mock.patch.object(helper, 'GTKClipboard', NativeStall):
+                with self.assertRaises(helper.ClipboardError):
+                    helper.owner_write(b'valid', OwnerHandoffTests.Session(), time.monotonic() + 0.1)
+            ready, _, _ = select.select([reader], [], [], 0.1)
+            self.assertTrue(ready, 'native stall did not start before the deadline')
+            self.assertEqual(os.read(reader, 1), b's')
+            self.assertEqual(len(child), 1)
+            end = time.monotonic() + 0.45
+            while time.monotonic() < end:
+                try:
+                    pid, _ = os.waitpid(child[0], os.WNOHANG)
+                except ChildProcessError:
+                    pid = child[0]
+                if pid == child[0]:
+                    break
+                time.sleep(0.01)
+            self.assertEqual(pid, child[0], 'native-blocked preclaim child survived the deadline')
+            child.clear()
+            ready, _, _ = select.select([reader], [], [], 0)
+            if ready:
+                self.assertNotIn(b'c', os.read(reader, 64))
+        finally:
+            os.close(reader)
+            os.close(writer)
+            for pid in child:
+                try: os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError: pass
+                try: os.waitpid(pid, 0)
+                except ChildProcessError: pass
 
     def test_parent_disconnect_before_claim_prevents_mutation(self):
         reader, writer = os.pipe()

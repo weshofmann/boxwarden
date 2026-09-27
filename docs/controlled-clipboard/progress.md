@@ -33,13 +33,16 @@ Full local Go and race suites passed using external scratch space. Source-only
 host admission accepts the exact r3 identity; the installed toolchain and root
 manifest have not changed. Real VM/window/menu acceptance is pending.
 
-Independent guest review found a remaining Important liveness gap: a blocked
-native GTK call can outlive the preclaim Python signal deadline. A test-first
-correction is in progress. No fresh guest artifact or new VM qualification is
-claimed from the earlier synthetic helper checks.
+Independent guest review found an Important liveness gap: a blocked native GTK
+call could outlive the preclaim Python signal deadline. The source correction
+uses a kernel-enforced default SIGALRM until the native clipboard claim succeeds,
+then disarms it before retaining ownership. Its regression first reproduced the
+gap in a blocking C call and now passes; independent review confirmed native
+initialization and claim stalls terminate at the deadline, while committed
+owners survive. No new VM/golden qualification is claimed from source checks.
 
-Next: fix and review the guest deadline, then demonstrate production CLI and synthetic Firefox/application
-copy and later paste in the existing disposable probe. Host deployment and
+Next: demonstrate production CLI and synthetic Firefox/application copy and
+later paste in the existing disposable probe. Host deployment and
 real host-clipboard GUI testing remain attended gates.
 Valuable demo D is untouched; one disposable probe is used. No real host clipboard
 has been accessed. Deployment remains a separate concrete approval gate.
