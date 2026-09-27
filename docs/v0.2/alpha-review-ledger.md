@@ -670,3 +670,24 @@ native reboot/reconnect and real-host interrupted-export recovery separately
 from human sign-in/GUI acceptance. Earlier checkpoint text is retained in the
 existing folded history. No tests or live host operations were performed by
 the reviewer, and this does not approve the still-running tree preparation.
+
+
+## Export cancellation ownership review at `3d98aec`
+
+A fresh bounded read-only review found an Important gap in builder cancellation:
+`exec.CommandContext` kills the Bash parent by default, but does not own and
+terminate its descendants. The builder's EXIT cleanup cannot run after SIGKILL,
+and bundle identity is received only on success. The proposed extra real-host
+cancellation test is held pending a production correction and deterministic
+descendant/cleanup regression. The reviewer executed no tests or host mutations.
+
+The same review confirmed that durable snapshot-ready recovery with cleared
+Pending bypasses the source runtime lease, but snapshot-ready spans several
+stages and cannot identify where cancellation occurred. Inspector teardown must
+have its own evidence if the helper launched. Inspector memory is 2 GiB, so a
+4 GiB source session plus inspector uses 6 GiB. This planned case would cover
+ready-snapshot resume; interrupted copying remains a separate unqualified case.
+
+The current tree builder and B software-addition/start/data/GUI observations are
+actual host evidence, separate from this open cancellation finding. The earlier
+jq software-addition claim remains withdrawn.

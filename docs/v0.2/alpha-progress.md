@@ -20,8 +20,14 @@ A separate `examples/v0.2-alpha-chatgpt-tree.json` variant appends only `tree` t
 the original package declaration. Both captured baseline inventories contain no
 `tree` entry. The original and historical `jq` recipes remain unchanged. Runnable
 recipe/key/intent checks and actual edit/once/startup fixtures passed targeted
-local tests; actual tree preparation, installed-package proof and both corrected
-rebuild/replacement histories remain pending. Fresh bounded design review found
+local tests. Fresh public tree preparation exited zero; its exact admitted
+journal/cache and passed independent-clone receipt matched independently, with
+both objects stopped and healthy doctor. B rebuilt from that qualified base,
+then explicit public start completed automatic actions. Pinned readback proved
+the formerly absent tree package installed at the qualified version and all
+four edited workspace files retained. Actual rebuilt ChatGPT sign-in GUI was
+observed. B is stopped; its E replacement and the C → D repeat remain pending.
+Fresh bounded design review found
 no Important/Critical issue and approved reusing one newly qualified tree base
 across the two independent workspace histories.
 
@@ -32,8 +38,8 @@ verification passed under C's original backend before edits or rebuild. C then
 ran the explicit guest edit, produced its own NEW edited export matching all
 four predetermined/live files, and retained those bytes through an actual
 restart. Counter `3`, one once execution, one explicit edit and three startup
-pairs matched independently. C is stopped; sixteen VMs were stopped before
-launching the one fresh public tree preparation. No tree base is admitted yet.
+pairs matched independently. C is stopped. Its separate tree rebuild and
+replacement remain pending.
 
 Bounded launch review caught a private runner bookkeeping failure that could
 lose the original builder result after launch. Corrected runners retain the
@@ -41,7 +47,7 @@ same child through receipt failures and distinguish child exit from bookkeeping
 errors. The old failure reproduced; five isolated fault cases passed and fresh
 delta review found no remaining Important/Critical launch issue. A corrected
 export observer used the actual build directory; its earlier error is retained.
-These runner checks do not qualify the running installer.
+These runner checks are separate from the subsequently verified tree admission.
 
 Fresh uncached full Go tests, race detection and vet passed at `f5113f0`, as did
 host/Linux guest builds, Node, guest/helper fixtures, shell syntax, gofmt and
@@ -53,10 +59,19 @@ passed the full deterministic matrix, including both Swift helper builds. A fres
 current-source bootstrap build reproduced the exact tracked digest lock. Final
 host gates remain pending.
 
-Next: resolve the single running public tree preparation by its original result,
-then independently match journal/cache/passed clone receipt/stopped objects and
-doctor. After admission, complete B → E and C → D actual absent-to-installed
-rebuild/start plus NEW replacement exports. Preserve all historical workspaces, protected VM and detached rollback.
+A focused export cancellation review found an Important process-ownership gap:
+cancelling the builder can kill its shell while leaving descendants or build
+artifacts. The extra real cancellation attempt is held until a production fix
+and deterministic regression checks pass. Snapshot-ready alone is not an
+inspector cancellation barrier; no host cleanup qualification is claimed.
+
+Next: reviewed B → E replacement and NEW independently compared stopped export,
+then C → D tree rebuild/start/replacement and its own NEW export. Correct the
+export cancellation gap before spending that failure-path attempt. Preserve
+historical workspaces, protected VM and detached rollback. The auxiliary
+qualification sparsebundle remains in place per operator preference; its latest
+allocated footprint was about 70.8 GiB while installer assets were staged, with
+about 57.0 GiB free inside. No latency bottleneck has been attributed to it.
 
 
 ### Visible limits and human actions
