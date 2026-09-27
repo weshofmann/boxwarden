@@ -233,3 +233,120 @@ func TestStopRejectsDriftBeforeIntentMutation(t *testing.T) {
 		t.Fatal("supervisor mutated despite backend drift")
 	}
 }
+
+// A failed start can reap and remove its exact generation before Stop is called.
+// The first Stop must persist stopping intent and accept the same quiescence
+// proof as a retry, without contacting a control socket that no longer exists.
+func TestStopReconcilesQuiescentGenerationOnFirstCall(t *testing.T) {
+	for _, state := range []IntendedState{StateStarting, StateRunning} {
+		t.Run(string(state), func(t *testing.T) {
+			domainConfig, backendFake, creator := createFixture(t)
+			created, err := creator.Create(context.Background(), "dev", ModeClean)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prior := saveRunningRecord(t, domainConfig, created)
+			prior.IntendedState = state
+			if state == StateStarting {
+				prior.Readiness = ReadinessRecord{Status: ReadinessStarting}
+			}
+			if err := SaveRecord(domainConfig.StateRoot, domainConfig.ID, prior); err != nil {
+				t.Fatal(err)
+			}
+			backendFake.SetObservation(backend.Observation{ObjectID: prior.Backend.ObjectID, Exists: true, State: backend.ObjectStopped})
+			proofCalls, releaseCalls := 0, 0
+			control := &startSupervisorFake{
+				stop: func(supervisor.Binding) error { return errors.New("cleaned generation has no control socket") },
+				quiesced: func(binding supervisor.Binding) (bool, error) {
+					proofCalls++
+					if binding != startBinding(prior) {
+						t.Fatalf("quiescence binding = %#v", binding)
+					}
+					stored := assertStoredState(t, domainConfig, "dev", StateStopping)
+					if stored.StartGeneration != prior.StartGeneration || stored.Readiness.Status != ReadinessNotReady {
+						t.Fatalf("intent at proof = %#v", stored)
+					}
+					return true, nil
+				},
+			}
+			service := newStartTestService(domainConfig, backendFake, control, time.Now, nil)
+			service.start.Workspaces = startWorkspaceFake{release: func() error {
+				releaseCalls++
+				ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+				defer cancel()
+				held, err := lock.AcquireSession(ctx, domainConfig.StateRoot, "work", "dev")
+				if err != nil {
+					return err
+				}
+				defer held.Release()
+				assertStoredState(t, domainConfig, "dev", StateStopping)
+				return nil
+			}}
+			stopped, err := service.Stop(context.Background(), "dev")
+			if err != nil {
+				t.Fatalf("first Stop failed: %v", err)
+			}
+			if stopped.IntendedState != StateStopped || stopped.StartGeneration != "" || stopped.Readiness.Status != ReadinessNotReady || proofCalls != 1 || releaseCalls != 1 || control.stopCalls != 0 {
+				t.Fatalf("first stop = %#v; proof=%d release=%d control=%d", stopped, proofCalls, releaseCalls, control.stopCalls)
+			}
+			assertStoredRecord(t, domainConfig, stopped)
+		})
+	}
+}
+
+func TestStopQuiescenceFailureRetainsGenerationOnFirstCall(t *testing.T) {
+	for _, state := range []IntendedState{StateStarting, StateRunning} {
+		for _, proofFails := range []bool{false, true} {
+			name := string(state) + "/false"
+			if proofFails {
+				name = string(state) + "/error"
+			}
+			t.Run(name, func(t *testing.T) {
+				domainConfig, backendFake, creator := createFixture(t)
+				created, err := creator.Create(context.Background(), "dev", ModeClean)
+				if err != nil {
+					t.Fatal(err)
+				}
+				prior := saveRunningRecord(t, domainConfig, created)
+				prior.IntendedState = state
+				if state == StateStarting {
+					prior.Readiness = ReadinessRecord{Status: ReadinessStarting}
+				}
+				if err := SaveRecord(domainConfig.StateRoot, domainConfig.ID, prior); err != nil {
+					t.Fatal(err)
+				}
+				backendFake.SetObservation(backend.Observation{ObjectID: prior.Backend.ObjectID, Exists: true, State: backend.ObjectStopped})
+				proofError, stopError := errors.New("unsafe exact runtime parent"), errors.New("exact owner unavailable")
+				proofCalls, releaseCalls := 0, 0
+				control := &startSupervisorFake{
+					stop: func(supervisor.Binding) error { return stopError },
+					quiesced: func(binding supervisor.Binding) (bool, error) {
+						proofCalls++
+						if binding != startBinding(prior) {
+							t.Fatalf("quiescence binding = %#v", binding)
+						}
+						assertStoredState(t, domainConfig, "dev", StateStopping)
+						if proofFails {
+							return false, proofError
+						}
+						return false, nil
+					},
+				}
+				service := newStartTestService(domainConfig, backendFake, control, time.Now, nil)
+				service.start.Workspaces = startWorkspaceFake{release: func() error { releaseCalls++; return nil }}
+				_, err = service.Stop(context.Background(), "dev")
+				wantErr, wantStopCalls := stopError, 1
+				if proofFails {
+					wantErr, wantStopCalls = proofError, 0
+				}
+				if !errors.Is(err, wantErr) || proofCalls != 1 || control.stopCalls != wantStopCalls || releaseCalls != 0 {
+					t.Fatalf("stop error=%v; proof=%d control=%d release=%d", err, proofCalls, control.stopCalls, releaseCalls)
+				}
+				stored := assertStoredState(t, domainConfig, "dev", StateStopping)
+				if stored.StartGeneration != prior.StartGeneration || stored.Readiness.Status != ReadinessNotReady {
+					t.Fatalf("failed stop lost generation: %#v", stored)
+				}
+			})
+		}
+	}
+}

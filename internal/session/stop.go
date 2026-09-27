@@ -70,20 +70,23 @@ func (s *Service) Stop(ctx context.Context, rawName string) (record Record, err 
 	if !validUUID(record.StartGeneration) {
 		return Record{}, fmt.Errorf("session has no exact generation to stop")
 	}
-	if record.IntendedState == StateStopping && observation.State == backend.ObjectStopped {
+	if record.IntendedState != StateStopping {
+		record.IntendedState = StateStopping
+		record.Readiness = ReadinessRecord{Status: ReadinessNotReady}
+		if err := SaveRecord(s.domain.StateRoot, domainID, record); err != nil {
+			return Record{}, fmt.Errorf("persist stopping intent: %w", err)
+		}
+	}
+	// A failed start may already have reaped and cleaned its generation.
+	// Prove quiescence after persisting stopping intent so the first stop
+	// reconciles that state without contacting an absent control socket.
+	if observation.State == backend.ObjectStopped {
 		quiesced, proofErr := s.start.Supervisor.Quiesced(ctx, startBinding(record))
 		if proofErr != nil {
 			return Record{}, fmt.Errorf("prove exact generation quiesced: %w", proofErr)
 		}
 		if quiesced {
 			return s.finishStopped(ctx, domainID, name, record, &held, "")
-		}
-	}
-	if record.IntendedState != StateStopping {
-		record.IntendedState = StateStopping
-		record.Readiness = ReadinessRecord{Status: ReadinessNotReady}
-		if err := SaveRecord(s.domain.StateRoot, domainID, record); err != nil {
-			return Record{}, fmt.Errorf("persist stopping intent: %w", err)
 		}
 	}
 	// The owner may need the session lock while ending a volume lease. The
