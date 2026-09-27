@@ -63,10 +63,23 @@ and trailing newlines. The bounded private test used the guest's existing GTK
 library and left the exact disposable session READY. Its independent source
 review found no Important/Critical issue. This proves application-widget
 interoperability, not Firefox behavior or the patched host viewer controls.
+The disposable probe was then stopped through the public workflow and verified
+stopped; host doctor remained healthy. Demo D remains running and untouched.
 
-Next: finish the cumulative feature review, then present the single attended
-installed-toolchain deployment and rollback gate. Host buttons/menus and the
-real host-clipboard GUI path remain untested until that gate.
+Independent cumulative review of the feature diff against merged `main` found
+no remaining Important/Critical issue. The signed patched Tart is staged beside
+the stock executable at its exact digest. Read-only host admission preflight
+passed exact mounts, original backups, both executable identities, signature,
+and doctor. A private attended cutover/rollback helper passed synthetic atomic
+file replacement and refusal checks and independent source review. It has **not**
+run with administrator privileges or changed the installed admission. Its
+all-stopped/no-new-starts requirement means the running demo must be stopped
+gracefully before the cutover.
+
+Next: obtain the single concrete attended approval for temporary host-toolchain
+admission and a synthetic Mac clipboard test window; then verify real viewer
+buttons, menus, target selection and later guest application paste. Host
+buttons/menus and the real host-clipboard GUI path remain untested until then.
 
 Valuable demo D is untouched; one disposable probe is used. No real host clipboard
 has been accessed. Deployment remains a separate concrete approval gate.
