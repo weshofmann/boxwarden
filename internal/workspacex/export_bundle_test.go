@@ -252,7 +252,7 @@ set -eu
 [[ "$#" == 3 ]]
 [[ "${TMPDIR:-}" == "$3" ]]
 [[ -z "${BOXWARDEN_TEST_AMBIENT_SENTINEL:-}" ]]
-printf '%s\n' "$1" "$2" "$3" "${TMPDIR:-}" "${BOXWARDEN_TEST_AMBIENT_SENTINEL:-}" > "$3/argv.txt"
+printf '%s\n' "$#" "$1" "$2" "$3" "${TMPDIR:-}" "${BOXWARDEN_TEST_AMBIENT_SENTINEL:-}" > "$3/argv.txt"
 printf 'prepared private export inspector artifacts: %s/boxwarden-alpha-inspector-export.A12b3C\n' "$3"
 `
 	if err := os.WriteFile(filepath.Join(scriptDir, "prepare_export_bundle.sh"), []byte(script), 0o700); err != nil {
@@ -264,7 +264,7 @@ printf 'prepared private export inspector artifacts: %s/boxwarden-alpha-inspecto
 		t.Fatalf("builder path=%q err=%v", got, err)
 	}
 	raw, err := os.ReadFile(filepath.Join(staging, "argv.txt"))
-	if err != nil || string(raw) != iso+"\n"+request+"\n"+staging+"\n"+staging+"\n\n" {
+	if err != nil || string(raw) != "3\n"+iso+"\n"+request+"\n"+staging+"\n"+staging+"\n\n" {
 		t.Fatalf("child argv changed: %q, %v", raw, err)
 	}
 }

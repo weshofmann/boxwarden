@@ -101,9 +101,11 @@ limits and supervisor fixture correction retain their recorded targeted checks.
 - An already-running public start exited zero without new action attempts or
   changed marker bytes; pinned readback still showed counter `1`. Public import
   transferred all three pristine synthetic files and reported matched readback.
-  The original session then stopped cleanly for initial export; no guest edit or
-  rebuild has occurred. Original-owner stopped export/public import verification
-  remains pending.
+  The original session then stopped cleanly for initial export. Public export
+  completed and independent exact source/tracked/export comparisons matched all
+  three private files. The source raw disk SHA remained unchanged by inspection,
+  and temporary builds were removed. Public import verification under the original
+  owner exited zero and records `verified`. No rebuild has occurred.
 - Export inspector request, artifacts, caches and compiler scratch now stage
   beneath the configured private state root. The prior fixed internal temp
   directory rejected the external-state workflow at its reserve despite adequate
@@ -113,9 +115,21 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   Bounded delta review caught a remaining compiler-scratch escape; explicit
   Go/Swift scratch routing corrects it. Targeted package checks, wrapper argument
   and child-environment regressions, shell syntax and ShellCheck passed. Final full local Go suite (with unchanged packages cached) and targeted vet
-  passed; real stopped export remains pending.
-- Next: initial stopped export and pristine public verification under original
-  ownership, explicit edit, restart, software-changing rebuild and replacement. No continuation automation is
+  passed. Two actual stopped exports now exited zero and their bytes/cleanup
+  passed independent checks. [Source CI](https://github.com/weshofmann/boxwarden/actions/runs/36293513801)
+  passed the full deterministic matrix.
+- Following pristine verification, public restart reached READY/actions complete;
+  counter `2` and unchanged once marker matched. The explicit guest reconfigure
+  action ran the imported Node demo, changed `task.json` and created the note.
+  Live pinned readback and a NEW stopped export independently matched all four
+  predetermined edited files. Original host source bytes remain unchanged.
+  Another actual restart retained all edited bytes, advanced counter to `3`, and
+  kept once/edit at one succeeded execution each; each actual start has exactly
+  one succeeded startup pair. This verifies the first-cycle edit/restart gate.
+- Next: stop the first system, publish this checkpoint and run the public
+  software-changing `jq` recipe rebuild. Require its independent base admission,
+  then explicit public start, actual GUI/package observation and edited-byte
+  checks before replacement and the complete independent fresh second cycle. No continuation automation is
   recreated; the rollback image stays detached and intact.
 
 - [Retention-policy checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36265108243)

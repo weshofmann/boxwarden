@@ -553,3 +553,14 @@ refusal and argument boundaries remain tested. Affected workspacex/exportx/
 diskreserve packages, ShellCheck and syntax passed. Final full-suite and real-host
 export results are tracked in the progress record; no host success is inferred
 from this review. No trust-boundary, guard-floor or arbitrary-path CLI expansion.
+
+
+### Argument-count proof follow-up
+
+A two-line test-only delta against `e1fbb9c` also records child-observed argv count
+in the Go assertion. Injecting a fourth argument made the regression fail; the
+unchanged production three-argument call was restored before the passing repeat.
+The fresh bounded reviewer found no issue in the test delta; root independently
+verified production restoration. This closes reliance on the installed Bash's
+standalone conditional/errexit behavior for the count proof. Runtime export code
+and inspector build inputs are unchanged.
