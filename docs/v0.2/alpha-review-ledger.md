@@ -530,3 +530,26 @@ Ubuntu desktop and ChatGPT waiting-for-sign-in were separately observed in the
 exact session window; first-run keyring creation was cancelled without a
 password. Private screenshots were archived with matching digests. Provider
 sign-in, already-running idempotence, import and durability remain unqualified.
+
+
+## Configured-state export staging delta (parent `15b22f9`)
+
+A fresh Astra/extra-high reviewer was requested for the three-file export builder
+and script delta, with relevant unchanged capture/resume/private-path callers.
+Routing was requested through the agent tool; independent runtime model metadata
+is not exposed. The initial pass found one Important issue: caches moved to
+external state while compiler scratch still defaulted to the unguarded internal
+disk. It is corrected with private bundle scratch, explicit Go `TMPDIR` and
+`GOTMPDIR`, Swift `TMPDIR`, and wrapper child `TMPDIR`. Follow-up found no remaining
+Important/Critical issue and verified Swift planned output paths with spaces,
+Go scratch configuration, trap ordering, syntax and scope checks.
+
+Root regression first reproduced fixed-path rejection and the actual internal
+reserve failure. A child-observed byte regression then failed without scratch
+binding and passed with it; standalone shell assertions were insufficient on the
+installed Bash and are not used as the proof. Exact request/transaction lock,
+changed-snapshot rejection, replaced-parent cleanup refusal, unexpected path
+refusal and argument boundaries remain tested. Affected workspacex/exportx/
+diskreserve packages, ShellCheck and syntax passed. Final full-suite and real-host
+export results are tracked in the progress record; no host success is inferred
+from this review. No trust-boundary, guard-floor or arbitrary-path CLI expansion.

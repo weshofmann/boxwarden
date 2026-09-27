@@ -4,12 +4,13 @@ umask 077
 
 # Prepare private source artifacts for one export transaction. This does not
 # launch a VM, attach a managed disk, or publish files to the destination.
-if [[ "$#" != 2 || ! -f "$1" || ! -f "$2" ]]; then
-  echo 'usage: prepare_export_bundle.sh <verified Ubuntu 24.04.4 ARM64 ISO> <private journal-derived request.json>' >&2
+if [[ "$#" != 3 || ! -f "$1" || ! -f "$2" || ! -d "$3" ]]; then
+  echo 'usage: prepare_export_bundle.sh <verified Ubuntu 24.04.4 ARM64 ISO> <private journal-derived request.json> <private configured-state staging directory>' >&2
   exit 2
 fi
 iso=$1
 request=$2
+staging_root=$3
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/../.." && pwd)"
 qualification=production
@@ -28,9 +29,26 @@ if [[ "$actual_iso" != "$expected_iso" ]]; then
   exit 1
 fi
 
-output_dir="$(mktemp -d /private/tmp/boxwarden-alpha-inspector-export.XXXXXX)"
+python3 - "$staging_root" "$script_dir" <<'PYROOT'
+import os
+from pathlib import Path
+import stat
+import sys
+sys.path.insert(0, sys.argv[2])
+from pack_initramfs import _check_no_acl
+root = Path(sys.argv[1])
+info = root.lstat()
+if (not root.is_absolute() or os.path.normpath(str(root)) != str(root)
+        or any(c in str(root) for c in "\r\n\0")
+        or not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o700
+        or info.st_uid != os.getuid()):
+    raise SystemExit("inspector staging parent is not a private absolute directory")
+_check_no_acl(root)
+PYROOT
+output_dir="$(mktemp -d "$staging_root/boxwarden-alpha-inspector-export.XXXXXX")"
 prepared=0
 trap 'if [[ "$prepared" != 1 ]]; then rm -rf -- "$output_dir"; fi' EXIT
+mkdir -- "$output_dir/tmp"
 python3 - "$script_dir" "$request" "$output_dir/request.json" <<'PY'
 import os
 from pathlib import Path
@@ -77,13 +95,14 @@ go_binary="$(command -v go)"
 (
   cd "$repo_root"
   env -i PATH=/usr/bin:/bin GOCACHE="$output_dir/gocache" GOMODCACHE="$output_dir/modcache" \
+    TMPDIR="$output_dir/tmp" GOTMPDIR="$output_dir/tmp" \
     GOTOOLCHAIN=local GOENV=off GOPROXY=off GOSUMDB=off CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
     "$go_binary" build -o "$output_dir/alpha-probe" ./tools/alpha-inspector/guest
 )
 python3 "$script_dir/pack_initramfs.py" \
   "$output_dir/casper/initrd" "$output_dir/alpha-probe" \
   "$output_dir/inspector-initrd" "$output_dir/request.json"
-swiftc -module-cache-path "$output_dir/swift-cache" \
+TMPDIR="$output_dir/tmp" swiftc -module-cache-path "$output_dir/swift-cache" \
   -o "$output_dir/alpha-inspector" "$script_dir/main.swift" "$script_dir/boot.swift"
 codesign --force --sign - --entitlements "$script_dir/virtualization.entitlements" \
   "$output_dir/alpha-inspector"
@@ -162,7 +181,7 @@ with os.fdopen(descriptor, "w", encoding="utf-8") as output:
     output.write("\n")
     output.flush()
     os.fsync(output.fileno())
-for name in ("gocache", "modcache", "swift-cache"):
+for name in ("gocache", "modcache", "swift-cache", "tmp"):
     shutil.rmtree(root / name, ignore_errors=True)
 directory_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 try:

@@ -20,8 +20,8 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   and passed afterward; nine EFI fixtures, generic seed/fake-ISO/finalizer,
   eight preparation/eight installer tests and fresh affected Go packages passed.
   Independent read-only review found no Important/Critical issue. These are
-  targeted local checks; the full hosted matrix passed. Real installer execution
-  remains pending.
+  targeted local checks; the full hosted matrix passed. The fresh native-store builder below later completed actual installer and
+  independent-clone qualification successfully.
 - Recipe/base/cache, generation-bound management readiness, guest actions,
   independent workspace volumes, import, retained-volume rebuild/replacement
   and stopped export are implemented. Earlier bounded generic synthetic trials
@@ -66,15 +66,15 @@ limits and supervisor fixture correction retain their recorded targeted checks.
 - Public session A reused that exact cache without a new preparation attempt,
   was created stopped and received only the first fresh workspace. Its first
   public start exited zero with management READY and three succeeded ordered
-  actions. Pinned marker readback matched `once` and counter `1` exactly. A driver-selected hyphenated session name was
-  rejected before creation; all four planned names were corrected to the
+  actions. Pinned marker readback matched `once` and counter `1` exactly.
+  A driver-selected hyphenated session name was rejected before creation; all four planned names were corrected to the
   existing lowercase-letter/digit rule. No product code change was needed.
 - Both ChatGPT recipes now include the existing once marker and startup counter
   before GUI launch. Missing/foreign marker refusal, counter `1` then `2`,
   unchanged marker bytes, session-intent change and unchanged preparation keys
   passed targeted local fixtures. [Hosted CI for `a3a7d6c`](https://github.com/weshofmann/boxwarden/actions/runs/36290657028)
-  passed the full deterministic matrix. This does not establish real guest ordering,
-  or GUI launch.
+  passed the full deterministic matrix. Those source checks alone do not establish guest ordering or GUI launch;
+  the separate first-session observations above and below do.
 
 - Focused post-migration review is frozen at `6588c88`. Its [hosted deterministic
   CI](https://github.com/weshofmann/boxwarden/actions/runs/36285329567) passed.
@@ -98,15 +98,30 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   without entering a password; no provider sign-in or software update was done.
   Screenshot bytes and provenance were durably verified privately. This proves
   visible launch and waiting-for-sign-in, not provider or desktop agent capability.
-- Next: verify already-running start idempotence, then continue
-  pristine import/original-owner stopped verification before editing, restart,
-  software-changing rebuild and replacement. No continuation automation is
+- An already-running public start exited zero without new action attempts or
+  changed marker bytes; pinned readback still showed counter `1`. Public import
+  transferred all three pristine synthetic files and reported matched readback.
+  The original session then stopped cleanly for initial export; no guest edit or
+  rebuild has occurred. Original-owner stopped export/public import verification
+  remains pending.
+- Export inspector request, artifacts, caches and compiler scratch now stage
+  beneath the configured private state root. The prior fixed internal temp
+  directory rejected the external-state workflow at its reserve despite adequate
+  external space; its path rejection and real reserve failure were reproduced.
+  Parent/child ownership, ACL and inode checks bind cleanup to the exact build;
+  reserve floors, journal/request/source/snapshot admission remain intact.
+  Bounded delta review caught a remaining compiler-scratch escape; explicit
+  Go/Swift scratch routing corrects it. Targeted package checks, wrapper argument
+  and child-environment regressions, shell syntax and ShellCheck passed. Final full local Go suite (with unchanged packages cached) and targeted vet
+  passed; real stopped export remains pending.
+- Next: initial stopped export and pristine public verification under original
+  ownership, explicit edit, restart, software-changing rebuild and replacement. No continuation automation is
   recreated; the rollback image stays detached and intact.
 
 - [Retention-policy checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36265108243)
   passed the full deterministic matrix. Hosted checks do not qualify VM,
   provider, graphical or destructive host behavior.
-- The latest fresh installer failed its deadline. Retained diagnostic controls
+- The earlier pre-migration fresh installer failed its deadline. Retained diagnostic controls
   show the two scoped daemons active, but Firefox's configure hook exceeded its
   five-minute limit and seeding rolled back. Readiness ordering alone did not
   resolve it. Storage performance remains a hypothesis, not a proven cause.
@@ -1092,3 +1107,15 @@ alpha branch, with targeted checks for small changes and full integration
 checks at mission gates. Keep this record and the Draft PR current. Keep
 private host evidence, VM disks, credentials, and vault keys out of Git.
 Never push or merge into `main`, rewrite published history, or bypass checks.
+
+### Auxiliary storage decision
+
+The qualification sparsebundle allocates about **57.2 GiB**, with **70.6 GiB**
+free inside its 127.8 GiB filesystem. VM disks already use native APFS. The
+operator prefers leaving this smaller image in place for now; no separate
+auxiliary native volume or migration is executed. Significant latency from this
+image has not been demonstrated. Device numbers and `st_dev` can change on
+reattachment for either layout; filesystem UUID is the durable mount identity,
+and historical workspace remount reconciliation remains an explicit limitation.
+[Previous publication CI](https://github.com/weshofmann/boxwarden/actions/runs/36292385487)
+passed the full deterministic matrix.

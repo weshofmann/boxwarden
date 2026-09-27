@@ -61,14 +61,21 @@ func TestBuildInspectorBundleUsesExactJournalRequestAndRechecksSnapshot(t *testi
 			if _, err := rand.Read(suffix[:]); err != nil {
 				t.Fatal(err)
 			}
-			bundlePath := "/private/tmp/boxwarden-alpha-inspector-export." + hex.EncodeToString(suffix[:])
+			stagingRoot := filepath.Join(root, "export-builds")
+			if err := os.Mkdir(stagingRoot, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			bundlePath := filepath.Join(stagingRoot, "boxwarden-alpha-inspector-export."+hex.EncodeToString(suffix[:]))
 			if err := os.Mkdir(bundlePath, 0o700); err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = os.RemoveAll(bundlePath) })
 			var requestPath string
-			builder := func(ctx context.Context, source, iso, request, goBinary string) (string, error) {
+			builder := func(ctx context.Context, source, iso, request, goBinary, staging string) (string, error) {
 				requestPath = request
+				if staging != stagingRoot || filepath.Dir(filepath.Dir(request)) != stagingRoot {
+					return "", fmt.Errorf("builder request staging escaped configured state storage: %s", request)
+				}
 				if source != "/private/source" || iso != "/private/verified.iso" || goBinary != "/private/bin/go" {
 					return "", fmt.Errorf("builder received different inputs")
 				}
@@ -103,7 +110,7 @@ func TestBuildInspectorBundleUsesExactJournalRequestAndRechecksSnapshot(t *testi
 			got, err := buildAdmittedExportInspectorBundle(context.Background(), root, domain.ID("work"), journal.ID,
 				"/private/source", "/private/verified.iso", "/private/bin/go", builder, admitter)
 			if requestPath == "" {
-				t.Fatal("builder was not called with a request file")
+				t.Fatalf("builder was not called with a request file: %v", err)
 			}
 			if _, statErr := os.Lstat(requestPath); !os.IsNotExist(statErr) {
 				t.Fatalf("temporary request survived build: %v", statErr)
@@ -138,7 +145,12 @@ func TestProductionTrustedInspectorBuilder(t *testing.T) {
 	if source == "" || iso == "" || goBinary == "" || request == "" {
 		t.Fatal("all four private production builder inputs are required")
 	}
-	path, err := runTrustedInspectorBuilder(context.Background(), source, iso, request, goBinary)
+	staging := privateRoot(t)
+	parentInfo, err := os.Lstat(staging)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := runTrustedInspectorBuilder(context.Background(), source, iso, request, goBinary, staging)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +158,7 @@ func TestProductionTrustedInspectorBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bundle := PreparedInspectorBundle{Path: path, identity: info}
+	bundle := PreparedInspectorBundle{Path: path, identity: info, parentPath: staging, parentIdentity: parentInfo}
 	t.Cleanup(func() {
 		if err := bundle.Remove(); err != nil {
 			t.Errorf("remove disposable production test bundle: %v", err)
@@ -158,5 +170,101 @@ func TestProductionTrustedInspectorBuilder(t *testing.T) {
 	}
 	if _, err := exportx.AdmitInspectorBundle(context.Background(), path, source, requestBytes); err != nil {
 		t.Fatalf("newly built production bundle was rejected: %v", err)
+	}
+}
+
+func TestInspectorBundlePathSupportsConfiguredStateStorage(t *testing.T) {
+	root := filepath.Join(privateRoot(t), "export-builds")
+	if err := exactPreparedInspectorBundlePath(filepath.Join(root, "boxwarden-alpha-inspector-export.A12b3C"), root); err != nil {
+		t.Fatalf("configured state staging path rejected: %v", err)
+	}
+}
+
+func TestPreparedInspectorBundleCleanupRejectsReplacedParent(t *testing.T) {
+	root := privateRoot(t)
+	parent := filepath.Join(root, "export-builds")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(parent, "boxwarden-alpha-inspector-export.A12b3C")
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Lstat(path)
+	parentInfo, _ := os.Lstat(parent)
+	bundle := PreparedInspectorBundle{Path: path, identity: info, parentPath: parent, parentIdentity: parentInfo}
+	original := filepath.Join(root, "old-staging")
+	if err := os.Rename(parent, original); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Move the original bundle back: its inode still matches, but its parent does not.
+	if err := os.Rename(filepath.Join(original, filepath.Base(path)), path); err != nil {
+		t.Fatal(err)
+	}
+	if err := bundle.Remove(); err == nil {
+		t.Fatal("replaced staging parent admitted for cleanup")
+	}
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("cleanup touched retained bundle: %v", err)
+	}
+}
+
+func TestInspectorBundlePathRejectsOtherParentAndTraversal(t *testing.T) {
+	root := filepath.Join(privateRoot(t), "export-builds")
+	for _, path := range []string{
+		"/private/tmp/boxwarden-alpha-inspector-export.A12b3C",
+		root + "/../boxwarden-alpha-inspector-export.A12b3C",
+		root + "/boxwarden-alpha-inspector-export.A12b3C/child",
+		root + "/boxwarden-alpha-inspector-export.A12b3!",
+	} {
+		if err := exactPreparedInspectorBundlePath(path, root); err == nil {
+			t.Fatalf("unsafe path accepted: %s", path)
+		}
+	}
+}
+
+func TestTrustedInspectorBuilderPreservesStagingArgvAndClosedEnvironment(t *testing.T) {
+	root := privateRoot(t)
+	source := filepath.Join(root, "source with spaces")
+	scriptDir := filepath.Join(source, "tools", "alpha-inspector")
+	if err := os.MkdirAll(scriptDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	staging := filepath.Join(root, "staging with spaces")
+	if err := os.Mkdir(staging, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	binDir := filepath.Join(root, "bin with spaces")
+	if err := os.Mkdir(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	goBinary := filepath.Join(binDir, "go")
+	if err := os.WriteFile(goBinary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	iso := filepath.Join(root, "input with spaces.iso")
+	request := filepath.Join(root, "request with spaces.json")
+	script := `#!/bin/bash
+set -eu
+[[ "$#" == 3 ]]
+[[ "${TMPDIR:-}" == "$3" ]]
+[[ -z "${BOXWARDEN_TEST_AMBIENT_SENTINEL:-}" ]]
+printf '%s\n' "$1" "$2" "$3" "${TMPDIR:-}" "${BOXWARDEN_TEST_AMBIENT_SENTINEL:-}" > "$3/argv.txt"
+printf 'prepared private export inspector artifacts: %s/boxwarden-alpha-inspector-export.A12b3C\n' "$3"
+`
+	if err := os.WriteFile(filepath.Join(scriptDir, "prepare_export_bundle.sh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BOXWARDEN_TEST_AMBIENT_SENTINEL", "must-not-reach-child")
+	got, err := runTrustedInspectorBuilder(context.Background(), source, iso, request, goBinary, staging)
+	if err != nil || got != filepath.Join(staging, "boxwarden-alpha-inspector-export.A12b3C") {
+		t.Fatalf("builder path=%q err=%v", got, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(staging, "argv.txt"))
+	if err != nil || string(raw) != iso+"\n"+request+"\n"+staging+"\n"+staging+"\n\n" {
+		t.Fatalf("child argv changed: %q, %v", raw, err)
 	}
 }

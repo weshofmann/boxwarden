@@ -22,31 +22,40 @@ import (
 const inspectorBuildDeadline = 5 * time.Minute
 const inspectorBuildLogLimit = 16 << 10
 
-type exportInspectorBundleBuilder func(context.Context, string, string, string, string) (string, error)
+type exportInspectorBundleBuilder func(context.Context, string, string, string, string, string) (string, error)
 type exportInspectorBundleAdmitter func(context.Context, string, string, []byte) (exportx.InspectorBundle, error)
 
 type PreparedInspectorBundle struct {
-	Path     string
-	identity os.FileInfo
+	Path           string
+	identity       os.FileInfo
+	parentPath     string
+	parentIdentity os.FileInfo
 }
 
 // Remove cleans only the exact private directory returned by Build.
 func (bundle PreparedInspectorBundle) Remove() error {
-	if err := exactPreparedInspectorBundlePath(bundle.Path); err != nil {
+	if err := exactPreparedInspectorBundlePath(bundle.Path, bundle.parentPath); err != nil {
 		return err
 	}
-	info, err := os.Lstat(bundle.Path)
+	root, err := openStateRoot(bundle.parentPath)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	parent, err := root.Stat(".")
+	if err != nil || bundle.parentIdentity == nil || !os.SameFile(parent, bundle.parentIdentity) {
+		return fmt.Errorf("inspector staging parent identity changed before cleanup: %v", err)
+	}
+	info, err := root.Lstat(filepath.Base(bundle.Path))
 	if err != nil {
 		return err
 	}
 	if bundle.identity == nil || privateDirectory(info) != nil || !os.SameFile(info, bundle.identity) {
 		return fmt.Errorf("inspector bundle identity changed before cleanup")
 	}
-	root, err := os.OpenRoot("/private/tmp")
-	if err != nil {
+	if err := checkPrivateACL(bundle.Path, info); err != nil {
 		return err
 	}
-	defer root.Close()
 	return root.RemoveAll(filepath.Base(bundle.Path))
 }
 
@@ -87,11 +96,26 @@ func buildAdmittedExportInspectorBundle(ctx context.Context, stateRoot string, d
 	if err != nil {
 		return bundle, err
 	}
-	requestDir, err := os.MkdirTemp("/private/tmp", "boxwarden-alpha-export-request.")
+	state, err := openStateRoot(stateRoot)
 	if err != nil {
 		return bundle, err
 	}
-	defer func() { err = errors.Join(err, os.RemoveAll(requestDir)) }()
+	defer state.Close()
+	staging, err := openChild(state, "export-builds", true)
+	if err != nil {
+		return bundle, err
+	}
+	defer staging.Close()
+	bundle.parentPath = staging.Name()
+	bundle.parentIdentity, err = staging.Stat(".")
+	if err != nil {
+		return bundle, err
+	}
+	requestDir, err := os.MkdirTemp(staging.Name(), "boxwarden-alpha-export-request.")
+	if err != nil {
+		return bundle, err
+	}
+	defer func() { err = errors.Join(err, staging.RemoveAll(filepath.Base(requestDir))) }()
 	requestPath := filepath.Join(requestDir, "request.json")
 	requestFile, err := os.OpenFile(requestPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
@@ -106,18 +130,25 @@ func buildAdmittedExportInspectorBundle(ctx context.Context, stateRoot string, d
 	}
 	buildContext, cancel := context.WithTimeout(ctx, inspectorBuildDeadline)
 	defer cancel()
-	err = diskreserve.Run(buildContext, []string{stateRoot, "/private/tmp"}, func(guarded context.Context) error {
+	err = diskreserve.Run(buildContext, []string{stateRoot, staging.Name()}, func(guarded context.Context) error {
 		var buildErr error
-		bundle.Path, buildErr = build(guarded, sourceRoot, isoPath, requestPath, goBinary)
+		bundle.Path, buildErr = build(guarded, sourceRoot, isoPath, requestPath, goBinary, staging.Name())
 		if buildErr != nil {
 			return buildErr
 		}
-		if err := exactPreparedInspectorBundlePath(bundle.Path); err != nil {
+		if err := exactPreparedInspectorBundlePath(bundle.Path, staging.Name()); err != nil {
 			return err
 		}
 		info, err := os.Lstat(bundle.Path)
 		if err != nil || privateDirectory(info) != nil {
 			return fmt.Errorf("builder output is not a private directory: %v", err)
+		}
+		if err := checkPrivateACL(bundle.Path, info); err != nil {
+			return err
+		}
+		parent, err := os.Lstat(staging.Name())
+		if err != nil || !os.SameFile(parent, bundle.parentIdentity) {
+			return fmt.Errorf("inspector staging parent changed while building: %v", err)
 		}
 		bundle.identity = info
 		if _, err := admit(guarded, bundle.Path, sourceRoot, prepared.Request); err != nil {
@@ -138,8 +169,11 @@ func buildAdmittedExportInspectorBundle(ctx context.Context, stateRoot string, d
 	return bundle, nil
 }
 
-func exactPreparedInspectorBundlePath(path string) error {
-	const prefix = "/private/tmp/boxwarden-alpha-inspector-export."
+func exactPreparedInspectorBundlePath(path, parent string) error {
+	if !filepath.IsAbs(parent) || filepath.Clean(parent) != parent || strings.ContainsAny(parent, "\r\n\x00") {
+		return fmt.Errorf("invalid inspector staging parent")
+	}
+	prefix := filepath.Join(parent, "boxwarden-alpha-inspector-export.")
 	if !strings.HasPrefix(path, prefix) || len(path) != len(prefix)+6 || !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return fmt.Errorf("builder returned unexpected inspector bundle path")
 	}
@@ -154,14 +188,14 @@ func exactPreparedInspectorBundlePath(path string) error {
 // The executable is a tracked, clean-source build script with positional argv
 // elements. This explicit Bash invocation cannot be replaced by guest input;
 // both stdout and stderr are bounded and never include request bytes.
-func runTrustedInspectorBuilder(ctx context.Context, sourceRoot, isoPath, requestPath, goBinary string) (string, error) {
+func runTrustedInspectorBuilder(ctx context.Context, sourceRoot, isoPath, requestPath, goBinary, stagingRoot string) (string, error) {
 	info, err := os.Lstat(goBinary)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
 		return "", fmt.Errorf("explicit Go executable is not regular and executable: %v", err)
 	}
 	script := filepath.Join(sourceRoot, "tools", "alpha-inspector", "prepare_export_bundle.sh")
-	command := exec.CommandContext(ctx, "/bin/bash", script, isoPath, requestPath)
-	command.Env = []string{"PATH=" + filepath.Dir(goBinary) + ":/usr/bin:/bin", "LANG=C", "LC_ALL=C"}
+	command := exec.CommandContext(ctx, "/bin/bash", script, isoPath, requestPath, stagingRoot)
+	command.Env = []string{"PATH=" + filepath.Dir(goBinary) + ":/usr/bin:/bin", "LANG=C", "LC_ALL=C", "TMPDIR=" + stagingRoot}
 	command.Stdin = nil
 	command.WaitDelay = 5 * time.Second
 	stdout, stderr := &boundedBuildLog{limit: inspectorBuildLogLimit}, &boundedBuildLog{limit: inspectorBuildLogLimit}
@@ -178,7 +212,7 @@ func runTrustedInspectorBuilder(ctx context.Context, sourceRoot, isoPath, reques
 		return "", fmt.Errorf("inspector builder did not return one exact artifact path")
 	}
 	path := strings.TrimSuffix(strings.TrimPrefix(output, marker), "\n")
-	if err := exactPreparedInspectorBundlePath(path); err != nil {
+	if err := exactPreparedInspectorBundlePath(path, stagingRoot); err != nil {
 		return "", err
 	}
 	return path, nil

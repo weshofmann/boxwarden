@@ -325,3 +325,18 @@ The operator runs `python3 tools/alpha-inspector/run_boot_probe.py
 compiled executables, manifest, and any boot result. It can be removed after
 evidence review when the helper is reaped and no VZ instance remains. No
 workspace or VM-owned path is in that directory.
+
+
+### Configured-state export build staging
+
+Public export and resume build the journal-derived inspector request and source
+artifacts under the private `export-builds` child of the configured state root.
+There is no arbitrary temporary-path CLI flag. The state and staging filesystems
+retain the existing reserve checks. Bundle cleanup reopens and verifies the
+saved parent and bundle identities, ownership, private modes and ACLs; changed
+paths are refused. The fixed third script argument preserves the staging path as
+one argv element. Go caches and `TMPDIR`/`GOTMPDIR`, Swift module cache and
+`TMPDIR`, and other child scratch are explicitly routed to that private storage.
+Completed caches/scratch are removed before artifact admission; the caller
+removes the exact admitted bundle after capture. This allows an external-state
+workflow to avoid expanding internal disk use during inspector compilation.
