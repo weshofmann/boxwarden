@@ -41,8 +41,19 @@ gap in a blocking C call and now passes; independent review confirmed native
 initialization and claim stalls terminate at the deadline, while committed
 owners survive. No new VM/golden qualification is claimed from source checks.
 
-Next: demonstrate production CLI and synthetic Firefox/application copy and
-later paste in the existing disposable probe. Host deployment and
-real host-clipboard GUI testing remain attended gates.
+The first production `clipboard copy` on the restarted disposable probe
+refused with `clipboard text unavailable`; an independent direct invocation
+of the fixed guest helper returned a pre-claim error. Read-only exact-session
+diagnostics found one GNOME Shell process and no Xwayland process. The active
+Wayland login and desktop environment checks passed; the strict process
+binding therefore refused before GTK initialized. No production CLI transfer
+has passed, and this fresh-start behavior needs a guest-adapter correction and
+retest before Firefox/application acceptance.
+
+Next: verify a bounded first-use Xwayland activation, correct the guest adapter
+with regression coverage, then repeat production CLI and synthetic
+Firefox/application copy and later paste in the same disposable probe. Host
+deployment and real host-clipboard GUI testing remain attended gates.
+
 Valuable demo D is untouched; one disposable probe is used. No real host clipboard
 has been accessed. Deployment remains a separate concrete approval gate.
