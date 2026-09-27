@@ -28,19 +28,26 @@ private enum BootFailure: Error, CustomStringConvertible {
 private final class BootCancellation {
     private let lock = NSLock()
     private var cancelled = false
-    private let source: DispatchSourceSignal
+    private let sources: [DispatchSourceSignal]
 
     init(wake: DispatchSemaphore) {
-        signal(SIGTERM, SIG_IGN)
-        source = DispatchSource.makeSignalSource(signal: SIGTERM,
-                    queue: DispatchQueue(label: "boxwarden.alpha.inspector.signal"))
-        source.setEventHandler {
-            self.lock.lock()
-            self.cancelled = true
-            self.lock.unlock()
-            wake.signal()
+        let queue = DispatchQueue(label: "boxwarden.alpha.inspector.signal")
+        // A terminal Ctrl-C reaches the helper's foreground group as SIGINT;
+        // the host's retained-child cancellation sends SIGTERM. Both record
+        // the same intent and enter the existing ordered lifecycle path.
+        sources = [SIGTERM, SIGINT].map { signalNumber in
+            signal(signalNumber, SIG_IGN)
+            return DispatchSource.makeSignalSource(signal: signalNumber, queue: queue)
         }
-        source.resume()
+        for source in sources {
+            source.setEventHandler {
+                self.lock.lock()
+                self.cancelled = true
+                self.lock.unlock()
+                wake.signal()
+            }
+            source.resume()
+        }
     }
 
     var requested: Bool {
@@ -49,7 +56,7 @@ private final class BootCancellation {
         return cancelled
     }
 
-    func close() { source.cancel() }
+    func close() { for source in sources { source.cancel() } }
 }
 
 private final class StopObserver: NSObject, VZVirtualMachineDelegate {
