@@ -237,14 +237,20 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   for these source fixtures; its [full hosted matrix](https://github.com/weshofmann/boxwarden/actions/runs/36273287982)
   passed. Real guest
   edits and lifecycle persistence remain pending; the
-  private old-source synthetic staging and acceptance plan need refreshed
-  input hashes before use. No VM operation has run for this correction.
+  fresh three-file published-source staging now matches exact hashes and modes.
+  The retained clean source CLI and all 21 pinned inputs match; the later
+  publication changes only documentation. A disabled native-layout acceptance
+  plan passed independent review, including complete second-volume edit,
+  restart, rebuild, explicit startup, replacement and new export coverage.
+  Literal edited-data hashes were independently reconstructed; each cycle must
+  establish its own checked baseline. All twelve gates remain pending and no
+  session/builder command is enabled by this review. No VM operation has run.
 - The reviewed conditional diagnostic tools need refreshed source/storage
   identities before use. Their fake-tool checks qualify harness behavior only.
   All twelve fresh ChatGPT acceptance gates remain pending. Native Tart storage
   cutover and controlled persistent mounting are verified. Next: refresh source,
-  storage and diagnostic/acceptance bindings, correct the second-volume repeat
-  coverage, then diagnose on a fresh bounded control and run the corrected
+  storage and diagnostic/acceptance execution bindings, including exact receipt
+  digests and edit-action attempt counts across restart, then run the corrected
   exact-source public builder before fresh session acceptance. Failed and
   forensic objects remain excluded from admission.
 
