@@ -161,8 +161,8 @@ edited-data restart retention and system rebuild/start are verified. The actual
 added-software gate passed using `tree`, which was absent in both baselines;
 the earlier `jq` claim remains withdrawn because it was already installed.
 Replacement reattachment, NEW stopped exports and the independent repetition
-also passed, with D's documented recovery limitation. Final handoff gates remain
-tracked in [alpha progress](alpha-progress.md).
+also passed, with D's documented recovery limitation. The verified local handoff
+and final classification are recorded in [alpha progress](alpha-progress.md).
 
 If export copying is interrupted and reports a transaction UUID, keep its
 session stopped and recover that exact transaction:
@@ -322,5 +322,6 @@ formatted again when attached, rebuilt or replaced.
   prove an authenticated agent task or desktop computer-use capability.
 
 Keep synthetic data for this acceptance workflow. Both tree rebuild histories
-and independent repeats passed recorded engineering checks; final source/host
-handoff gates remain separate from those human actions.
+and independent repeats passed recorded engineering checks. Final source/host
+handoff checks passed their documented scopes; provider sign-in and subjective
+acceptance remain separate human actions.

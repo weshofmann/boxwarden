@@ -2,8 +2,8 @@
 
 Updated: 2026-09-27 UTC. Integration branch:
 `weshofmann/feature/v02-alpha`; [Draft PR #12](https://github.com/weshofmann/boxwarden/pull/12).
-The mission deadline is 2026-10-03 14:44 UTC. This remains a functional
-prototype with material acceptance gaps, not an alpha-ready release.
+The mission deadline is 2026-10-03 14:44 UTC. Final status: **FUNCTIONAL PROTOTYPE — MATERIAL GAPS LISTED**.
+The verified synthetic workflow is delivered; this is not an alpha-ready release.
 
 ## Current checkpoint
 
@@ -80,8 +80,8 @@ an ACL fixture, Darwin linking of Linux-only guest targets, and Python isolation
 excluding a sibling fixture module. Corrected targeted/tail checks passed; this
 is source verification, not VM acceptance. [Current source CI](https://github.com/weshofmann/boxwarden/actions/runs/36297904967)
 passed the full deterministic matrix, including both Swift helper builds. A fresh
-current-source bootstrap build reproduced the exact tracked digest lock. Final
-host gates remain pending.
+current-source bootstrap build reproduced the exact tracked digest lock. The
+final current-source and host handoff observations are recorded below.
 
 A focused export cancellation review found an Important process-ownership gap.
 Reviewed corrections now preallocate exact builder output, serialize process
@@ -141,8 +141,9 @@ its production admission and cleanup are inferred from the observed public
 result and artifact checks, not claimed as direct receipt inspection.
 The [CGO corrective checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36306591033)
 passed its full deterministic matrix.
-Next: selective retention and final source/host handoff gates. Preserve
-historical workspaces, protected VM and detached rollback. The auxiliary
+The selective retention and final source/host handoff checks below are now
+complete. Historical workspaces, protected VM and detached rollback are
+preserved. The auxiliary
 qualification sparsebundle remains in place per operator preference; its latest
 allocated footprint after final retention was about 71.8 GiB, with
 about 56.8 GiB free inside. No latency bottleneck has been attributed to it.
@@ -1303,7 +1304,7 @@ status above supersedes historical pending/running statements.
 
 </details>
 
-## Remaining acceptance and handoff
+## Completion audit and local handoff
 
 Both independent histories completed the corrective software-changing `tree`
 rebuild, explicit start, package/GUI/action/data checks, replacement attachment
@@ -1318,8 +1319,25 @@ All artifact copies/digests and production read-only formatter admission passed.
 Final host observation found all nine retained VMs stopped, all nineteen
 workspace identities/metadata/records unchanged, healthy doctor, no open VM or
 workspace files, no export-build bundle and detached rollback.
-Next: final bounded handoff review and publication of the truthful outcome.
+Independent bounded handoff review verified the delivered CLI/formatter/
+bindings/demo hashes, clean frozen source and CGO metadata, signatures, all
+35 matrix-record digests and current demo/storage identities. No Important/
+Critical handoff finding remained. The integration stays Draft and is not merged.
+The continuation automation remains cancelled.
 Wes's provider sign-in and subjective GUI acceptance remain human actions.
+
+The nine launch criteria have evidence in the acceptance record: automatic
+base preparation/reuse; desktop/packages/visible interface; independent pristine
+workspace import with unchanged host source; stop/start; software-changing
+rebuild; replacement without format/import; controlled stopped export; an
+independent fresh repeat; and applicable tests/reviews with visible limits.
+The repeat includes D's exact receipt recovery. Provider login is not proven.
+
+Delivered privately: exact source/digest CGO CLI, frozen clean checkout, verified
+ISO/tools, signed source-bound formatter, example recipes, pristine synthetic
+demo, acceptance/evidence binding and compact start/sign-in/stop/export commands.
+Use the retained D demo; E's extra cancellation import makes its single-import
+edit action unsuitable for rerunning. All test VMs are left stopped.
 
 ## Qualification storage direction
 
