@@ -59,6 +59,21 @@ doctor. After admission, complete B → E and C → D actual absent-to-installed
 rebuild/start plus NEW replacement exports. Preserve all historical workspaces, protected VM and detached rollback.
 
 
+### Visible limits and human actions
+
+Provider sign-in and subjective GUI acceptance remain human actions; the tree
+and independent-repeat checks above remain engineering gates. Softnet permits
+connections to vmnet-gateway services, so full guest-to-host network isolation
+is not claimed. Effectively IPv6-only upstreams, workspace remount identity
+reconciliation, native reboot/reconnect and real-host interrupted-export recovery
+remain unqualified. See the [quickstart limitations](alpha-quickstart.md#known-limits-and-remaining-human-actions).
+
+<details>
+<summary>Earlier checkpoint and implementation evidence</summary>
+
+The following records describe their respective checkpoints; the current
+status above supersedes historical pending/running statements.
+
 Latest installer source: `d401c17126e2ff2b9e23ab75af1c781fae032fff`.
 [Hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36256683649)
 passed its full deterministic matrix. Required EFI wait, scoped daemon startup
@@ -431,8 +446,6 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   exact-source public builder before fresh session acceptance. Failed and
   forensic objects remain excluded from admission.
 
-<details>
-<summary>Earlier checkpoint and implementation evidence</summary>
 
 The following records describe their respective checkpoints; the current
 status above supersedes historical pending/running statements.
@@ -1180,9 +1193,9 @@ status above supersedes historical pending/running statements.
 1. Extend the first retained workspace history with a genuinely software-changing
    `tree` rebuild of B, explicit public start, installed-package/GUI/action/data
    checks, a new replacement and a NEW independently compared stopped export.
-2. Complete C's explicit edit/restart baseline, tree rebuild/start and D
-   replacement/export on the second independently formatted workspace. C's
-   pristine original-owner import verification has already passed.
+2. Complete C's tree rebuild/start and D replacement/export on its independently
+   formatted workspace. C's pristine original-owner verification, explicit edit,
+   own NEW edited export and actual restart retention have passed.
 3. Run final source and real-host checks, resolve review findings, record limits,
    and update the Draft PR/quickstart with stopped test VMs. Wes's provider
    sign-in and subjective GUI acceptance may remain human actions.
@@ -1211,8 +1224,9 @@ Never push or merge into `main`, rewrite published history, or bypass checks.
 
 ### Auxiliary storage decision
 
-The qualification sparsebundle allocates about **57.2 GiB**, with **70.6 GiB**
-free inside its 127.8 GiB filesystem. VM disks already use native APFS. The
+The last idle measurement of the qualification sparsebundle was **64.4 GiB**
+allocated, with **63.8 GiB** free inside its 127.8 GiB filesystem. Preparation
+and export artifacts can change these values during active work. VM disks already use native APFS. The
 operator prefers leaving this smaller image in place for now; no separate
 auxiliary native volume or migration is executed. Significant latency from this
 image has not been demonstrated. Device numbers and `st_dev` can change on

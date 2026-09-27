@@ -37,11 +37,12 @@ printf 'source SHA: %s\n' "$SOURCE_SHA"
 ```
 
 Set `BW` to that built binary, `SOURCE_ROOT` to the absolute checkout path,
-and `RECIPE` to `examples/v0.2-alpha-base.json` within it. Give each new
+and `RECIPE` to `examples/v0.2-alpha-chatgpt.json` within it before creating
+the session. The full walkthrough requires its declared `edit-project` action. Give each new
 session and workspace fresh names and UUIDs. Global flags precede the
 command:
 
-The optional `examples/v0.2-alpha-chatgpt.json` recipe adds a pinned official
+The default `examples/v0.2-alpha-chatgpt.json` recipe adds a pinned official
 ARM64 ChatGPT package as a `prepare` step and requests a guest-side graphical
 launch on `startup`, after the existing `record-first-start` once marker and
 `count-starts` startup counter. The installer checks downloaded bytes, Debian package
@@ -267,3 +268,45 @@ bound to its original owner; do not run that verification against the replacemen
 The historical first-workspace delete/create/attach/start/stop/export sequence
 passed. Repeat it after the corrective `tree` rebuild; its earlier export cannot
 prove the later software transition.
+
+
+## Formatter prerequisite and local handoff bindings
+
+The dedicated-Mac handoff supplies private paths and identities for the built
+CLI, configuration, verified ISO/tools, signed formatter and retained demo
+workspaces. Keep those bindings outside Git. For a new clean source revision,
+prepare a source-bound formatter using the verified ARM64 `e2fsck-static` package
+required by the script:
+
+```sh
+"$SOURCE_ROOT/tools/alpha-formatter/prepare_boot.sh" \
+  "$ISO" "$CHECKER_DEB" "$CONFIG" alpha
+```
+
+The script checks the fixed ISO/package/extracted-checker digests, builds and
+signs the no-NIC formatter, and prints its bundle path. It prepares artifacts;
+it does not format a disk. Archive the complete private bundle durably, verify
+the archived bytes against its manifest, and set `FORMATTER_BUNDLE` to that
+path before `workspace create`. Keep the source checkout clean and at the same
+revision. Existing volumes retain their original formatter proof and are not
+formatted again when attached, rebuilt or replaced.
+
+## Known limits and remaining human actions
+
+- The admitted Softnet policy permits guest-initiated connections to services
+  on the vmnet gateway. Full guest-to-host network isolation is not claimed;
+  effectively IPv6-only upstream environments remain unqualified.
+- Filesystem UUID identifies the storage volume, but workspace admission also
+  pins the raw file's device/inode. A remount can change the device and cause
+  refusal; general identity reconciliation is unqualified. Do not rewrite
+  records to adopt whatever happens to be mounted.
+- Native storage reboot/reconnect and real-host interrupted-export recovery
+  remain unqualified. Source recovery regressions and completed exports do not
+  prove those scenarios. An export interrupted before UUID output still needs
+  exact private-journal diagnosis.
+- Provider sign-in and subjective desktop acceptance remain Wes's actions.
+  Installation, an unauthenticated window and the synthetic workload do not
+  prove an authenticated agent task or desktop computer-use capability.
+
+Keep synthetic data for this acceptance workflow. The pending tree rebuild and
+independent repeat are engineering gates, separate from those human actions.

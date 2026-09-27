@@ -652,3 +652,21 @@ do not complete the tree rebuild or fresh-repeat gate. One fresh public tree
 preparation is running from published `e10fe50`; its terminal result remains
 required. Current deterministic CI passed, and a fresh bootstrap build exactly
 reproduced the tracked artifact lock.
+
+
+### Pre-handoff documentation and coverage audit at `c9097ff`
+
+A bounded read-only audit of the mission criteria, current docs and selected
+acceptance metadata found no new production/security issue. It identified a
+runnable quickstart mismatch: the minimal recipe has no edit action but the
+walkthrough later invokes `edit-project`. The full demo now selects the
+ChatGPT recipe before immutable session creation. Formatter construction and
+private handoff bindings are explicit prerequisites; final delivered bindings
+remain to be recorded at the final source checkpoint.
+
+Stale C edit/restart-pending wording is corrected. The quickstart and current
+progress now expose vmnet-gateway access, remount identity refusal, unqualified
+native reboot/reconnect and real-host interrupted-export recovery separately
+from human sign-in/GUI acceptance. Earlier checkpoint text is retained in the
+existing folded history. No tests or live host operations were performed by
+the reviewer, and this does not approve the still-running tree preparation.
