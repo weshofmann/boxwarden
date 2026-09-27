@@ -1,5 +1,6 @@
 import Foundation
 import Virtualization
+import Darwin
 
 private enum BootFailure: Error, CustomStringConvertible {
     case startTimeout
@@ -7,6 +8,7 @@ private enum BootFailure: Error, CustomStringConvertible {
     case serialTimeout
     case streamOverflow
     case unexpectedState
+    case cancelled
 
     var description: String {
         switch self {
@@ -14,22 +16,56 @@ private enum BootFailure: Error, CustomStringConvertible {
         case .stopTimeout: return "VM did not reach stopped state within bounded stop sequence"
         case .serialTimeout: return "serial pipes did not reach EOF after VM stop"
         case .streamOverflow: return "guest serial output exceeded fixed byte limit"
+        case .cancelled: return "inspector cancelled after verified stopped VM and serial EOF"
         case .unexpectedState: return "VM state or network-device count changed"
         }
     }
 }
 
+// The dispatch signal callback records intent and wakes the caller only.
+// VM access stays on the VM queue, and the caller waits for an in-flight
+// start callback before it enters the single stop/EOF/receipt path.
+private final class BootCancellation {
+    private let lock = NSLock()
+    private var cancelled = false
+    private let source: DispatchSourceSignal
+
+    init(wake: DispatchSemaphore) {
+        signal(SIGTERM, SIG_IGN)
+        source = DispatchSource.makeSignalSource(signal: SIGTERM,
+                    queue: DispatchQueue(label: "boxwarden.alpha.inspector.signal"))
+        source.setEventHandler {
+            self.lock.lock()
+            self.cancelled = true
+            self.lock.unlock()
+            wake.signal()
+        }
+        source.resume()
+    }
+
+    var requested: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func close() { source.cancel() }
+}
+
 private final class StopObserver: NSObject, VZVirtualMachineDelegate {
     let stopped = DispatchSemaphore(value: 0)
+    let wake = DispatchSemaphore(value: 0)
     var error: Error?
 
     func guestDidStop(_ virtualMachine: VZVirtualMachine) {
         stopped.signal()
+        wake.signal()
     }
 
     func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: Error) {
         self.error = error
         stopped.signal()
+        wake.signal()
     }
 }
 
@@ -106,6 +142,8 @@ func bootProof(_ prepared: PreparedConfiguration) throws {
     }
     let queue = DispatchQueue(label: "boxwarden.alpha.inspector.vm")
     let observer = StopObserver()
+    let cancellation = BootCancellation(wake: observer.wake)
+    defer { cancellation.close() }
     let vm = queue.sync {
         let vm = VZVirtualMachine(configuration: prepared.configuration, queue: queue)
         vm.delegate = observer
@@ -120,8 +158,9 @@ func bootProof(_ prepared: PreparedConfiguration) throws {
                                 maximum: prepared.exportDisk == nil ? 64 * 1024 : 320 * 1024 * 1024)
     consolePump.start()
     exportPump.start()
+    var stopAttempted = false
     defer {
-        if !queue.sync(execute: { vm.state == .stopped }) {
+        if !stopAttempted && !queue.sync(execute: { vm.state == .stopped }) {
             try? requestAndForceStop(vm, queue: queue, observer: observer)
         }
         try? prepared.consoleOutput.fileHandleForWriting.close()
@@ -131,6 +170,10 @@ func bootProof(_ prepared: PreparedConfiguration) throws {
     let started = DispatchSemaphore(value: 0)
     var startError: Error?
     queue.async {
+        if cancellation.requested {
+            started.signal()
+            return
+        }
         vm.start { result in
             if case let .failure(error) = result {
                 startError = error
@@ -141,14 +184,23 @@ func bootProof(_ prepared: PreparedConfiguration) throws {
     guard started.wait(timeout: .now() + .seconds(15)) == .success else {
         throw BootFailure.startTimeout
     }
-    if let startError { throw startError }
-
-    let guestDeadline = prepared.exportDisk == nil ? 30 : 50
-    if observer.stopped.wait(timeout: .now() + .seconds(guestDeadline)) == .timedOut {
-        try requestAndForceStop(vm, queue: queue, observer: observer)
-        throw BootFailure.stopTimeout
+    // Cancellation cannot bypass this callback rendezvous: a late successful
+    // start must never race a stopped-state receipt from an earlier observation.
+    var lifecycleError: Error? = startError
+    if lifecycleError == nil && !cancellation.requested {
+        let guestDeadline = prepared.exportDisk == nil ? 30 : 50
+        if observer.wake.wait(timeout: .now() + .seconds(guestDeadline)) == .timedOut {
+            lifecycleError = BootFailure.stopTimeout
+        }
     }
-    if let stopError = observer.error { throw stopError }
+    var wasCancelled = cancellation.requested
+    if wasCancelled || lifecycleError != nil {
+        stopAttempted = true
+        try requestAndForceStop(vm, queue: queue, observer: observer)
+    }
+    if let stopError = queue.sync(execute: { observer.error }) {
+        lifecycleError = stopError
+    }
     let (vmStopped, networkDeviceCount) = queue.sync { (vm.state == .stopped, vm.networkDevices.count) }
     guard vmStopped, networkDeviceCount == 0 else {
         throw BootFailure.unexpectedState
@@ -165,6 +217,9 @@ func bootProof(_ prepared: PreparedConfiguration) throws {
     if let expected = prepared.exportDisk {
         try requireExportSnapshotDisk(prepared.diskURL, expected: expected)
     }
+    // Include cancellation received while draining the final serial bytes.
+    wasCancelled = wasCancelled || cancellation.requested
+    if !wasCancelled, let lifecycleError { throw lifecycleError }
 
     var evidence: [String: Any] = [
         "vm_state": "stopped",
@@ -174,7 +229,11 @@ func bootProof(_ prepared: PreparedConfiguration) throws {
     ]
     if prepared.exportDisk != nil { evidence["inspector_mode"] = "export" }
     let encoded = try JSONSerialization.data(withJSONObject: evidence, options: [.sortedKeys])
-    FileHandle.standardError.write(Data("BOOT_EVIDENCE ".utf8))
+    // Both prefixes attest stopped state and complete serial EOF. Only the
+    // success prefix may qualify captured bytes for publication.
+    let prefix = wasCancelled ? "BOOT_CANCELLED " : "BOOT_EVIDENCE "
+    FileHandle.standardError.write(Data(prefix.utf8))
     FileHandle.standardError.write(encoded)
     FileHandle.standardError.write(Data([0x0a]))
+    if wasCancelled { throw BootFailure.cancelled }
 }

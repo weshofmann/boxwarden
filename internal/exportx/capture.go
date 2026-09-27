@@ -18,10 +18,16 @@ import (
 )
 
 const (
-	maxInspectorStreamBytes = 320 << 20
-	maxInspectorLogBytes    = 16 << 10
-	inspectorDeadline       = 80 * time.Second
+	maxInspectorStreamBytes  = 320 << 20
+	maxInspectorLogBytes     = 16 << 10
+	inspectorDeadline        = 80 * time.Second
+	inspectorCleanupDeadline = 45 * time.Second
 )
+
+// ErrInspectorStopUnproven means the launched helper did not provide bounded
+// stopped-VM and serial-EOF evidence. Preserve its spool and boot bundle for
+// inspection; process exit alone does not establish VM lifecycle completion.
+var ErrInspectorStopUnproven = errors.New("inspector VM stop evidence unproven; private spool and bundle retained")
 
 // InspectorEvidence is the host helper's final observation, emitted only
 // after its VM has stopped and both serial pipes reached EOF.
@@ -123,7 +129,9 @@ func (captured CapturedInspectorStream) Remove() error {
 // verify the snapshot again before passing Stream to the receiver. This gate
 // only exposes the stream after bounded capture, process reap, and exact host
 // stopped/zero-NIC evidence. PrivateParent must be an existing 0700 directory;
-// stream.bin must not already exist.
+// stream.bin must not already exist. Cancellation with verified stopped/EOF
+// evidence removes the exact spool and returns no stream. Unproven cleanup
+// leaves stream.bin in place and returns ErrInspectorStopUnproven.
 func CaptureInspector(ctx context.Context, executable string, args []string, privateParent string) (CapturedInspectorStream, error) {
 	var result CapturedInspectorStream
 	err := diskreserve.Run(ctx, []string{privateParent}, func(guarded context.Context) error {
@@ -162,7 +170,11 @@ func CaptureExportInspector(ctx context.Context, executable string, args []strin
 }
 
 func captureInspector(ctx context.Context, executable string, args []string, privateParent string, streamLimit, logLimit int64) (captured CapturedInspectorStream, err error) {
-	if executable == "" || !filepath.IsAbs(executable) || filepath.Clean(executable) != executable || streamLimit <= 0 || logLimit <= 0 {
+	return captureInspectorWithCleanupDeadline(ctx, executable, args, privateParent, streamLimit, logLimit, inspectorCleanupDeadline)
+}
+
+func captureInspectorWithCleanupDeadline(ctx context.Context, executable string, args []string, privateParent string, streamLimit, logLimit int64, cleanupDeadline time.Duration) (captured CapturedInspectorStream, err error) {
+	if executable == "" || !filepath.IsAbs(executable) || filepath.Clean(executable) != executable || streamLimit <= 0 || logLimit <= 0 || cleanupDeadline <= 0 {
 		return CapturedInspectorStream{}, fmt.Errorf("invalid inspector capture inputs")
 	}
 	if err := ctx.Err(); err != nil {
@@ -181,10 +193,19 @@ func captureInspector(ctx context.Context, executable string, args []string, pri
 	if err != nil {
 		return CapturedInspectorStream{}, err
 	}
-	keep := false
+
+	originalInfo, err := stream.Stat()
+	if err != nil {
+		_ = stream.Close()
+		return CapturedInspectorStream{}, err
+	}
+	keep, preserve := false, false
 	defer func() {
-		if !keep {
-			err = errors.Join(err, stream.Close(), parentRoot.Remove("stream.bin"))
+		if preserve {
+			err = errors.Join(err, stream.Sync(), stream.Close())
+		} else if !keep {
+			exact := CapturedInspectorStream{Stream: stream, parent: privateParent, parentID: parentInfo, streamID: originalInfo}
+			err = errors.Join(err, exact.Remove())
 		}
 	}()
 	bootContext, cancel := context.WithTimeout(ctx, inspectorDeadline)
@@ -193,19 +214,79 @@ func captureInspector(ctx context.Context, executable string, args []string, pri
 	command.Dir = privateParent
 	command.Env = []string{"PATH=/usr/bin:/bin", "LANG=C"}
 	command.Stdin = nil
-	command.WaitDelay = 5 * time.Second
+	// Signal the retained child only. Go Process.Signal synchronizes with Wait
+	// and returns ProcessDone after reap; never retry using a numeric PID.
+	command.Cancel = func() error { return command.Process.Signal(syscall.SIGTERM) }
+	command.WaitDelay = cleanupDeadline
 	stdout := &boundedInspectorWriter{output: stream, limit: streamLimit}
 	var log bytes.Buffer
 	stderr := &boundedInspectorWriter{output: &log, limit: logLimit}
-	command.Stdout, command.Stderr = stdout, stderr
-	if err := command.Run(); err != nil {
-		return CapturedInspectorStream{}, fmt.Errorf("inspector helper did not complete and reap: %w", err)
-	}
-	if err := bootContext.Err(); err != nil {
+	outRead, outWrite, err := os.Pipe()
+	if err != nil {
 		return CapturedInspectorStream{}, err
 	}
+	defer outRead.Close()
+	defer outWrite.Close()
+	errRead, errWrite, err := os.Pipe()
+	if err != nil {
+		return CapturedInspectorStream{}, err
+	}
+	defer errRead.Close()
+	defer errWrite.Close()
+	command.Stdout, command.Stderr = outWrite, errWrite
+	if err := command.Start(); err != nil {
+		return CapturedInspectorStream{}, errors.Join(fmt.Errorf("start inspector helper: %w", err), bootContext.Err())
+	}
+	// Unlike Cmd's internal copier, these results preserve actual EOF even if
+	// the child's nonzero exit takes precedence over WaitDelay in Cmd.Wait.
+	outDone, errDone := make(chan error, 1), make(chan error, 1)
+	go func() { _, e := io.Copy(stdout, outRead); outDone <- e }()
+	go func() { _, e := io.Copy(stderr, errRead); errDone <- e }()
+	_ = outWrite.Close()
+	_ = errWrite.Close()
+	deadlineSet := make(chan struct{})
+	stopDeadline := context.AfterFunc(bootContext, func() {
+		deadline := time.Now().Add(cleanupDeadline)
+		_ = outRead.SetReadDeadline(deadline)
+		_ = errRead.SetReadDeadline(deadline)
+		close(deadlineSet)
+	})
+	waitErr := command.Wait()
+	if !stopDeadline() {
+		<-deadlineSet
+	} else {
+		deadline := time.Now().Add(cleanupDeadline)
+		_ = outRead.SetReadDeadline(deadline)
+		_ = errRead.SetReadDeadline(deadline)
+	}
+	pipeErr := errors.Join(<-outDone, <-errDone)
+	cancellation := bootContext.Err()
+	if waitErr != nil || cancellation != nil || pipeErr != nil {
+		if cancellation != nil && pipeErr == nil && !stdout.overflow && !stderr.overflow {
+			evidence, receiptErr := parseInspectorCancellation(log.Bytes(), stdout.count)
+			var exitErr *exec.ExitError
+			if receiptErr == nil && evidence.Mode == "export" && errors.As(waitErr, &exitErr) && exitErr.ExitCode() > 0 {
+				return CapturedInspectorStream{}, errors.Join(cancellation, waitErr)
+			}
+			// A normal completion racing cancellation can also prove safe cleanup,
+			// but cancellation still prevents publication.
+			if waitErr == nil || errors.Is(waitErr, cancellation) {
+				if _, evidenceErr := parseInspectorEvidence(log.Bytes(), stdout.count); evidenceErr == nil {
+					return CapturedInspectorStream{}, cancellation
+				}
+			}
+		}
+		preserve = true
+		return CapturedInspectorStream{}, errors.Join(ErrInspectorStopUnproven, cancellation, waitErr, pipeErr)
+	}
 	if stdout.overflow || stderr.overflow {
-		return CapturedInspectorStream{}, fmt.Errorf("inspector output exceeded capture limit")
+		preserve = true
+		return CapturedInspectorStream{}, errors.Join(ErrInspectorStopUnproven, fmt.Errorf("inspector output exceeded capture limit"))
+	}
+	evidence, err := parseInspectorEvidence(log.Bytes(), stdout.count)
+	if err != nil {
+		preserve = true
+		return CapturedInspectorStream{}, errors.Join(ErrInspectorStopUnproven, err)
 	}
 	if err := stream.Sync(); err != nil {
 		return CapturedInspectorStream{}, err
@@ -230,10 +311,6 @@ func captureInspector(ctx context.Context, executable string, args []string, pri
 	}
 	if err := privateacl.Check(filepath.Join(privateParent, "stream.bin"), pathInfo, captureACLInspector); err != nil {
 		return CapturedInspectorStream{}, fmt.Errorf("captured stream ACL after helper reap: %w", err)
-	}
-	evidence, err := parseInspectorEvidence(log.Bytes(), info.Size())
-	if err != nil {
-		return CapturedInspectorStream{}, err
 	}
 	if _, err := stream.Seek(0, io.SeekStart); err != nil {
 		return CapturedInspectorStream{}, err
@@ -281,6 +358,11 @@ func privateCapturedFile(info os.FileInfo) bool {
 
 func parseInspectorEvidence(log []byte, streamSize int64) (InspectorEvidence, error) {
 	const prefix = "BOOT_EVIDENCE "
+	for _, line := range bytes.Split(log, []byte{'\n'}) {
+		if bytes.HasPrefix(line, []byte("BOOT_CANCELLED ")) {
+			return InspectorEvidence{}, fmt.Errorf("cancelled inspector stream cannot be published")
+		}
+	}
 	var payload []byte
 	for _, line := range bytes.Split(log, []byte{'\n'}) {
 		if bytes.HasPrefix(line, []byte(prefix)) {
@@ -346,4 +428,14 @@ func parseInspectorEvidence(log []byte, streamSize int64) (InspectorEvidence, er
 		return InspectorEvidence{}, fmt.Errorf("inspector host observations do not match captured stream")
 	}
 	return result, nil
+}
+
+// BOOT_CANCELLED has the same strict observations as BOOT_EVIDENCE, but its
+// separate prefix attests stopped state and both serial EOFs during ordered
+// cancellation cleanup. It never admits bytes for publication.
+func parseInspectorCancellation(log []byte, streamSize int64) (InspectorEvidence, error) {
+	if bytes.Contains(log, []byte("BOOT_EVIDENCE ")) {
+		return InspectorEvidence{}, fmt.Errorf("conflicting inspector completion and cancellation receipts")
+	}
+	return parseInspectorEvidence(bytes.ReplaceAll(log, []byte("BOOT_CANCELLED "), []byte("BOOT_EVIDENCE ")), streamSize)
 }

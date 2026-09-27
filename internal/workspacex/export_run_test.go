@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -210,5 +211,44 @@ func TestReadySnapshotResumeDoesNotWaitForLiveVolumeLease(t *testing.T) {
 	record, err := LoadRecord(root, "work", testVolumeID)
 	if err != nil || record.Pending != nil {
 		t.Fatalf("snapshot resume changed volume: %+v %v", record, err)
+	}
+}
+
+func TestCaptureFailurePreservesBundleOnlyWhenStopUnproven(t *testing.T) {
+	for _, unproven := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unproven=%t", unproven), func(t *testing.T) {
+			parent := privateRoot(t)
+			path := filepath.Join(parent, "boxwarden-alpha-inspector-export.aB12cD")
+			if err := os.Mkdir(path, 0700); err != nil {
+				t.Fatal(err)
+			}
+			marker := filepath.Join(path, "exact-evidence")
+			if err := os.WriteFile(marker, []byte("retain"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			info, _ := os.Lstat(path)
+			parentInfo, _ := os.Lstat(parent)
+			bundle := PreparedInspectorBundle{Path: path, identity: info, parentPath: parent, parentIdentity: parentInfo}
+			captureErr := error(context.Canceled)
+			if unproven {
+				captureErr = errors.Join(captureErr, exportx.ErrInspectorStopUnproven)
+			}
+			journal := testExportJournal(t.TempDir())
+			capture := func(context.Context, string, domain.ID, string, string, string) (exportx.CapturedInspectorStream, ExportJournal, error) {
+				return exportx.CapturedInspectorStream{}, journal, captureErr
+			}
+			result, published, err := completeSelectedWorkspaceWithCapturer(t.Context(), parent, "work", journal, bundle, "/unused/source", capture)
+			if !errors.Is(err, captureErr) || published != "" || result.Phase != journal.Phase {
+				t.Fatalf("failure published or changed journal: %+v %q %v", result, published, err)
+			}
+			body, readErr := os.ReadFile(marker)
+			if unproven {
+				if readErr != nil || string(body) != "retain" {
+					t.Fatalf("unproven stop erased bundle: %q %v", body, readErr)
+				}
+			} else if !os.IsNotExist(readErr) {
+				t.Fatalf("verified cancellation retained bundle: %v", readErr)
+			}
+		})
 	}
 }

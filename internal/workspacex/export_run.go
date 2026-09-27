@@ -9,6 +9,7 @@ import (
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/domain"
+	"github.com/weshofmann/boxwarden/internal/exportx"
 )
 
 // ExportSelectedWorkspace runs one stopped-workspace transaction through an
@@ -125,8 +126,18 @@ func completeSelectedWorkspace(ctx context.Context, stateRoot string, domainID d
 }
 
 func completeSelectedWorkspaceWithBundle(ctx context.Context, stateRoot string, domainID domain.ID, journal ExportJournal, bundle PreparedInspectorBundle, sourceRoot string) (result ExportJournal, published string, err error) {
-	defer func() { err = errors.Join(err, bundle.Remove()) }()
-	captured, observed, err := CaptureAdmittedExportInspector(ctx, stateRoot, domainID, journal.ID, bundle.Path, sourceRoot)
+	return completeSelectedWorkspaceWithCapturer(ctx, stateRoot, domainID, journal, bundle, sourceRoot, CaptureAdmittedExportInspector)
+}
+
+type boundExportCapturer func(context.Context, string, domain.ID, string, string, string) (exportx.CapturedInspectorStream, ExportJournal, error)
+
+func completeSelectedWorkspaceWithCapturer(ctx context.Context, stateRoot string, domainID domain.ID, journal ExportJournal, bundle PreparedInspectorBundle, sourceRoot string, capture boundExportCapturer) (result ExportJournal, published string, err error) {
+	defer func() {
+		if !errors.Is(err, exportx.ErrInspectorStopUnproven) {
+			err = errors.Join(err, bundle.Remove())
+		}
+	}()
+	captured, observed, err := capture(ctx, stateRoot, domainID, journal.ID, bundle.Path, sourceRoot)
 	if err != nil {
 		return journal, "", fmt.Errorf("export %s inspector capture: %w", journal.ID, err)
 	}
