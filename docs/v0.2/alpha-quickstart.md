@@ -49,8 +49,9 @@ identity, and installed identity, and disables the package's optional apt
 source. The launcher requires the workstation's active graphical user manager
 and asks it to start the package executable. Its checked command only proves
 that the user manager accepted the process; a usable visible window and
-waiting-for-sign-in state require separate VM acceptance. This recipe has not
-yet passed a real-VM build or graphical acceptance.
+waiting-for-sign-in state require separate VM acceptance. The first fresh
+native-store build and visible ChatGPT sign-in window have passed that check;
+provider sign-in and the complete repeated lifecycle remain unqualified.
 
 [OpenAI's Linux guide](https://learn.chatgpt.com/docs/linux/linux-app) lists
 Ubuntu 24.04 ARM64 as supported but says Computer Use is not yet available in
@@ -67,7 +68,9 @@ remains. Both ChatGPT recipes include these same proof actions before GUI
 launch. An already-running public start must add no action attempts and leave
 the counter unchanged. A rebuilt system runs its own once action and starts
 its guest-local counter at `1`; the separate workspace retains project bytes.
-These examples are source checked and await fresh-VM qualification.
+The first fresh system verified once/counter ordering, already-running start
+idempotence and counter increments through actual restarts. Rebuilt-system
+counter reset and independent repetition remain pending.
 
 ```sh
 "$BW" --config "$CONFIG" doctor
@@ -143,9 +146,10 @@ backend still own the attachment: a rebuild changes backend identity, and a
 replacement changes session identity. After either transition, make a new
 stopped export and compare its bytes independently; the original import
 verification cannot be repeated against that new owner. Keep the VM stopped
-when finished. Rebuild, replacement reattachment, GUI acceptance, and a fresh
-independent repetition are tracked in [alpha progress](alpha-progress.md)
-until they pass the complete matrix.
+when finished. First-session GUI launch, pristine original-owner verification
+and edited-data restart retention are verified. Software-changing rebuild,
+replacement reattachment and a fresh independent repetition are tracked in
+[alpha progress](alpha-progress.md) until they pass the complete matrix.
 
 If export copying is interrupted and reports a transaction UUID, keep its
 session stopped and recover that exact transaction:
@@ -191,7 +195,9 @@ after rebuild plus explicit public start, and after replacement using another
 new stopped export. The original pristine import journal has already been
 verified; do not compare the edited tree to it or invoke that journal against a
 replacement owner. Repeat on the second fresh workspace independently. These
-commands and retention behavior await real-VM qualification.
+explicit edits and first-system restart retention are verified with pinned
+live readback and independently compared stopped exports. Rebuild, replacement
+and the full second-volume repeat remain pending.
 
 For the pending software-changing rebuild trial, the tracked
 `examples/v0.2-alpha-chatgpt-jq.json` recipe retains the ChatGPT preparation,

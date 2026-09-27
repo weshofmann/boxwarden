@@ -564,3 +564,20 @@ The fresh bounded reviewer found no issue in the test delta; root independently
 verified production restoration. This closes reliance on the installed Bash's
 standalone conditional/errexit behavior for the count proof. Runtime export code
 and inspector build inputs are unchanged.
+
+
+## Bounded cumulative source gate at `551b297`
+
+A fresh reviewer was requested with Astra/extra-high routing, frozen at
+`551b297` against base `e16f239`, building on the completed `6588c88` ledger and
+bounded `523f719`, `a3a7d6c` and `e1fbb9c` corrections. Requested model routing
+is not independently attested. The pass traced original-owner import verification,
+edited baselines, public recovery/inspection, action ordering and the rebuild →
+explicit start → replacement boundaries. No new Important/Critical source issue
+was found; this is bounded composition review, not exhaustive whole-PR approval.
+
+Clean/frozen checkout, diff and shell syntax checks passed. No tests were rerun;
+private evidence and live host state were untouched. Minor stale quickstart and
+remaining-acceptance descriptions are corrected to distinguish the verified first
+system from pending rebuild, replacement, independent repetition and final gates.
+The current `jq` installer is a single retained public operation, not admission.
