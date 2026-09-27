@@ -6,7 +6,7 @@
 set -euo pipefail
 
 readonly acknowledgement="--acknowledge-generic-golden-finalization"
-readonly helper_sha256="b350cc7fe6d861f39107b4922b4f8987e56e687c7c802dfe8c106fec71f7df60"
+readonly helper_sha256="ecdb752197c6d36f9594d234e4035745f55e1e38c95426a78d473e5d26dadf06"
 
 die() { printf 'generic golden finalization: %s\n' "$*" >&2; exit 1; }
 
@@ -30,13 +30,20 @@ require_generic_trust_absent() {
   done
   entries="$(find "$parent" -mindepth 1 -print -quit)" || die 'cannot enumerate generic SSH trust parent'
   [[ -z "$entries" ]] || die 'generic SSH trust parent contains active or unexpected material'
-  for account in root boxwarden; do
-    local ssh_dir
-    ssh_dir="$(path_in_root "$root" "/${account}/.ssh")"
-    if [[ "$account" == boxwarden ]]; then
-      ssh_dir="$(path_in_root "$root" /home/boxwarden/.ssh)"
+}
+
+scrub_builder_ssh() {
+  local root="$1" home ssh_dir
+  for home in /root /home/boxwarden; do
+    home="$(path_in_root "$root" "$home")"
+    [[ -d "$home" && ! -L "$home" ]] || die "builder SSH home ${home} is missing or unsafe"
+    ssh_dir="${home}/.ssh"
+    [[ ! -L "$ssh_dir" ]] || die "builder SSH directory ${ssh_dir} is a symlink"
+    if [[ -e "$ssh_dir" ]]; then
+      [[ -d "$ssh_dir" ]] || die "builder SSH path ${ssh_dir} is not a directory"
+      rm -rf -- "$ssh_dir" || die "cannot remove builder SSH directory ${ssh_dir}"
     fi
-    [[ ! -e "$ssh_dir" && ! -L "$ssh_dir" ]] || die "unexpected ${account} SSH authentication state"
+    [[ ! -e "$ssh_dir" && ! -L "$ssh_dir" ]] || die "builder SSH state survived at ${ssh_dir}"
   done
 }
 
@@ -50,7 +57,7 @@ require_sshd_policy() {
 pubkeyauthentication yes
 trustedusercakeys /etc/ssh/boxwarden/active/trusted-user-ca.pub
 authorizedprincipalsfile /etc/ssh/boxwarden/active/authorized_principals/%u
-authorizedkeysfile none
+authorizedkeysfile .ssh/authorized_keys
 permituserenvironment no
 permituserrc no
 passwordauthentication no
@@ -167,6 +174,8 @@ finalize_golden() {
   dbus="$(path_in_root "$root" /var/lib/dbus/machine-id)"
   marker="$(path_in_root "$root" /var/lib/boxwarden/golden-clone-ready)"
   [[ ! -e "$marker" && ! -L "$marker" ]] || die 'clone-ready marker already exists'
+  [[ -d "$(dirname "$marker")" && ! -L "$(dirname "$marker")" &&
+    "$(stat -c '%u:%g:%a' "$(dirname "$marker")")" == 0:0:700 ]] || die 'private Boxwarden state directory is unsafe'
   [[ -f "$helper" && -x "$helper" && ! -L "$helper" ]] || die 'fixed guest bootstrap helper is missing or unsafe'
   [[ "$(sha256sum "$helper" | awk '{print $1}')" == "$helper_sha256" ]] || die 'fixed guest bootstrap helper digest differs from lock'
   [[ -f "$shadow" && ! -L "$shadow" ]] || die 'shadow account database is missing or unsafe'
@@ -174,11 +183,12 @@ finalize_golden() {
   [[ -n "$field" ]] || die 'workstation account has an empty password field'
   require_generic_trust_absent "$root"
   require_sshd_policy
+  scrub_builder_ssh "$root"
   [[ -f "$machine_id" && ! -L "$machine_id" ]] || die 'machine-id is missing or unsafe'
   old_hostname="$(cat "$(path_in_root "$root" /etc/hostname)")"
   [[ -f "$(path_in_root "$root" /etc/boxwarden-task0-spike)" ]] || die 'build marker is missing'
   build_run_id="$(cat "$(path_in_root "$root" /etc/boxwarden-task0-spike)")"
-  [[ "$build_run_id" =~ ^run-[12]$ ]] || die 'unexpected build marker'
+  [[ "$build_run_id" =~ ^run-([12]|[0-9a-f]{12})$ ]] || die 'unexpected build marker'
   build_hostname="boxwarden-task0-${build_run_id}"
   [[ "$old_hostname" == "$build_hostname" || "$old_hostname" == boxwarden-golden ]] || die 'unexpected build hostname'
 
@@ -236,8 +246,10 @@ finalize_golden() {
   [[ -z "$host_keys" ]] || die 'SSH host key remains'
   [[ ! -e "$(path_in_root "$root" /var/lib/NetworkManager/secret_key)" && ! -e "$(path_in_root "$root" /var/lib/systemd/random-seed)" ]] || die 'machine seed remains'
   require_generic_trust_absent "$root"
+  for ssh_dir in /root/.ssh /home/boxwarden/.ssh; do
+    [[ ! -e "$(path_in_root "$root" "$ssh_dir")" && ! -L "$(path_in_root "$root" "$ssh_dir")" ]] || die 'builder SSH state survived'
+  done
   sync
-  install -d -m 0755 "$(dirname "$marker")"
   : >"$marker"
   chmod 0644 "$marker"
   printf 'generic golden clone-ready; power off without another boot\n'

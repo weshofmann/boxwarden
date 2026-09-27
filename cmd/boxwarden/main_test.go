@@ -139,8 +139,59 @@ func TestProductionPublicOptionsWireAdmittedStarterFactory(t *testing.T) {
 	if options.SessionStarter != nil || options.SessionStarterFactory == nil {
 		t.Fatal("production public start is not factory-composed")
 	}
+	if options.StatusSnapshotFactory == nil {
+		t.Fatal("production status has no exact supervisor snapshot reader")
+	}
+	if options.AlphaPrepare == nil {
+		t.Fatal("production alpha preparation is not composed")
+	}
+	if options.AlphaAction == nil {
+		t.Fatal("production alpha action service is not composed")
+	}
+	if options.AlphaAutomatic == nil {
+		t.Fatal("production alpha automatic action runner is not composed")
+	}
 	if _, err := options.SessionStarterFactory(config.Config{}, config.Domain{}, "/private/config.json"); err == nil {
 		t.Fatal("production factory accepted unadmitted configuration")
+	}
+	if _, err := options.StatusSnapshotFactory(config.Config{}, config.Domain{}); err == nil {
+		t.Fatal("production status factory accepted unadmitted configuration")
+	}
+	if _, err := options.AlphaPrepare(context.Background(), config.Config{}, config.Domain{}, "/private/config.json", app.AlphaPrepareInput{}); err == nil {
+		t.Fatal("production alpha preparation accepted unadmitted configuration")
+	}
+}
+
+func TestProductionAlphaPrepareReportsPlannedIdentityBeforeHostAdmission(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(root, "config.json")
+	if err := os.WriteFile(configPath, []byte(fmt.Sprintf(`{"version":1,"domains":{"work":{"state_root":%q}}}`, root)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := loaded.Domain("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipePath := filepath.Join(root, "recipe.json")
+	recipeData := `{"version":1,"source":{"kind":"ubuntu-24.04.4-desktop-arm64","sha256":"c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"},"machine":{"cpus":2,"memory_mib":4096,"system_disk_gib":40}}`
+	if err := os.WriteFile(recipePath, []byte(recipeData), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	options := publicOptions(&output)
+	_, err = options.AlphaPrepare(context.Background(), loaded, selected, configPath, app.AlphaPrepareInput{RecipePath: recipePath, ISOPath: filepath.Join(root, "installer.iso"), GuestDefinitionRoot: filepath.Join(root, "guest")})
+	if err == nil || !strings.Contains(output.String(), "preparation-attempt: alpha-attempt-") || !strings.Contains(output.String(), "planned-candidate: boxwarden-alpha-base-") {
+		t.Fatalf("planned identity not reported before unavailable host: %v, %q", err, output.String())
 	}
 }
 

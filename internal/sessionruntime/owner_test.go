@@ -2,6 +2,10 @@ package sessionruntime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -14,12 +18,24 @@ import (
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/backend/tart"
+	"github.com/weshofmann/boxwarden/internal/domain"
+	"github.com/weshofmann/boxwarden/internal/guestproto"
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/serialx"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/sshx"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
+	"github.com/weshofmann/boxwarden/internal/workspaceformat"
+	"github.com/weshofmann/boxwarden/internal/workspacex"
 )
+
+const ownerTestPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+func ownerTestFingerprint() string {
+	raw, _ := base64.StdEncoding.DecodeString(strings.Fields(ownerTestPublicKey)[1])
+	sum := sha256.Sum256(raw)
+	return "SHA256:" + base64.RawStdEncoding.EncodeToString(sum[:])
+}
 
 // Keep configuration and durable session loading real. Only external host
 // qualification, CA inspection, PTY allocation and VM mechanics are doubled.
@@ -34,6 +50,7 @@ type fixture struct {
 	observe                                     func(context.Context, string) (backend.Observation, error)
 	hostErr, caErr, launchErr                   error
 	serialErr                                   error
+	pin                                         pinStore
 	launchConfig                                tart.LaunchConfig
 	startRequest                                backend.StartRequest
 	observationPaths                            [2]string
@@ -82,7 +99,7 @@ func newFixture(t *testing.T) *fixture {
 			if selected != (sshx.Domain{ID: "work", StateRoot: f.root}) || !reflect.DeepEqual(all, []sshx.Domain{{ID: "personal", StateRoot: f.personal}, {ID: "work", StateRoot: f.root}}) {
 				t.Errorf("CA selection/configuration = %#v/%#v", selected, all)
 			}
-			return sshx.CAIdentity{Domain: "work"}, f.caErr
+			return sshx.CAIdentity{Domain: "work", Algorithm: "ssh-ed25519", PublicKey: ownerTestPublicKey, Fingerprint: ownerTestFingerprint(), PrivateKeyPath: filepath.Join(f.root, "identity", "ssh-user-ca", "ca")}, f.caErr
 		}),
 		observer: func(path, home string) backend.Observer {
 			f.observationPaths = [2]string{path, home}
@@ -114,6 +131,13 @@ func newFixture(t *testing.T) *fixture {
 			}
 			return f.serial, nil
 		},
+		pin: func(domain sshx.Domain) pinStore {
+			if f.pin != nil {
+				return f.pin
+			}
+			return sshx.NewPinStore(domain)
+		},
+		newNonce: func() (string, error) { return "nonce-1", nil },
 		launcher: func(c tart.LaunchConfig) backend.Starter {
 			f.launchConfig = c
 			return starterFunc(func(_ context.Context, r backend.StartRequest) (backend.Handle, error) {
@@ -132,7 +156,7 @@ func newFixture(t *testing.T) *fixture {
 
 // Catch omitted authoritative reload, narrowed CA/host admission, request
 // fields used as launch authority, or readiness inferred from process start.
-func TestStartReloadsAdmissionAndRetainsExactRuntimeWithoutReady(t *testing.T) {
+func TestBootstrapUsesReloadedAuthorityPersistsExactPinWithoutReady(t *testing.T) {
 	f := newFixture(t)
 	if err := f.owner.Start(context.Background(), f.request); err != nil {
 		t.Fatal(err)
@@ -150,8 +174,26 @@ func TestStartReloadsAdmissionAndRetainsExactRuntimeWithoutReady(t *testing.T) {
 	if f.startRequest != (backend.StartRequest{ObjectID: "boxwarden-work-dev", SerialDevice: f.serial.endpoint, GenerationDirectory: f.request.RuntimeDirectory}) {
 		t.Fatalf("start request = %#v", f.startRequest)
 	}
+	if err := f.owner.Bootstrap(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if f.serial.bootstrapCalls != 1 {
+		t.Fatalf("serial bootstrap calls = %d, want 1", f.serial.bootstrapCalls)
+	}
+	wantRequest := guestproto.SerialRequest{
+		Version: 1, Nonce: "nonce-1", StartGeneration: f.record.StartGeneration,
+		Association: guestproto.Association{Domain: "work", SessionID: f.record.ID, BackendKind: "tart", BackendObject: f.record.Backend.ObjectID},
+		CAPublicKey: ownerTestPublicKey, CAFingerprint: ownerTestFingerprint(), Principal: "boxwarden-session-" + f.record.ID,
+	}
+	if f.serial.bootstrapRequest != wantRequest {
+		t.Fatalf("bootstrap request = %#v, want authoritative %#v", f.serial.bootstrapRequest, wantRequest)
+	}
+	pin, err := sshx.NewPinStore(sshx.Domain{ID: "work", StateRoot: f.root}).Load(context.Background(), sshx.Binding{Domain: "work", SessionID: f.record.ID, BackendKind: "tart", BackendObject: f.record.Backend.ObjectID})
+	if err != nil || pin.PublicKey != ownerTestPublicKey || pin.Algorithm != "ssh-ed25519" {
+		t.Fatalf("persisted pin = %#v, %v", pin, err)
+	}
 	s := f.owner.Snapshot(context.Background())
-	if s.Binding != f.request.Binding || !s.BackendRunning || !s.SerialHealthy || s.PinPresent || s.CertificateCurrent || s.ProbeOK || s.ZoneMatches || s.ObservedAt.IsZero() {
+	if s.Binding != f.request.Binding || !s.BackendRunning || !s.SerialHealthy || !s.PinPresent || s.CertificateCurrent || s.ProbeOK || s.ZoneMatches || s.ObservedAt.IsZero() {
 		t.Fatalf("snapshot = %#v", s)
 	}
 	stored, err := session.LoadRecord(f.root, "work", "dev")
@@ -164,6 +206,314 @@ func TestStartReloadsAdmissionAndRetainsExactRuntimeWithoutReady(t *testing.T) {
 	if err := f.owner.Wait(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func rebuildOwnerFixture(t *testing.T) (*fixture, session.RebuildJournal, sshx.Binding) {
+	t.Helper()
+	f := newFixture(t)
+	oldBackend := f.record.Backend.ObjectID
+	oldBinding := sshx.Binding{Domain: f.record.Domain, SessionID: f.record.ID, BackendKind: "tart", BackendObject: oldBackend}
+	oldPin, err := sshx.NewPinStore(sshx.Domain{ID: "work", StateRoot: f.root}).Admit(context.Background(), oldBinding, sshx.ObservedHostKey{Algorithm: "ssh-ed25519", PublicKey: ownerTestPublicKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawPin, err := json.Marshal(oldPin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(rawPin)
+	journal := session.RebuildJournal{Version: 1, Domain: "work", SessionName: "dev", SessionID: f.record.ID,
+		OperationID: "00112233-4455-4677-8899-aabbccddeeff", Phase: session.RebuildCutover,
+		OldBackend: oldBackend, OldRevision: f.record.GoldenRevision,
+		CandidateBackend: "boxwarden-work-00112233445546778899aabbccddeeff", CandidateRevision: "golden-r2",
+		OldPinPresent: true, OldPinDigest: hex.EncodeToString(digest[:])}
+	f.record.Backend.ObjectID = journal.CandidateBackend
+	f.record.GoldenRevision = journal.CandidateRevision
+	if err := session.SaveRecord(f.root, "work", f.record); err != nil {
+		t.Fatal(err)
+	}
+	f.request.Binding.BackendObject = journal.CandidateBackend
+	if err := os.Mkdir(filepath.Join(f.root, "rebuilds"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeOwnerRebuildJournal(t, f.root, journal)
+	f.observe = func(_ context.Context, object string) (backend.Observation, error) {
+		state := backend.ObjectStopped
+		if object == journal.CandidateBackend && f.startRequest.ObjectID != "" {
+			state = backend.ObjectRunning
+		}
+		return backend.Observation{ObjectID: object, Exists: true, State: state}, nil
+	}
+	return f, journal, oldBinding
+}
+
+func writeOwnerRebuildJournal(t *testing.T, root string, journal session.RebuildJournal) {
+	t.Helper()
+	raw, err := json.Marshal(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "rebuilds", journal.SessionName+".json"), append(raw, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRebuildBootstrapRotatesOnlyJournalBoundPin(t *testing.T) {
+	f, journal, oldBinding := rebuildOwnerFixture(t)
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Bootstrap(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	store := sshx.NewPinStore(sshx.Domain{ID: "work", StateRoot: f.root})
+	candidateBinding := oldBinding
+	candidateBinding.BackendObject = journal.CandidateBackend
+	if pin, err := store.Load(context.Background(), candidateBinding); err != nil || pin.BackendObject != journal.CandidateBackend {
+		t.Fatalf("candidate pin = %#v, %v", pin, err)
+	}
+	if _, err := store.Load(context.Background(), oldBinding); err == nil {
+		t.Fatal("old pin binding remained after rebuild bootstrap")
+	}
+	_ = f.owner.Stop(context.Background())
+	_ = f.owner.Wait(context.Background())
+}
+
+func TestRebuildOwnerRestartsExactPinnedCandidateAfterReadyOrRetiring(t *testing.T) {
+	for _, scenario := range []struct {
+		name      string
+		phase     session.RebuildPhase
+		oldExists bool
+	}{
+		{name: "ready", phase: session.RebuildReady, oldExists: true},
+		{name: "retiring_before_delete", phase: session.RebuildRetiring, oldExists: true},
+		{name: "retiring_after_delete", phase: session.RebuildRetiring, oldExists: false},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			f, journal, oldBinding := rebuildOwnerFixture(t)
+			journal.Phase = scenario.phase
+			writeOwnerRebuildJournal(t, f.root, journal)
+			store := sshx.NewPinStore(sshx.Domain{ID: "work", StateRoot: f.root})
+			candidateBinding := oldBinding
+			candidateBinding.BackendObject = journal.CandidateBackend
+			candidatePin, err := store.TransitionRebuild(t.Context(), journal.OperationID, oldBinding, candidateBinding,
+				journal.OldPinPresent, journal.OldPinDigest, sshx.ObservedHostKey{Algorithm: "ssh-ed25519", PublicKey: ownerTestPublicKey})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.observe = func(_ context.Context, object string) (backend.Observation, error) {
+				switch object {
+				case journal.OldBackend:
+					if !scenario.oldExists {
+						return backend.Observation{ObjectID: object, State: backend.ObjectUnknown}, nil
+					}
+					return backend.Observation{ObjectID: object, Exists: true, State: backend.ObjectStopped}, nil
+				case journal.CandidateBackend:
+					state := backend.ObjectStopped
+					if f.startRequest.ObjectID != "" {
+						state = backend.ObjectRunning
+					}
+					return backend.Observation{ObjectID: object, Exists: true, State: state}, nil
+				default:
+					t.Fatalf("unexpected observed object %q", object)
+					return backend.Observation{}, nil
+				}
+			}
+			if err := f.owner.Start(t.Context(), f.request); err != nil {
+				t.Fatalf("exact recovery launch: %v", err)
+			}
+			if f.startRequest.ObjectID != journal.CandidateBackend {
+				t.Fatalf("launched %q instead of exact candidate", f.startRequest.ObjectID)
+			}
+			if err := f.owner.Bootstrap(t.Context()); err != nil {
+				t.Fatalf("exact recovery bootstrap: %v", err)
+			}
+			if got, err := store.Load(t.Context(), candidateBinding); err != nil || got != candidatePin {
+				t.Fatalf("candidate pin changed during recovery: %#v, %v", got, err)
+			}
+			if _, err := store.Load(t.Context(), oldBinding); err == nil {
+				t.Fatal("old pin became active during recovery")
+			}
+			if err := f.owner.Stop(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.owner.Wait(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestRebuildOwnerRecoveryRequiresEstablishedCandidatePin(t *testing.T) {
+	f, journal, _ := rebuildOwnerFixture(t)
+	journal.Phase = session.RebuildReady
+	writeOwnerRebuildJournal(t, f.root, journal)
+	if err := f.owner.Start(t.Context(), f.request); err == nil || f.startRequest.ObjectID != "" {
+		t.Fatalf("ready recovery launched without candidate pin: %v; request=%#v", err, f.startRequest)
+	}
+}
+
+func TestRebuildOwnerReadyRecoveryRejectsAbsentOldBackend(t *testing.T) {
+	f, journal, oldBinding := rebuildOwnerFixture(t)
+	journal.Phase = session.RebuildReady
+	writeOwnerRebuildJournal(t, f.root, journal)
+	candidateBinding := oldBinding
+	candidateBinding.BackendObject = journal.CandidateBackend
+	store := sshx.NewPinStore(sshx.Domain{ID: "work", StateRoot: f.root})
+	if _, err := store.TransitionRebuild(t.Context(), journal.OperationID, oldBinding, candidateBinding,
+		journal.OldPinPresent, journal.OldPinDigest, sshx.ObservedHostKey{Algorithm: "ssh-ed25519", PublicKey: ownerTestPublicKey}); err != nil {
+		t.Fatal(err)
+	}
+	f.observe = func(_ context.Context, object string) (backend.Observation, error) {
+		if object != journal.OldBackend {
+			t.Fatalf("observed unexpected object %q before old-backend gate", object)
+		}
+		return backend.Observation{ObjectID: object, State: backend.ObjectUnknown}, nil
+	}
+	if err := f.owner.Start(t.Context(), f.request); err == nil || f.startRequest.ObjectID != "" {
+		t.Fatalf("ready recovery accepted absent old backend: %v; request=%#v", err, f.startRequest)
+	}
+}
+
+func TestRebuildBootstrapRejectsChangedJournalBeforePinRotation(t *testing.T) {
+	f, journal, oldBinding := rebuildOwnerFixture(t)
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	journal.OldPinDigest = strings.Repeat("0", 64)
+	writeOwnerRebuildJournal(t, f.root, journal)
+	if err := f.owner.Bootstrap(context.Background()); err == nil {
+		t.Fatal("changed rebuild journal authorized pin rotation")
+	}
+	if pin, err := sshx.NewPinStore(sshx.Domain{ID: "work", StateRoot: f.root}).Load(context.Background(), oldBinding); err != nil || pin.BackendObject != oldBinding.BackendObject {
+		t.Fatalf("rejected bootstrap changed old pin: %#v, %v", pin, err)
+	}
+	_ = f.owner.Stop(context.Background())
+	_ = f.owner.Wait(context.Background())
+}
+
+func TestRebuildOwnerRejectsWrongPhaseAndRunningOldSystemBeforeLaunch(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*fixture, *session.RebuildJournal)
+	}{
+		{name: "wrong phase", mutate: func(_ *fixture, j *session.RebuildJournal) { j.Phase = session.RebuildCloned }},
+		{name: "candidate intent mismatch", mutate: func(_ *fixture, j *session.RebuildJournal) { j.CandidateIntentDigest = strings.Repeat("a", 64) }},
+		{name: "pin transition unavailable", mutate: func(f *fixture, _ *session.RebuildJournal) { f.pin = &flakyPinStore{} }},
+		{name: "old still running", mutate: func(f *fixture, j *session.RebuildJournal) {
+			candidate := j.CandidateBackend
+			old := j.OldBackend
+			f.observe = func(_ context.Context, object string) (backend.Observation, error) {
+				state := backend.ObjectStopped
+				if object == old {
+					state = backend.ObjectRunning
+				}
+				if object != old && object != candidate {
+					t.Fatalf("unexpected observed object %q", object)
+				}
+				return backend.Observation{ObjectID: object, Exists: true, State: state}, nil
+			}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f, journal, _ := rebuildOwnerFixture(t)
+			test.mutate(f, &journal)
+			writeOwnerRebuildJournal(t, f.root, journal)
+			if err := f.owner.Start(context.Background(), f.request); err == nil || f.startRequest.ObjectID != "" {
+				t.Fatalf("unsafe rebuild owner reached launch: request=%#v, error=%v", f.startRequest, err)
+			}
+		})
+	}
+}
+
+func TestBootstrapRetriesPinFromValidatedResultWithoutSecondSerialCommand(t *testing.T) {
+	f := newFixture(t)
+	pins := &flakyPinStore{failures: 1}
+	f.pin = pins
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Bootstrap(context.Background()); err == nil || !strings.Contains(err.Error(), "pin write interrupted") {
+		t.Fatalf("first bootstrap error = %v", err)
+	}
+	if err := f.owner.Bootstrap(context.Background()); err != nil {
+		t.Fatalf("exact pin retry: %v", err)
+	}
+	if f.serial.bootstrapCalls != 1 || pins.admitCalls != 2 {
+		t.Fatalf("serial/pin calls = %d/%d, want 1/2", f.serial.bootstrapCalls, pins.admitCalls)
+	}
+	if snapshot := f.owner.Snapshot(context.Background()); !snapshot.PinPresent {
+		t.Fatalf("pin retry snapshot = %#v", snapshot)
+	}
+	_ = f.owner.Stop(context.Background())
+	_ = f.owner.Wait(context.Background())
+}
+
+func TestBootstrapSerialResultAndPinConflictsFailClosed(t *testing.T) {
+	for name, mutate := range map[string]func(*fixture){
+		"wrong generation": func(f *fixture) {
+			f.serial.resultMutation = func(r *guestproto.SerialResult) { r.StartGeneration = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" }
+		},
+		"wrong session": func(f *fixture) {
+			f.serial.resultMutation = func(r *guestproto.SerialResult) { r.SessionID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" }
+		},
+		"wrong domain": func(f *fixture) { f.serial.resultMutation = func(r *guestproto.SerialResult) { r.Domain = "personal" } },
+		"wrong backend": func(f *fixture) {
+			f.serial.resultMutation = func(r *guestproto.SerialResult) { r.BackendObject = "other" }
+		},
+		"invalid host key": func(f *fixture) {
+			f.serial.resultMutation = func(r *guestproto.SerialResult) { r.HostPublicKey = "ssh-ed25519 invalid" }
+		},
+		"pin conflict": func(f *fixture) {
+			f.pin = &flakyPinStore{conflict: true}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			mutate(f)
+			if err := f.owner.Start(context.Background(), f.request); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.owner.Bootstrap(context.Background()); err == nil {
+				t.Fatal("conflicting bootstrap accepted")
+			}
+			if snapshot := f.owner.Snapshot(context.Background()); snapshot.PinPresent {
+				t.Fatalf("conflict published pin: %#v", snapshot)
+			}
+			_ = f.owner.Stop(context.Background())
+			_ = f.owner.Wait(context.Background())
+		})
+	}
+}
+
+func TestConcurrentBootstrapEmitsOneGuestRequestAndSnapshotRechecksPin(t *testing.T) {
+	f := newFixture(t)
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	var group sync.WaitGroup
+	for range 8 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			if err := f.owner.Bootstrap(context.Background()); err != nil {
+				t.Errorf("concurrent bootstrap: %v", err)
+			}
+		}()
+	}
+	group.Wait()
+	if f.serial.bootstrapCalls != 1 {
+		t.Fatalf("serial bootstrap calls = %d, want 1", f.serial.bootstrapCalls)
+	}
+	pinPath := filepath.Join(f.root, "identity", "ssh-host-pins", f.record.ID+".json")
+	if err := os.Remove(pinPath); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := f.owner.Snapshot(context.Background()); snapshot.PinPresent || !strings.Contains(snapshot.Diagnostic, "host-key pin") {
+		t.Fatalf("snapshot trusted stale in-memory pin: %#v", snapshot)
+	}
+	_ = f.owner.Stop(context.Background())
+	_ = f.owner.Wait(context.Background())
 }
 
 func TestStartRejectsBindingOrAdmissionBeforeMutation(t *testing.T) {
@@ -276,6 +626,36 @@ func TestWaitRetainsSerialUntilActualReapAndStopsOnlyExactHandle(t *testing.T) {
 	}
 	if s := f.owner.Snapshot(context.Background()); s.BackendRunning || s.SerialHealthy {
 		t.Fatalf("snapshot after reap: %#v", s)
+	}
+}
+
+func TestTartScratchCleanupFailurePreservesGenerationAuthority(t *testing.T) {
+	f := newFixture(t)
+	f.handle.waitErr = tart.ErrScratchCleanupUnproven
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	err := f.owner.Wait(context.Background())
+	if !errors.Is(err, supervisor.ErrRuntimeCleanupUnproven) || !errors.Is(err, tart.ErrScratchCleanupUnproven) {
+		t.Fatalf("Wait() error = %v, want exact generation cleanup preservation", err)
+	}
+}
+
+func TestTartAmbiguousReapPreservesGenerationAuthority(t *testing.T) {
+	f := newFixture(t)
+	f.handle.waitErr = tart.ErrReapUnproven
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	err := f.owner.Wait(context.Background())
+	if !errors.Is(err, supervisor.ErrRuntimeCleanupUnproven) || !errors.Is(err, tart.ErrReapUnproven) {
+		t.Fatalf("Wait() error = %v, want unproven exact generation preserved", err)
 	}
 }
 
@@ -419,6 +799,109 @@ func TestPostHandleFailureJoinsCleanupErrorsAndRequiresStoppedProof(t *testing.T
 	}
 }
 
+type retryStopHandle struct {
+	attempts int
+	want     error
+}
+
+func (h *retryStopHandle) Stop(context.Context) error {
+	h.attempts++
+	if h.attempts == 1 {
+		return h.want
+	}
+	return nil
+}
+func (*retryStopHandle) Wait(context.Context) error { return nil }
+
+func TestOwnerStopRetriesTransientHandleSignalError(t *testing.T) {
+	want := errors.New("transient exact signal failure")
+	handle := &retryStopHandle{want: want}
+	owner := &Owner{handle: handle}
+	if err := owner.Stop(context.Background()); !errors.Is(err, want) {
+		t.Fatalf("first Stop = %v", err)
+	}
+	if err := owner.Stop(context.Background()); err != nil {
+		t.Fatalf("retry Stop = %v", err)
+	}
+	if err := owner.Stop(context.Background()); err != nil || handle.attempts != 2 {
+		t.Fatalf("idempotent Stop = %v; attempts=%d", err, handle.attempts)
+	}
+}
+
+type guestStopHandle struct{ requests, stops int }
+
+func (h *guestStopHandle) RequestStop(context.Context) error { h.requests++; return nil }
+func (h *guestStopHandle) Stop(context.Context) error        { h.stops++; return nil }
+func (*guestStopHandle) Wait(context.Context) error          { return nil }
+
+func TestOwnerRequestsGuestShutdownBeforeBoundedForceStop(t *testing.T) {
+	handle := &guestStopHandle{}
+	owner := &Owner{handle: handle}
+	if err := owner.RequestStop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.RequestStop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if handle.requests != 1 || handle.stops != 0 {
+		t.Fatalf("guest request / force stop = %d / %d", handle.requests, handle.stops)
+	}
+	if got := owner.StopOutcome(); got.Request != supervisor.StopRequestTartOnly || got.Forced {
+		t.Fatalf("Tart-only request outcome = %+v", got)
+	}
+	if err := owner.Stop(context.Background()); err != nil || handle.stops != 1 {
+		t.Fatalf("force stop after guest request = %v; calls=%d", err, handle.stops)
+	}
+}
+
+func TestOwnerRequestsPinnedGuestShutdownWithTartFallback(t *testing.T) {
+	binding := sshx.Binding{Domain: "alpha", SessionID: "123e4567-e89b-42d3-a456-426614174000", BackendKind: "tart", BackendObject: "workstation"}
+	mount := sshx.WorkspaceMount{VolumeID: "00112233-4455-4677-8899-aabbccddeeff", FilesystemUUID: "10213243-5465-4768-899a-bbccddeeff00", MountPath: "/home/boxwarden/workspaces/project"}
+	for _, failed := range []bool{false, true} {
+		handle := &guestStopHandle{}
+		calls := 0
+		client := &readyClient{shutdown: func(connection sshx.Connection, mounts []sshx.WorkspaceMount) error {
+			calls++
+			if connection.Binding != binding {
+				t.Errorf("shutdown binding = %+v", connection.Binding)
+			}
+			if len(mounts) != 1 || mounts[0] != mount {
+				t.Errorf("shutdown workspace binding = %+v", mounts)
+			}
+			if failed {
+				return errors.New("SSH failed after an ambiguous shutdown request")
+			}
+			return nil
+		}}
+		owner := &Owner{handle: handle, active: true, readyEstablished: true, sshBinding: binding, connection: sshx.Connection{Binding: binding}, workspaceMounts: []sshx.WorkspaceMount{mount}, deps: dependencies{client: client}}
+		if err := owner.RequestStop(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		wantPath := supervisor.StopRequestGuestAccepted
+		if failed {
+			wantPath = supervisor.StopRequestTartFallback
+		}
+		if got := owner.StopOutcome(); got.Request != wantPath || got.Forced {
+			t.Fatalf("stop outcome before force = %+v, want request %q", got, wantPath)
+		}
+		if calls != 1 || handle.stops != 0 {
+			t.Fatalf("guest calls=%d force stops=%d", calls, handle.stops)
+		}
+		if failed && handle.requests != 1 || !failed && handle.requests != 0 {
+			t.Fatalf("Tart request count = %d; SSH failed=%t", handle.requests, failed)
+		}
+		if err := owner.RequestStop(context.Background()); err != nil || calls != 1 {
+			t.Fatalf("duplicate shutdown = %v; guest calls=%d", err, calls)
+		}
+		if err := owner.Stop(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if got := owner.StopOutcome(); got.Request != wantPath || !got.Forced {
+			t.Fatalf("stop outcome after force = %+v, want request %q and forced", got, wantPath)
+		}
+	}
+}
+
 func TestCancellationOrPoisonAfterHandleStillReapsAndCloses(t *testing.T) {
 	for _, failure := range []string{"cancel", "poison"} {
 		t.Run(failure, func(t *testing.T) {
@@ -463,6 +946,138 @@ func TestOwnerCannotBeReusedToAcquireSecondRuntime(t *testing.T) {
 	_ = f.owner.Wait(context.Background())
 }
 
+func TestOwnerRejectsAttachedWorkspaceWithoutExactUseBeforeLaunch(t *testing.T) {
+	f := newFixture(t)
+	f.observe = func(_ context.Context, object string) (backend.Observation, error) {
+		return backend.Observation{ObjectID: object, Exists: true, State: backend.ObjectStopped}, nil
+	}
+	volume := workspacex.Record{
+		Version: 1, Domain: "work", VolumeID: "00112233-4455-4677-8899-aabbccddeeff",
+		SizeBytes: 4096, Format: workspacex.FormatRawExt4,
+		FilesystemUUID: "10213243-5465-4768-899a-bbccddeeff00", State: workspacex.StateAvailable,
+		Disk:       &workspacex.DiskIdentity{Device: 1, Inode: 2},
+		Attachment: &workspacex.Attachment{SessionID: f.record.ID, SessionName: "dev", MountPath: "/home/boxwarden/workspaces/project"},
+	}
+	directory := filepath.Join(f.root, "workspaces")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(volume)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, volume.VolumeID+".json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Start(context.Background(), f.request); err == nil || !strings.Contains(err.Error(), "lacks exact starting-generation use") {
+		t.Fatalf("attached volume without use was not refused: %v", err)
+	}
+	if events := strings.Join(f.trace.all(), ","); strings.Contains(events, "serial") || strings.Contains(events, "launch") {
+		t.Fatalf("owner crossed prelaunch boundary after workspace refusal: %s", events)
+	}
+}
+
+type ownerFormatFunc func(context.Context, workspaceformat.FormatRequest) (workspaceformat.FormatEvidence, error)
+
+func (f ownerFormatFunc) FormatAndVerify(ctx context.Context, request workspaceformat.FormatRequest) (workspaceformat.FormatEvidence, error) {
+	return f(ctx, request)
+}
+
+func TestOwnerPassesExactQualifiedWorkspaceLeaseToLauncher(t *testing.T) {
+	f := newFixture(t)
+	stopped := f.record
+	stopped.IntendedState = session.StateStopped
+	stopped.StartGeneration = ""
+	stopped.Readiness = session.ReadinessRecord{Status: session.ReadinessNotReady}
+	if err := session.SaveRecord(f.root, domain.ID("work"), stopped); err != nil {
+		t.Fatal(err)
+	}
+	volume := workspacex.Record{Version: 1, Domain: "work", VolumeID: "10213243-5465-4768-899a-bbccddeeff00", SizeBytes: 16 << 20, Format: workspacex.FormatRawExt4, FilesystemUUID: "20314253-6475-4869-9aab-ccddeeff0011", State: workspacex.StateCreating}
+	if err := workspacex.SaveRecord(f.root, domain.ID("work"), volume); err != nil {
+		t.Fatal(err)
+	}
+	request := workspaceformat.Request{Domain: volume.Domain, VolumeID: volume.VolumeID, FilesystemUUID: volume.FilesystemUUID, SizeBytes: volume.SizeBytes}
+	_, err := workspaceformat.Create(context.Background(), f.root, request, ownerFormatFunc(func(_ context.Context, request workspaceformat.FormatRequest) (workspaceformat.FormatEvidence, error) {
+		file, err := os.OpenFile(request.DiskPath, os.O_WRONLY, 0)
+		if err != nil {
+			return workspaceformat.FormatEvidence{}, err
+		}
+		defer file.Close()
+		if _, err := file.WriteAt([]byte{0x53, 0xef}, 1024+0x38); err != nil {
+			return workspaceformat.FormatEvidence{}, err
+		}
+		uuid, err := hex.DecodeString(strings.ReplaceAll(request.FilesystemUUID, "-", ""))
+		if err != nil {
+			return workspaceformat.FormatEvidence{}, err
+		}
+		if _, err := file.WriteAt(uuid, 1024+0x68); err != nil {
+			return workspaceformat.FormatEvidence{}, err
+		}
+		if err := file.Sync(); err != nil {
+			return workspaceformat.FormatEvidence{}, err
+		}
+		return workspaceformat.FormatEvidence{ObservedUUID: request.FilesystemUUID, WholeDevice: true, FilesystemClean: true}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workspacex.PromoteVerified(context.Background(), f.root, domain.ID("work"), volume.VolumeID); err != nil {
+		t.Fatal(err)
+	}
+	stoppedObserver := observerFunc(func(_ context.Context, object string) (backend.Observation, error) {
+		return backend.Observation{ObjectID: object, Exists: true, State: backend.ObjectStopped}, nil
+	})
+	if _, err := workspacex.Attach(context.Background(), f.root, domain.ID("work"), volume.VolumeID, "dev", "/home/boxwarden/workspaces/project", stoppedObserver); err != nil {
+		t.Fatal(err)
+	}
+	use := workspacex.Use{BackendKind: "tart", BackendObject: f.record.Backend.ObjectID, Generation: f.record.StartGeneration}
+	if _, err := workspacex.ReserveUse(context.Background(), f.root, domain.ID("work"), volume.VolumeID, use, stoppedObserver); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.SaveRecord(f.root, domain.ID("work"), f.record); err != nil {
+		t.Fatal(err)
+	}
+	f.observe = func(_ context.Context, object string) (backend.Observation, error) {
+		f.observations++
+		state := backend.ObjectStopped
+		if f.observations >= 3 {
+			state = backend.ObjectRunning
+		}
+		return backend.Observation{ObjectID: object, Exists: true, State: state}, nil
+	}
+	originalLauncher := f.owner.deps.launcher
+	validatedLease := false
+	f.owner.deps.launcher = func(config tart.LaunchConfig) backend.Starter {
+		starter := originalLauncher(config)
+		return starterFunc(func(ctx context.Context, request backend.StartRequest) (backend.Handle, error) {
+			if request.ManagedDisks == nil {
+				t.Fatal("workspace lease omitted from backend request")
+			}
+			if err := backend.ValidateStartRequest(request); err != nil {
+				t.Fatalf("workspace lease failed exact backend admission: %v", err)
+			}
+			validatedLease = true
+			return starter.Start(ctx, request)
+		})
+	}
+	if err := f.owner.Start(context.Background(), f.request); err != nil {
+		t.Fatal(err)
+	}
+	if !validatedLease {
+		t.Fatal("launcher did not receive validated workspace lease")
+	}
+	wantMounts := []sshx.WorkspaceMount{{VolumeID: volume.VolumeID, FilesystemUUID: volume.FilesystemUUID, MountPath: "/home/boxwarden/workspaces/project"}}
+	if !reflect.DeepEqual(f.owner.workspaceMounts, wantMounts) {
+		t.Fatalf("owner did not retain exact admitted mount binding: %+v", f.owner.workspaceMounts)
+	}
+	if err := f.owner.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type traceLog struct {
 	mu     sync.Mutex
 	events []string
@@ -476,23 +1091,50 @@ func (l *traceLog) all() []string {
 }
 
 type fakeSerial struct {
-	mu       sync.Mutex
-	trace    *traceLog
-	endpoint string
-	err      error
-	closeErr error
+	mu               sync.Mutex
+	trace            *traceLog
+	endpoint         string
+	err              error
+	closeErr         error
+	bootstrapCalls   int
+	bootstrapRequest guestproto.SerialRequest
+	bootstrapErr     error
+	resultMutation   func(*guestproto.SerialResult)
 }
 
 func (s *fakeSerial) TartSlave() string { return s.endpoint }
 func (s *fakeSerial) Err() error        { s.mu.Lock(); defer s.mu.Unlock(); return s.err }
-func (s *fakeSerial) poison()           { s.mu.Lock(); defer s.mu.Unlock(); s.err = serialx.ErrPoisoned }
-func (s *fakeSerial) Close() error      { s.trace.add("close"); s.poison(); return s.closeErr }
+func (s *fakeSerial) Bootstrap(_ context.Context, request guestproto.SerialRequest) (guestproto.SerialResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bootstrapCalls++
+	s.bootstrapRequest = request
+	if s.bootstrapErr != nil {
+		return guestproto.SerialResult{}, s.bootstrapErr
+	}
+	result := guestproto.SerialResult{Version: 1, StartGeneration: request.StartGeneration, Association: request.Association, CAFingerprint: request.CAFingerprint, Principal: request.Principal, HostPublicKey: ownerTestPublicKey}
+	if s.resultMutation != nil {
+		s.resultMutation(&result)
+	}
+	return result, nil
+}
+func (s *fakeSerial) poison()      { s.mu.Lock(); defer s.mu.Unlock(); s.err = serialx.ErrPoisoned }
+func (s *fakeSerial) Close() error { s.trace.add("close"); s.poison(); return s.closeErr }
 
 type fakeHandle struct {
 	trace            *traceLog
 	done, waiting    chan struct{}
 	stop             sync.Once
 	stopErr, waitErr error
+}
+
+func (h *fakeHandle) RetainedChildLive() bool {
+	select {
+	case <-h.done:
+		return false
+	default:
+		return true
+	}
 }
 
 func (h *fakeHandle) Stop(context.Context) error {
@@ -534,4 +1176,30 @@ type starterFunc func(context.Context, backend.StartRequest) (backend.Handle, er
 
 func (f starterFunc) Start(c context.Context, r backend.StartRequest) (backend.Handle, error) {
 	return f(c, r)
+}
+
+type flakyPinStore struct {
+	failures, admitCalls int
+	conflict             bool
+	pin                  sshx.HostKeyPin
+}
+
+func (s *flakyPinStore) Admit(_ context.Context, binding sshx.Binding, observed sshx.ObservedHostKey) (sshx.HostKeyPin, error) {
+	s.admitCalls++
+	if s.failures > 0 {
+		s.failures--
+		return sshx.HostKeyPin{}, errors.New("pin write interrupted")
+	}
+	if s.conflict {
+		return sshx.HostKeyPin{}, errors.New("existing host-key pin differs")
+	}
+	s.pin = sshx.HostKeyPin{Version: 1, Domain: binding.Domain, SessionID: binding.SessionID, BackendKind: binding.BackendKind, BackendObject: binding.BackendObject, Algorithm: observed.Algorithm, PublicKey: observed.PublicKey, Fingerprint: ownerTestFingerprint()}
+	return s.pin, nil
+}
+
+func (s *flakyPinStore) Load(_ context.Context, _ sshx.Binding) (sshx.HostKeyPin, error) {
+	if s.pin.Version == 0 {
+		return sshx.HostKeyPin{}, errors.New("host-key pin missing")
+	}
+	return s.pin, nil
 }

@@ -175,6 +175,9 @@ func marshalRecord(record Record) ([]byte, error) {
 // caller holds the domain golden lock. That lock serializes first-time UUID
 // reservations across otherwise independent per-session locks.
 func requireUnreservedBackendObject(stateRoot string, expectedDomain domain.ID, name Name, objectID string) error {
+	if err := requireUnreservedRebuildObject(stateRoot, expectedDomain, objectID); err != nil {
+		return err
+	}
 	root, err := openSessionStateRoot(stateRoot)
 	if err != nil {
 		return fmt.Errorf("state root: %w", err)

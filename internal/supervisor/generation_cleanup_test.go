@@ -273,6 +273,13 @@ func (c cleanupRetryController) Snapshot(_ context.Context, binding Binding) (Sn
 	return Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true}, nil
 }
 
+func (cleanupRetryController) Bootstrap(_ context.Context, binding Binding) (Snapshot, error) {
+	return Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true}, nil
+}
+func (cleanupRetryController) Ready(_ context.Context, binding Binding) (Snapshot, error) {
+	return readyFixtureSnapshot(binding), nil
+}
+
 func (cleanupRetryController) Stop(context.Context, Binding) error { return nil }
 
 // Production break: StartExact must retry publication after the finishing old
@@ -384,6 +391,13 @@ func (c *liveCleanupTransitionController) Snapshot(_ context.Context, binding Bi
 		return Snapshot{}, errors.Join(fmt.Errorf("republished generation is not live"), err)
 	}
 	return Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true}, nil
+}
+
+func (c *liveCleanupTransitionController) Bootstrap(_ context.Context, binding Binding) (Snapshot, error) {
+	return Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true}, nil
+}
+func (c *liveCleanupTransitionController) Ready(_ context.Context, binding Binding) (Snapshot, error) {
+	return readyFixtureSnapshot(binding), nil
 }
 
 func (*liveCleanupTransitionController) Stop(context.Context, Binding) error { return nil }
@@ -506,6 +520,13 @@ func (f *postLaunchTransitionFixture) Snapshot(_ context.Context, binding Bindin
 	return Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true}, nil
 }
 
+func (f *postLaunchTransitionFixture) Bootstrap(_ context.Context, binding Binding) (Snapshot, error) {
+	return Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true}, nil
+}
+func (f *postLaunchTransitionFixture) Ready(_ context.Context, binding Binding) (Snapshot, error) {
+	return readyFixtureSnapshot(binding), nil
+}
+
 func (*postLaunchTransitionFixture) Stop(context.Context, Binding) error { return nil }
 
 func (f *postLaunchTransitionFixture) close() {
@@ -587,7 +608,10 @@ func TestExactStartFailsClosedAfterSuccessfulLaunchBecomesInvalid(t *testing.T) 
 			exact := &exactStartController{
 				launcher:   fixture,
 				controller: fixture,
-				policy:     startupPolicy{timeout: 200 * time.Millisecond, interval: time.Millisecond},
+				// Fixture publication syncs files and directories. Allow that I/O
+				// to finish on loaded CI; classification must still return the
+				// exact error without any snapshot or additional launch.
+				policy: startupPolicy{timeout: 5 * time.Second, interval: time.Millisecond},
 			}
 
 			_, err := exact.startExact(context.Background(), request)
@@ -627,6 +651,17 @@ func (c *coexistingCleanupController) Snapshot(_ context.Context, binding Bindin
 		}
 	}
 	return Snapshot{}, fmt.Errorf("old exact supervisor entered ambiguous state")
+}
+
+func (c *coexistingCleanupController) Bootstrap(_ context.Context, binding Binding) (Snapshot, error) {
+	return Snapshot{}, fmt.Errorf("unexpected bootstrap after ambiguous transition")
+}
+func (c *coexistingCleanupController) Ready(_ context.Context, binding Binding) (Snapshot, error) {
+	return Snapshot{}, fmt.Errorf("unexpected ready after ambiguous transition")
+}
+
+func readyFixtureSnapshot(binding Binding) Snapshot {
+	return Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true}
 }
 
 func (*coexistingCleanupController) Stop(context.Context, Binding) error { return nil }

@@ -86,6 +86,46 @@ func TestControlTransportSupportsLongCanonicalGenerationPaths(t *testing.T) {
 	}
 }
 
+type stopOutcomeRuntime struct {
+	runtimeFixture
+	outcome StopOutcome
+}
+
+func (o *stopOutcomeRuntime) StopOutcome() StopOutcome { return o.outcome }
+
+func TestStopWithOutcomeReturnsBoundedOwnerResult(t *testing.T) {
+	request := minimalRequest(t)
+	if _, _, err := publishOrAdmitRequest(request); err != nil {
+		t.Fatal(err)
+	}
+	held, err := acquireGenerationLock(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	listener, err := listenSocket(filepath.Join(request.RuntimeDirectory, socketName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	want := StopOutcome{Request: StopRequestTartFallback, Forced: true}
+	owner := &stopOutcomeRuntime{runtimeFixture: runtimeFixture{binding: request.Binding, done: make(chan struct{})}, outcome: want}
+	served := make(chan error, 1)
+	go func() { served <- serveControl(ctx, listener, request.Binding, owner, func() error { return nil }) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory}
+	got, err := client.StopWithOutcome(context.Background(), request.Binding)
+	if err != nil || got != want {
+		t.Fatalf("stop outcome = %+v, %v; want %+v", got, err, want)
+	}
+	cancel()
+	listener.Close()
+	if err := <-served; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSocketAddressIsPrivateTransientAndRejectsRuntimeSymlinks(t *testing.T) {
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {

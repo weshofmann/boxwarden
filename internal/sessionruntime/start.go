@@ -6,13 +6,16 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/backend/tart"
 	"github.com/weshofmann/boxwarden/internal/config"
+	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/execx"
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/sshx"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
+	"github.com/weshofmann/boxwarden/internal/workspacex"
 )
 
 // NewStarter constructs the parent start service after configuration/domain
@@ -56,9 +59,27 @@ func startDependencies(loaded config.Config, selected config.Domain, path string
 		Host:        hostx.NewSystemDoctor(),
 		HostRequest: hostx.Request{ConfiguredStateRoots: host.ConfiguredStateRoots, TartPath: host.Host.TartExecutable, TartHome: host.Host.TartHome, SoftnetPath: host.Host.SoftnetSource},
 		CA:          caCheckOnly{check: ca.Check}, ConfiguredDomains: domains,
-		Supervisor: controller, RuntimeRoot: runtimeRoot, ConfigPath: path,
+		Supervisor: controller, Workspaces: workspaceStartCoordinator{}, RuntimeRoot: runtimeRoot, ConfigPath: path,
 		NewGeneration: sshx.RandomUUID, Now: time.Now,
 	}, nil
+}
+
+type workspaceStartCoordinator struct{}
+
+func (workspaceStartCoordinator) PrepareStart(ctx context.Context, stateRoot string, domainID domain.ID, stopped session.Record, generation string, observer backend.Observer) (session.Record, error) {
+	return workspacex.PrepareSessionStart(ctx, stateRoot, domainID, stopped, generation, observer)
+}
+
+func (workspaceStartCoordinator) PrepareRebuildStart(ctx context.Context, stateRoot string, domainID domain.ID, stopped session.Record, generation string, observer backend.Observer, journal session.RebuildJournal) (session.Record, error) {
+	return workspacex.PrepareRebuildSessionStart(ctx, stateRoot, domainID, stopped, generation, observer, journal)
+}
+
+func (workspaceStartCoordinator) VerifyUses(ctx context.Context, stateRoot string, domainID domain.ID, record session.Record) error {
+	return workspacex.VerifySessionUses(ctx, stateRoot, domainID, record)
+}
+
+func (workspaceStartCoordinator) ReleaseUses(ctx context.Context, stateRoot string, domainID domain.ID, record session.Record, observer backend.Observer) error {
+	return workspacex.ReleaseSessionUses(ctx, stateRoot, domainID, record, observer)
 }
 
 // caCheckOnly deliberately removes CA creation from start's capability surface.

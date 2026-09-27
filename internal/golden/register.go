@@ -30,6 +30,17 @@ var (
 )
 
 func Register(ctx context.Context, configured config.Domain, tartName string, observer backend.Observer) (Record, error) {
+	return register(ctx, configured, tartName, observer, true)
+}
+
+// RegisterRevision admits an exact stopped object without changing the
+// domain-wide current pointer. Recipe-specific preparation uses this with an
+// explicit session revision so unrelated session creation is unaffected.
+func RegisterRevision(ctx context.Context, configured config.Domain, tartName string, observer backend.Observer) (Record, error) {
+	return register(ctx, configured, tartName, observer, false)
+}
+
+func register(ctx context.Context, configured config.Domain, tartName string, observer backend.Observer, setCurrent bool) (Record, error) {
 	domainID, err := admittedDomain(configured)
 	if err != nil {
 		return Record{}, err
@@ -53,7 +64,7 @@ func Register(ctx context.Context, configured config.Domain, tartName string, ob
 		return Record{}, fmt.Errorf("golden %q must be one existing stopped object", tartName)
 	}
 	record := Record{Version: recordVersion, Domain: domainID, Revision: tartName, Backend: BackendRef{Kind: "tart", ObjectID: tartName}}
-	if err := persistRegistration(configured.StateRoot, record); err != nil {
+	if err := persistRegistration(configured.StateRoot, record, setCurrent); err != nil {
 		return Record{}, err
 	}
 	return record, nil
@@ -141,7 +152,7 @@ func admittedDomain(configured config.Domain) (domain.ID, error) {
 	return id, nil
 }
 
-func persistRegistration(stateRoot string, record Record) error {
+func persistRegistration(stateRoot string, record Record, setCurrent bool) error {
 	root, err := openStateRoot(stateRoot)
 	if err != nil {
 		return fmt.Errorf("state root: %w", err)
@@ -176,6 +187,9 @@ func persistRegistration(stateRoot string, record Record) error {
 		}
 	} else {
 		return err
+	}
+	if !setCurrent {
+		return nil
 	}
 	pointer, err := json.Marshal(currentPointer{Version: recordVersion, Domain: record.Domain, Revision: record.Revision})
 	if err != nil {

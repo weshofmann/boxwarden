@@ -126,6 +126,265 @@ func TestAwaitSnapshotReturnsAtBackendPlusSerialStartedBoundary(t *testing.T) {
 	}
 }
 
+// Slice C production break: reconnecting to the exact live generation must
+// trigger the one fixed bootstrap action and must not return the pre-bootstrap
+// Slice B snapshot as if guest trust and the host-key pin were established.
+func TestStartExactInvokesTypedBootstrapAfterExactStartedProof(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := &atomic.Bool{}
+	owner := &runtimeFixture{done: make(chan struct{}), pinPresent: pin}
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(runCtx, path, owner) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, MaxSnapshotAge: time.Minute}
+	if _, err := awaitSnapshot(context.Background(), request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	launcher := &rejectLauncher{}
+	runtimeRoot := filepath.Dir(filepath.Dir(filepath.Dir(request.RuntimeDirectory)))
+	control, err := NewExactController(runtimeRoot, launcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control.policy = startupPolicy{timeout: time.Second, interval: time.Millisecond}
+	snapshot, err := control.StartExact(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.BackendRunning || !snapshot.SerialHealthy || !snapshot.PinPresent {
+		t.Fatalf("Slice C snapshot = %#v", snapshot)
+	}
+	if owner.bootstraps.Load() != 1 || launcher.calls.Load() != 0 {
+		t.Fatalf("bootstrap/launch calls = %d/%d, want 1/0", owner.bootstraps.Load(), launcher.calls.Load())
+	}
+	if err := client.Stop(context.Background(), request.Binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBootstrapControlRejectsWrongBindingAndReturnsPreciseFailure(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &runtimeFixture{done: make(chan struct{}), bootstrapErr: errors.New("host-key pin conflict")}
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(runCtx, path, owner) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, MaxSnapshotAge: time.Minute}
+	if _, err := awaitSnapshot(context.Background(), request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	wrong := request.Binding
+	wrong.Generation = "foreign"
+	if _, err := client.Bootstrap(context.Background(), wrong); err == nil {
+		t.Fatal("wrong bootstrap binding accepted")
+	}
+	if owner.bootstraps.Load() != 0 {
+		t.Fatal("wrong binding reached runtime owner")
+	}
+	if _, err := client.Bootstrap(context.Background(), request.Binding); err == nil || !strings.Contains(err.Error(), "host-key pin conflict") {
+		t.Fatalf("bootstrap error = %v, want bounded precise cause", err)
+	}
+	if owner.bootstraps.Load() != 1 {
+		t.Fatalf("bootstrap calls = %d, want 1", owner.bootstraps.Load())
+	}
+	if err := client.Stop(context.Background(), request.Binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReadyControlIsExactBoundAndReturnsFreshSnapshot(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &runtimeFixture{done: make(chan struct{})}
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(context.Background(), path, owner) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, MaxSnapshotAge: time.Minute}
+	if _, err := awaitSnapshot(context.Background(), request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	wrong := request.Binding
+	wrong.Generation = "foreign"
+	if _, err := client.Ready(context.Background(), wrong); err == nil || owner.readies.Load() != 0 {
+		t.Fatalf("foreign ready reached owner: %v, calls=%d", err, owner.readies.Load())
+	}
+	snapshot, err := client.Ready(context.Background(), request.Binding)
+	if err != nil || !snapshotReady(snapshot) || snapshot.Binding != request.Binding || owner.readies.Load() != 1 {
+		t.Fatalf("ready snapshot/calls = %#v/%d, %v", snapshot, owner.readies.Load(), err)
+	}
+	if err := client.Stop(context.Background(), request.Binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+type importRuntimeFixture struct {
+	runtimeFixture
+	imports atomic.Int32
+	result  ImportResult
+}
+
+func (o *importRuntimeFixture) TransferImport(_ context.Context, spec ImportTransfer) (ImportResult, error) {
+	o.imports.Add(1)
+	if spec.TransactionID != "039179af-8411-4790-9587-890922080236" {
+		return ImportResult{}, fmt.Errorf("unexpected transaction")
+	}
+	return o.result, nil
+}
+
+func TestImportControlRequiresExactTypedReadyGenerationAndMeasuredResult(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := ImportTransfer{TransactionID: "039179af-8411-4790-9587-890922080236", SourceDigest: strings.Repeat("a", 64),
+		VolumeID: "a7d43c10-344e-4617-812d-c8a1c7253631", FilesystemUUID: "691ec498-707b-47f0-a0f2-1869259068ed", MountPath: "/home/boxwarden/workspaces/project"}
+	owner := &importRuntimeFixture{runtimeFixture: runtimeFixture{done: make(chan struct{})}, result: ImportResult{Digest: spec.SourceDigest, FileCount: 1, TotalBytes: 9, RemotePath: spec.MountPath + "/boxwarden-import-" + spec.TransactionID}}
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(context.Background(), path, owner) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, MaxSnapshotAge: time.Minute}
+	if _, err := awaitSnapshot(context.Background(), request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	wrong := request.Binding
+	wrong.Generation = "foreign"
+	if _, err := client.TransferImport(context.Background(), wrong, spec); err == nil || owner.imports.Load() != 0 {
+		t.Fatalf("foreign generation reached import owner: %v", err)
+	}
+	bad := spec
+	bad.MountPath = "/home/boxwarden/workspaces/project/other"
+	if _, err := client.TransferImport(context.Background(), request.Binding, bad); err == nil || owner.imports.Load() != 0 {
+		t.Fatalf("untyped mount reached import owner: %v", err)
+	}
+	result, err := client.TransferImport(context.Background(), request.Binding, spec)
+	if err != nil || result != owner.result || owner.imports.Load() != 1 {
+		t.Fatalf("exact measured import = %#v, calls=%d, err=%v", result, owner.imports.Load(), err)
+	}
+	owner.result.Digest = strings.Repeat("b", 64)
+	if _, err := client.TransferImport(context.Background(), request.Binding, spec); err == nil || owner.imports.Load() != 2 {
+		t.Fatalf("mismatched owner result accepted: %v", err)
+	}
+	if err := client.Stop(context.Background(), request.Binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPackageInspectionUsesExactReadySupervisorAndTypedNames(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &runtimeFixture{done: make(chan struct{})}
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(context.Background(), path, owner) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, MaxSnapshotAge: time.Minute}
+	if _, err := awaitSnapshot(context.Background(), request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	wrong := request.Binding
+	wrong.Generation = "foreign"
+	if _, err := client.InspectPackages(context.Background(), wrong, []string{"git"}); err == nil || owner.inspections.Load() != 0 {
+		t.Fatalf("foreign inspection reached owner: %v", err)
+	}
+	if _, err := client.InspectPackages(context.Background(), request.Binding, []string{"git;id"}); err == nil || owner.inspections.Load() != 0 {
+		t.Fatalf("untyped inspection reached owner: %v", err)
+	}
+	packages, err := client.InspectPackages(context.Background(), request.Binding, []string{"git"})
+	if err != nil || len(packages) != 1 || packages[0].Name != "git" || owner.inspections.Load() != 1 {
+		t.Fatalf("exact package inspection = %#v, calls=%d, err=%v", packages, owner.inspections.Load(), err)
+	}
+	if err := client.Stop(context.Background(), request.Binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+type mismatchedPackageRuntime struct{ runtimeFixture }
+
+func (o *mismatchedPackageRuntime) InspectPackages(context.Context, []string) ([]PackageVersion, error) {
+	return []PackageVersion{{Name: "curl", Version: "1"}}, nil
+}
+
+func TestPackageInspectionRejectsMismatchedOwnerResult(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &mismatchedPackageRuntime{runtimeFixture: runtimeFixture{done: make(chan struct{})}}
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(context.Background(), path, owner) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, MaxSnapshotAge: time.Minute}
+	if _, err := awaitSnapshot(context.Background(), request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.InspectPackages(context.Background(), request.Binding, []string{"git"}); err == nil {
+		t.Fatal("mismatched package report accepted")
+	}
+	if err := client.Stop(context.Background(), request.Binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIdentityInspectionUsesExactReadySupervisor(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &runtimeFixture{done: make(chan struct{})}
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(context.Background(), path, owner) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, MaxSnapshotAge: time.Minute}
+	if _, err := awaitSnapshot(context.Background(), request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	wrong := request.Binding
+	wrong.Generation = "foreign"
+	if _, err := client.InspectIdentity(context.Background(), wrong); err == nil || owner.identities.Load() != 0 {
+		t.Fatalf("foreign identity query reached owner: %v", err)
+	}
+	identity, err := client.InspectIdentity(context.Background(), request.Binding)
+	if err != nil || identity.MachineID != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" || identity.Hostname != "boxwarden-bbbbbbbbbbbb" || owner.identities.Load() != 1 {
+		t.Fatalf("exact identity inspection = %+v, calls=%d, err=%v", identity, owner.identities.Load(), err)
+	}
+	if err := client.Stop(context.Background(), request.Binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTypedControlBounds(t *testing.T) {
 	for _, size := range []uint32{0, maxControlBytes + 1, ^uint32(0)} {
 		var wire bytes.Buffer
@@ -313,12 +572,16 @@ func timePointer(value time.Time) *time.Time { return &value }
 type expiringSnapshotRuntime struct {
 	runtimeFixture
 	observing, canceled chan struct{}
+	readyOnCancellation bool
 }
 
 func (o *expiringSnapshotRuntime) Snapshot(ctx context.Context) Snapshot {
 	close(o.observing)
 	<-ctx.Done()
 	close(o.canceled)
+	if o.readyOnCancellation {
+		return Snapshot{Binding: o.binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true}
+	}
 	return Snapshot{Binding: o.binding}
 }
 
@@ -353,6 +616,46 @@ func TestControlSnapshotUsesClientAbsoluteExpiry(t *testing.T) {
 	case <-owner.canceled:
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("snapshot observer received a fresh server timeout instead of its client expiry")
+	}
+	<-served
+}
+
+func TestControlSnapshotReturnsNonReadyBeforeClientExpiryWhenObserverTimesOut(t *testing.T) {
+	binding := minimalRequest(t).Binding
+	owner := &expiringSnapshotRuntime{
+		runtimeFixture:      runtimeFixture{binding: binding, done: make(chan struct{})},
+		observing:           make(chan struct{}),
+		canceled:            make(chan struct{}),
+		readyOnCancellation: true,
+	}
+	server, client := net.Pipe()
+	defer client.Close()
+	served := make(chan struct{})
+	go func() {
+		handleControl(context.Background(), server, binding, owner, func() error { return owner.Stop(context.Background()) })
+		close(served)
+	}()
+	expiresAt := time.Now().Add(time.Second)
+	if err := client.SetDeadline(expiresAt); err != nil {
+		t.Fatal(err)
+	}
+	request, err := json.Marshal(controlRequest{Version: 1, Action: "snapshot", Binding: binding, ExpiresAt: expiresAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFrame(client, request); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := readBounded(client)
+	if err != nil {
+		t.Fatalf("observer used whole RPC deadline without response: %v", err)
+	}
+	var response controlResponse
+	if err := decodeExact(encoded, &response); err != nil || response.Binding != binding || response.Snapshot.Binding != binding ||
+		response.Snapshot.BackendRunning || response.Snapshot.SerialHealthy || response.Snapshot.PinPresent ||
+		response.Snapshot.CertificateCurrent || response.Snapshot.ProbeOK || response.Snapshot.ZoneMatches ||
+		response.Snapshot.Diagnostic != "snapshot observation expired" {
+		t.Fatalf("non-ready timeout response = %+v, %v", response, err)
 	}
 	<-served
 }
@@ -421,6 +724,43 @@ func TestClientRejectsForeignResponseAndHonorsCancellation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBootstrapClientRejectsStaleCompletionSnapshot(t *testing.T) {
+	request := minimalRequest(t)
+	if _, _, err := publishOrAdmitRequest(request); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := acquireGenerationLock(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	listener, err := listenSocket(filepath.Join(request.RuntimeDirectory, socketName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		connection, err := listener.AcceptUnix()
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		if _, err := readBounded(connection); err != nil {
+			return
+		}
+		response := controlResponse{Version: 1, Binding: request.Binding, Snapshot: Snapshot{Binding: request.Binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, ObservedAt: time.Now().Add(-2 * time.Minute).UTC()}}
+		data, _ := json.Marshal(response)
+		_ = writeFrame(connection, data)
+	}()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory, MaxSnapshotAge: time.Minute}
+	if _, err := client.Bootstrap(context.Background(), request.Binding); err == nil || !strings.Contains(err.Error(), "stale") {
+		t.Fatalf("stale bootstrap snapshot accepted: %v", err)
+	}
+	<-done
 }
 
 func TestRunCancellationStopsAndReapsOnce(t *testing.T) {
@@ -574,8 +914,12 @@ func (o *startFailureRuntime) Start(_ context.Context, request LaunchRequest) er
 	return o.err
 }
 func (*startFailureRuntime) Snapshot(context.Context) Snapshot { return Snapshot{} }
-func (*startFailureRuntime) Stop(context.Context) error        { return errors.New("unexpected stop") }
-func (*startFailureRuntime) Wait(context.Context) error        { return errors.New("unexpected wait") }
+func (*startFailureRuntime) Bootstrap(context.Context) error {
+	return errors.New("unexpected bootstrap")
+}
+func (*startFailureRuntime) Ready(context.Context) error { return errors.New("unexpected ready") }
+func (*startFailureRuntime) Stop(context.Context) error  { return errors.New("unexpected stop") }
+func (*startFailureRuntime) Wait(context.Context) error  { return errors.New("unexpected wait") }
 
 // Production break: retaining a failed generation after RuntimeOwner.Start has
 // completed its partial cleanup would make the same durable retry ambiguous.
@@ -628,6 +972,114 @@ func (o *slowStopRuntime) Stop(ctx context.Context) error {
 	return ctx.Err()
 }
 
+type retrySignalRuntime struct{ runtimeFixture }
+
+func (o *retrySignalRuntime) Stop(context.Context) error {
+	if o.stops.Add(1) == 1 {
+		return errors.New("transient signal failure")
+	}
+	o.once.Do(func() { close(o.done) })
+	return nil
+}
+
+type guestShutdownRuntime struct {
+	runtimeFixture
+	requests  atomic.Int32
+	cooperate bool
+	fail      bool
+}
+
+func (o *guestShutdownRuntime) RequestStop(context.Context) error {
+	o.requests.Add(1)
+	if o.fail {
+		return errors.New("guest request signal failed")
+	}
+	if o.cooperate {
+		o.once.Do(func() { close(o.done) })
+	}
+	return nil
+}
+
+func TestStopRequestsGuestShutdownBeforeForceFallback(t *testing.T) {
+	previous := gracefulStopWait
+	gracefulStopWait = 25 * time.Millisecond
+	t.Cleanup(func() { gracefulStopWait = previous })
+	for _, tc := range []struct {
+		name      string
+		cooperate bool
+		fail      bool
+		wantForce int32
+	}{
+		{"cooperating", true, false, 0},
+		{"unresponsive", false, false, 1},
+		{"request-failed", false, true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := minimalRequest(t)
+			path, _, err := publishOrAdmitRequest(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner := &guestShutdownRuntime{runtimeFixture: runtimeFixture{done: make(chan struct{})}, cooperate: tc.cooperate, fail: tc.fail}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			runDone := make(chan error, 1)
+			go func() { runDone <- Run(ctx, path, owner) }()
+			client := &Client{RuntimeDirectory: request.RuntimeDirectory}
+			if _, err := awaitSnapshot(ctx, request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+				t.Fatal(err)
+			}
+			_ = client.Stop(context.Background(), request.Binding) // Response can race exact reap.
+			select {
+			case err := <-runDone:
+				if err != nil {
+					t.Fatalf("Run after guest request = %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("guest stop or bounded force did not reap")
+			}
+			if owner.requests.Load() != 1 || owner.stops.Load() != tc.wantForce || owner.waits.Load() != 1 {
+				t.Fatalf("requests/force/wait = %d/%d/%d, want 1/%d/1", owner.requests.Load(), owner.stops.Load(), owner.waits.Load(), tc.wantForce)
+			}
+		})
+	}
+}
+
+func TestStopRetriesFailedSignalWhileExactOwnerRemainsLive(t *testing.T) {
+	request := minimalRequest(t)
+	path, _, err := publishOrAdmitRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &retrySignalRuntime{runtimeFixture: runtimeFixture{done: make(chan struct{})}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(ctx, path, owner) }()
+	client := &Client{RuntimeDirectory: request.RuntimeDirectory}
+	if _, err := awaitSnapshot(ctx, request.Binding, startupPolicy{timeout: time.Second, interval: time.Millisecond}, client.Snapshot); err != nil {
+		t.Fatalf("exact owner did not start: %v", err)
+	}
+	if err := client.Stop(context.Background(), request.Binding); err == nil || !strings.Contains(err.Error(), "transient signal failure") {
+		t.Fatalf("first Stop = %v", err)
+	}
+	if owner.stops.Load() != 1 {
+		t.Fatalf("failed signal attempts = %d", owner.stops.Load())
+	}
+	_ = client.Stop(context.Background(), request.Binding) // Reply can race owner reap.
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run after retried signal = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("exact owner did not reap after retry")
+	}
+	if owner.stops.Load() != 2 || owner.waits.Load() != 1 {
+		t.Fatalf("stop/wait = %d/%d, want 2/1", owner.stops.Load(), owner.waits.Load())
+	}
+}
+
 func TestStopSharesOneLifecycleDeadlineAndRetainsOwnershipUntilReap(t *testing.T) {
 	request := minimalRequest(t)
 	path, _, err := publishOrAdmitRequest(request)
@@ -670,6 +1122,12 @@ type runtimeFixture struct {
 	once              sync.Once
 	starts, snapshots atomic.Int32
 	stops, waits      atomic.Int32
+	bootstraps        atomic.Int32
+	readies           atomic.Int32
+	inspections       atomic.Int32
+	identities        atomic.Int32
+	pinPresent        *atomic.Bool
+	bootstrapErr      error
 }
 
 func (o *runtimeFixture) Start(_ context.Context, r LaunchRequest) error {
@@ -679,7 +1137,30 @@ func (o *runtimeFixture) Start(_ context.Context, r LaunchRequest) error {
 }
 func (o *runtimeFixture) Snapshot(context.Context) Snapshot {
 	o.snapshots.Add(1)
-	return Snapshot{Binding: o.binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true}
+	pinPresent := true
+	if o.pinPresent != nil {
+		pinPresent = o.pinPresent.Load()
+	}
+	return Snapshot{Binding: o.binding, BackendRunning: true, SerialHealthy: true, PinPresent: pinPresent, CertificateCurrent: true, ProbeOK: true, ZoneMatches: true}
+}
+func (o *runtimeFixture) Bootstrap(context.Context) error {
+	o.bootstraps.Add(1)
+	if o.bootstrapErr == nil && o.pinPresent != nil {
+		o.pinPresent.Store(true)
+	}
+	return o.bootstrapErr
+}
+func (o *runtimeFixture) Ready(context.Context) error { o.readies.Add(1); return nil }
+func (o *runtimeFixture) InspectPackages(_ context.Context, names []string) ([]PackageVersion, error) {
+	o.inspections.Add(1)
+	if len(names) != 1 || names[0] != "git" {
+		return nil, fmt.Errorf("unexpected package request")
+	}
+	return []PackageVersion{{Name: "git", Version: "1:2.45.3-1ubuntu2"}}, nil
+}
+func (o *runtimeFixture) InspectIdentity(context.Context) (GuestIdentity, error) {
+	o.identities.Add(1)
+	return GuestIdentity{MachineID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Hostname: "boxwarden-bbbbbbbbbbbb"}, nil
 }
 func (o *runtimeFixture) Stop(context.Context) error {
 	o.stops.Add(1)

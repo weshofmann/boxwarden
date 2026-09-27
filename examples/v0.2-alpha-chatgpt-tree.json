@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "source": {
+    "kind": "ubuntu-24.04.4-desktop-arm64",
+    "sha256": "c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe"
+  },
+  "machine": {
+    "cpus": 4,
+    "memory_mib": 4096,
+    "system_disk_gib": 30
+  },
+  "apt_packages": ["git", "curl", "ca-certificates", "nodejs", "tree"],
+  "steps": [
+    {
+      "id": "install-chatgpt",
+      "phase": "prepare",
+      "argv": ["/usr/local/libexec/boxwarden-install-pinned-chatgpt"]
+    },
+    {
+      "id": "record-first-start",
+      "phase": "once",
+      "argv": [
+        "/usr/bin/python3",
+        "-c",
+        "from pathlib import Path; Path('/home/boxwarden/.boxwarden-alpha-once').write_text('once\\n')"
+      ]
+    },
+    {
+      "id": "count-starts",
+      "phase": "startup",
+      "argv": [
+        "/usr/bin/python3",
+        "-c",
+        "from pathlib import Path; marker=Path('/home/boxwarden/.boxwarden-alpha-once'); assert marker.read_text() == 'once\\n'; count=Path('/home/boxwarden/.boxwarden-alpha-starts'); count.write_text(str(int(count.read_text()) + 1 if count.exists() else 1) + '\\n')"
+      ]
+    },
+    {
+      "id": "open-chatgpt",
+      "phase": "startup",
+      "argv": ["/usr/local/libexec/boxwarden-launch-chatgpt"]
+    },
+    {
+      "id": "edit-project",
+      "phase": "reconfigure",
+      "argv": [
+        "/usr/bin/node",
+        "-e",
+        "const fs = require('node:fs');\nconst path = require('node:path');\nconst { spawnSync } = require('node:child_process');\nconst mount = process.argv[1];\nif (!fs.lstatSync(mount).isDirectory()) throw new Error('workspace must be an ordinary directory');\nconst imports = fs.readdirSync(mount, { withFileTypes: true }).filter(entry => /^boxwarden-import-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(entry.name));\nif (imports.length !== 1 || !imports[0].isDirectory()) throw new Error('edit-project requires exactly one ordinary synthetic import directory');\nconst app = path.join(mount, imports[0].name, 'app.js');\nconst info = fs.lstatSync(app);\nif (!info.isFile() || info.nlink !== 1) throw new Error('synthetic app must be an ordinary unlinked file');\nconst result = spawnSync(process.execPath, [app, '--edit'], { stdio: 'inherit' });\nif (result.error) throw result.error;\nprocess.exit(result.status === null ? 1 : result.status);",
+        "/home/boxwarden/workspaces/project"
+      ]
+    }
+  ],
+  "workspaces": [
+    {
+      "name": "project",
+      "mount": "/home/boxwarden/workspaces/project"
+    }
+  ],
+  "launch": []
+}

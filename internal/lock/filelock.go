@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -29,9 +30,14 @@ var (
 // Held is an advisory lock retained until Release. Its file descriptor remains
 // open while held; lock-file existence is never used as ownership evidence.
 type Held struct {
-	file *os.File
-	once sync.Once
-	err  error
+	mu        sync.Mutex
+	file      *os.File
+	stateRoot string
+	rootInfo  os.FileInfo
+	locksInfo os.FileInfo
+	scope     string
+	once      sync.Once
+	err       error
 }
 
 // Acquire obtains an owner-private lock named by a safe scope below stateRoot.
@@ -47,11 +53,19 @@ func Acquire(ctx context.Context, stateRoot, scope string) (*Held, error) {
 		return nil, fmt.Errorf("state root: %w", err)
 	}
 	defer root.Close()
+	rootInfo, err := root.Stat(".")
+	if err != nil {
+		return nil, fmt.Errorf("inspect state root: %w", err)
+	}
 	locks, err := openPrivateChild(root, "locks", true)
 	if err != nil {
 		return nil, fmt.Errorf("lock directory: %w", err)
 	}
 	defer locks.Close()
+	locksInfo, err := locks.Stat(".")
+	if err != nil {
+		return nil, fmt.Errorf("inspect lock directory: %w", err)
+	}
 
 	name := scope + ".lock"
 	info, err := locks.Lstat(name)
@@ -83,7 +97,7 @@ func Acquire(ctx context.Context, stateRoot, scope string) (*Held, error) {
 	for {
 		err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
-			return &Held{file: file}, nil
+			return &Held{file: file, stateRoot: stateRoot, rootInfo: rootInfo, locksInfo: locksInfo, scope: scope}, nil
 		}
 		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
 			file.Close()
@@ -117,11 +131,70 @@ func AcquireSession(ctx context.Context, stateRoot, domain, name string) (*Held,
 
 // Release releases the advisory lock and closes its descriptor. It is idempotent.
 func (h *Held) Release() error {
-	if h == nil || h.file == nil {
+	if h == nil {
 		return nil
 	}
-	h.once.Do(func() { h.err = h.file.Close() })
+	h.once.Do(func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if h.file != nil {
+			h.err = h.file.Close()
+			h.file = nil
+		}
+	})
 	return h.err
+}
+
+// MatchesScope reports whether this exact advisory lock is still owned by
+// this handle. The caller must retain the handle for the protected lifetime;
+// a check cannot prevent another trusted holder from calling Release later.
+func (h *Held) MatchesScope(scope string) bool {
+	if h == nil {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.file == nil || h.scope != scope {
+		return false
+	}
+	_, err := h.file.Stat()
+	return err == nil
+}
+
+// MatchesExact proves that this live handle still owns the named lock under
+// the exact state root. Both directory identities and the lock pathname are
+// rechecked; an unlinked lock inode cannot authorize a new disk admission.
+func (h *Held) MatchesExact(stateRoot, scope string) bool {
+	if h == nil {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.file == nil || h.scope != scope || h.stateRoot != stateRoot || h.rootInfo == nil || h.locksInfo == nil {
+		return false
+	}
+	opened, err := h.file.Stat()
+	if err != nil || requirePrivateRegular(opened) != nil {
+		return false
+	}
+	rootPath := stateRoot
+	locksPath := filepath.Join(stateRoot, "locks")
+	lockPath := filepath.Join(locksPath, scope+".lock")
+	for range 2 {
+		root, err := os.Lstat(rootPath)
+		if err != nil || !os.SameFile(root, h.rootInfo) || requirePrivateDirectory(root) != nil {
+			return false
+		}
+		locks, err := os.Lstat(locksPath)
+		if err != nil || !os.SameFile(locks, h.locksInfo) || requirePrivateDirectory(locks) != nil {
+			return false
+		}
+		named, err := os.Lstat(lockPath)
+		if err != nil || !os.SameFile(named, opened) || requirePrivateRegular(named) != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func openStateRoot(path string) (*os.Root, error) {

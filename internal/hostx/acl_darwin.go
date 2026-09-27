@@ -28,12 +28,17 @@ func (OSACLInspector) HasExtendedACL(path string) (bool, error) {
 		return false, fmt.Errorf("inspect ACL for %q: %w", path, err)
 	}
 	line := result.Stdout
+	entries := ""
 	if newline := strings.IndexByte(line, '\n'); newline >= 0 {
+		entries = line[newline+1:]
 		line = line[:newline]
 	}
 	fields := strings.Fields(line)
 	if len(fields) == 0 {
 		return false, fmt.Errorf("inspect ACL for %q: malformed ls output", path)
 	}
-	return strings.HasSuffix(fields[0], "+"), nil
+	// On current macOS, an extended-attribute marker (@) can appear on the
+	// first line even when an ACL is present. With -e, ls prints the ACL entries
+	// on subsequent lines; inspect those as well as the legacy + marker.
+	return strings.HasSuffix(fields[0], "+") || strings.TrimSpace(entries) != "", nil
 }

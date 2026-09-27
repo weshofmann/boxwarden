@@ -24,7 +24,9 @@ type exactCleanupResidue struct {
 	directory, request, lock, marker bool
 }
 
-// publishOrAdmitRequest is called under the common session operation lock.
+// Production public starts serialize this publication under the session's
+// transition lock, which spans the long StartExact call while the ordinary
+// session lock is released for child-side volume admission.
 // Stage a complete request and ordinary empty lock before publishing the
 // generation. Never create serial/: that subtree belongs exclusively to serialx.
 func publishOrAdmitRequest(r LaunchRequest) (string, bool, error) {
@@ -211,6 +213,23 @@ func validateGenerationEntry(dir, name string) error {
 	case "serial":
 		if !info.IsDir() || info.Mode().Perm() != 0700 {
 			return fmt.Errorf("invalid serial subtree")
+		}
+	case "tart":
+		if !info.IsDir() || info.Mode().Perm() != 0700 {
+			return fmt.Errorf("invalid Tart scratch")
+		}
+		entries, err := os.ReadDir(filepath.Join(dir, name))
+		if err != nil {
+			return fmt.Errorf("read Tart scratch: %w", err)
+		}
+		if len(entries) > 1 || len(entries) == 1 && entries[0].Name() != "control.sock" {
+			return fmt.Errorf("unexpected Tart scratch contents")
+		}
+		if len(entries) == 1 {
+			socket, err := os.Lstat(filepath.Join(dir, name, "control.sock"))
+			if err != nil || !ownedByCurrentUser(socket) || socket.Mode()&os.ModeSocket == 0 || socket.Mode().Perm() != 0o755 {
+				return fmt.Errorf("invalid Tart scratch control socket")
+			}
 		}
 	case socketName:
 		if info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0600 {

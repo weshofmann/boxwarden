@@ -27,6 +27,18 @@ grep -Fq '__BOXWARDEN_FINALIZER_SHA256__' "$output/user-data" || fail 'finalizer
 ! grep -Eq '__BOXWARDEN_(RUN_ID|TIMEZONE|PASSWORD_HASH|INSTANCE_ID)__' "$output/user-data" "$output/meta-data" || fail 'seed retains an unrendered build field'
 grep -Fq 'boxwarden-task0-run-1' "$output/meta-data" || fail 'instance ID did not track build run'
 
+fresh_run=run-0123456789ab
+BW_GOLDEN_RENDER_TEST_MODE=1 BW_GOLDEN_TEST_ZONEINFO_ROOT="$zoneinfo" BW_GOLDEN_TEST_LOCALTIME="$localtime" \
+  bash "$renderer" "$fresh_run" "$hash_file" "${test_dir}/fresh-rendered" >"${test_dir}/fresh-render.out" || fail 'fresh alpha run ID was rejected'
+grep -Fq "hostname: boxwarden-task0-${fresh_run}" "${test_dir}/fresh-rendered/user-data" || fail 'fresh alpha hostname was not rendered'
+grep -Fq "boxwarden-task0-${fresh_run}" "${test_dir}/fresh-rendered/meta-data" || fail 'fresh alpha instance ID was not rendered'
+for invalid_run in run-0123456789ABC run-0123456789a run-0123456789abc run-3; do
+  if BW_GOLDEN_RENDER_TEST_MODE=1 BW_GOLDEN_TEST_ZONEINFO_ROOT="$zoneinfo" BW_GOLDEN_TEST_LOCALTIME="$localtime" \
+    bash "$renderer" "$invalid_run" "$hash_file" "${test_dir}/invalid-${invalid_run}" >"${test_dir}/invalid-run.out" 2>&1; then
+    fail "invalid build run ID accepted: ${invalid_run}"
+  fi
+done
+
 if BW_GOLDEN_RENDER_TEST_MODE=1 BW_GOLDEN_TEST_ZONEINFO_ROOT="$zoneinfo" BW_GOLDEN_TEST_LOCALTIME="$localtime" \
   bash "$renderer" run-1 "$hash_file" "$output" >"${test_dir}/overwrite.out" 2>&1; then
   fail 'renderer overwrote an existing seed'

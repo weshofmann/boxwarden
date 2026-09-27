@@ -66,6 +66,9 @@ func TestDarwinPTYBootstrapDrainAndClose(t *testing.T) {
 	}
 	defer guest.Close()
 	done := startBootstrap(r, context.Background())
+	if _, err := io.WriteString(guest, "boxwarden@boxwarden-123456789abc:~$ "); err != nil {
+		t.Fatal(err)
+	}
 	request := bootstrapRequest()
 	// Read the two lines bytewise: terminal input must already be raw.
 	var lines []byte

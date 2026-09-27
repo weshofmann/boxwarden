@@ -2,19 +2,190 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/config"
+	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/hostx"
+	"github.com/weshofmann/boxwarden/internal/lock"
 	"github.com/weshofmann/boxwarden/internal/sshx"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
 )
 
 const testStartGeneration = "11111111-2222-4333-8444-555555555555"
+
+func TestStartRejectsMissingBoundRecipeIntentBeforeLaunch(t *testing.T) {
+	configured, backendFake, creator := createFixture(t)
+	record, err := creator.Create(t.Context(), "dev", ModeClean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.RecipeIntentDigest = strings.Repeat("a", 64)
+	if err := SaveRecord(configured.StateRoot, record.Domain, record); err != nil {
+		t.Fatal(err)
+	}
+	starter := newStartTestService(configured, backendFake, &startSupervisorFake{start: func(supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+		t.Fatal("missing recipe intent reached supervisor")
+		return supervisor.Snapshot{}, nil
+	}}, time.Now, func() (string, error) { return testStartGeneration, nil })
+	if _, err := starter.Start(t.Context(), "dev"); err == nil {
+		t.Fatal("missing bound recipe intent started session")
+	}
+	assertStoredState(t, configured, "dev", StateStopped)
+}
+
+func TestStartDoesNotLaunchAfterWorkspaceReservationFailure(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	if _, err := creator.Create(context.Background(), "dev", ModeClean); err != nil {
+		t.Fatal(err)
+	}
+	service := newStartTestService(domainConfig, backendFake, &startSupervisorFake{start: func(supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+		t.Fatal("supervisor reached after workspace reservation failure")
+		return supervisor.Snapshot{}, nil
+	}}, time.Now, func() (string, error) { return testStartGeneration, nil })
+	called := false
+	service.start.Workspaces = startWorkspaceFake{prepare: func() error {
+		called = true
+		return errors.New("reservation failed before launch commit")
+	}}
+	if _, err := service.Start(context.Background(), "dev"); err == nil || !called {
+		t.Fatalf("Start() error = %v, reservation called = %v", err, called)
+	}
+	assertStoredState(t, domainConfig, "dev", StateStopped)
+}
+
+func TestStartReconcilesStoppedUsesBeforeNewGeneration(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	if _, err := creator.Create(context.Background(), "dev", ModeClean); err != nil {
+		t.Fatal(err)
+	}
+	control := &startSupervisorFake{start: func(supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+		t.Fatal("supervisor reached before stopped-use reconciliation")
+		return supervisor.Snapshot{}, nil
+	}}
+	service := newStartTestService(domainConfig, backendFake, control, time.Now, func() (string, error) {
+		t.Fatal("generation allocated before stopped-use reconciliation")
+		return "", nil
+	})
+	injected := errors.New("partial Use cannot yet be cleared")
+	service.start.Workspaces = startWorkspaceFake{release: func() error { return injected }}
+	if _, err := service.Start(context.Background(), "dev"); !errors.Is(err, injected) {
+		t.Fatalf("Start() error = %v, want stopped reconciliation error", err)
+	}
+	assertStoredState(t, domainConfig, "dev", StateStopped)
+}
+
+func TestStartUpgradesLegacyStoppedRecordBeforeWorkspaceReservation(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	created, err := creator.Create(context.Background(), "dev", ModeClean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeRecord(t, domainConfig.StateRoot, "dev", fmt.Sprintf(`{"version":1,"domain":"work","name":"dev","id":%q,"mode":"clean","intended_state":"stopped","backend":{"kind":"tart","object_id":%q},"golden_revision":%q}`, created.ID, created.Backend.ObjectID, created.GoldenRevision))
+	service := newStartTestService(domainConfig, backendFake, &startSupervisorFake{start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+		return startedSnapshot(request.Binding, time.Now()), nil
+	}}, time.Now, func() (string, error) { return testStartGeneration, nil })
+	service.start.Workspaces = startWorkspaceFake{prepare: func() error {
+		current, err := LoadRecord(domainConfig.StateRoot, "work", "dev")
+		if err != nil || current.Version != recordVersion || current.IntendedState != StateStopped {
+			return fmt.Errorf("legacy session not upgraded before reservation: %#v, %w", current, err)
+		}
+		return nil
+	}}
+	got, err := service.Start(context.Background(), "dev")
+	if err != nil || got.Version != recordVersion || got.IntendedState != StateStarting {
+		t.Fatalf("legacy start = %#v, %v", got, err)
+	}
+}
+
+func TestStartReleasesSessionLockDuringSupervisorLaunch(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	if _, err := creator.Create(context.Background(), "dev", ModeClean); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	control := &startSupervisorFake{start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		held, err := lock.AcquireSession(ctx, domainConfig.StateRoot, "work", "dev")
+		if err != nil {
+			return supervisor.Snapshot{}, fmt.Errorf("supervisor could not acquire session lock: %w", err)
+		}
+		if err := held.Release(); err != nil {
+			return supervisor.Snapshot{}, err
+		}
+		return startedSnapshot(request.Binding, now), nil
+	}}
+	service := newStartTestService(domainConfig, backendFake, control, func() time.Time { return now }, func() (string, error) { return testStartGeneration, nil })
+	if _, err := service.Start(context.Background(), "dev"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStopCannotPreemptInFlightExactStart(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	if _, err := creator.Create(context.Background(), "dev", ModeClean); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	var service *Service
+	control := &startSupervisorFake{
+		start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			defer cancel()
+			if _, err := service.Stop(ctx, "dev"); !errors.Is(err, context.DeadlineExceeded) {
+				return supervisor.Snapshot{}, fmt.Errorf("stop preempted in-flight exact start: %v", err)
+			}
+			return readySnapshot(request.Binding, now), nil
+		},
+		stop: func(supervisor.Binding) error { return nil },
+	}
+	service = newStartTestService(domainConfig, backendFake, control, func() time.Time { return now }, func() (string, error) { return testStartGeneration, nil })
+	if _, err := service.Start(context.Background(), "dev"); err != nil {
+		t.Fatal(err)
+	}
+	if got := assertStoredState(t, domainConfig, "dev", StateRunning); got.StartGeneration != testStartGeneration || got.Readiness.Status != ReadinessReady {
+		t.Fatalf("started record = %#v", got)
+	}
+}
+
+func TestStartRejectsChangedIntentAfterSupervisorReturns(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	if _, err := creator.Create(context.Background(), "dev", ModeClean); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	control := &startSupervisorFake{start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+		held, err := lock.AcquireSession(context.Background(), domainConfig.StateRoot, "work", "dev")
+		if err != nil {
+			return supervisor.Snapshot{}, err
+		}
+		defer held.Release()
+		current, err := LoadRecord(domainConfig.StateRoot, "work", "dev")
+		if err != nil {
+			return supervisor.Snapshot{}, err
+		}
+		current.IntendedState = StateStopping
+		current.Readiness = ReadinessRecord{Status: ReadinessNotReady}
+		if err := SaveRecord(domainConfig.StateRoot, domainConfig.ID, current); err != nil {
+			return supervisor.Snapshot{}, err
+		}
+		return readySnapshot(request.Binding, now), nil
+	}}
+	service := newStartTestService(domainConfig, backendFake, control, func() time.Time { return now }, func() (string, error) { return testStartGeneration, nil })
+	if _, err := service.Start(context.Background(), "dev"); err == nil {
+		t.Fatal("changed intent was restored to READY")
+	}
+	if got := assertStoredState(t, domainConfig, "dev", StateStopping); got.Readiness.Status != ReadinessNotReady {
+		t.Fatalf("changed intent was overwritten: %#v", got)
+	}
+}
 
 // Production break: moving persistence below StartExact would let a runtime
 // namespace exist without a durable generation to bind or recover it.
@@ -44,6 +215,7 @@ func TestStartPersistsGenerationBeforeSupervisorMutation(t *testing.T) {
 	}}
 	service = NewStartService(domainConfig, StartDependencies{
 		Observer:          backendFake,
+		Workspaces:        startWorkspaceFake{},
 		Host:              startHostFake{},
 		CA:                startCAFake{identity: admittedCA},
 		Supervisor:        supervisorFake,
@@ -70,9 +242,29 @@ func TestStartPersistsGenerationBeforeSupervisorMutation(t *testing.T) {
 	}
 }
 
-// Production break: routing every retry through StartExact could relaunch an
-// already-running backend, while minting a replacement generation would lose
-// the durable recovery binding.
+func TestStartPersistsReadyOnlyAfterFreshExactManagementEvidence(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	if _, err := creator.Create(context.Background(), "dev", ModeClean); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	control := &startSupervisorFake{start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+		loaded, err := LoadRecord(domainConfig.StateRoot, "work", "dev")
+		if err != nil || loaded.IntendedState != StateStarting || loaded.Readiness.Status != ReadinessStarting {
+			t.Fatalf("READY before durable intent: %#v, %v", loaded, err)
+		}
+		return readySnapshot(request.Binding, now), nil
+	}}
+	service := newStartTestService(domainConfig, backendFake, control, func() time.Time { return now }, func() (string, error) { return testStartGeneration, nil })
+	record, err := service.Start(context.Background(), "dev")
+	if err != nil || record.IntendedState != StateRunning || record.Readiness.Status != ReadinessReady {
+		t.Fatalf("ready start = %#v, %v", record, err)
+	}
+	assertStoredRecord(t, domainConfig, record)
+}
+
+// Production break: a completed Slice C retry must reuse the exact live
+// generation without asking the supervisor to bootstrap again or minting G+1.
 func TestStartingRetryReusesGenerationAndClassifiesBackendBeforeMutation(t *testing.T) {
 	for _, state := range []backend.ObjectState{backend.ObjectRunning, backend.ObjectStopped} {
 		t.Run(string(state), func(t *testing.T) {
@@ -108,13 +300,149 @@ func TestStartingRetryReusesGenerationAndClassifiesBackendBeforeMutation(t *test
 			if generationCalls != 0 {
 				t.Fatalf("NewGeneration calls = %d, want 0", generationCalls)
 			}
-			if state == backend.ObjectRunning && (control.startCalls != 0 || control.snapshotCalls != 1) {
-				t.Fatalf("running retry start/snapshot calls = %d/%d, want 0/1", control.startCalls, control.snapshotCalls)
-			}
-			if state == backend.ObjectStopped && (control.startCalls != 1 || control.snapshotCalls != 0) {
-				t.Fatalf("stopped retry start/snapshot calls = %d/%d, want 1/0", control.startCalls, control.snapshotCalls)
+			if control.startCalls != 0 || control.snapshotCalls != 1 {
+				t.Fatalf("%s retry start/snapshot calls = %d/%d, want 0/1 for exact retained owner", state, control.startCalls, control.snapshotCalls)
 			}
 		})
+	}
+}
+
+func TestStartingRetryPrefersExactReadyOwnerWhenTartFalselyListsStopped(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	created, err := creator.Create(context.Background(), "dev", ModeClean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := saveStartingRecord(t, domainConfig, created)
+	backendFake.SetObservation(backend.Observation{ObjectID: created.Backend.ObjectID, Exists: true, State: backend.ObjectStopped})
+	now := time.Date(2026, 9, 24, 3, 0, 0, 0, time.UTC)
+	control := &startSupervisorFake{snapshot: func(binding supervisor.Binding) (supervisor.Snapshot, error) {
+		return readySnapshot(binding, now), nil
+	}}
+	service := newStartTestService(domainConfig, backendFake, control, func() time.Time { return now }, func() (string, error) {
+		t.Fatal("false-stopped retry allocated another generation")
+		return "", nil
+	})
+	got, err := service.Start(context.Background(), "dev")
+	if err != nil || got.IntendedState != StateRunning || got.StartGeneration != before.StartGeneration || control.startCalls != 0 || control.snapshotCalls != 1 {
+		t.Fatalf("false-stopped retry = %#v, %v; start/snapshot calls=%d/%d", got, err, control.startCalls, control.snapshotCalls)
+	}
+}
+
+func TestStartingRetryWithStoppedListingAndNoOwnerUsesExactStartAdmission(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	created, err := creator.Create(context.Background(), "dev", ModeClean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := saveStartingRecord(t, domainConfig, created)
+	backendFake.SetObservation(backend.Observation{ObjectID: created.Backend.ObjectID, Exists: true, State: backend.ObjectStopped})
+	now := time.Date(2026, 9, 24, 3, 0, 0, 0, time.UTC)
+	control := &startSupervisorFake{
+		snapshot: func(supervisor.Binding) (supervisor.Snapshot, error) {
+			return supervisor.Snapshot{}, errors.New("no exact owner")
+		},
+		start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+			if request.Binding.Generation != before.StartGeneration {
+				t.Fatal("exact start changed generation")
+			}
+			return startedSnapshot(request.Binding, now), nil
+		},
+	}
+	service := newStartTestService(domainConfig, backendFake, control, func() time.Time { return now }, func() (string, error) {
+		t.Fatal("stopped retry allocated another generation")
+		return "", nil
+	})
+	got, err := service.Start(context.Background(), "dev")
+	if err != nil || got != before || control.snapshotCalls != 1 || control.startCalls != 1 {
+		t.Fatalf("exact start fallback = %#v, %v; snapshot/start=%d/%d", got, err, control.snapshotCalls, control.startCalls)
+	}
+}
+
+func TestStartingLiveBootstrapIncompleteRetriesSameGeneration(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	created, err := creator.Create(context.Background(), "dev", ModeClean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := saveStartingRecord(t, domainConfig, created)
+	backendFake.SetObservation(backend.Observation{ObjectID: created.Backend.ObjectID, Exists: true, State: backend.ObjectRunning})
+	now := time.Date(2026, 9, 8, 1, 0, 0, 0, time.UTC)
+	control := &startSupervisorFake{
+		snapshot: func(binding supervisor.Binding) (supervisor.Snapshot, error) {
+			snapshot := startedSnapshot(binding, now)
+			snapshot.PinPresent = false
+			return snapshot, nil
+		},
+		start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+			if request.Binding.Generation != before.StartGeneration {
+				return supervisor.Snapshot{}, fmt.Errorf("bootstrap retry changed generation")
+			}
+			return startedSnapshot(request.Binding, now), nil
+		},
+	}
+	service := newStartTestService(domainConfig, backendFake, control, func() time.Time { return now }, func() (string, error) {
+		t.Fatal("bootstrap retry allocated a generation")
+		return "", nil
+	})
+	got, err := service.Start(context.Background(), "dev")
+	if err != nil || got != before {
+		t.Fatalf("same-G bootstrap retry = %#v, %v; want unchanged %#v", got, err, before)
+	}
+	if control.snapshotCalls != 1 || control.startCalls != 1 || control.stopCalls != 0 {
+		t.Fatalf("snapshot/start/stop = %d/%d/%d, want 1/1/0", control.snapshotCalls, control.startCalls, control.stopCalls)
+	}
+}
+
+func TestStartingPoisonedSerialStopsAndRelaunchesSameGeneration(t *testing.T) {
+	domainConfig, backendFake, creator := createFixture(t)
+	created, err := creator.Create(context.Background(), "dev", ModeClean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := saveStartingRecord(t, domainConfig, created)
+	backendFake.SetObservation(backend.Observation{ObjectID: created.Backend.ObjectID, Exists: true, State: backend.ObjectRunning})
+	now := time.Date(2026, 9, 8, 1, 0, 0, 0, time.UTC)
+	control := &startSupervisorFake{
+		snapshot: func(binding supervisor.Binding) (supervisor.Snapshot, error) {
+			snapshot := startedSnapshot(binding, now)
+			snapshot.PinPresent = false
+			snapshot.SerialHealthy = false
+			return snapshot, nil
+		},
+		stop: func(binding supervisor.Binding) error {
+			if binding.Generation != before.StartGeneration {
+				return fmt.Errorf("stopped foreign generation")
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			defer cancel()
+			held, err := lock.AcquireSession(ctx, domainConfig.StateRoot, "work", "dev")
+			if err != nil {
+				return fmt.Errorf("poisoned owner could not acquire session lock: %w", err)
+			}
+			if err := held.Release(); err != nil {
+				return err
+			}
+			backendFake.SetObservation(backend.Observation{ObjectID: created.Backend.ObjectID, Exists: true, State: backend.ObjectStopped})
+			return nil
+		},
+		start: func(request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+			if request.Binding.Generation != before.StartGeneration {
+				return supervisor.Snapshot{}, fmt.Errorf("serial recovery changed generation")
+			}
+			return startedSnapshot(request.Binding, now), nil
+		},
+	}
+	service := newStartTestService(domainConfig, backendFake, control, func() time.Time { return now }, func() (string, error) {
+		t.Fatal("serial recovery allocated a generation")
+		return "", nil
+	})
+	got, err := service.Start(context.Background(), "dev")
+	if err != nil || got != before {
+		t.Fatalf("same-G serial recovery = %#v, %v; want unchanged %#v", got, err, before)
+	}
+	if control.snapshotCalls != 1 || control.stopCalls != 1 || control.startCalls != 1 {
+		t.Fatalf("snapshot/stop/start = %d/%d/%d, want 1/1/1", control.snapshotCalls, control.stopCalls, control.startCalls)
 	}
 }
 
@@ -131,7 +459,6 @@ func TestRunningBackendRetryRejectsInexactStartedSnapshotWithoutMutation(t *test
 		"backend absent": func(snapshot *supervisor.Snapshot) {
 			snapshot.BackendRunning = false
 		},
-		"serial unhealthy": func(snapshot *supervisor.Snapshot) { snapshot.SerialHealthy = false },
 	} {
 		t.Run(name, func(t *testing.T) {
 			domainConfig, backendFake, creator := createFixture(t)
@@ -206,6 +533,7 @@ func TestStartRequiresConfiguredCACollectionToContainSelectedDomain(t *testing.T
 	}
 	service := NewStartService(domainConfig, StartDependencies{
 		Observer:          backendFake,
+		Workspaces:        startWorkspaceFake{},
 		Host:              startHostFake{},
 		CA:                startCAFake{},
 		ConfiguredDomains: []sshx.Domain{{ID: "personal", StateRoot: "/private/personal"}},
@@ -276,10 +604,16 @@ func TestRunningRecordStillRequiresFullFreshReadySnapshot(t *testing.T) {
 }
 
 type startSupervisorFake struct {
-	start         func(supervisor.LaunchRequest) (supervisor.Snapshot, error)
-	snapshot      func(supervisor.Binding) (supervisor.Snapshot, error)
-	startCalls    int
-	snapshotCalls int
+	start          func(supervisor.LaunchRequest) (supervisor.Snapshot, error)
+	snapshot       func(supervisor.Binding) (supervisor.Snapshot, error)
+	ready          func(supervisor.Binding) (supervisor.Snapshot, error)
+	stop           func(supervisor.Binding) error
+	quiesced       func(supervisor.Binding) (bool, error)
+	startCalls     int
+	snapshotCalls  int
+	stopCalls      int
+	readyCalls     int
+	lastSnapshotAt time.Time
 }
 
 func (f *startSupervisorFake) StartExact(_ context.Context, request supervisor.LaunchRequest) (supervisor.Snapshot, error) {
@@ -294,9 +628,30 @@ func (f *startSupervisorFake) Snapshot(_ context.Context, binding supervisor.Bin
 	if f.snapshot == nil {
 		return supervisor.Snapshot{}, fmt.Errorf("unexpected Snapshot")
 	}
-	return f.snapshot(binding)
+	result, err := f.snapshot(binding)
+	f.lastSnapshotAt = result.ObservedAt
+	return result, err
 }
-func (*startSupervisorFake) Stop(context.Context, supervisor.Binding) error { return nil }
+func (f *startSupervisorFake) Ready(_ context.Context, binding supervisor.Binding) (supervisor.Snapshot, error) {
+	f.readyCalls++
+	if f.ready == nil {
+		return startedSnapshot(binding, f.lastSnapshotAt), nil
+	}
+	return f.ready(binding)
+}
+func (f *startSupervisorFake) Stop(_ context.Context, binding supervisor.Binding) error {
+	f.stopCalls++
+	if f.stop == nil {
+		return fmt.Errorf("unexpected Stop")
+	}
+	return f.stop(binding)
+}
+func (f *startSupervisorFake) Quiesced(_ context.Context, binding supervisor.Binding) (bool, error) {
+	if f.quiesced == nil {
+		return false, nil
+	}
+	return f.quiesced(binding)
+}
 
 type startHostFake struct{}
 
@@ -310,9 +665,52 @@ func (f startCAFake) Check(context.Context, sshx.Domain, []sshx.Domain) (sshx.CA
 	return f.identity, nil
 }
 
+type startWorkspaceFake struct {
+	prepare        func() error
+	rebuildPrepare func(RebuildJournal) error
+	verify         func() error
+	release        func() error
+}
+
+func (f startWorkspaceFake) PrepareRebuildStart(ctx context.Context, stateRoot string, domainID domain.ID, stopped Record, generation string, observer backend.Observer, journal RebuildJournal) (Record, error) {
+	if f.rebuildPrepare != nil {
+		if err := f.rebuildPrepare(journal); err != nil {
+			return Record{}, err
+		}
+	}
+	return f.PrepareStart(ctx, stateRoot, domainID, stopped, generation, observer)
+}
+
+func (f startWorkspaceFake) PrepareStart(_ context.Context, stateRoot string, domainID domain.ID, stopped Record, generation string, _ backend.Observer) (Record, error) {
+	if f.prepare != nil {
+		if err := f.prepare(); err != nil {
+			return Record{}, err
+		}
+	}
+	started := stopped
+	started.IntendedState = StateStarting
+	started.StartGeneration = generation
+	started.Readiness = ReadinessRecord{Status: ReadinessStarting}
+	return started, SaveRecord(stateRoot, domainID, started)
+}
+
+func (f startWorkspaceFake) VerifyUses(context.Context, string, domain.ID, Record) error {
+	if f.verify != nil {
+		return f.verify()
+	}
+	return nil
+}
+
+func (f startWorkspaceFake) ReleaseUses(context.Context, string, domain.ID, Record, backend.Observer) error {
+	if f.release != nil {
+		return f.release()
+	}
+	return nil
+}
+
 func newStartTestService(domainConfig config.Domain, observer backend.Observer, control SupervisorControl, now func() time.Time, newGeneration func() (string, error)) *Service {
 	return NewStartService(domainConfig, StartDependencies{
-		Observer: observer, Host: startHostFake{}, CA: startCAFake{},
+		Observer: observer, Host: startHostFake{}, CA: startCAFake{}, Workspaces: startWorkspaceFake{},
 		RuntimeRoot: filepath.Join(domainConfig.StateRoot, "runtime"), ConfigPath: "/private/boxwarden-config.json",
 		ConfiguredDomains: []sshx.Domain{{ID: domainConfig.ID, StateRoot: domainConfig.StateRoot}},
 		Supervisor:        control, NewGeneration: newGeneration, Now: now,
@@ -353,7 +751,7 @@ func assertStoredRecord(t *testing.T, domainConfig config.Domain, want Record) {
 }
 
 func startedSnapshot(binding supervisor.Binding, now time.Time) supervisor.Snapshot {
-	return supervisor.Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, ObservedAt: now.UTC()}
+	return supervisor.Snapshot{Binding: binding, BackendRunning: true, SerialHealthy: true, PinPresent: true, ObservedAt: now.UTC()}
 }
 
 func readySnapshot(binding supervisor.Binding, now time.Time) supervisor.Snapshot {

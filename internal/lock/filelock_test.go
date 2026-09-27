@@ -46,6 +46,47 @@ func TestAcquireGoldenSerializesAndUsesPrivateRegularLock(t *testing.T) {
 	}
 }
 
+func TestHeldMatchesOnlyItsLiveExactScope(t *testing.T) {
+	root := privateRoot(t)
+	held, err := Acquire(context.Background(), root, "volume-work-00112233-4455-4677-8899-aabbccddeeff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !held.MatchesScope("volume-work-00112233-4455-4677-8899-aabbccddeeff") || held.MatchesScope("volume-work-other") {
+		t.Fatal("live lock scope mismatch")
+	}
+	if err := held.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if held.MatchesScope("volume-work-00112233-4455-4677-8899-aabbccddeeff") {
+		t.Fatal("released lock still matches scope")
+	}
+}
+
+func TestHeldMatchesExactRootAndCurrentLockPath(t *testing.T) {
+	root := privateRoot(t)
+	otherRoot := privateRoot(t)
+	scope := "volume-work-00112233-4455-4677-8899-aabbccddeeff"
+	held, err := Acquire(context.Background(), root, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+	if !held.MatchesExact(root, scope) || held.MatchesExact(otherRoot, scope) {
+		t.Fatal("lock matched another state root or rejected its exact root")
+	}
+	path := filepath.Join(root, "locks", scope+".lock")
+	if err := os.Rename(path, path+".old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if held.MatchesExact(root, scope) {
+		t.Fatal("lock matched after its path was replaced")
+	}
+}
+
 func TestAcquireRejectsUnsafeScopeAndSymlinkedPaths(t *testing.T) {
 	root := privateRoot(t)
 	if _, err := Acquire(context.Background(), root, "../session"); err == nil {

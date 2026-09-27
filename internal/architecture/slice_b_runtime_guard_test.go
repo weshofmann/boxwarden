@@ -22,12 +22,18 @@ var (
 	alternatePTYSourcePattern = regexp.MustCompile(`(?i)(\b(posix_openpt|grantpt|unlockpt)[[:space:]]*\(|/dev/ptmx\b)`)
 )
 
-func TestSliceBPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
+func TestSliceCPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
 	tests := []struct {
 		name, path, source, want string
 	}{
-		{"moved deferred import", "internal/lifecycle/start.go", `package lifecycle; import _ "github.com/weshofmann/boxwarden/internal/timezonex"`, "deferred Slice C/D import"},
-		{"moved deferred call", "internal/backend/start.go", `package backend; func f(r interface{ Bootstrap() }) { r.Bootstrap() }`, "deferred Slice C/D call"},
+		{"moved deferred import", "internal/lifecycle/start.go", `package lifecycle; import _ "github.com/weshofmann/boxwarden/internal/timezonex"`, "deferred Slice D import"},
+		{"moved bootstrap call", "internal/backend/start.go", `package backend; func f(r interface{ Bootstrap() }) { r.Bootstrap() }`, "unauthorized Slice C call"},
+		{"workspace promotion cannot admit SSH pin", "internal/workspacex/promotion.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
+		{"workspace launch cannot admit SSH pin", "internal/workspacex/launch_disks.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
+		{"workspace preparation cannot admit SSH pin", "internal/workspacex/prepare_start.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
+		{"export snapshot cannot admit SSH pin", "internal/workspacex/export_copy.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
+		{"export recovery cannot admit SSH pin", "internal/workspacex/export_recover.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
+		{"export cannot persist owner manifest", "internal/exportx/other.go", `package exportx; type OwnerManifest struct{ Token string }`, "ownership record"},
 		{"composite readiness publication", "internal/app/start.go", `package app; type Snapshot struct{ PinPresent bool }; var _ = Snapshot{PinPresent: true}`, "deferred readiness publication"},
 		{"assigned readiness publication", "internal/lifecycle/start.go", `package lifecycle; type Snapshot struct{ ZoneMatches bool }; func f(s *Snapshot) { s.ZoneMatches = true }`, "deferred readiness publication"},
 		{"cgo libproc header", "internal/backend/proc.go", "package backend\n/* #include <libproc.h> */\nimport \"C\"", "discarded libproc"},
@@ -37,7 +43,11 @@ func TestSliceBPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
 		{"second C openpty primitive", "internal/serialx/pty_darwin.go", "package serialx\n/*\n#include <pty.h>\nstatic int duplicate(void) { openpty(0, 0, 0, 0, 0); return openpty(0, 0, 0, 0, 0); }\n*/\nimport \"C\"", "actual PTY primitive"},
 		{"alternate PTY provider", "internal/backend/terminal.go", `package backend; import terminal "github.com/creack/pty"; func f() { _, _, _ = terminal.Open() }`, "alternate PTY provider"},
 		{"renamed SSH wrapper", "internal/backend/start.go", `package backend; import trust "github.com/weshofmann/boxwarden/internal/sshx"; func f() { trust.EstablishManagement() }`, "unapproved foundation selector"},
+		{"package report outside runtime owner", "internal/backend/start.go", `package backend; import trust "github.com/weshofmann/boxwarden/internal/sshx"; var _ trust.PackageVersion`, "unapproved foundation selector"},
+		{"workspace mount binding outside runtime owner", "internal/backend/start.go", `package backend; import trust "github.com/weshofmann/boxwarden/internal/sshx"; var _ trust.WorkspaceMount`, "unapproved foundation selector"},
 		{"renamed bootstrap wrapper", "internal/lifecycle/start.go", `package lifecycle; import serialtransport "github.com/weshofmann/boxwarden/internal/serialx"; func f() { serialtransport.RunBootstrap() }`, "unapproved foundation selector"},
+		{"action protocol outside session boundary", "internal/backend/start.go", `package backend; import protocol "github.com/weshofmann/boxwarden/internal/guestproto"; var _ protocol.ActionRequest`, "unauthorized Slice C import"},
+		{"installer serial outside builder", "internal/backend/start.go", `package backend; import serialtransport "github.com/weshofmann/boxwarden/internal/serialx"; func f() { serialtransport.CreateInstallerRuntime() }`, "unapproved foundation selector"},
 		{"blank foundation import", "internal/backend/start.go", `package backend; import _ "github.com/weshofmann/boxwarden/internal/sshx"`, "unsupported foundation import"},
 		{"dot foundation import", "internal/lifecycle/start.go", `package lifecycle; import . "github.com/weshofmann/boxwarden/internal/serialx"`, "unsupported foundation import"},
 		{"alternate process field", "internal/backend/state.go", `package backend; type State struct { ProcessID int }`, "persisted process authority"},
@@ -59,7 +69,7 @@ func TestSliceBPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
 	}
 }
 
-func TestSliceBPolicyAllowsCurrentAdmissionAndUncomposedFoundations(t *testing.T) {
+func TestSliceCPolicyAllowsBoundedBootstrapAndUncomposedSliceDFoundations(t *testing.T) {
 	tests := []struct {
 		name, path, source string
 	}{
@@ -69,6 +79,7 @@ func TestSliceBPolicyAllowsCurrentAdmissionAndUncomposedFoundations(t *testing.T
 			`package sessionruntime
 import (
   "context"
+	"github.com/weshofmann/boxwarden/internal/guestproto"
 	"github.com/weshofmann/boxwarden/internal/serialx"
   "github.com/weshofmann/boxwarden/internal/sshx"
   "github.com/weshofmann/boxwarden/internal/supervisor"
@@ -77,13 +88,40 @@ func f(ctx context.Context, expectation struct{ Manifest struct{ Operator string
 	ca := sshx.NewCAStore(sshx.CAStoreOptions{Runner: sshx.NewExecRunner(), Identity: sshx.OSIdentity{}})
   _, _ = ca.Check(ctx, sshx.Domain{}, []sshx.Domain{{}})
 	_, _ = serialx.CreateRuntime(ctx, "/generation")
+	request := guestproto.SerialRequest{Version: guestproto.Version, Association: guestproto.Association{}}
+	result, _ := serial.Bootstrap(ctx, request)
+	_, _, _ = guestproto.EncodeSerialFrame(request, result)
+	pins := sshx.NewPinStore(sshx.Domain{})
+	binding := sshx.Binding{}
+	pin, _ := pins.Admit(ctx, binding, sshx.ObservedHostKey{})
+	_, _ = pins.Load(ctx, binding)
+	_ = pin
   _ = supervisor.LaunchRequest{Binding: supervisor.Binding{}}
-  _ = supervisor.Snapshot{PinPresent: false, CertificateCurrent: false, ProbeOK: false, ZoneMatches: false}
+	_ = supervisor.Snapshot{PinPresent: true, CertificateCurrent: false, ProbeOK: false, ZoneMatches: false}
   _ = expectation.Manifest.Operator
 }`,
 		},
 		{"host admission manifest", "internal/hostx/manifest.go", `package hostx; type Manifest struct{ Operator string }`},
+		{"ephemeral process argument", "internal/backend/tart/process_group_darwin.go", `package tart; func request(processID int) { _ = processID }`},
 		{"guest trust foundation", "internal/guestproto/bootstrap.go", `package guestproto; type bindingManifest struct{ Domain string }`},
+		{"session action protocol", "internal/session/action_service.go", `package session
+import protocol "github.com/weshofmann/boxwarden/internal/guestproto"
+var _ = protocol.ActionRequest{Version: protocol.Version, Association: protocol.Association{}}
+var _ = protocol.ActionReceipt{}
+func f(r protocol.ActionRequest, receipt protocol.ActionReceipt) { _, _, _ = protocol.EncodeActionRequest(r); _, _ = protocol.EncodeActionReceipt(r, receipt) }`},
+		{"owner action admission protocol", "internal/sessionruntime/action_owner.go", `package sessionruntime
+import protocol "github.com/weshofmann/boxwarden/internal/guestproto"
+var _ = protocol.ActionRequest{Association: protocol.Association{}}
+func f(r protocol.ActionRequest) { _, _, _ = protocol.EncodeActionRequest(r) }`},
+		{"typed supervisor action control", "internal/supervisor/control.go", `package supervisor
+import protocol "github.com/weshofmann/boxwarden/internal/guestproto"
+var _ = protocol.ActionRequest{Association: protocol.Association{}}
+var _ = protocol.ActionReceipt{}
+func f(r protocol.ActionRequest, receipt protocol.ActionReceipt) { _, _, _ = protocol.EncodeActionRequest(r); _, _ = protocol.EncodeActionReceipt(r, receipt) }`},
+		{"exact action controller", "internal/supervisor/action_exact.go", `package supervisor
+import protocol "github.com/weshofmann/boxwarden/internal/guestproto"
+var _ = protocol.ActionRequest{}
+var _ = protocol.ActionReceipt{}`},
 		{"serial protocol foundation", "internal/serialx/runtime.go", `package serialx
 import protocol "github.com/weshofmann/boxwarden/internal/guestproto"
 var _ = protocol.MaxRequestBytes
@@ -94,6 +132,15 @@ func f(request protocol.SerialRequest) protocol.SerialResult {
 		{"exact Darwin PTY primitive", "internal/serialx/pty_darwin.go", "package serialx\n/*\n#include <pty.h>\nstatic int boxwarden_openpty(void) { return openpty(0, 0, 0, 0, 0); }\n*/\nimport \"C\""},
 		{"SSH foundation", "internal/sshx/client.go", `package sshx; func NewClient() {}; func f(c interface{ Probe() }) { c.Probe() }`},
 		{"time-zone foundation", "internal/timezonex/guest.go", `package timezonex; func Converge() {}`},
+		{"workspace formatter admission", "internal/workspacex/promotion.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
+		{"workspace launch formatter admission", "internal/workspacex/launch_disks.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
+		{"workspace preparation formatter admission", "internal/workspacex/prepare_start.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
+		{"export snapshot formatter admission", "internal/workspacex/export_copy.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
+		{"export recovery formatter admission", "internal/workspacex/export_recover.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
+		{"managed create formatter admission", "internal/workspacex/create_managed.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
+		{"deleted workspace retention formatter admission", "internal/workspacex/delete.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
+		{"stopped import verification formatter admission", "internal/workspacex/import_verify.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
+		{"inspector artifact manifest", "internal/exportx/bundle.go", `package exportx; type inspectorBundleManifest struct{ Version int }`},
 		{"qualification libproc", "internal/qualification/adr024/proc.go", "package adr024\n/* #cgo LDFLAGS: -lproc\n#include <libproc.h> */\nimport \"C\""},
 	}
 	for _, test := range tests {
@@ -105,7 +152,7 @@ func f(request protocol.SerialRequest) protocol.SerialResult {
 	}
 }
 
-func TestSliceBProductionTreeSatisfiesRuntimeBoundaryPolicy(t *testing.T) {
+func TestSliceCProductionTreeSatisfiesRuntimeBoundaryPolicy(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
 	policy := &sliceBPolicy{}
 	for _, sourceRoot := range []string{filepath.Join(root, "cmd"), filepath.Join(root, "internal")} {
@@ -139,7 +186,7 @@ func TestSliceBProductionTreeSatisfiesRuntimeBoundaryPolicy(t *testing.T) {
 	}
 	issues := append(policy.issues, policy.finish()...)
 	if len(issues) != 0 {
-		t.Fatalf("Slice B production runtime boundary violations:\n%s", strings.Join(issues, "\n"))
+		t.Fatalf("Slice C production runtime boundary violations:\n%s", strings.Join(issues, "\n"))
 	}
 }
 
@@ -150,6 +197,9 @@ type sliceBPolicy struct {
 	ptyParameterCalls          int
 	lowLevelPTYCalls           int
 	serialRuntimeConstructions int
+	serialBootstrapCalls       int
+	pinAdmissionCalls          int
+	pinLoadCalls               int
 }
 
 func inspectSliceBSource(path string, source []byte) []string {
@@ -166,6 +216,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 	composition := isSliceBCompositionPath(path)
 	serialFoundation := strings.HasPrefix(path, "internal/serialx/")
 	foundationImports := make(map[string]string)
+	workspaceFormatterAlias := ""
 
 	if libprocSourcePattern.Match(source) {
 		p.add(path, "discarded libproc", "libproc header, linker flag, or token")
@@ -194,6 +245,12 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 	}
 	for _, imported := range file.Imports {
 		importPath := strings.ToLower(strings.Trim(imported.Path.Value, `"`))
+		if importPath == "github.com/weshofmann/boxwarden/internal/workspaceformat" {
+			workspaceFormatterAlias = "workspaceformat"
+			if imported.Name != nil {
+				workspaceFormatterAlias = imported.Name.Name
+			}
+		}
 		if isAlternatePTYImport(importPath) {
 			p.add(path, "alternate PTY provider", importPath)
 		}
@@ -209,11 +266,14 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 				foundationImports[localName] = foundation
 			}
 		}
-		if composition && strings.HasSuffix(importPath, "/internal/timezonex") {
-			p.add(path, "deferred Slice C/D import", importPath)
+		if composition && strings.HasSuffix(importPath, "/internal/timezonex") && path != "internal/sessionruntime/owner.go" {
+			p.add(path, "deferred Slice D import", importPath)
 		}
-		if composition && !serialFoundation && strings.HasSuffix(importPath, "/internal/guestproto") {
-			p.add(path, "deferred Slice C/D import", importPath)
+		if composition && !serialFoundation && strings.HasSuffix(importPath, "/internal/guestproto") &&
+			path != "internal/sessionruntime/owner.go" && path != "internal/session/action_service.go" &&
+			path != "internal/sessionruntime/action_owner.go" && path != "internal/supervisor/control.go" &&
+			path != "internal/supervisor/action_exact.go" {
+			p.add(path, "unauthorized Slice C import", importPath)
 		}
 	}
 
@@ -238,11 +298,21 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 			if composition && name == "CreateRuntime" {
 				p.serialRuntimeConstructions++
 			}
+			if path == "internal/sessionruntime/owner.go" && name == "Bootstrap" {
+				p.serialBootstrapCalls++
+			}
+			if path == "internal/sessionruntime/owner.go" && name == "Admit" && calledReceiver(value.Fun) == "pins" {
+				p.pinAdmissionCalls++
+			}
+			if path == "internal/sessionruntime/owner.go" && name == "Load" && calledReceiver(value.Fun) == "pins" {
+				p.pinLoadCalls++
+			}
 			if name == "FindProcess" {
 				p.add(path, "process reconstruction", "os.FindProcess or equivalent name")
 			}
-			if composition && isDeferredCall(name) {
-				p.add(path, "deferred Slice C/D call", name)
+			qualifiedWorkspaceAdmit := allowedWorkspaceFormatterAdmitPath(path) && name == "Admit" && workspaceFormatterAlias != "" && calledReceiver(value.Fun) == workspaceFormatterAlias
+			if composition && isDeferredCall(name) && !allowedLifecycleCall(path, name) && !qualifiedWorkspaceAdmit {
+				p.add(path, "unauthorized Slice C call", name)
 			}
 		case *ast.AssignStmt:
 			if !composition {
@@ -254,29 +324,34 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 					continue
 				}
 				if index >= len(value.Rhs) || !isFalseLiteral(value.Rhs[index]) {
+					if path == "internal/sessionruntime/owner.go" {
+						continue
+					}
 					p.add(path, "deferred readiness publication", selector.Sel.Name)
 				}
 			}
 		case *ast.KeyValueExpr:
 			name := expressionName(value.Key)
-			if composition && isFutureReadinessField(name) && !isFalseLiteral(value.Value) {
+			if composition && isFutureReadinessField(name) && !isFalseLiteral(value.Value) && path != "internal/sessionruntime/owner.go" {
 				p.add(path, "deferred readiness publication", name)
 			}
 			if isPersistedProcessName(name) || isOwnershipMetadataName(name) {
 				p.add(path, "persisted process authority", name)
 			}
-		case *ast.Field:
-			for _, name := range value.Names {
-				if isPersistedProcessName(name.Name) || isOwnershipMetadataName(name.Name) {
-					p.add(path, "persisted process authority", name.Name)
+		case *ast.StructType:
+			for _, field := range value.Fields.List {
+				for _, name := range field.Names {
+					if isPersistedProcessName(name.Name) || isOwnershipMetadataName(name.Name) {
+						p.add(path, "persisted process authority", name.Name)
+					}
 				}
-			}
-			if value.Tag != nil {
-				tag, err := strconv.Unquote(value.Tag.Value)
-				if err == nil {
-					jsonName := strings.Split(reflect.StructTag(tag).Get("json"), ",")[0]
-					if isPersistedProcessName(jsonName) || isOwnershipMetadataName(jsonName) {
-						p.add(path, "persisted process authority", jsonName)
+				if field.Tag != nil {
+					tag, err := strconv.Unquote(field.Tag.Value)
+					if err == nil {
+						jsonName := strings.Split(reflect.StructTag(tag).Get("json"), ",")[0]
+						if isPersistedProcessName(jsonName) || isOwnershipMetadataName(jsonName) {
+							p.add(path, "persisted process authority", jsonName)
+						}
 					}
 				}
 			}
@@ -285,7 +360,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 			if isOwnershipRecordName(name) {
 				p.add(path, "ownership record", value.Name.Name)
 			}
-			if strings.Contains(name, "manifest") && !manifestFoundationPath(path) {
+			if strings.Contains(name, "manifest") && !manifestFoundationPath(path) && !(path == "internal/exportx/bundle.go" && value.Name.Name == "inspectorBundleManifest") {
 				p.add(path, "ownership record", value.Name.Name)
 			}
 		case *ast.BasicLit:
@@ -309,7 +384,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 				break
 			}
 			foundation, ok := foundationImports[identifier.Name]
-			if ok && !allowedFoundationSelector(foundation, value.Sel.Name) {
+			if ok && !allowedFoundationSelector(path, foundation, value.Sel.Name) {
 				p.add(path, "unapproved foundation selector", foundation+"."+value.Sel.Name)
 			}
 		}
@@ -329,6 +404,11 @@ func (p *sliceBPolicy) finish() []string {
 		{p.ptyParameterCalls, 1, "single allocator invocation in serial runtime"},
 		{p.lowLevelPTYCalls, 1, "Darwin low-level PTY allocation"},
 		{p.serialRuntimeConstructions, 1, "Slice B serial runtime construction"},
+		{p.serialBootstrapCalls, 1, "Slice C serial bootstrap composition"},
+		{p.pinAdmissionCalls, 1, "Slice C host-key pin admission"},
+		// Recovery loads the established candidate pin before relaunch; READY
+		// composition loads it again against the live exact-generation key.
+		{p.pinLoadCalls, 2, "Slice C host-key pin verification"},
 	} {
 		if check.got != check.want {
 			issues = append(issues, check.name+" count = "+strconv.Itoa(check.got)+", want "+strconv.Itoa(check.want))
@@ -369,13 +449,40 @@ func sliceBFoundation(importPath string) (string, bool) {
 	}
 }
 
-func allowedFoundationSelector(foundation, selector string) bool {
+func allowedFoundationSelector(path, foundation, selector string) bool {
+	if foundation == "guestproto" {
+		switch path {
+		case "internal/session/action_service.go":
+			switch selector {
+			case "ActionRequest", "ActionReceipt", "Association", "Version", "EncodeActionRequest", "EncodeActionReceipt":
+				return true
+			}
+		case "internal/sessionruntime/action_owner.go":
+			switch selector {
+			case "ActionRequest", "ActionReceipt", "Association", "EncodeActionRequest", "EncodeActionReceipt":
+				return true
+			}
+		case "internal/supervisor/control.go":
+			switch selector {
+			case "ActionRequest", "ActionReceipt", "Association", "EncodeActionRequest", "EncodeActionReceipt":
+				return true
+			}
+		case "internal/supervisor/action_exact.go":
+			return selector == "ActionRequest" || selector == "ActionReceipt"
+		}
+	}
+	if foundation == "serialx" && selector == "CreateInstallerRuntime" {
+		return path == "internal/basebuild/installer_launcher.go"
+	}
 	allowed := map[string]map[string]bool{
 		"guestproto": {
+			"Association":         true,
 			"DecodeSerialEndLine": true,
 			"MaxRequestBytes":     true,
 			"SerialRequest":       true,
 			"SerialResult":        true,
+			"EncodeSerialFrame":   true,
+			"Version":             true,
 		},
 		"serialx": {
 			"CreateRuntime": true,
@@ -387,15 +494,69 @@ func allowedFoundationSelector(foundation, selector string) bool {
 			"CAInitialized":        true,
 			"CAInitResult":         true,
 			"CAStoreOptions":       true,
+			"Binding":              true,
 			"Domain":               true,
+			"HostKeyPin":           true,
 			"NewCAStore":           true,
 			"NewExecRunner":        true,
+			"NewPinStore":          true,
+			"ObservedHostKey":      true,
 			"OSIdentity":           true,
 			"RandomUUID":           true,
 		},
 		"timezonex": {},
 	}
+	if path == "internal/sessionruntime/owner.go" {
+		switch foundation {
+		case "sshx":
+			switch selector {
+			case "Certificate", "Connection", "PackageVersion", "GuestIdentity", "WorkspaceMount", "ImportReceipt", "ProbeRequest", "ProbeResult", "ReadZoneRequest", "EnsureClientKey", "NewCertificateIssuer", "NewClient", "NewSFTPClient", "WriteKnownHosts", "RenewalRequired", "CleanupGenerationCredentials":
+				return true
+			}
+		case "timezonex":
+			switch selector {
+			case "ZoneClient", "DetectHost", "Converge", "Valid":
+				return true
+			}
+		}
+	}
+	if path == "internal/sessionruntime/import_owner.go" && foundation == "sshx" && selector == "WorkspaceMount" {
+		return true // Retained owner compares only its already admitted launch mounts.
+	}
+	if path == "internal/sessionruntime/action_owner.go" && foundation == "sshx" && selector == "Connection" {
+		return true // The retained owner uses its existing pinned connection for one admitted action.
+	}
+	if path != "internal/sessionruntime/owner.go" {
+		if foundation == "guestproto" && (selector == "Association" || selector == "EncodeSerialFrame" || selector == "Version") {
+			return false
+		}
+		if foundation == "sshx" && (selector == "Binding" || selector == "HostKeyPin" || selector == "NewPinStore" || selector == "ObservedHostKey") {
+			// Reviewed in docs/v0.2/alpha-decisions.md: rebuild may read
+			// the exact old pin witness; only the owner may mutate the pin.
+			switch path {
+			case "internal/session/rebuild.go", "internal/session/rebuild_journal.go":
+				return selector == "Binding" || selector == "HostKeyPin"
+			case "internal/sessionruntime/rebuild.go":
+				return selector == "NewPinStore"
+			default:
+				return false
+			}
+		}
+	}
 	return allowed[foundation][selector]
+}
+
+func allowedLifecycleCall(path, name string) bool {
+	switch name {
+	case "Bootstrap":
+		return path == "internal/sessionruntime/owner.go" || path == "internal/supervisor/control.go" || path == "internal/supervisor/exact.go"
+	case "Admit", "Load", "NewPinStore":
+		return path == "internal/sessionruntime/owner.go" || name == "NewPinStore" && path == "internal/sessionruntime/rebuild.go"
+	case "NewAddressResolver", "NewCertificateIssuer", "NewClient", "WriteKnownHosts", "Issue", "Resolve", "Probe", "Converge", "ReadZone":
+		return path == "internal/sessionruntime/owner.go"
+	default:
+		return false
+	}
 }
 
 func isAlternatePTYImport(importPath string) bool {
@@ -416,6 +577,16 @@ func manifestFoundationPath(path string) bool {
 	return strings.HasPrefix(path, "internal/hostx/") || strings.HasPrefix(path, "internal/guestproto/")
 }
 
+func allowedWorkspaceFormatterAdmitPath(path string) bool {
+	switch path {
+	case "internal/workspacex/promotion.go", "internal/workspacex/launch_disks.go", "internal/workspacex/prepare_start.go",
+		"internal/workspacex/export_copy.go", "internal/workspacex/export_recover.go", "internal/workspacex/create_managed.go", "internal/workspacex/delete.go", "internal/workspacex/import_verify.go":
+		return true
+	default:
+		return false
+	}
+}
+
 func calledName(expression ast.Expr) string {
 	switch value := expression.(type) {
 	case *ast.Ident:
@@ -425,6 +596,18 @@ func calledName(expression ast.Expr) string {
 	default:
 		return ""
 	}
+}
+
+func calledReceiver(expression ast.Expr) string {
+	selector, ok := expression.(*ast.SelectorExpr)
+	if !ok {
+		return ""
+	}
+	receiver, ok := selector.X.(*ast.Ident)
+	if !ok {
+		return ""
+	}
+	return receiver.Name
 }
 
 func expressionName(expression ast.Expr) string {

@@ -13,11 +13,14 @@ import (
 )
 
 const (
-	requestName        = "supervisor-request.json"
-	socketName         = "supervisor.sock"
-	lockName           = "generation.lock"
-	maxDiagnosticBytes = 2048
-	maxControlBytes    = 16 << 10
+	requestName           = "supervisor-request.json"
+	socketName            = "supervisor.sock"
+	lockName              = "generation.lock"
+	maxDiagnosticBytes    = 2048
+	maxLaunchRequestBytes = 16 << 10
+	// One canonical action request can be 64 KiB; the typed control envelope
+	// has a separate 80 KiB frame ceiling. Other actions retain their own bounds.
+	maxControlBytes = 80 << 10
 )
 
 type Binding struct{ Domain, SessionID, BackendKind, BackendObject, Generation string }
@@ -36,8 +39,36 @@ type Snapshot struct {
 	ObservedAt                                                                          time.Time `json:"observed_at"`
 	Diagnostic                                                                          string    `json:"diagnostic"`
 }
+type PackageVersion struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+type GuestIdentity struct {
+	MachineID string `json:"machine_id"`
+	Hostname  string `json:"hostname"`
+}
+
+// ImportTransfer binds one private host snapshot to an exact mounted
+// workspace. The retained owner admits the journal and performs the transfer.
+type ImportTransfer struct {
+	TransactionID  string `json:"transaction_id"`
+	SourceDigest   string `json:"source_digest"`
+	VolumeID       string `json:"volume_id"`
+	FilesystemUUID string `json:"filesystem_uuid"`
+	MountPath      string `json:"mount_path"`
+}
+
+// ImportResult is a measured host readback, not durable guest persistence.
+type ImportResult struct {
+	Digest     string `json:"digest"`
+	FileCount  int    `json:"file_count"`
+	TotalBytes int64  `json:"total_bytes"`
+	RemotePath string `json:"remote_path"`
+}
 type Controller interface {
 	Snapshot(context.Context, Binding) (Snapshot, error)
+	Bootstrap(context.Context, Binding) (Snapshot, error)
+	Ready(context.Context, Binding) (Snapshot, error)
 	Stop(context.Context, Binding) error
 }
 
@@ -71,7 +102,7 @@ func validLaunchRequest(r LaunchRequest) error {
 		return fmt.Errorf("runtime directory does not match exact binding")
 	}
 	data, err := json.Marshal(r)
-	if err != nil || len(data) > maxControlBytes {
+	if err != nil || len(data) > maxLaunchRequestBytes {
 		return fmt.Errorf("encoded launch request exceeds bound")
 	}
 	return nil
@@ -130,9 +161,12 @@ func readExactRequestFile(path string) (LaunchRequest, error) {
 		return r, err
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, maxControlBytes+1))
+	data, err := io.ReadAll(io.LimitReader(file, maxLaunchRequestBytes+1))
 	if err != nil {
 		return r, err
+	}
+	if len(data) > maxLaunchRequestBytes {
+		return r, fmt.Errorf("encoded launch request exceeds bound")
 	}
 	if err = decodeExact(data, &r); err != nil {
 		return r, err
@@ -162,9 +196,13 @@ func decodeExact(data []byte, value any) error {
 	return nil
 }
 func snapshotReady(s Snapshot) bool {
-	return snapshotStarted(s) && s.PinPresent && s.CertificateCurrent && s.ProbeOK && s.ZoneMatches
+	return snapshotBootstrapped(s) && s.CertificateCurrent && s.ProbeOK && s.ZoneMatches
 }
 
 func snapshotStarted(s Snapshot) bool {
 	return s.BackendRunning && s.SerialHealthy
+}
+
+func snapshotBootstrapped(s Snapshot) bool {
+	return snapshotStarted(s) && s.PinPresent
 }

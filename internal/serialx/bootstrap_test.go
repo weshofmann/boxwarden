@@ -28,7 +28,7 @@ func bootstrapRequest() guestproto.SerialRequest {
 
 func bootstrapResult() guestproto.SerialResult {
 	r := bootstrapRequest()
-	return guestproto.SerialResult{Version: 1, StartGeneration: r.StartGeneration, Association: r.Association, CAFingerprint: r.CAFingerprint, Principal: r.Principal, HostPublicKey: requestKey, InstalledSHA256: map[string]string{"trusted-user-ca.pub": strings.Repeat("a", 64), "authorized_principals/boxwarden": strings.Repeat("b", 64), "management-binding.json": strings.Repeat("c", 64)}, SSHD: map[string]string{"trustedusercakeys": "/etc/ssh/boxwarden/active/trusted-user-ca.pub", "authorizedprincipalsfile": "/etc/ssh/boxwarden/active/authorized_principals/%u", "authorizedkeysfile": "none", "permituserenvironment": "no", "permituserrc": "no", "passwordauthentication": "no", "kbdinteractiveauthentication": "no", "permitrootlogin": "no", "allowagentforwarding": "no", "x11forwarding": "no", "allowtcpforwarding": "no", "allowstreamlocalforwarding": "no", "gatewayports": "no", "permittunnel": "no"}}
+	return guestproto.SerialResult{Version: 1, StartGeneration: r.StartGeneration, Association: r.Association, CAFingerprint: r.CAFingerprint, Principal: r.Principal, HostPublicKey: requestKey, InstalledSHA256: map[string]string{"trusted-user-ca.pub": strings.Repeat("a", 64), "authorized_principals/boxwarden": strings.Repeat("b", 64), "management-binding.json": strings.Repeat("c", 64)}, SSHD: map[string]string{"trustedusercakeys": "/etc/ssh/boxwarden/active/trusted-user-ca.pub", "authorizedprincipalsfile": "/etc/ssh/boxwarden/active/authorized_principals/%u", "authorizedkeysfile": ".ssh/authorized_keys", "permituserenvironment": "no", "permituserrc": "no", "passwordauthentication": "no", "kbdinteractiveauthentication": "no", "permitrootlogin": "no", "allowagentforwarding": "no", "x11forwarding": "no", "allowtcpforwarding": "no", "allowstreamlocalforwarding": "no", "gatewayports": "no", "permittunnel": "no"}}
 }
 
 func runtimePipe(t *testing.T) (*Runtime, net.Conn) {
@@ -41,6 +41,9 @@ func runtimePipe(t *testing.T) (*Runtime, net.Conn) {
 
 func readBootstrap(t *testing.T, guest net.Conn) {
 	t.Helper()
+	if _, err := io.WriteString(guest, "boxwarden@boxwarden-123456789abc:~$ "); err != nil {
+		t.Fatal(err)
+	}
 	guest.SetDeadline(time.Now().Add(3 * time.Second))
 	reader := bufio.NewReader(guest)
 	command, err := reader.ReadString('\n')
@@ -50,6 +53,58 @@ func readBootstrap(t *testing.T, guest net.Conn) {
 	request, err := guestproto.DecodeSerialRequest(reader)
 	if err != nil || request != bootstrapRequest() {
 		t.Fatalf("canonical request = %#v, %v", request, err)
+	}
+}
+
+func TestBootstrapWaitsForExactAutologinPrompt(t *testing.T) {
+	r, guest := runtimePipe(t)
+	done := startBootstrap(r, context.Background())
+	guest.SetReadDeadline(time.Now().Add(30 * time.Millisecond))
+	var one [1]byte
+	if n, _ := guest.Read(one[:]); n != 0 {
+		t.Fatal("bootstrap command sent before autologin prompt")
+	}
+	for _, output := range []string{
+		"booting Linux\r\n",
+		"root@boxwarden-123456789abc:~# ",
+		"boxwarden@boxwarden-123456789abc:~/wrong$ ",
+		"\x1b[01;32mboxwarden@boxwarden-123456789abc\x1b[00m:\x1b[01;34m~\x1b[00m$ ",
+	} {
+		for _, b := range []byte(output) {
+			if _, err := guest.Write([]byte{b}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	guest.SetReadDeadline(time.Now().Add(3 * time.Second))
+	reader := bufio.NewReader(guest)
+	command, err := reader.ReadString('\n')
+	if err != nil || command != bootstrapCommand {
+		t.Fatalf("fixed command after prompt = %q, %v", command, err)
+	}
+	if _, err := guestproto.DecodeSerialRequest(reader); err != nil {
+		t.Fatal(err)
+	}
+	begin, end, _ := guestproto.EncodeSerialFrame(bootstrapRequest(), bootstrapResult())
+	if _, err := io.WriteString(guest, begin+"\n"+end+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	awaitBootstrap(t, done, false)
+}
+
+func TestBootstrapPromptWaitCancellationSendsNoCommand(t *testing.T) {
+	r, guest := runtimePipe(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	done := startBootstrap(r, ctx)
+	awaitBootstrap(t, done, true)
+	guest.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
+	var one [1]byte
+	if n, _ := guest.Read(one[:]); n != 0 {
+		t.Fatal("prompt wait wrote to guest")
+	}
+	if !errors.Is(r.Err(), ErrPoisoned) {
+		t.Fatalf("prompt wait did not poison one-shot transport: %v", r.Err())
 	}
 }
 
@@ -149,6 +204,9 @@ func TestBootstrapCancellationAndClosureUnblockBothDirections(t *testing.T) {
 				readBootstrap(t, guest)
 			} else {
 				// Consume one byte, leaving the fixed request write blocked.
+				if _, err := io.WriteString(guest, "boxwarden@boxwarden-123456789abc:~$ "); err != nil {
+					t.Fatal(err)
+				}
 				guest.SetReadDeadline(time.Now().Add(time.Second))
 				var b [1]byte
 				if _, err := guest.Read(b[:]); err != nil {

@@ -19,12 +19,16 @@ func main() {
 
 func run(args []string, input io.Reader, output, _ io.Writer, bootstrapper *guestproto.Bootstrapper) error {
 	if len(args) != 1 {
-		return fmt.Errorf("usage: boxwarden-guest-bootstrap serial-bootstrap|management")
+		return fmt.Errorf("usage: boxwarden-guest-bootstrap serial-bootstrap|management|action")
 	}
 	if bootstrapper == nil {
 		bootstrapper = guestproto.NewBootstrapper("/", guestproto.ExecRunner{})
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	timeout := 30 * time.Second
+	if args[0] == "action" {
+		timeout = 10 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	switch args[0] {
 	case "serial-bootstrap":
@@ -57,6 +61,23 @@ func run(args []string, input io.Reader, output, _ io.Writer, bootstrapper *gues
 			return fmt.Errorf("management response exceeds bound")
 		}
 		if err := writeExact(output, result); err != nil {
+			return err
+		}
+		return writeExact(output, []byte("\n"))
+	case "action":
+		request, err := guestproto.DecodeActionRequest(input)
+		if err != nil {
+			return err
+		}
+		receipt, err := bootstrapper.ExecuteAction(ctx, request)
+		if err != nil {
+			return err
+		}
+		encoded, err := guestproto.EncodeActionReceipt(request, receipt)
+		if err != nil {
+			return err
+		}
+		if err := writeExact(output, encoded); err != nil {
 			return err
 		}
 		return writeExact(output, []byte("\n"))
