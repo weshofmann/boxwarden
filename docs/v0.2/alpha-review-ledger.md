@@ -766,3 +766,19 @@ This is a concrete build prerequisite mismatch, without reconstructing discarded
 child stderr. Correct the host build profile before another guest start. A
 synthetic regression reproduced the two-stop reconciliation path. Do not weaken
 socket admission based on the secondary missing-socket observation.
+
+
+## Single-call quiescence correction at `6d7c037`
+
+Reviewed worker `84ac5a5` was integrated with provenance. The two-file delta
+persists stopping intent before the unchanged exact-generation quiescence proof
+when the exact backend is stopped. It retains residue/unsafe-parent rejection,
+same-generation binding, transition locking, volume-first workspace release,
+record comparison and final backend recheck. Fresh bounded review found no
+Important/Critical issue and independently passed stop/quiescence tests.
+Regressions reproduced the old first-call failure; positive/negative checks,
+full worker Go suite, affected race and fresh integration stop checks passed.
+The host CLI build now explicitly enables CGO. Clean current-source metadata,
+real Darwin PTY race tests and healthy doctor were observed. These are build
+and source checks; no refreshed VM start, inspector cancellation or resume is
+claimed yet. Earlier failed host results remain immutable.

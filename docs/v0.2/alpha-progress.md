@@ -116,9 +116,17 @@ harness, not the pending host behavior.
 
 [Latest published deterministic CI](https://github.com/weshofmann/boxwarden/actions/runs/36303545644)
 passed the full matrix at the preceding source checkpoint.
-Next: correct and verify single-call absent-generation reconciliation, build
-and verify the host CLI with CGO, then refresh the source-bound cancellation test.
-Selective retention and final source/host handoff gates remain pending. Preserve
+The single-call correction is now reviewed and published: stopped-backend
+reconciliation persists stopping intent before the existing exact quiescence
+proof. Starting/running, proof-false/error and lock-order regressions failed on
+the old source and passed after correction. Full worker Go tests, affected race
+checks, independent targeted review tests and fresh integration stop tests
+passed. Exact runtime-residue and workspace-release checks remain unchanged.
+A clean current-source host CLI was built with CGO enabled; build metadata,
+real Darwin PTY race tests and full-host doctor passed. This is source/build
+verification; the refreshed real cancellation case has not run.
+Next: current-source bounded real cancellation/resume acceptance, selective
+retention and final source/host handoff gates. Preserve
 historical workspaces, protected VM and detached rollback. The auxiliary
 qualification sparsebundle remains in place per operator preference; its latest
 allocated footprint was about 71.2 GiB, with
