@@ -26,13 +26,18 @@ VOLUME_UUID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 FS_UUID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 ```
 
-Build from a clean checkout and retain its source identity:
+Build from a clean checkout and retain its source identity. The macOS host CLI
+requires CGO for the Darwin serial PTY implementation; a CGO-disabled binary can
+run host diagnostics and export commands but cannot start a workstation. Retain
+and inspect build metadata rather than treating successful compilation or doctor
+as proof of runtime support:
 
 ```sh
 test -z "$(git status --porcelain)"
 SOURCE_SHA=$(git rev-parse HEAD)
 mkdir -m 700 "$PRIVATE_BIN"
-GOTOOLCHAIN=local "$GO_BIN" build -o "$PRIVATE_BIN/boxwarden" ./cmd/boxwarden
+CGO_ENABLED=1 GOTOOLCHAIN=local "$GO_BIN" build -o "$PRIVATE_BIN/boxwarden" ./cmd/boxwarden
+"$GO_BIN" version -m "$PRIVATE_BIN/boxwarden"
 printf 'source SHA: %s\n' "$SOURCE_SHA"
 ```
 

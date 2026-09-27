@@ -735,3 +735,34 @@ READY; service errors add fixed binding/freshness details. Unknown secret-like
 diagnostics remain suppressed, and every readiness guard is unchanged.
 Eighteen RED cases, full worker Go checks, affected race/vet and fresh targeted
 integration race checks passed. The original host cause remains unknown.
+
+
+## Current-source cancellation prerequisite and reconciliation failure
+
+A fresh bounded private-driver review found and corrected missing original-result
+and receipt-save acceptance gates. Seventeen synthetic cases passed, including
+owned foreground-group SIGINT, incomplete-stream admission, wrong transaction,
+protocol/mode/link rejection, and failure after result bytes were written.
+Corrected read-only host preflight passed. Initial preflight failures are
+preserved separately; no VM mutation occurred during them.
+
+The reviewed real test's first public start returned an error before payload
+import. Its retained original child and driver both exited one. Full-host Tart
+observation showed all eighteen objects stopped. Public containment stop also
+exited one, reporting an unsafe launch-request path after generation cleanup;
+the existing `stopping`-state quiescence path subsequently completed public
+stop. Independent verification proved stopped intent, healthy doctor and unchanged
+workspace data/metadata. No import, inspector cancellation, export
+resume or host acceptance is reported. The detached supervisor's stderr was not
+retained, so the original child cause is unknown; the missing control socket can
+be a later polling observation. Next delta review covers safe failure visibility
+and exact absent-generation reconciliation before any new host attempt.
+
+
+Build metadata inspection found the new host CLI used `CGO_ENABLED=0`, whereas
+the earlier successful lifecycle CLI used CGO. Darwin serial PTY allocation is
+selected only with CGO; the disabled build selects an unavailable implementation.
+This is a concrete build prerequisite mismatch, without reconstructing discarded
+child stderr. Correct the host build profile before another guest start. A
+synthetic regression reproduced the two-stop reconciliation path. Do not weaken
+socket admission based on the secondary missing-socket observation.

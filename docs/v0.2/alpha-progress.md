@@ -96,12 +96,33 @@ Independent bounded delta reviews found no Important/Critical defect. Actual
 VZ cancellation and terminal process-group behavior remain unqualified;
 snapshot-ready alone is not an inspector cancellation barrier.
 
-Next: current-source bounded real cancellation/resume acceptance, selective
-retention and final source/host handoff gates. Preserve
+The current-source real cancellation attempt is held after its prerequisite
+public start failed before payload import. The original start process exited
+one; authoritative backend observation showed all eighteen objects stopped.
+Public stop then failed reconciliation after the generation namespace had been
+cleaned. The distinct existing `stopping`-state recovery path subsequently
+completed public stop; independent observation confirmed stopped intent, all
+eighteen backends stopped, healthy doctor and unchanged workspace data/metadata.
+No new import,
+inspector cancellation or resume is claimed. Both original results are retained.
+The supervisor child's diagnostic was discarded by the detached launcher; its
+precise original error remains unknown. Build inspection found that the new
+CLI disabled CGO, selecting the unavailable Darwin PTY implementation; earlier
+successful starts used CGO. A fresh host CLI must enable CGO before another
+start. A fresh bounded review approved the
+private cancellation driver after receipt-failure corrections; seventeen
+synthetic cases and read-only host preflight passed. These qualify the test
+harness, not the pending host behavior.
+
+[Latest published deterministic CI](https://github.com/weshofmann/boxwarden/actions/runs/36303545644)
+passed the full matrix at the preceding source checkpoint.
+Next: correct and verify single-call absent-generation reconciliation, build
+and verify the host CLI with CGO, then refresh the source-bound cancellation test.
+Selective retention and final source/host handoff gates remain pending. Preserve
 historical workspaces, protected VM and detached rollback. The auxiliary
 qualification sparsebundle remains in place per operator preference; its latest
-allocated footprint was about 70.8 GiB while installer assets were staged, with
-about 57.0 GiB free inside. No latency bottleneck has been attributed to it.
+allocated footprint was about 71.2 GiB, with
+about 56.9 GiB free inside. No latency bottleneck has been attributed to it.
 
 
 ### Visible limits and human actions
