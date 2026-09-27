@@ -338,7 +338,8 @@ paths are refused. The fixed third script argument preserves the staging path as
 one argv element. Go caches and `TMPDIR`/`GOTMPDIR`, Swift module cache and
 `TMPDIR`, and other child scratch are explicitly routed to that private storage.
 Completed caches/scratch are removed before artifact admission; the caller
-removes the exact admitted bundle after capture. This allows an external-state
+removes the exact admitted bundle after capture only when its lifetime is
+proved. An unproven inspector stop retains the bundle and spool. This allows an external-state
 workflow to avoid expanding internal disk use during inspector compilation.
 
 ### Export builder cancellation ownership
@@ -355,3 +356,15 @@ An unproven reap or drain returns an error naming the retained request and outpu
 paths and removes neither. Successful cancellation removes only the recorded
 identities. This source-level correction does not qualify inspector VM capture
 cancellation, which requires its independent stopped-receipt contract.
+
+### Inspector capture cancellation
+
+The caller signals its retained helper with SIGTERM and permits bounded ordered
+shutdown. The Swift helper handles SIGINT and SIGTERM through the same intent
+flag and VM queue, waits for an in-flight start callback, then proves stopped
+state and console EOF. A separate cancellation receipt permits cleanup only;
+it never opens export publication. Go tracks actual pipe EOF independently of
+the child exit. Missing, malformed or unproven shutdown evidence retains the
+exact spool and bundle for inspection and prevents silent resume. A fallback
+helper kill and reap alone do not prove VM shutdown. Source regressions and
+Swift compilation do not qualify real VZ cancellation or terminal Ctrl-C.

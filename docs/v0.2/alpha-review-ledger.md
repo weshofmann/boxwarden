@@ -691,3 +691,29 @@ ready-snapshot resume; interrupted copying remains a separate unqualified case.
 The current tree builder and B software-addition/start/data/GUI observations are
 actual host evidence, separate from this open cancellation finding. The earlier
 jq software-addition claim remains withdrawn.
+
+## Cancellation correction deltas and retained-workspace repeat
+
+Fresh bounded six-file reviews approved builder correction `1d079be` and
+inspector correction `6643d02`, integrated as `aecd7f7` and `a0fbda8`.
+The additional two-file SIGINT delta `7b8a31f` received its own bounded review
+and was integrated as `f1f82e2`. No Important/Critical defect remained in those
+frozen deltas. Requested Astra/xhigh runtime routing was not independently
+attested. Reviews cover source and synthetic checks, not actual VZ shutdown.
+Builder descendant and bounded-log failures reproduced before correction;
+source cancellation/EOF and shared-signal fixtures also have retained RED/GREEN
+evidence. Fresh integration targeted race checks passed using external scratch.
+The earlier internal-scratch run failed the real disk reserve; it is not a pass.
+
+Reviewed exact B and C deletion manifests preserved their independent workspace
+volumes and excluded every other backend object. E replacement and its NEW
+stopped export passed independent data/package comparisons. C separately
+completed tree rebuild, explicit start, actions/data/package checks and GUI
+observation before D replacement. D returned a valid GUI action receipt but
+failed the caller's post-action READY gate; one reviewed exact retry failed the
+supervisor precheck before any guest action request. Both original failures are
+retained. Later public READY, pinned edited data/package readback and actual GUI
+observation do not convert them into successful starts. Five bounded read-only
+typed snapshots subsequently proved all six predicates, with no recurrence;
+the earlier discarded failing snapshot cannot be reconstructed. Recovery and
+D's NEW stopped export remain open gates.

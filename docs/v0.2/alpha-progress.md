@@ -26,7 +26,10 @@ both objects stopped and healthy doctor. B rebuilt from that qualified base,
 then explicit public start completed automatic actions. Pinned readback proved
 the formerly absent tree package installed at the qualified version and all
 four edited workspace files retained. Actual rebuilt ChatGPT sign-in GUI was
-observed. B is stopped; its E replacement and the C → D repeat remain pending.
+observed. Reviewed public deletion retained B's exact workspace; replacement E
+attached it without formatting or import, completed actions and retained the
+edited bytes and installed package. E's NEW stopped export matched its own
+history, live readback and predetermined bytes independently.
 Fresh bounded design review found
 no Important/Critical issue and approved reusing one newly qualified tree base
 across the two independent workspace histories.
@@ -38,8 +41,18 @@ verification passed under C's original backend before edits or rebuild. C then
 ran the explicit guest edit, produced its own NEW edited export matching all
 four predetermined/live files, and retained those bytes through an actual
 restart. Counter `3`, one once execution, one explicit edit and three startup
-pairs matched independently. C is stopped. Its separate tree rebuild and
-replacement remain pending.
+pairs matched independently. C also completed its separate tree rebuild,
+explicit start, package/data/action readback and actual ChatGPT GUI observation.
+Reviewed public deletion retained its workspace, which replacement D attached.
+D's first start failed the fresh readiness check after the GUI action returned
+a valid receipt; that attempt remains indeterminate. One separately reviewed
+exact receipt retry failed the supervisor's own readiness precheck before any
+guest action request. Later public status reported READY; pinned readback
+matched all four edited files, once/counter markers and seven package records,
+and the actual sign-in GUI was observed. Both failures remain immutable evidence.
+The precise failing readiness predicate was discarded by the current error
+path and is not yet attributed. D recovery and its NEW stopped export remain
+pending; the independent repeat is not complete.
 
 Bounded launch review caught a private runner bookkeeping failure that could
 lose the original builder result after launch. Corrected runners retain the
@@ -59,15 +72,22 @@ passed the full deterministic matrix, including both Swift helper builds. A fres
 current-source bootstrap build reproduced the exact tracked digest lock. Final
 host gates remain pending.
 
-A focused export cancellation review found an Important process-ownership gap:
-cancelling the builder can kill its shell while leaving descendants or build
-artifacts. The extra real cancellation attempt is held until a production fix
-and deterministic regression checks pass. Snapshot-ready alone is not an
-inspector cancellation barrier; no host cleanup qualification is claimed.
+A focused export cancellation review found an Important process-ownership gap.
+Reviewed corrections now preallocate exact builder output, serialize process
+group cancellation with direct-child reaping, bound logs, and retain artifacts
+when lifetime is unproven. Inspector cancellation permits ordered shutdown and
+requires an exact stopped/EOF receipt before cleanup; cancellation receipts
+never permit publication. SIGINT and SIGTERM share that path. Worker full Go,
+affected race/vet and Swift checks passed; fresh integration targeted race,
+shell and source gates passed. The first integration run hit the internal disk
+reserve; the corrected run used external scratch and retained the guard.
+Independent bounded delta reviews found no Important/Critical defect. Actual
+VZ cancellation and terminal process-group behavior remain unqualified;
+snapshot-ready alone is not an inspector cancellation barrier.
 
-Next: reviewed B → E replacement and NEW independently compared stopped export,
-then C → D tree rebuild/start/replacement and its own NEW export. Correct the
-export cancellation gap before spending that failure-path attempt. Preserve
+Next: bounded read-only D readiness diagnosis, supported recovery and its NEW
+independently compared stopped export; then current-source cancellation
+acceptance and final source/host handoff gates. Preserve
 historical workspaces, protected VM and detached rollback. The auxiliary
 qualification sparsebundle remains in place per operator preference; its latest
 allocated footprint was about 70.8 GiB while installer assets were staged, with
