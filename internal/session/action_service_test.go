@@ -392,3 +392,46 @@ func TestExecuteActionRejectsForeignGuestReceipt(t *testing.T) {
 		t.Fatalf("false receipt accepted: %+v, %v", got, err)
 	}
 }
+
+func TestActionServiceReportsSafeReadinessFailureBeforeAndAfterGuest(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		mutate     func(*supervisor.Snapshot)
+	}{
+		{"probe", "ssh probe; strict management SSH probe failed", func(s *supervisor.Snapshot) { s.ProbeOK = false; s.Diagnostic = "strict management SSH probe failed" }},
+		{"unknown", "unproven checks: certificate", func(s *supervisor.Snapshot) {
+			s.CertificateCurrent = false
+			s.Diagnostic = "secret-fixture-token\x1b[31m"
+		}},
+		{"binding", "exact-generation binding mismatch", func(s *supervisor.Snapshot) { s.Binding.Generation = "secret-fixture-token" }},
+		{"missing-time", "snapshot observation freshness unproven", func(s *supervisor.Snapshot) { s.ObservedAt = time.Time{} }},
+		{"future-time", "snapshot observation freshness unproven", func(s *supervisor.Snapshot) { s.ObservedAt = s.ObservedAt.Add(time.Second) }},
+		{"stale-time", "snapshot observation freshness unproven", func(s *supervisor.Snapshot) { s.ObservedAt = s.ObservedAt.Add(-maxReadySnapshotAge - time.Nanosecond) }},
+	} {
+		for _, failedCall := range []int{1, 2} {
+			t.Run(tc.name+string(rune('0'+failedCall)), func(t *testing.T) {
+				root, fixture := actionAttemptFixture(t)
+				control := &actionControlFake{now: time.Now(), mutateSnapshot: func(call int, s *supervisor.Snapshot) {
+					if call == failedCall {
+						tc.mutate(s)
+					}
+				}}
+				service := testActionService(root, control, fixture.AttemptID)
+				got, err := service.ExecuteAction(t.Context(), fixture.SessionName, fixture.ActionPhase, fixture.ActionID)
+				if err == nil || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "secret-fixture-token") {
+					t.Fatalf("readiness failure lost or unsafe: %v", err)
+				}
+				if control.runs != failedCall-1 {
+					t.Fatalf("guest calls=%d", control.runs)
+				}
+				if failedCall == 1 {
+					if _, err := LoadActionAttempt(root, fixture.Domain, fixture.SessionID, fixture.AttemptID); !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("failed precheck reserved attempt: %v", err)
+					}
+				} else if got.State != ActionAttemptIndeterminate {
+					t.Fatalf("failed postcheck completed attempt: %+v", got)
+				}
+			})
+		}
+	}
+}

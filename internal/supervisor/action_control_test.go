@@ -2,6 +2,8 @@ package supervisor
 
 import (
 	"context"
+	"encoding/json"
+	"net"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -136,5 +138,70 @@ func TestExactActionControllerRejectsNonCanonicalRoot(t *testing.T) {
 	}
 	if controller, err := NewExactActionController("/private/boxwarden-runtime"); err != nil || controller == nil {
 		t.Fatalf("canonical controller = %v, %v", controller, err)
+	}
+}
+
+// The real control handler must keep the failed precheck reason even when
+// its final observation has recovered. No guest action may run in between.
+type recoveringActionRuntime struct {
+	actionRuntimeFixture
+	fail func(*Snapshot)
+}
+
+func (o *recoveringActionRuntime) Snapshot(ctx context.Context) Snapshot {
+	snapshot := o.runtimeFixture.Snapshot(ctx)
+	if o.snapshots.Load() == 2 {
+		o.fail(&snapshot)
+	}
+	return snapshot
+}
+func TestActionControlRetainsFailedPrecheckAfterReadyRecovery(t *testing.T) {
+	for _, actionName := range []string{"run_action", "retry_action"} {
+		for _, tc := range []struct {
+			name, want string
+			fail       func(*Snapshot)
+		}{
+			{"probe", "ssh probe; strict management SSH probe failed", func(s *Snapshot) { s.ProbeOK = false; s.Diagnostic = "strict management SSH probe failed" }},
+			{"unknown", "unproven checks: serial", func(s *Snapshot) { s.SerialHealthy = false; s.Diagnostic = "secret-fixture-token\x1b[31m" }},
+			{"binding", "exact-generation binding mismatch", func(s *Snapshot) { s.Binding.Generation = "foreign-secret-fixture-token" }},
+		} {
+			t.Run(actionName+"/"+tc.name, func(t *testing.T) {
+				launch, action := actionControlRequest(t)
+				owner := &recoveringActionRuntime{actionRuntimeFixture: actionRuntimeFixture{runtimeFixture: runtimeFixture{binding: launch.Binding}}, fail: tc.fail}
+				if !snapshotReady(owner.Snapshot(t.Context())) {
+					t.Fatal("first snapshot must be READY")
+				}
+				server, client := net.Pipe()
+				defer client.Close()
+				served := make(chan struct{})
+				go func() {
+					handleControl(t.Context(), server, launch.Binding, owner, func() error { return nil })
+					close(served)
+				}()
+				client.SetDeadline(time.Now().Add(time.Second))
+				request, err := json.Marshal(controlRequest{Version: 1, Action: actionName, Binding: launch.Binding, ExpiresAt: time.Now().Add(time.Second), GuestAction: &action})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = writeFrame(client, request); err != nil {
+					t.Fatal(err)
+				}
+				data, err := readBounded(client)
+				if err != nil {
+					t.Fatal(err)
+				}
+				<-served
+				var response controlResponse
+				if err = decodeExact(data, &response); err != nil {
+					t.Fatal(err)
+				}
+				if owner.actions.Load() != 0 || owner.retries.Load() != 0 || response.GuestReceipt != nil || !snapshotReady(response.Snapshot) || owner.snapshots.Load() != 3 {
+					t.Fatalf("failed precheck executed action or lost final READY: %+v", response)
+				}
+				if !strings.Contains(response.Error, tc.want) || strings.Contains(response.Error, "secret-fixture-token") {
+					t.Fatalf("failed precheck reason lost or unsafe: %q", response.Error)
+				}
+			})
+		}
 	}
 }

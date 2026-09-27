@@ -356,7 +356,11 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 	} else if request.Action == "run_action" || request.Action == "retry_action" {
 		before := owner.Snapshot(operationCtx)
 		if before.Binding != binding || !snapshotReady(before) {
-			response.Error = "exact runtime is not ready for action"
+			reason := ReadinessFailureDiagnostic(before)
+			if before.Binding != binding {
+				reason = "exact-generation binding mismatch"
+			}
+			response.Error = "exact runtime is not ready for action: " + reason
 		} else {
 			var receipt guestproto.ActionReceipt
 			var actionErr error

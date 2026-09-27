@@ -212,7 +212,13 @@ func (s *ActionService) requireFreshActionReady(ctx context.Context, binding sup
 	if snapshot.Binding != binding || !snapshot.BackendRunning || !snapshot.SerialHealthy || !snapshot.PinPresent ||
 		!snapshot.CertificateCurrent || !snapshot.ProbeOK || !snapshot.ZoneMatches || snapshot.ObservedAt.IsZero() ||
 		snapshot.ObservedAt.After(now) || now.Sub(snapshot.ObservedAt) > maxReadySnapshotAge {
-		return fmt.Errorf("action requires fresh exact-generation READY")
+		reason := supervisor.ReadinessFailureDiagnostic(snapshot)
+		if snapshot.Binding != binding {
+			reason = "exact-generation binding mismatch"
+		} else if snapshot.ObservedAt.IsZero() || snapshot.ObservedAt.After(now) || now.Sub(snapshot.ObservedAt) > maxReadySnapshotAge {
+			reason = "snapshot observation freshness unproven"
+		}
+		return fmt.Errorf("action requires fresh exact-generation READY: %s", reason)
 	}
 	return nil
 }
