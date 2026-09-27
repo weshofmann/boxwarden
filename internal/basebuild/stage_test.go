@@ -53,3 +53,12 @@ func TestStageBuildInputsRetainsSnapshotAfterSourceChanges(t *testing.T) {
 		t.Fatalf("staged definition changed: %q %v", data, err)
 	}
 }
+
+func TestStageGuestDefinitionIncludesClipboardAdapter(t *testing.T) {
+	for _, name := range stagedGuestDefinitionFiles {
+		if name == "clipboard.py" {
+			return
+		}
+	}
+	t.Fatal("clipboard adapter missing from build snapshot")
+}

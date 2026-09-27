@@ -3,25 +3,30 @@
 Baseline: merged `10ad0bea`; branch `weshofmann/feature/controlled-clipboard`,
 Draft PR [#13](https://github.com/weshofmann/boxwarden/pull/13).
 
-Published checkpoint: bounded shared transfer core, nonblocking operation locks,
-and exact-generation supervisor handshake. Source capture follows live admission;
-text stays out of action journals. Busy operations refuse, and ambiguous writes
-are reported without replay. Pinned management SSH is the chosen guest transport.
+Published foundation `40eada6`: bounded shared transfer core, nonblocking locks,
+and exact-generation supervisor handshake. Its hosted deterministic CI passed.
+Pinned management SSH is the guest transport; clipboard bytes bypass actions and
+journals. Busy operations refuse, ambiguous writes do not replay.
 
-Verification: focused core/lock/supervisor tests and race checks passed; independent
-checkpoint review found no Important/Critical issue in those published scopes.
-Synthetic guest helper roundtrips passed for Unicode, whitespace/trailing LF,
-empty text and 1 MiB, including later reads. Invalid UTF-8/NUL/oversize refusal
-preserved the prior synthetic value. This is helper evidence, not GUI acceptance.
+This checkpoint adds fixed guest framing and expiring generation-bound requests,
+retained owner/SSH capability and session exclusion, desktop selection ownership,
+and source installation/artifact pins. The supported adapter is Ubuntu 24.04
+GNOME Wayland with Xwayland and logind controller affiliation; ambiguous desktops
+and native X11 refuse. Guest-local privileged metadata reads identify executable
+links only when ordinary same-user inspection is denied.
 
-In progress: four public CLI commands, private AppKit adapter, fixed guest mode
-and retained SSH integration are implemented locally. Review found guest owner
-preclaim cancellation, exact display/session affiliation and blocked stdout issues;
-corrections and integration verification continue. Historical intermittent owner
-loss remains unattributed; a reproduced session-metadata enumeration race is fixed.
-Pinned Tart strip/menu patch and staged build are being implemented separately.
+Verification: guest helper/source fixtures and focused Go/race checks passed.
+The existing Go suite passed at the integration checkpoint. Real synthetic helper
+checks passed Unicode/trailing LF, empty text and 1 MiB, later reads after writer
+exit, and malformed/NUL/oversize rejection preserving the previous value.
+These are helper checks, not production CLI or graphical application acceptance.
 
-Next: resolve review findings, publish verified CLI/guest integration, then verify
-Tart window/menu behavior and real synthetic application copy/later paste.
-Installed Tart and root admission remain unchanged. Valuable demo D is untouched;
-one disposable probe is used. No real host clipboard has been accessed.
+In progress: four public CLI commands and private AppKit adapter; review-confirmed
+blocked native reads require a bounded child, and descriptor flags require cleanup
+after I/O quiescence. Pinned Tart strip/menu build is staged; independent shutdown
+review continues. No installed toolchain or root admission has changed.
+
+Next: finish host adapters and patched-viewer review, publish their verified
+integration, then demonstrate synthetic Firefox/application copy and later paste.
+Valuable demo D is untouched; one disposable probe is used. No real host clipboard
+has been accessed. Deployment remains a separate concrete approval gate.

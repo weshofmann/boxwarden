@@ -34,9 +34,11 @@ type Connection struct {
 	KnownHostsFile   string
 }
 
-type Client struct{ runner Runner }
+type Client struct{ runner, clipboardRunner Runner }
 
-func NewClient(runner Runner) *Client { return &Client{runner: runner} }
+func NewClient(runner Runner) *Client {
+	return NewClientWithClipboardRunner(runner, NewClipboardExecRunner())
+}
 
 type WorkspaceMount struct {
 	VolumeID       string `json:"volume_id"`

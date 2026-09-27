@@ -56,6 +56,7 @@ type Bootstrapper struct {
 	Root              string
 	Runner            Runner
 	ActionExecutor    ActionExecutor
+	ClipboardExecutor ClipboardExecutor
 	HostKeyPath       string
 	ZonePath          string
 	Failpoint         func(string) error
@@ -71,7 +72,7 @@ func NewBootstrapper(root string, runner Runner) *Bootstrapper {
 	if runner == nil {
 		runner = ExecRunner{}
 	}
-	return &Bootstrapper{Root: root, Runner: runner, ActionExecutor: WorkstationActionExecutor{}, HostKeyPath: "/etc/ssh/ssh_host_ed25519_key.pub", ZonePath: "/etc/timezone", effectiveHostname: os.Hostname, renameNoReplace: renameWithoutReplacement, workspaceOwner: lookupWorkspaceOwner}
+	return &Bootstrapper{Root: root, Runner: runner, ActionExecutor: WorkstationActionExecutor{}, ClipboardExecutor: ExecClipboardExecutor{}, HostKeyPath: "/etc/ssh/ssh_host_ed25519_key.pub", ZonePath: "/etc/timezone", effectiveHostname: os.Hostname, renameNoReplace: renameWithoutReplacement, workspaceOwner: lookupWorkspaceOwner}
 }
 
 func (b *Bootstrapper) Serial(ctx context.Context, request SerialRequest) (SerialResult, error) {
@@ -124,7 +125,14 @@ func (b *Bootstrapper) Serial(ctx context.Context, request SerialRequest) (Seria
 	if err != nil {
 		return SerialResult{}, err
 	}
-	return b.result(request, active, sshd, hostKey)
+	result, err := b.result(request, active, sshd, hostKey)
+	if err != nil {
+		return SerialResult{}, err
+	}
+	if err := b.publishClipboardGeneration(request); err != nil {
+		return SerialResult{}, err
+	}
+	return result, nil
 }
 
 // OpenSSH's ssh-keygen -A adds a local human comment to generated public-key

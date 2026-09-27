@@ -46,6 +46,8 @@ func TestSliceCPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
 		{"package report outside runtime owner", "internal/backend/start.go", `package backend; import trust "github.com/weshofmann/boxwarden/internal/sshx"; var _ trust.PackageVersion`, "unapproved foundation selector"},
 		{"workspace mount binding outside runtime owner", "internal/backend/start.go", `package backend; import trust "github.com/weshofmann/boxwarden/internal/sshx"; var _ trust.WorkspaceMount`, "unapproved foundation selector"},
 		{"renamed bootstrap wrapper", "internal/lifecycle/start.go", `package lifecycle; import serialtransport "github.com/weshofmann/boxwarden/internal/serialx"; func f() { serialtransport.RunBootstrap() }`, "unapproved foundation selector"},
+		{"clipboard protocol outside retained owner", "internal/backend/start.go", `package backend; import protocol "github.com/weshofmann/boxwarden/internal/guestproto"; var _ protocol.ClipboardRequest`, "unauthorized Slice C import"},
+		{"clipboard owner cannot publish generic bootstrap", "internal/sessionruntime/clipboard_owner.go", `package sessionruntime; import protocol "github.com/weshofmann/boxwarden/internal/guestproto"; var _ protocol.EncodeSerialFrame`, "unapproved foundation selector"},
 		{"action protocol outside session boundary", "internal/backend/start.go", `package backend; import protocol "github.com/weshofmann/boxwarden/internal/guestproto"; var _ protocol.ActionRequest`, "unauthorized Slice C import"},
 		{"installer serial outside builder", "internal/backend/start.go", `package backend; import serialtransport "github.com/weshofmann/boxwarden/internal/serialx"; func f() { serialtransport.CreateInstallerRuntime() }`, "unapproved foundation selector"},
 		{"blank foundation import", "internal/backend/start.go", `package backend; import _ "github.com/weshofmann/boxwarden/internal/sshx"`, "unsupported foundation import"},
@@ -109,6 +111,13 @@ import protocol "github.com/weshofmann/boxwarden/internal/guestproto"
 var _ = protocol.ActionRequest{Version: protocol.Version, Association: protocol.Association{}}
 var _ = protocol.ActionReceipt{}
 func f(r protocol.ActionRequest, receipt protocol.ActionReceipt) { _, _, _ = protocol.EncodeActionRequest(r); _, _ = protocol.EncodeActionReceipt(r, receipt) }`},
+		{"clipboard retained-owner protocol", "internal/sessionruntime/clipboard_owner.go", `package sessionruntime
+import protocol "github.com/weshofmann/boxwarden/internal/guestproto"
+import trust "github.com/weshofmann/boxwarden/internal/sshx"
+var _ = trust.Connection{}
+var _ = protocol.ClipboardRequest{Version:protocol.Version,Association:protocol.Association{}}
+var _ = protocol.ClipboardResponse{}
+func f(r protocol.ClipboardRequest, response protocol.ClipboardResponse){_,_=protocol.EncodeClipboardResponse(r,response,nil)}`},
 		{"owner action admission protocol", "internal/sessionruntime/action_owner.go", `package sessionruntime
 import protocol "github.com/weshofmann/boxwarden/internal/guestproto"
 var _ = protocol.ActionRequest{Association: protocol.Association{}}
@@ -271,7 +280,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 		}
 		if composition && !serialFoundation && strings.HasSuffix(importPath, "/internal/guestproto") &&
 			path != "internal/sessionruntime/owner.go" && path != "internal/session/action_service.go" &&
-			path != "internal/sessionruntime/action_owner.go" && path != "internal/supervisor/control.go" &&
+			path != "internal/sessionruntime/action_owner.go" && path != "internal/sessionruntime/clipboard_owner.go" && path != "internal/supervisor/control.go" &&
 			path != "internal/supervisor/action_exact.go" {
 			p.add(path, "unauthorized Slice C import", importPath)
 		}
@@ -457,6 +466,11 @@ func allowedFoundationSelector(path, foundation, selector string) bool {
 			case "ActionRequest", "ActionReceipt", "Association", "Version", "EncodeActionRequest", "EncodeActionReceipt":
 				return true
 			}
+		case "internal/sessionruntime/clipboard_owner.go":
+			switch selector {
+			case "ClipboardRequest", "ClipboardResponse", "Association", "Version", "EncodeClipboardResponse":
+				return true
+			}
 		case "internal/sessionruntime/action_owner.go":
 			switch selector {
 			case "ActionRequest", "ActionReceipt", "Association", "EncodeActionRequest", "EncodeActionReceipt":
@@ -523,7 +537,7 @@ func allowedFoundationSelector(path, foundation, selector string) bool {
 	if path == "internal/sessionruntime/import_owner.go" && foundation == "sshx" && selector == "WorkspaceMount" {
 		return true // Retained owner compares only its already admitted launch mounts.
 	}
-	if path == "internal/sessionruntime/action_owner.go" && foundation == "sshx" && selector == "Connection" {
+	if (path == "internal/sessionruntime/action_owner.go" || path == "internal/sessionruntime/clipboard_owner.go") && foundation == "sshx" && selector == "Connection" {
 		return true // The retained owner uses its existing pinned connection for one admitted action.
 	}
 	if path != "internal/sessionruntime/owner.go" {
