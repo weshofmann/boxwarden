@@ -41,29 +41,32 @@ gap in a blocking C call and now passes; independent review confirmed native
 initialization and claim stalls terminate at the deadline, while committed
 owners survive. No new VM/golden qualification is claimed from source checks.
 
-The first production `clipboard copy` on the restarted disposable probe
-refused with `clipboard text unavailable`; an independent direct invocation
-of the fixed guest helper returned a pre-claim error. Read-only exact-session
-diagnostics found one GNOME Shell process and no Xwayland process. The active
-Wayland login and desktop environment checks passed; the strict process
-binding therefore refused before GTK initialized. No production CLI transfer
-has passed. A bounded X11 connection on that disposable guest started one
-Xwayland process without accessing clipboard contents. The guest source now
-makes that connection before its unchanged strict process proof; 59 guest tests,
-including native-call deadline and first-use ordering cases, and the fake ISO
-and finalization fixtures passed. Independent guest review found no remaining
-Important/Critical issue in the correction. After staging only this helper in
-the disposable probe, public stop/start produced a new READY generation and a
-read-only inventory again found one GNOME Shell and zero Xwayland. From that
-cold baseline, public CLI `copy`/`paste` passed exact Unicode/trailing LF,
-valid empty text, and 1 MiB. Invalid UTF-8, NUL, oversize, and stale-generation
-requests refused without changing the destination. Full-host doctor and final
-session readiness passed; no Mac pasteboard was accessed. Hosted deterministic
-CI passed at `dc3bf28` ([run 36357415006](https://github.com/weshofmann/boxwarden/actions/runs/36357415006)).
+The first disposable guest lacked a running Xwayland process despite having
+an active Wayland desktop. The helper now wakes Xwayland before its unchanged
+strict desktop process proof. Its 59 guest tests, including native-call deadline
+and first-use ordering cases, and fake ISO/finalization fixtures passed;
+independent guest review found no remaining Important/Critical issue. After
+staging this helper only in the disposable probe, public stop/start produced a
+new READY generation. From a cold baseline with no Xwayland process, public
+CLI `copy`/`paste` passed exact Unicode/trailing LF, valid empty text, and
+1 MiB. Invalid UTF-8, NUL, oversize, and stale-generation requests refused
+without changing the destination. Full-host doctor and final session readiness
+passed; no Mac pasteboard was accessed. Hosted deterministic CI passed at
+`dc3bf28` ([run 36357415006](https://github.com/weshofmann/boxwarden/actions/runs/36357415006))
+and at the documentation checkpoint `f232d4b`
+([run 36357937418](https://github.com/weshofmann/boxwarden/actions/runs/36357937418)).
 
-Next: demonstrate synthetic guest Firefox/application copy and later paste,
-then finish the attended deployment and host GUI acceptance path. Host
-deployment and real host-clipboard GUI testing remain attended gates.
+A separate synthetic GTK 3 TextView application then pasted exact text after
+the public CLI copy had exited. A second TextView copied exact text that the
+public CLI paste read later: 25 and 23 bytes respectively, including Unicode
+and trailing newlines. The bounded private test used the guest's existing GTK
+library and left the exact disposable session READY. Its independent source
+review found no Important/Critical issue. This proves application-widget
+interoperability, not Firefox behavior or the patched host viewer controls.
+
+Next: finish the cumulative feature review, then present the single attended
+installed-toolchain deployment and rollback gate. Host buttons/menus and the
+real host-clipboard GUI path remain untested until that gate.
 
 Valuable demo D is untouched; one disposable probe is used. No real host clipboard
 has been accessed. Deployment remains a separate concrete approval gate.
