@@ -47,11 +47,16 @@ of the fixed guest helper returned a pre-claim error. Read-only exact-session
 diagnostics found one GNOME Shell process and no Xwayland process. The active
 Wayland login and desktop environment checks passed; the strict process
 binding therefore refused before GTK initialized. No production CLI transfer
-has passed, and this fresh-start behavior needs a guest-adapter correction and
-retest before Firefox/application acceptance.
+has passed. A bounded X11 connection on that disposable guest started one
+Xwayland process without accessing clipboard contents. The guest source now
+makes that connection before its unchanged strict process proof; 59 guest tests,
+including native-call deadline and first-use ordering cases, and the fake ISO
+and finalization fixtures passed. Independent guest review found no remaining
+Important/Critical issue in the correction. Real cold-start CLI acceptance is
+still pending.
 
-Next: verify a bounded first-use Xwayland activation, correct the guest adapter
-with regression coverage, then repeat production CLI and synthetic
+Next: stage the corrected helper only in the disposable probe, restart it to
+observe a zero-Xwayland baseline, then repeat production CLI and synthetic
 Firefox/application copy and later paste in the same disposable probe. Host
 deployment and real host-clipboard GUI testing remain attended gates.
 

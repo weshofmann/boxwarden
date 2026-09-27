@@ -120,6 +120,90 @@ class SessionRaceTests(unittest.TestCase):
         with mock.patch.object(helper, 'session_id', return_value='5'):
             with self.assertRaises(helper.ClipboardError): session.check()
 
+class XwaylandActivationTests(unittest.TestCase):
+    ENV = dict(helper.BASE_ENV, DISPLAY=':0', XAUTHORITY='/run/user/1000/auth', GDK_BACKEND='x11')
+    def test_session_connects_before_binding_and_only_once(self):
+        calls = []
+        def wake(env):
+            self.assertEqual(env, self.ENV)
+            calls.append('wake')
+        def bind(identity, env):
+            self.assertEqual((identity, env), ('3', self.ENV))
+            calls.append('bind')
+            return ('exact',)
+        with mock.patch.object(helper, 'session_id', return_value='3'), \
+             mock.patch.object(helper, 'environment', return_value=self.ENV), \
+             mock.patch.object(helper, 'activate_xwayland', side_effect=wake), \
+             mock.patch.object(helper, 'desktop_binding', side_effect=bind):
+            session = helper.Session()
+            session.check()
+        self.assertEqual(calls, ['wake', 'bind', 'bind', 'bind'])
+
+    def test_failed_connection_never_admits_desktop_binding(self):
+        with mock.patch.object(helper, 'session_id', return_value='3'), \
+             mock.patch.object(helper, 'environment', return_value=self.ENV), \
+             mock.patch.object(helper, 'activate_xwayland', side_effect=helper.ClipboardError('desktop display unavailable')), \
+             mock.patch.object(helper, 'desktop_binding') as bind:
+            with self.assertRaises(helper.ClipboardError): helper.Session()
+        bind.assert_not_called()
+
+    def test_x11_connection_closes_with_closed_environment(self):
+        display = mock.Mock()
+        display.XOpenDisplay.return_value = 17
+        with mock.patch.dict(os.environ, {'HOST_SECRET': 'synthetic'}, clear=True), \
+             mock.patch.object(helper.C, 'CDLL', return_value=display) as load:
+            helper.activate_xwayland(self.ENV)
+            self.assertEqual(dict(os.environ), self.ENV)
+        load.assert_called_once_with('libX11.so.6')
+        display.XOpenDisplay.assert_called_once_with(None)
+        display.XCloseDisplay.assert_called_once_with(17)
+
+    def test_failed_x11_open_refuses_without_claim(self):
+        display = mock.Mock()
+        display.XOpenDisplay.return_value = None
+        with mock.patch.dict(os.environ, {}, clear=True), \
+             mock.patch.object(helper.C, 'CDLL', return_value=display):
+            with self.assertRaises(helper.ClipboardError): helper.activate_xwayland(self.ENV)
+        display.XCloseDisplay.assert_not_called()
+
+    def test_native_x11_open_stall_dies_at_existing_alarm(self):
+        reader, writer = os.pipe()
+        libc = ctypes.CDLL(None)
+        libc.usleep.argtypes = [ctypes.c_uint]
+        pid = os.fork()
+        if pid == 0:
+            os.close(reader)
+            display = mock.Mock()
+            def blocked_open(_name):
+                os.write(writer, b's')
+                libc.usleep(1000000)
+                return 17
+            display.XOpenDisplay.side_effect = blocked_open
+            signal.setitimer(signal.ITIMER_REAL, 0.1)
+            with mock.patch.object(helper.C, 'CDLL', return_value=display):
+                helper.activate_xwayland(self.ENV)
+            os._exit(99)
+        os.close(writer)
+        try:
+            ready, _, _ = select.select([reader], [], [], 0.3)
+            self.assertTrue(ready)
+            self.assertEqual(os.read(reader, 1), b's')
+            deadline = time.monotonic() + 0.5
+            while time.monotonic() < deadline:
+                ended, status = os.waitpid(pid, os.WNOHANG)
+                if ended: break
+                time.sleep(0.01)
+            else: self.fail('native X11 open outlived its alarm')
+            pid = 0
+            self.assertTrue(os.WIFSIGNALED(status))
+            self.assertEqual(os.WTERMSIG(status), signal.SIGALRM)
+        finally:
+            os.close(reader)
+            if pid:
+                try: os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError: pass
+                os.waitpid(pid, 0)
+
 class OwnerHandoffTests(unittest.TestCase):
     class Session:
         def check(self): pass

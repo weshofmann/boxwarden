@@ -340,10 +340,40 @@ def desktop_binding(identity, env):
     return (controller,) + proof
 
 
+def activate_xwayland(env):
+    # Mutter may start Xwayland only when the first X11 client connects. Wake
+    # it before requiring its process in the desktop proof; this connection
+    # does not request or claim clipboard contents and is closed before fork.
+    os.environ.clear(); os.environ.update(env)
+    previous = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, signal.SIG_DFL)
+    display = None
+    library = None
+    failed = False
+    try:
+        library = C.CDLL('libX11.so.6')
+        library.XOpenDisplay.argtypes = [C.c_char_p]
+        library.XOpenDisplay.restype = C.c_void_p
+        library.XCloseDisplay.argtypes = [C.c_void_p]
+        library.XCloseDisplay.restype = C.c_int
+        display = library.XOpenDisplay(None)
+        failed = not bool(display)
+    except BaseException:
+        failed = True
+    finally:
+        if display:
+            try: library.XCloseDisplay(display)
+            except BaseException: failed = True
+        signal.signal(signal.SIGALRM, previous)
+    if failed:
+        raise ClipboardError('desktop display unavailable')
+
+
 class Session:
     def __init__(self):
         self.identity = session_id()
         self.env = environment()
+        activate_xwayland(self.env)
         self.binding = desktop_binding(self.identity, self.env)
         self.check()
     def check(self):

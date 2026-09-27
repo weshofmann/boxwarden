@@ -34,6 +34,11 @@ DISPLAY/session-bus environment with GTK3 on Xwayland, already present in the
 Ubuntu desktop baseline. GTK clipboard operations target CLIPBOARD, not PRIMARY.
 The helper admits exactly one active workstation graphical session/display,
 captures its identity, and refuses missing/ambiguous or replaced desktop sessions.
+Because Xwayland may start only on the first X11 connection, the helper makes
+one bounded connection after validating the unique Wayland login and desktop
+environment, then closes it before forking or handling text. The unchanged
+controller/process/display proof must still pass before any clipboard read or
+claim; waking Xwayland itself grants no clipboard authority.
 It runs as the workstation user, with closed environment and bounded output. A push validates all input before claiming the selection, then retains
 only a guest-local selection-owner process until replacement or desktop logout;
 that process closes/detaches inherited SSH stdin/stdout/stderr after a private
