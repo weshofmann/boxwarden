@@ -717,3 +717,21 @@ observation do not convert them into successful starts. Five bounded read-only
 typed snapshots subsequently proved all six predicates, with no recurrence;
 the earlier discarded failing snapshot cannot be reconstructed. Recovery and
 D's NEW stopped export remain open gates.
+
+The bounded observation batch saw no recurrence. A reviewed final exact retry
+recovered the original GUI attempt's receipt; no new attempt was allocated and
+the earlier once/counter records were unchanged. D then stopped through the
+public command. Its NEW export from clean `2699a46` passed independent comparison
+against its own C history and live/predetermined files, unchanged host source
+and exact raw/snapshot digests; all eighteen objects were stopped. This records
+supported recovery and preserves both original failures, rather than claiming
+an uninterrupted start.
+
+Fresh six-file diagnostic delta review approved `a0fbda8..77f9cebe`, integrated
+as `8d0956b`, with no Important/Critical finding. The existing safe formatter
+and whitelist were relocated unchanged. Run/retry precheck errors retain the
+original failing observation's fixed predicates even when a later snapshot is
+READY; service errors add fixed binding/freshness details. Unknown secret-like
+diagnostics remain suppressed, and every readiness guard is unchanged.
+Eighteen RED cases, full worker Go checks, affected race/vet and fresh targeted
+integration race checks passed. The original host cause remains unknown.

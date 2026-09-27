@@ -45,14 +45,25 @@ pairs matched independently. C also completed its separate tree rebuild,
 explicit start, package/data/action readback and actual ChatGPT GUI observation.
 Reviewed public deletion retained its workspace, which replacement D attached.
 D's first start failed the fresh readiness check after the GUI action returned
-a valid receipt; that attempt remains indeterminate. One separately reviewed
+a valid receipt; that attempt was recorded indeterminate. One separately reviewed
 exact receipt retry failed the supervisor's own readiness precheck before any
 guest action request. Later public status reported READY; pinned readback
 matched all four edited files, once/counter markers and seven package records,
 and the actual sign-in GUI was observed. Both failures remain immutable evidence.
-The precise failing readiness predicate was discarded by the current error
-path and is not yet attributed. D recovery and its NEW stopped export remain
-pending; the independent repeat is not complete.
+Five bounded read-only observations subsequently passed all six readiness
+predicates with no recurrence. One reviewed final same-attempt retry recovered
+the exact receipt without allocating another attempt; earlier once/counter
+records were unchanged. This is recovery acceptance, not an uninterrupted
+successful start. Public stop and D's NEW current-source export completed;
+independent comparison matched its own C history/live/predetermined bytes,
+unchanged host source and raw/snapshot digests. All eighteen backend objects
+were stopped. The precise earlier failing predicate remains unknown.
+
+A narrow reviewed correction now preserves fixed safe readiness details across
+later recovered snapshots, without changing readiness requirements. Eighteen
+regressions reproduced the old loss; full worker Go tests, affected race/vet
+and fresh targeted integration race checks passed. This improves future failure
+visibility and cannot reconstruct the discarded host observation.
 
 Bounded launch review caught a private runner bookkeeping failure that could
 lose the original builder result after launch. Corrected runners retain the
@@ -85,9 +96,8 @@ Independent bounded delta reviews found no Important/Critical defect. Actual
 VZ cancellation and terminal process-group behavior remain unqualified;
 snapshot-ready alone is not an inspector cancellation barrier.
 
-Next: bounded read-only D readiness diagnosis, supported recovery and its NEW
-independently compared stopped export; then current-source cancellation
-acceptance and final source/host handoff gates. Preserve
+Next: current-source bounded real cancellation/resume acceptance, selective
+retention and final source/host handoff gates. Preserve
 historical workspaces, protected VM and detached rollback. The auxiliary
 qualification sparsebundle remains in place per operator preference; its latest
 allocated footprint was about 70.8 GiB while installer assets were staged, with
