@@ -170,10 +170,14 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   Thirty local synthetic cases, exact archived full-host read-only preflight,
   Python/wrapper syntax and ShellCheck passed. Review caught and corrected a
   verification-unmount relock gap; fresh final review found no Important/Critical
-  issue and reran all thirty cases. The archived continuation awaits attended
-  administrator execution; actual encryption and cutover remain pending.
+  issue and reran all thirty cases. The attended continuation is now running.
+  Copied-content parity passed before encryption; native APFS reports background
+  encryption conversion in progress. Original parent, encryption completion and
+  acceptance receipts remain pending; no cutover is claimed.
   Native success also requires independent checks and a reviewed persistent
   mount helper before VM trials; the old source job stays disabled.
+- [Encryption-continuation checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36276333420)
+  passed its full deterministic matrix.
 - [Native-copy checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36274438213)
   passed its full deterministic matrix. Hosted CI does not qualify migration.
 - At the operator's request, the recurring continuation automation was deleted.
