@@ -1,8 +1,9 @@
 # Boxwarden v0.2 alpha quickstart
 
-This is the current source-tracked operator path. The fresh full workflow is
-still under qualification; see [alpha progress](alpha-progress.md) for observed
-results and limits. Use synthetic data and the explicit `alpha` test domain.
+This is the current source-tracked operator path. Two synthetic workspace
+histories passed the recorded public workflow, including recovery in the
+independent replacement history; see [alpha progress](alpha-progress.md) for
+observed results and limits. Use synthetic data and the explicit `alpha` test domain.
 
 ## Prerequisites
 
@@ -57,7 +58,8 @@ and asks it to start the package executable. Its checked command only proves
 that the user manager accepted the process; a usable visible window and
 waiting-for-sign-in state require separate VM acceptance. The first fresh
 native-store build and visible ChatGPT sign-in window have passed that check;
-provider sign-in and the complete repeated lifecycle remain unqualified.
+both synthetic lifecycle histories also passed the recorded engineering
+checks. Provider sign-in and authenticated capability remain untested.
 
 [OpenAI's Linux guide](https://learn.chatgpt.com/docs/linux/linux-app) lists
 Ubuntu 24.04 ARM64 as supported but says Computer Use is not yet available in
@@ -77,7 +79,8 @@ its guest-local counter at `1`; the separate workspace retains project bytes.
 The first fresh system verified once/counter ordering, already-running start
 idempotence and counter increments through actual restarts. Rebuilt-system
 counter reset also passed after the public system rebuild and explicit
-start. Replacement retention also passed; independent repetition remains pending.
+start. Replacement retention and the independent repetition also passed;
+the latter replacement required the documented same-attempt recovery.
 
 ```sh
 "$BW" --config "$CONFIG" doctor
@@ -155,10 +158,11 @@ stopped export and compare its bytes independently; the original import
 verification cannot be repeated against that new owner. Keep the VM stopped
 when finished. First-session GUI launch, pristine original-owner verification,
 edited-data restart retention and system rebuild/start are verified. The actual
-added-software gate remains pending: `jq` was already installed in the baseline.
-Replacement reattachment and its NEW stopped export also passed. Independent
-repetition and final gates remain tracked in
-[alpha progress](alpha-progress.md) until they pass the complete matrix.
+added-software gate passed using `tree`, which was absent in both baselines;
+the earlier `jq` claim remains withdrawn because it was already installed.
+Replacement reattachment, NEW stopped exports and the independent repetition
+also passed, with D's documented recovery limitation. Final handoff gates remain
+tracked in [alpha progress](alpha-progress.md).
 
 If export copying is interrupted and reports a transaction UUID, keep its
 session stopped and recover that exact transaction:
@@ -207,7 +211,8 @@ replacement owner. Repeat on the second fresh workspace independently. These
 explicit edits and first-system restart retention are verified with pinned
 live readback and independently compared stopped exports. Retained bytes also
 matched after rebuild/start and replacement; a NEW replacement export matched
-the edited baseline. The full second-volume repeat remains pending.
+the edited baseline. The second-volume repeat also passed, including the
+documented exact receipt recovery for its replacement start.
 
 For the software-changing rebuild trial, the tracked
 `examples/v0.2-alpha-chatgpt-tree.json` recipe retains the ChatGPT preparation,
@@ -235,8 +240,9 @@ Rebuild reports management state but does not invoke the recipe's automatic
 `actions: complete`, then check the workspace bytes and actual GUI.
 The historical `jq` trial passed system rebuild/start, admission, action counts,
 retained edited bytes, ChatGPT sign-in readiness and replacement export. It did
-not establish added software. The corrective `tree` rebuild and both full
-workspace histories remain pending until separate package/data evidence passes. Do not infer retained data or a usable desktop from rebuild exit alone.
+not establish added software. The corrective `tree` rebuild passed for both
+workspace histories with separate package/data/GUI evidence. Do not infer
+retained data or a usable desktop from rebuild exit alone.
 
 
 ## Replace the disposable system and retain the workspace
@@ -271,8 +277,9 @@ returned directory to the known edited bytes and earlier edited-data baseline;
 refuse extra files or unsupported types. Keep original pristine import verification
 bound to its original owner; do not run that verification against the replacement.
 The historical first-workspace delete/create/attach/start/stop/export sequence
-passed. Repeat it after the corrective `tree` rebuild; its earlier export cannot
-prove the later software transition.
+passed. Both corrective `tree` histories also completed this sequence with
+NEW independently compared exports; D required the documented same-attempt
+recovery. An earlier export cannot prove a later software transition.
 
 
 ## Formatter prerequisite and local handoff bindings
