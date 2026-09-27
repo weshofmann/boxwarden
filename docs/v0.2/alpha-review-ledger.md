@@ -504,3 +504,29 @@ Fresh bounded recipe delta review found no Important/Critical issue in the
 four code/example files atop `523f719`, confirming planner phase ordering and
 stop-on-failure behavior. Targeted session/app action and recipe tests passed.
 The reviewer inspected source and did not rerun tests or touch live storage.
+
+### Fresh native prepared-base checkpoint
+
+Public preparation from clean `523f719` reached terminal zero and exact cache
+admission. Full-host independent verification matched journal/cache candidate,
+preparation key and identity, hashed both qualification receipt files, checked
+passed inventory/identity and stop proof, observed candidate/independent clone
+stopped with all twelve backend objects, and confirmed native encryption and
+healthy doctor. No diagnostic clone or timeout extension was introduced.
+The updated `a3a7d6c` recipes retain the prepare-only projection and all nineteen
+guest files; their different complete intents apply to new sessions.
+
+Fresh operational delta review found no Important omission in the disabled
+acceptance plan. Its minor version/equivalence metadata and fixed counter `2`
+expectation were corrected in a new immutable plan. Every real restart,
+including export-related restarts, now checks a counter increment and exact
+startup attempt delta while preserving once attempts. Original exit-zero
+admission remains required before enabling session commands. Two new volumes
+were actually formatted and independently checked; old remount-drift records
+were preserved. Public session A reused the exact admitted base and first public start exited
+zero with READY and three successful actions in once/counter/GUI order. Pinned
+SFTP readback independently matched once marker and startup counter `1`. Actual
+Ubuntu desktop and ChatGPT waiting-for-sign-in were separately observed in the
+exact session window; first-run keyring creation was cancelled without a
+password. Private screenshots were archived with matching digests. Provider
+sign-in, already-running idempotence, import and durability remain unqualified.

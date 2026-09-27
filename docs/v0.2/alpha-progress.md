@@ -53,18 +53,28 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   selective retirement removed only its stopped, unadmitted VM and two staged
   ISO files. Immediate internal physical space recovery was negligible, so no
   logical-size savings are claimed. Historical volumes and evidence remain.
-- One fresh public preparation from clean published `523f719` is now in
-  `installer-running`, using the existing external qualification configuration.
-  Its original process is retained; no terminal success, cache admission or
-  independent-clone receipt exists yet. Qualification image encryption was
-  checked at the image layer; native Tart encryption remains a separate check.
-  Shared outer free space was about 257 GiB and qualification availability
-  about 77 GiB at preflight; these are not additive capacities.
+- Fresh public preparation from clean published `523f719` exited zero and
+  admitted the exact native-store candidate. Independent checks matched the
+  admitted journal/cache identity and both qualification receipt digests;
+  fresh-clone package/identity checks passed, all twelve backend objects were
+  stopped, native encryption remained admitted and doctor was healthy. This
+  completes the prepared-base gate, not GUI or project durability acceptance.
+- Both new 64 MiB acceptance volumes were created through a signed formatter
+  built from clean `a3a7d6c`. Their available records, verified formatter proofs,
+  exact device/inode/UUID and independently read clean ext4 headers matched.
+  The seventeen historical workspace volumes remain preserved and excluded.
+- Public session A reused that exact cache without a new preparation attempt,
+  was created stopped and received only the first fresh workspace. Its first
+  public start exited zero with management READY and three succeeded ordered
+  actions. Pinned marker readback matched `once` and counter `1` exactly. A driver-selected hyphenated session name was
+  rejected before creation; all four planned names were corrected to the
+  existing lowercase-letter/digit rule. No product code change was needed.
 - Both ChatGPT recipes now include the existing once marker and startup counter
   before GUI launch. Missing/foreign marker refusal, counter `1` then `2`,
   unchanged marker bytes, session-intent change and unchanged preparation keys
-  passed targeted local fixtures. This does not establish real guest ordering,
-  GUI launch or a successful fresh preparation.
+  passed targeted local fixtures. [Hosted CI for `a3a7d6c`](https://github.com/weshofmann/boxwarden/actions/runs/36290657028)
+  passed the full deterministic matrix. This does not establish real guest ordering,
+  or GUI launch.
 
 - Focused post-migration review is frozen at `6588c88`. Its [hosted deterministic
   CI](https://github.com/weshofmann/boxwarden/actions/runs/36285329567) passed.
@@ -83,9 +93,14 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   the export UUID before verification. Lifecycle/data review reproduced the interrupted-export recovery gap
   corrected in `523f719`. Its [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36289716827)
   passed the full deterministic matrix. Real-host export recovery remains pending.
-- Next: require this preparation's original exit zero, exact admission and
-  passed independent clone before creating fresh sessions and volumes. All twelve
-  fresh host acceptance gates remain pending. No continuation automation is
+- The actual Ubuntu desktop and ChatGPT sign-in window were observed in the
+  exact session window. A first-run keyring creation prompt was cancelled
+  without entering a password; no provider sign-in or software update was done.
+  Screenshot bytes and provenance were durably verified privately. This proves
+  visible launch and waiting-for-sign-in, not provider or desktop agent capability.
+- Next: verify already-running start idempotence, then continue
+  pristine import/original-owner stopped verification before editing, restart,
+  software-changing rebuild and replacement. No continuation automation is
   recreated; the rollback image stays detached and intact.
 
 - [Retention-policy checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36265108243)
@@ -1047,12 +1062,10 @@ status above supersedes historical pending/running statements.
 
 ## Remaining acceptance
 
-1. Complete a new fresh ChatGPT base preparation from reviewed tracked inputs.
-   Require original terminal success, exact admitted journal/cache, stopped
-   candidate/clone, passed independent-clone qualification and healthy doctor.
-   Then create a public session and verify ordered `once` and `startup`
-   actions, actual desktop launch, and waiting-for-sign-in without treating
-   management READY as application proof.
+1. Prepared-base admission, fresh session A create/start, ordered action receipts
+   with marker/counter readback, and actual ChatGPT waiting-for-sign-in are
+   verified in the current trial. Verify already-running start idempotence and
+   carry the separate observations through the remaining lifecycle/repeat gates.
 2. Import the tracked synthetic project, verify it with an initial stopped
    export while its original session/backend still owns the volume, then
    qualify stop/start retention, software-changing rebuild with explicit
@@ -1062,6 +1075,15 @@ status above supersedes historical pending/running statements.
 3. Run final source and real-host acceptance checks, resolve review findings,
    record limitations, and update the Draft PR. Wes's real provider sign-in
    and subjective GUI acceptance may remain human actions.
+
+## Qualification storage direction
+
+The operator prefers a second native encrypted APFS volume for non-Tart
+qualification state, workspaces and private artifacts. That migration is not
+executed. The qualification sparsebundle currently supplies the live attached
+workspace and state; the old Tart rollback stays detached. A future cutover
+requires stopped operations, measured capacity/rollback and explicit workspace
+identity reconciliation. Preserving mount paths alone does not fix device drift.
 
 ## Publication policy
 
