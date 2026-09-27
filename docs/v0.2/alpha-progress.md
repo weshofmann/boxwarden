@@ -126,15 +126,26 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   Another actual restart retained all edited bytes, advanced counter to `3`, and
   kept once/edit at one succeeded execution each; each actual start has exactly
   one succeeded startup pair. This verifies the first-cycle edit/restart gate.
-- The first system stopped cleanly. One public software-changing `jq` rebuild
-  is running with a fresh candidate in installer-running; no terminal success,
-  base admission or retained-data result is claimed. Before launch, exact source/
-  binary equivalence, guest/tool/ISO digests, clean stopped workspace identity,
-  encryption, healthy doctor and storage reserves passed full-host checks.
-- Next: require original rebuild success and independent base admission, then
-  explicit public start, actual GUI/package observation and edited-byte checks
-  before replacement and the complete independent fresh second cycle. No
-  continuation automation is recreated; the rollback stays detached and intact.
+- Public software-changing `jq` rebuild exited zero and admitted a fresh exact
+  candidate. Independent checks matched journal/cache identity, passed clone
+  receipt digests and both checks; the BOM includes installed `jq`. Base/clone
+  are stopped, the old system is retired, and the same workspace inode/size is
+  attached to the new backend under the original stable session identity.
+  Native encryption/qualification identity and healthy doctor passed again.
+- Explicit public start exited zero with actions complete. The new system has
+  exactly one succeeded once/counter/GUI action and no repeated edit; pinned
+  readback matched counter `1` and all four predetermined edited files. Installed
+  records confirm pinned ARM64 ChatGPT plus `jq`, Firefox, Git, Node.js and GNOME
+  Text Editor. Actual desktop/ChatGPT waiting-for-sign-in was observed and private
+  screenshot bytes/provenance verified; keyring creation was cancelled without a
+  password, with no provider sign-in or update. A private read-only observer first
+  failed its final check because a parser variable shadowed the session name;
+  the cause was reproduced and a new immutable corrected observer passed.
+- The rebuilt system stopped cleanly; authoritative inventory shows all fifteen
+  VMs stopped and its target bundle has no open files. Next: reviewed exact public
+  deletion retaining the workspace, fresh replacement attach/start and NEW
+  independently compared stopped export, then the full second-volume cycle.
+  No continuation automation is recreated; rollback stays detached and intact.
 - [Checkpoint CI at `551b297`](https://github.com/weshofmann/boxwarden/actions/runs/36294305997)
   passed the full deterministic matrix. Bounded cumulative source review at that
   exact head found no new Important/Critical issue. Its minor stale acceptance
@@ -1100,30 +1111,28 @@ status above supersedes historical pending/running statements.
 
 ## Remaining acceptance
 
-1. Finish the single public `jq` rebuild: exact original exit zero, admitted
-   candidate/cache and passed independent-clone receipt; then explicit public
-   start, new-system once/counter proofs, actual GUI/package and edited bytes.
-2. Delete only the stopped disposable system while retaining its workspace,
+1. Delete only the stopped disposable system while retaining its workspace,
    attach it to a fresh replacement, and compare a NEW stopped export to the
    predetermined edited bytes and earlier edited baseline.
-3. Repeat the complete pristine import/original-owner verification, explicit
+2. Repeat the complete pristine import/original-owner verification, explicit
    edit, restart, software-changing rebuild/start and replacement/export cycle
    on the second independently formatted fresh workspace and new sessions.
-4. Run final source and real-host checks, resolve review findings, record limits,
+3. Run final source and real-host checks, resolve review findings, record limits,
    and update the Draft PR/quickstart with stopped test VMs. Wes's provider
    sign-in and subjective GUI acceptance may remain human actions.
 
 Prepared-base admission, first create/start/GUI, ordered actions and running-start
-idempotence, pristine import/original-owner stopped verification, explicit edits
-and first-system restart retention have already passed in the current trial.
+idempotence, pristine import/original-owner stopped verification, explicit edits,
+first-system restart retention, and software-changing rebuild with explicit
+start/GUI/package/action proofs and retained edited bytes have already passed.
 
 ## Qualification storage direction
 
 A second native encrypted APFS volume for non-Tart state was discussed; the
 operator now prefers leaving the measured qualification image in place for now.
-No auxiliary migration is executed. The qualification sparsebundle currently supplies the live attached
-workspace and state; the old Tart rollback stays detached. A future cutover
-requires stopped operations, measured capacity/rollback and explicit workspace
+No auxiliary migration is executed. The qualification sparsebundle currently
+supplies the attached workspace and state; the old Tart rollback stays detached.
+A future cutover requires stopped operations, measured capacity/rollback and explicit workspace
 identity reconciliation. Preserving mount paths alone does not fix device drift.
 
 ## Publication policy
@@ -1145,3 +1154,7 @@ reattachment for either layout; filesystem UUID is the durable mount identity,
 and historical workspace remount reconciliation remains an explicit limitation.
 [Previous publication CI](https://github.com/weshofmann/boxwarden/actions/runs/36292385487)
 passed the full deterministic matrix.
+
+[Review-documentation CI at `c38b3de`](https://github.com/weshofmann/boxwarden/actions/runs/36295069815)
+passed the full deterministic matrix. Hosted results remain separate from the
+recorded real-host rebuild/start/retention observations.

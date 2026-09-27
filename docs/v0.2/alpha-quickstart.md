@@ -70,7 +70,8 @@ the counter unchanged. A rebuilt system runs its own once action and starts
 its guest-local counter at `1`; the separate workspace retains project bytes.
 The first fresh system verified once/counter ordering, already-running start
 idempotence and counter increments through actual restarts. Rebuilt-system
-counter reset and independent repetition remain pending.
+counter reset also passed after the public software-changing rebuild and explicit
+start. Replacement and independent repetition remain pending.
 
 ```sh
 "$BW" --config "$CONFIG" doctor
@@ -146,9 +147,9 @@ backend still own the attachment: a rebuild changes backend identity, and a
 replacement changes session identity. After either transition, make a new
 stopped export and compare its bytes independently; the original import
 verification cannot be repeated against that new owner. Keep the VM stopped
-when finished. First-session GUI launch, pristine original-owner verification
-and edited-data restart retention are verified. Software-changing rebuild,
-replacement reattachment and a fresh independent repetition are tracked in
+when finished. First-session GUI launch, pristine original-owner verification,
+edited-data restart retention and software-changing rebuild/start are verified.
+Replacement reattachment and a fresh independent repetition are tracked in
 [alpha progress](alpha-progress.md) until they pass the complete matrix.
 
 If export copying is interrupted and reports a transaction UUID, keep its
@@ -196,10 +197,11 @@ new stopped export. The original pristine import journal has already been
 verified; do not compare the edited tree to it or invoke that journal against a
 replacement owner. Repeat on the second fresh workspace independently. These
 explicit edits and first-system restart retention are verified with pinned
-live readback and independently compared stopped exports. Rebuild, replacement
+live readback and independently compared stopped exports. Retained bytes also
+matched after the software-changing rebuild and explicit start. Replacement
 and the full second-volume repeat remain pending.
 
-For the pending software-changing rebuild trial, the tracked
+For the software-changing rebuild trial, the tracked
 `examples/v0.2-alpha-chatgpt-jq.json` recipe retains the ChatGPT preparation,
 startup action, and workspace declaration while adding the [Ubuntu 24.04 ARM64
 `jq` package](https://packages.ubuntu.com/noble/arm64/jq). This gives the
@@ -220,5 +222,7 @@ the public command:
 Rebuild reports management state but does not invoke the recipe's automatic
 `once` and `startup` actions. Require the subsequent start to report
 `actions: complete`, then check the workspace bytes and actual GUI.
-These commands still require a fresh real-host qualification. Do not infer
-retained data or a usable desktop from rebuild's exit status alone.
+The first-cycle trial passed this rebuild/start sequence with independently
+verified admission, action counts, installed packages, retained edited bytes and
+actual ChatGPT sign-in readiness. Replacement and independent repetition remain
+pending. Do not infer retained data or a usable desktop from rebuild exit alone.
