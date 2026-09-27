@@ -581,3 +581,21 @@ private evidence and live host state were untouched. Minor stale quickstart and
 remaining-acceptance descriptions are corrected to distinguish the verified first
 system from pending rebuild, replacement, independent repetition and final gates.
 The current `jq` installer is a single retained public operation, not admission.
+
+
+### Exact public replacement deletion review
+
+A fresh bounded read-only reviewer approved the one stopped synthetic system
+manifest at source `c38b3de`; later documentation-only revisions preserve the
+reviewed production contract. Exact session/backend and owned bundle identity,
+all-stopped inventory, no open target/workspace files, no rebuild or volume-use
+reservation, and the preservation set matched. Root repeated those guards just
+before public deletion and verified target absence, retained raw identity/size,
+cleared attachment and every other VM preserved afterward.
+
+The review traced public delete locking/finalization and found no Important or
+Critical blocker. No disk hashes or tests were rerun for that review; filesystem
+cleanliness was not inferred from stop. Fresh replacement readback and a NEW
+controlled export separately proved the edited bytes. No broader cleanup or
+whole-PR approval is implied. Requested Astra/extra-high routing is not independently
+attested. Logs, import/export baselines, protected history and old workspaces remain.

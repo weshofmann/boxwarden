@@ -71,7 +71,7 @@ its guest-local counter at `1`; the separate workspace retains project bytes.
 The first fresh system verified once/counter ordering, already-running start
 idempotence and counter increments through actual restarts. Rebuilt-system
 counter reset also passed after the public software-changing rebuild and explicit
-start. Replacement and independent repetition remain pending.
+start. Replacement retention also passed; independent repetition remains pending.
 
 ```sh
 "$BW" --config "$CONFIG" doctor
@@ -149,7 +149,8 @@ stopped export and compare its bytes independently; the original import
 verification cannot be repeated against that new owner. Keep the VM stopped
 when finished. First-session GUI launch, pristine original-owner verification,
 edited-data restart retention and software-changing rebuild/start are verified.
-Replacement reattachment and a fresh independent repetition are tracked in
+Replacement reattachment and its NEW stopped export also passed. Independent
+repetition and final gates remain tracked in
 [alpha progress](alpha-progress.md) until they pass the complete matrix.
 
 If export copying is interrupted and reports a transaction UUID, keep its
@@ -198,8 +199,8 @@ verified; do not compare the edited tree to it or invoke that journal against a
 replacement owner. Repeat on the second fresh workspace independently. These
 explicit edits and first-system restart retention are verified with pinned
 live readback and independently compared stopped exports. Retained bytes also
-matched after the software-changing rebuild and explicit start. Replacement
-and the full second-volume repeat remain pending.
+matched after rebuild/start and replacement; a NEW replacement export matched
+the edited baseline. The full second-volume repeat remains pending.
 
 For the software-changing rebuild trial, the tracked
 `examples/v0.2-alpha-chatgpt-jq.json` recipe retains the ChatGPT preparation,
@@ -224,5 +225,39 @@ Rebuild reports management state but does not invoke the recipe's automatic
 `actions: complete`, then check the workspace bytes and actual GUI.
 The first-cycle trial passed this rebuild/start sequence with independently
 verified admission, action counts, installed packages, retained edited bytes and
-actual ChatGPT sign-in readiness. Replacement and independent repetition remain
-pending. Do not infer retained data or a usable desktop from rebuild exit alone.
+actual ChatGPT sign-in readiness. Replacement and its new export also passed;
+independent repetition and final gates remain pending. Do not infer retained data or a usable desktop from rebuild exit alone.
+
+
+## Replace the disposable system and retain the workspace
+
+Set `REPLACEMENT` to a fresh valid sandbox name (lowercase letters/digits),
+`REPLACEMENT_EXPORT_DEST` to a new empty private directory, and `IMPORT_UUID` to
+this cycle's original imported directory UUID. Keep the edited export baseline.
+The public `session delete` contract retains separate workspace disks; it takes
+no workspace-retention flag. Stop and delete only the disposable system:
+
+```sh
+"$BW" --config "$CONFIG" --domain alpha session stop "$SESSION"
+"$BW" --config "$CONFIG" --domain alpha session delete "$SESSION"
+"$BW" --config "$CONFIG" --domain alpha session create \
+  --recipe "$SOURCE_ROOT/examples/v0.2-alpha-chatgpt-jq.json" --iso "$ISO" \
+  --guest-definition "$SOURCE_ROOT/guest/ubuntu-24.04-arm64" \
+  --openssl "$OPENSSL" --openssl-sha256 "$OPENSSL_SHA256" \
+  --xorriso "$XORRISO" --xorriso-sha256 "$XORRISO_SHA256" "$REPLACEMENT"
+"$BW" --config "$CONFIG" --domain alpha workspace attach \
+  --mount /home/boxwarden/workspaces/project "$VOLUME_UUID" "$REPLACEMENT"
+"$BW" --config "$CONFIG" --domain alpha session start "$REPLACEMENT"
+"$BW" --config "$CONFIG" --domain alpha session stop "$REPLACEMENT"
+mkdir -m 700 "$REPLACEMENT_EXPORT_DEST"
+"$BW" --config "$CONFIG" --domain alpha workspace export \
+  --destination "$REPLACEMENT_EXPORT_DEST" \
+  --select "boxwarden-import-$IMPORT_UUID" --source-root "$SOURCE_ROOT" \
+  --iso "$ISO" --go "$GO_BIN" "$VOLUME_UUID"
+```
+
+Do not format or re-import this existing volume. Independently compare the NEW
+returned directory to the known edited bytes and earlier edited-data baseline;
+refuse extra files or unsupported types. Keep original pristine import verification
+bound to its original owner; do not run that verification against the replacement.
+The first-cycle public delete/create/attach/start/stop/export sequence passed.

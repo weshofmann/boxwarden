@@ -141,10 +141,23 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   password, with no provider sign-in or update. A private read-only observer first
   failed its final check because a parser variable shadowed the session name;
   the cause was reproduced and a new immutable corrected observer passed.
-- The rebuilt system stopped cleanly; authoritative inventory shows all fifteen
-  VMs stopped and its target bundle has no open files. Next: reviewed exact public
-  deletion retaining the workspace, fresh replacement attach/start and NEW
-  independently compared stopped export, then the full second-volume cycle.
+- Fresh bounded review approved exact public deletion of only the stopped rebuilt
+  system. Public delete exited zero, cleared its attachment and retained the same
+  workspace inode/size; every other VM remained stopped and preserved. Fresh
+  replacement B reused the admitted `jq` base, attached that existing volume
+  without formatting or import, and started with READY/actions complete.
+  Pinned readback matched its own once/counter `1`, all four edited files and
+  installed packages. B then stopped cleanly.
+- B's NEW stopped export exited zero. Independent comparison matched the exact
+  four private regular files against predetermined bytes, A's earlier edited
+  export and B's live readback. Host source and before/after workspace raw SHA
+  remained unchanged; inspector builds were cleaned. The original pristine
+  import journal remains verified under its original owner and was not reused
+  under B. All fifteen VMs are stopped. This completes the first full cycle.
+- Next: repeat every phase on independently formatted volume two and new C/D
+  sessions, then final source/host gates and stopped handoff. Fresh three-file
+  source staging and the second idle clean ext4 volume/header/proof passed
+  separate checks; no C/D VM was launched by that preflight.
   No continuation automation is recreated; rollback stays detached and intact.
 - [Checkpoint CI at `551b297`](https://github.com/weshofmann/boxwarden/actions/runs/36294305997)
   passed the full deterministic matrix. Bounded cumulative source review at that
@@ -1111,20 +1124,18 @@ status above supersedes historical pending/running statements.
 
 ## Remaining acceptance
 
-1. Delete only the stopped disposable system while retaining its workspace,
-   attach it to a fresh replacement, and compare a NEW stopped export to the
-   predetermined edited bytes and earlier edited baseline.
-2. Repeat the complete pristine import/original-owner verification, explicit
+1. Repeat the complete pristine import/original-owner verification, explicit
    edit, restart, software-changing rebuild/start and replacement/export cycle
-   on the second independently formatted fresh workspace and new sessions.
-3. Run final source and real-host checks, resolve review findings, record limits,
+   on the second independently formatted fresh workspace and new C/D sessions.
+2. Run final source and real-host checks, resolve review findings, record limits,
    and update the Draft PR/quickstart with stopped test VMs. Wes's provider
    sign-in and subjective GUI acceptance may remain human actions.
 
-Prepared-base admission, first create/start/GUI, ordered actions and running-start
-idempotence, pristine import/original-owner stopped verification, explicit edits,
-first-system restart retention, and software-changing rebuild with explicit
-start/GUI/package/action proofs and retained edited bytes have already passed.
+The first full cycle passed: prepared-base admission, create/start/GUI, ordered
+and idempotent actions, pristine original-owner import verification, explicit edits,
+restart retention, software-changing rebuild/start/GUI/packages, replacement
+attachment and a NEW independently compared stopped export. These observations
+remain separate from the still-pending independent repetition and final gates.
 
 ## Qualification storage direction
 
@@ -1158,3 +1169,7 @@ passed the full deterministic matrix.
 [Review-documentation CI at `c38b3de`](https://github.com/weshofmann/boxwarden/actions/runs/36295069815)
 passed the full deterministic matrix. Hosted results remain separate from the
 recorded real-host rebuild/start/retention observations.
+
+[Rebuild-checkpoint CI at `bb7276e`](https://github.com/weshofmann/boxwarden/actions/runs/36295754025)
+passed the full deterministic matrix. The later replacement/export checks above
+are separately executed real-host observations.
