@@ -72,7 +72,7 @@ test('unknown invocation is refused without changing the project', t => {
   assert.equal(fs.existsSync(path.join(f.project, 'guest-note.txt')), false);
 });
 
-for (const name of ['v0.2-alpha-chatgpt.json', 'v0.2-alpha-chatgpt-jq.json']) {
+for (const name of ['v0.2-alpha-chatgpt.json', 'v0.2-alpha-chatgpt-jq.json', 'v0.2-alpha-chatgpt-tree.json']) {
   function action(t, count = 1, linked = false) {
     const f = fixture(t);
     const mount = path.join(f.root, 'mount');
@@ -119,7 +119,7 @@ for (const name of ['v0.2-alpha-chatgpt.json', 'v0.2-alpha-chatgpt-jq.json']) {
   });
 }
 
-for (const name of ['v0.2-alpha-chatgpt.json', 'v0.2-alpha-chatgpt-jq.json']) {
+for (const name of ['v0.2-alpha-chatgpt.json', 'v0.2-alpha-chatgpt-jq.json', 'v0.2-alpha-chatgpt-tree.json']) {
   test(`${name}: once marker precedes startup counter and graphical launch`, t => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'boxwarden-action-proof-'));
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));

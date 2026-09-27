@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -297,7 +298,7 @@ func TestLoadRunnableRejectsUnexecutableActionArgv(t *testing.T) {
 }
 
 func TestTrackedChatGPTRecipesOfferExplicitWorkspaceEditWithoutChangingBase(t *testing.T) {
-	for _, filename := range []string{"v0.2-alpha-chatgpt.json", "v0.2-alpha-chatgpt-jq.json"} {
+	for _, filename := range []string{"v0.2-alpha-chatgpt.json", "v0.2-alpha-chatgpt-jq.json", "v0.2-alpha-chatgpt-tree.json"} {
 		t.Run(filename, func(t *testing.T) {
 			value, err := LoadRunnable(filepath.Join("..", "..", "examples", filename))
 			if err != nil {
@@ -335,7 +336,7 @@ func TestTrackedChatGPTRecipesOfferExplicitWorkspaceEditWithoutChangingBase(t *t
 }
 
 func TestTrackedChatGPTActionProofsRetainReusableBase(t *testing.T) {
-	for _, filename := range []string{"v0.2-alpha-chatgpt.json", "v0.2-alpha-chatgpt-jq.json"} {
+	for _, filename := range []string{"v0.2-alpha-chatgpt.json", "v0.2-alpha-chatgpt-jq.json", "v0.2-alpha-chatgpt-tree.json"} {
 		t.Run(filename, func(t *testing.T) {
 			value, err := LoadRunnable(filepath.Join("..", "..", "examples", filename))
 			if err != nil {
@@ -364,5 +365,46 @@ func TestTrackedChatGPTActionProofsRetainReusableBase(t *testing.T) {
 				t.Fatalf("proof actions did not change session intent: %v", err)
 			}
 		})
+	}
+}
+
+// The replacement recipe must change prepared software while preserving the
+// same guest actions and workspace contract. Actual guest absence/presence is
+// a separate host acceptance gate; this test proves the declared transition.
+func TestTrackedChatGPTTreeChangesPreparedSoftwareOnly(t *testing.T) {
+	original, err := LoadRunnable(filepath.Join("..", "..", "examples", "v0.2-alpha-chatgpt.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := LoadRunnable(filepath.Join("..", "..", "examples", "v0.2-alpha-chatgpt-tree.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range original.AptPackages {
+		if name == "tree" {
+			t.Fatal("original recipe already declares tree")
+		}
+	}
+	expected := original
+	expected.AptPackages = append(append([]string(nil), original.AptPackages...), "tree")
+	if !reflect.DeepEqual(changed, expected) {
+		t.Fatal("tree recipe must differ only by its added prepared package")
+	}
+	const guestSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	oldKey, err := PreparationKey(original, guestSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newKey, err := PreparationKey(changed, guestSHA)
+	if err != nil || newKey == oldKey {
+		t.Fatalf("software change reused base key: %s, %v", newKey, err)
+	}
+	_, oldIntent, err := CanonicalIntent(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, newIntent, err := CanonicalIntent(changed)
+	if err != nil || newIntent == oldIntent {
+		t.Fatalf("software change reused session intent: %s, %v", newIntent, err)
 	}
 }

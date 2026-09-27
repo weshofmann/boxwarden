@@ -64,13 +64,13 @@ For a credential-free action check, `examples/v0.2-alpha-actions.json` writes
 a `once` marker in the guest home, then its `startup` step requires that marker
 and increments a guest-local start counter. A fresh run should produce counter
 `1`; a later stop/start of the same system should produce `2` while the marker
-remains. Both ChatGPT recipes include these same proof actions before GUI
+remains. All three ChatGPT recipes include these same proof actions before GUI
 launch. An already-running public start must add no action attempts and leave
 the counter unchanged. A rebuilt system runs its own once action and starts
 its guest-local counter at `1`; the separate workspace retains project bytes.
 The first fresh system verified once/counter ordering, already-running start
 idempotence and counter increments through actual restarts. Rebuilt-system
-counter reset also passed after the public software-changing rebuild and explicit
+counter reset also passed after the public system rebuild and explicit
 start. Replacement retention also passed; independent repetition remains pending.
 
 ```sh
@@ -148,7 +148,8 @@ replacement changes session identity. After either transition, make a new
 stopped export and compare its bytes independently; the original import
 verification cannot be repeated against that new owner. Keep the VM stopped
 when finished. First-session GUI launch, pristine original-owner verification,
-edited-data restart retention and software-changing rebuild/start are verified.
+edited-data restart retention and system rebuild/start are verified. The actual
+added-software gate remains pending: `jq` was already installed in the baseline.
 Replacement reattachment and its NEW stopped export also passed. Independent
 repetition and final gates remain tracked in
 [alpha progress](alpha-progress.md) until they pass the complete matrix.
@@ -203,17 +204,20 @@ matched after rebuild/start and replacement; a NEW replacement export matched
 the edited baseline. The full second-volume repeat remains pending.
 
 For the software-changing rebuild trial, the tracked
-`examples/v0.2-alpha-chatgpt-jq.json` recipe retains the ChatGPT preparation,
+`examples/v0.2-alpha-chatgpt-tree.json` recipe retains the ChatGPT preparation,
 startup action, and workspace declaration while adding the [Ubuntu 24.04 ARM64
-`jq` package](https://packages.ubuntu.com/noble/arm64/jq). This gives the
+`tree` package](https://packages.ubuntu.com/noble/tree). This gives the
 replacement base a different preparation key and an
-additional package for independent-clone inventory. After recording the
+additional package for independent-clone inventory. Confirm it is absent in the
+original guest before treating installed presence after rebuild as a software
+change. The historical `jq` variant remains available, but its baseline already
+contained `jq` and therefore did not prove adding software. After recording the
 stopped original system and exact workspace bytes, prepare and rebuild through
 the public command:
 
 ```sh
 "$BW" --config "$CONFIG" --domain alpha session rebuild \
-  --recipe "$SOURCE_ROOT/examples/v0.2-alpha-chatgpt-jq.json" --iso "$ISO" \
+  --recipe "$SOURCE_ROOT/examples/v0.2-alpha-chatgpt-tree.json" --iso "$ISO" \
   --guest-definition "$SOURCE_ROOT/guest/ubuntu-24.04-arm64" \
   --openssl "$OPENSSL" --openssl-sha256 "$OPENSSL_SHA256" \
   --xorriso "$XORRISO" --xorriso-sha256 "$XORRISO_SHA256" "$SESSION"
@@ -223,10 +227,10 @@ the public command:
 Rebuild reports management state but does not invoke the recipe's automatic
 `once` and `startup` actions. Require the subsequent start to report
 `actions: complete`, then check the workspace bytes and actual GUI.
-The first-cycle trial passed this rebuild/start sequence with independently
-verified admission, action counts, installed packages, retained edited bytes and
-actual ChatGPT sign-in readiness. Replacement and its new export also passed;
-independent repetition and final gates remain pending. Do not infer retained data or a usable desktop from rebuild exit alone.
+The historical `jq` trial passed system rebuild/start, admission, action counts,
+retained edited bytes, ChatGPT sign-in readiness and replacement export. It did
+not establish added software. The corrective `tree` rebuild and both full
+workspace histories remain pending until separate package/data evidence passes. Do not infer retained data or a usable desktop from rebuild exit alone.
 
 
 ## Replace the disposable system and retain the workspace
@@ -241,7 +245,7 @@ no workspace-retention flag. Stop and delete only the disposable system:
 "$BW" --config "$CONFIG" --domain alpha session stop "$SESSION"
 "$BW" --config "$CONFIG" --domain alpha session delete "$SESSION"
 "$BW" --config "$CONFIG" --domain alpha session create \
-  --recipe "$SOURCE_ROOT/examples/v0.2-alpha-chatgpt-jq.json" --iso "$ISO" \
+  --recipe "$SOURCE_ROOT/examples/v0.2-alpha-chatgpt-tree.json" --iso "$ISO" \
   --guest-definition "$SOURCE_ROOT/guest/ubuntu-24.04-arm64" \
   --openssl "$OPENSSL" --openssl-sha256 "$OPENSSL_SHA256" \
   --xorriso "$XORRISO" --xorriso-sha256 "$XORRISO_SHA256" "$REPLACEMENT"
@@ -260,4 +264,6 @@ Do not format or re-import this existing volume. Independently compare the NEW
 returned directory to the known edited bytes and earlier edited-data baseline;
 refuse extra files or unsupported types. Keep original pristine import verification
 bound to its original owner; do not run that verification against the replacement.
-The first-cycle public delete/create/attach/start/stop/export sequence passed.
+The historical first-workspace delete/create/attach/start/stop/export sequence
+passed. Repeat it after the corrective `tree` rebuild; its earlier export cannot
+prove the later software transition.

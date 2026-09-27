@@ -7,6 +7,45 @@ prototype with material acceptance gaps, not an alpha-ready release.
 
 ## Current checkpoint
 
+### Software-change acceptance correction
+
+Pinned package inventories from both current workspace histories show that `jq`
+was already installed in the original desktop base. The earlier `jq` recipe
+changed preparation identity and replaced the system, but did **not** demonstrate
+adding software. The earlier first-full-cycle claim is withdrawn. Its pristine
+verification, edits, restarts, system replacement and independently compared
+exports remain valid observations.
+
+A separate `examples/v0.2-alpha-chatgpt-tree.json` variant appends only `tree` to
+the original package declaration. Both captured baseline inventories contain no
+`tree` entry. The original and historical `jq` recipes remain unchanged. Runnable
+recipe/key/intent checks and actual edit/once/startup fixtures passed targeted
+local tests; actual tree preparation, installed-package proof and both corrected
+rebuild/replacement histories remain pending. Fresh bounded design review found
+no Important/Critical issue and approved reusing one newly qualified tree base
+across the two independent workspace histories.
+
+Second session C independently completed public create/attach/start, actual
+ChatGPT sign-in observation, pristine import and pinned readback. Its initial
+stopped export matched its own pristine source/live bytes, and public import
+verification passed under C's original backend before edits or rebuild. All
+sixteen VMs are stopped. A driver import invocation omitted the required volume
+UUID and was rejected at parsing; the corrected invocation passed.
+
+Fresh uncached full Go tests, race detection and vet passed at `f5113f0`, as did
+host/Linux guest builds, Node, guest/helper fixtures, shell syntax, gofmt and
+ShellCheck. Failed driver attempts are retained separately: missing `USER` for
+an ACL fixture, Darwin linking of Linux-only guest targets, and Python isolation
+excluding a sibling fixture module. Corrected targeted/tail checks passed; this
+is source verification, not VM acceptance. Swift compilation, final artifact
+identity and current-source final gates remain pending. [Hosted checkpoint CI](https://github.com/weshofmann/boxwarden/actions/runs/36296446219)
+passed its full deterministic matrix.
+
+Next: finish C's edit/restart baseline, admit a fresh tree base, and complete the
+actual absent-to-installed rebuild/start plus NEW replacement export on each
+workspace. Preserve all historical workspaces, protected VM and detached rollback.
+
+
 Latest installer source: `d401c17126e2ff2b9e23ab75af1c781fae032fff`.
 [Hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36256683649)
 passed its full deterministic matrix. Required EFI wait, scoped daemon startup
@@ -126,7 +165,7 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   Another actual restart retained all edited bytes, advanced counter to `3`, and
   kept once/edit at one succeeded execution each; each actual start has exactly
   one succeeded startup pair. This verifies the first-cycle edit/restart gate.
-- Public software-changing `jq` rebuild exited zero and admitted a fresh exact
+- Public rebuild using the historical `jq` recipe exited zero and admitted a fresh exact
   candidate. Independent checks matched journal/cache identity, passed clone
   receipt digests and both checks; the BOM includes installed `jq`. Base/clone
   are stopped, the old system is retired, and the same workspace inode/size is
@@ -153,9 +192,10 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   export and B's live readback. Host source and before/after workspace raw SHA
   remained unchanged; inspector builds were cleaned. The original pristine
   import journal remains verified under its original owner and was not reused
-  under B. All fifteen VMs are stopped. This completes the first full cycle.
-- Next: repeat every phase on independently formatted volume two and new C/D
-  sessions, then final source/host gates and stopped handoff. Fresh three-file
+  under B. All fifteen VMs were stopped at that checkpoint. This proves the
+  replacement/data path; the software-change correction above remains pending.
+- At that checkpoint, the next step was to repeat every phase on independently
+  formatted volume two and new C/D sessions, then final gates and stopped handoff. Fresh three-file
   source staging and the second idle clean ext4 volume/header/proof passed
   separate checks; no C/D VM was launched by that preflight.
   No continuation automation is recreated; rollback stays detached and intact.
@@ -1124,18 +1164,20 @@ status above supersedes historical pending/running statements.
 
 ## Remaining acceptance
 
-1. Repeat the complete pristine import/original-owner verification, explicit
-   edit, restart, software-changing rebuild/start and replacement/export cycle
-   on the second independently formatted fresh workspace and new C/D sessions.
-2. Run final source and real-host checks, resolve review findings, record limits,
+1. Extend the first retained workspace history with a genuinely software-changing
+   `tree` rebuild of B, explicit public start, installed-package/GUI/action/data
+   checks, a new replacement and a NEW independently compared stopped export.
+2. Complete C's explicit edit/restart baseline, tree rebuild/start and D
+   replacement/export on the second independently formatted workspace. C's
+   pristine original-owner import verification has already passed.
+3. Run final source and real-host checks, resolve review findings, record limits,
    and update the Draft PR/quickstart with stopped test VMs. Wes's provider
    sign-in and subjective GUI acceptance may remain human actions.
 
-The first full cycle passed: prepared-base admission, create/start/GUI, ordered
-and idempotent actions, pristine original-owner import verification, explicit edits,
-restart retention, software-changing rebuild/start/GUI/packages, replacement
-attachment and a NEW independently compared stopped export. These observations
-remain separate from the still-pending independent repetition and final gates.
+The valid first-history observations are preserved, but the previous first-full-
+cycle/software-addition claim is withdrawn because `jq` was already installed.
+A fresh bounded reviewer approved these corrective continuations; each workspace
+requires its own before/after package evidence and NEW post-transition export.
 
 ## Qualification storage direction
 

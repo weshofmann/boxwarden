@@ -599,3 +599,33 @@ cleanliness was not inferred from stop. Fresh replacement readback and a NEW
 controlled export separately proved the edited bytes. No broader cleanup or
 whole-PR approval is implied. Requested Astra/extra-high routing is not independently
 attested. Logs, import/export baselines, protected history and old workspaces remain.
+
+
+## Bounded software-change correction at `f5113f0`
+
+Fresh requested Astra/extra-high review found no Important/Critical design defect
+in adding a separate package-only `tree` recipe and correcting the acceptance
+sequence. Routing is requested, not independently attested. Both preserved B/C
+pinned inventories contain installed `jq` and no `tree` stanza. The previous jq
+trial proves system replacement and data retention, not added software; its
+software-change/full-cycle claim is withdrawn.
+
+Retain A's valid pristine/edit/restart history, then rebuild B with tree, explicitly
+start and verify packages/actions/GUI/edited bytes, and make a new replacement and
+NEW stopped export. Independently finish C's pristine verify/edit/restart, tree
+rebuild/start and D replacement/export. One freshly qualified tree base may be
+reused; lifecycle and workspace observations must remain independent. Original
+recipes, guest inputs and all historical evidence are preserved.
+
+The review required runnable admission, distinct preparation key/intent, unchanged
+actions/workspace declarations and tree absence/presence evidence. Added regression
+failed before the variant existed, then Go recipe checks and real Node edit/once/
+startup fixtures passed. These are targeted source checks, not tree VM acceptance.
+No whole-PR rereview, tests or VM operations were performed by this reviewer.
+
+The same bounded reviewer inspected the actual six-file correction over
+`f5113f0` and found no Important/Critical issue. Recipe-only delta, runnable
+admission/key/intent regression, both Go/Node fixture loops and corrected active
+commands/claims matched. Read-only diff check passed; suites and VMs were not
+rerun by the reviewer. Two minor wording fixes (all three variants; explicitly
+historical next-step paragraph) were applied before publication.
