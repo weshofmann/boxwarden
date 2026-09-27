@@ -52,12 +52,17 @@ Xwayland process without accessing clipboard contents. The guest source now
 makes that connection before its unchanged strict process proof; 59 guest tests,
 including native-call deadline and first-use ordering cases, and the fake ISO
 and finalization fixtures passed. Independent guest review found no remaining
-Important/Critical issue in the correction. Real cold-start CLI acceptance is
-still pending.
+Important/Critical issue in the correction. After staging only this helper in
+the disposable probe, public stop/start produced a new READY generation and a
+read-only inventory again found one GNOME Shell and zero Xwayland. From that
+cold baseline, public CLI `copy`/`paste` passed exact Unicode/trailing LF,
+valid empty text, and 1 MiB. Invalid UTF-8, NUL, oversize, and stale-generation
+requests refused without changing the destination. Full-host doctor and final
+session readiness passed; no Mac pasteboard was accessed. Hosted deterministic
+CI passed at `dc3bf28` ([run 36357415006](https://github.com/weshofmann/boxwarden/actions/runs/36357415006)).
 
-Next: stage the corrected helper only in the disposable probe, restart it to
-observe a zero-Xwayland baseline, then repeat production CLI and synthetic
-Firefox/application copy and later paste in the same disposable probe. Host
+Next: demonstrate synthetic guest Firefox/application copy and later paste,
+then finish the attended deployment and host GUI acceptance path. Host
 deployment and real host-clipboard GUI testing remain attended gates.
 
 Valuable demo D is untouched; one disposable probe is used. No real host clipboard
