@@ -485,3 +485,22 @@ hit actual internal free-space reserve during fixture setup and was not green.
 The guard was retained. Hard termination before UUID output still requires exact
 private-journal inspection; public transaction listing remains unimplemented.
 No real export recovery or GUI/durability proof is claimed.
+
+### Ordered ChatGPT action proof delta
+
+The recipes now reuse the existing credential-free once marker and startup
+counter ahead of graphical launch, including the software-changing `jq`
+variant. New regressions failed against the three-step recipes, then passed
+with the five-step ordering. Sixteen Node fixtures execute the tracked Python
+commands with only the fixed guest home replaced by isolated temporary paths;
+they verify missing/foreign proof refusal and exact `1`/`2` counter bytes.
+The full recipe package also verifies unchanged preparation keys and changed
+session intent. Existing guest preparation inputs are unchanged, so the
+already-running base preparation remains usable only if its own admission
+succeeds. Actual session ordering, repeat-start idempotence and rebuild counter
+reset remain acceptance gates. No VM behavior is claimed by these fixtures.
+
+Fresh bounded recipe delta review found no Important/Critical issue in the
+four code/example files atop `523f719`, confirming planner phase ordering and
+stop-on-failure behavior. Targeted session/app action and recipe tests passed.
+The reviewer inspected source and did not rerun tests or touch live storage.

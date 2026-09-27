@@ -43,7 +43,8 @@ command:
 
 The optional `examples/v0.2-alpha-chatgpt.json` recipe adds a pinned official
 ARM64 ChatGPT package as a `prepare` step and requests a guest-side graphical
-launch on `startup`. The installer checks downloaded bytes, Debian package
+launch on `startup`, after the existing `record-first-start` once marker and
+`count-starts` startup counter. The installer checks downloaded bytes, Debian package
 identity, and installed identity, and disables the package's optional apt
 source. The launcher requires the workstation's active graphical user manager
 and asks it to start the package executable. Its checked command only proves
@@ -62,7 +63,11 @@ For a credential-free action check, `examples/v0.2-alpha-actions.json` writes
 a `once` marker in the guest home, then its `startup` step requires that marker
 and increments a guest-local start counter. A fresh run should produce counter
 `1`; a later stop/start of the same system should produce `2` while the marker
-remains. This example is source checked and awaits fresh-VM qualification.
+remains. Both ChatGPT recipes include these same proof actions before GUI
+launch. An already-running public start must add no action attempts and leave
+the counter unchanged. A rebuilt system runs its own once action and starts
+its guest-local counter at `1`; the separate workspace retains project bytes.
+These examples are source checked and await fresh-VM qualification.
 
 ```sh
 "$BW" --config "$CONFIG" doctor

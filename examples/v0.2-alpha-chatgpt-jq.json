@@ -17,6 +17,24 @@
       "argv": ["/usr/local/libexec/boxwarden-install-pinned-chatgpt"]
     },
     {
+      "id": "record-first-start",
+      "phase": "once",
+      "argv": [
+        "/usr/bin/python3",
+        "-c",
+        "from pathlib import Path; Path('/home/boxwarden/.boxwarden-alpha-once').write_text('once\\n')"
+      ]
+    },
+    {
+      "id": "count-starts",
+      "phase": "startup",
+      "argv": [
+        "/usr/bin/python3",
+        "-c",
+        "from pathlib import Path; marker=Path('/home/boxwarden/.boxwarden-alpha-once'); assert marker.read_text() == 'once\\n'; count=Path('/home/boxwarden/.boxwarden-alpha-starts'); count.write_text(str(int(count.read_text()) + 1 if count.exists() else 1) + '\\n')"
+      ]
+    },
+    {
       "id": "open-chatgpt",
       "phase": "startup",
       "argv": ["/usr/local/libexec/boxwarden-launch-chatgpt"]

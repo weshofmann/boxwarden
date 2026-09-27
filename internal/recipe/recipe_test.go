@@ -42,12 +42,12 @@ func TestTrackedChatGPTRecipeUsesPinnedGuestPreparation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tracked ChatGPT recipe is not runnable: %v", err)
 	}
-	if len(recipe.Steps) != 3 || recipe.Steps[0].Phase != "prepare" ||
+	if len(recipe.Steps) != 5 || recipe.Steps[0].Phase != "prepare" ||
 		len(recipe.Steps[0].Argv) != 1 || recipe.Steps[0].Argv[0] != "/usr/local/libexec/boxwarden-install-pinned-chatgpt" {
 		t.Fatalf("tracked ChatGPT preparation changed: %+v", recipe.Steps)
 	}
-	if recipe.Steps[1].Phase != "startup" || len(recipe.Steps[1].Argv) != 1 ||
-		recipe.Steps[1].Argv[0] != "/usr/local/libexec/boxwarden-launch-chatgpt" {
+	if recipe.Steps[3].Phase != "startup" || len(recipe.Steps[3].Argv) != 1 ||
+		recipe.Steps[3].Argv[0] != "/usr/local/libexec/boxwarden-launch-chatgpt" {
 		t.Fatalf("tracked ChatGPT startup changed: %+v", recipe.Steps)
 	}
 }
@@ -329,6 +329,39 @@ func TestTrackedChatGPTRecipesOfferExplicitWorkspaceEditWithoutChangingBase(t *t
 			withoutEdit, err := PreparationKey(without, guestSHA)
 			if err != nil || withEdit != withoutEdit {
 				t.Fatalf("explicit workspace edit invalidates reusable base: %s != %s, err=%v", withEdit, withoutEdit, err)
+			}
+		})
+	}
+}
+
+func TestTrackedChatGPTActionProofsRetainReusableBase(t *testing.T) {
+	for _, filename := range []string{"v0.2-alpha-chatgpt.json", "v0.2-alpha-chatgpt-jq.json"} {
+		t.Run(filename, func(t *testing.T) {
+			value, err := LoadRunnable(filepath.Join("..", "..", "examples", filename))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(value.Steps) != 5 || value.Steps[1].ID != "record-first-start" || value.Steps[1].Phase != "once" || value.Steps[2].ID != "count-starts" || value.Steps[2].Phase != "startup" || value.Steps[3].ID != "open-chatgpt" {
+				t.Fatalf("missing ordered proof: %+v", value.Steps)
+			}
+			before := value
+			before.Steps = append([]Step{value.Steps[0]}, value.Steps[3:]...)
+			digest := strings.Repeat("a", 64)
+			oldKey, err := PreparationKey(before, digest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			newKey, err := PreparationKey(value, digest)
+			if err != nil || oldKey != newKey {
+				t.Fatalf("proof actions changed base: %s != %s, %v", oldKey, newKey, err)
+			}
+			_, oldIntent, err := CanonicalIntent(before)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, newIntent, err := CanonicalIntent(value)
+			if err != nil || oldIntent == newIntent {
+				t.Fatalf("proof actions did not change session intent: %v", err)
 			}
 		})
 	}

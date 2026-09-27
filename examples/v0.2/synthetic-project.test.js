@@ -118,3 +118,37 @@ for (const name of ['v0.2-alpha-chatgpt.json', 'v0.2-alpha-chatgpt-jq.json']) {
     assert.equal(JSON.parse(fs.readFileSync(path.join(f.project, 'task.json'))).title, 'alpha workspace persistence');
   });
 }
+
+for (const name of ['v0.2-alpha-chatgpt.json', 'v0.2-alpha-chatgpt-jq.json']) {
+  test(`${name}: once marker precedes startup counter and graphical launch`, t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'boxwarden-action-proof-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const recipe = JSON.parse(fs.readFileSync(path.join(__dirname, '..', name)));
+    assert.deepEqual(recipe.steps.map(s => [s.id, s.phase]), [
+      ['install-chatgpt', 'prepare'], ['record-first-start', 'once'],
+      ['count-starts', 'startup'], ['open-chatgpt', 'startup'], ['edit-project', 'reconfigure'],
+    ]);
+    const once = recipe.steps[1], startup = recipe.steps[2];
+    function run(step) {
+      assert.deepEqual(step.argv.slice(0, 2), ['/usr/bin/python3', '-c']);
+      // Substitute only the fixed guest home in the tracked Python command.
+      // Execute its real marker/counter behavior in an isolated host fixture.
+      const code = step.argv[2].replaceAll('/home/boxwarden/', `${root}/`);
+      return spawnSync('/usr/bin/python3', ['-I', '-c', code], { encoding: 'utf8' });
+    }
+    const marker = path.join(root, '.boxwarden-alpha-once');
+    const counter = path.join(root, '.boxwarden-alpha-starts');
+    assert.notEqual(run(startup).status, 0, 'startup must reject missing once proof');
+    assert.equal(fs.existsSync(counter), false);
+    assert.equal(run(once).status, 0);
+    assert.equal(fs.readFileSync(marker, 'utf8'), 'once\n');
+    assert.equal(run(startup).status, 0);
+    assert.equal(fs.readFileSync(counter, 'utf8'), '1\n');
+    assert.equal(run(startup).status, 0);
+    assert.equal(fs.readFileSync(counter, 'utf8'), '2\n');
+    assert.equal(fs.readFileSync(marker, 'utf8'), 'once\n');
+    fs.writeFileSync(marker, 'foreign proof\n');
+    assert.notEqual(run(startup).status, 0);
+    assert.equal(fs.readFileSync(counter, 'utf8'), '2\n');
+  });
+}

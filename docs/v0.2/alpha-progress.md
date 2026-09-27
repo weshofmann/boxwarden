@@ -48,15 +48,23 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   Red/green regressions, affected tests, final full local Go suite, targeted vet
   and bounded delta source review passed. Broader independent fixture repetition
   hit the actual disk reserve and was not green. Real-host recovery remains pending.
-- The fresh native-store preparation was cancelled by the **internal-state disk
-  reserve**, with original process exit one and exact failed journal. The driver
-  selected an older internal-state configuration, staging ISO inputs internally;
-  concurrent disposable build caches exhausted its small stopping margin. The
-  candidate is stopped and unadmitted. Its records remain immutable; do not retry
-  it. Only this run's disposable Go caches were removed, without changing guards
-  or unrelated files. Verify the existing external qualification configuration
-  before the next fresh attempt, keeping host staging off the constrained internal
-  state root. This failure does not establish a guest installer or native-SSD cause.
+- The first native-store preparation failed the internal-state disk reserve.
+  Its exact journal and original exit one remain immutable; fresh-reviewed
+  selective retirement removed only its stopped, unadmitted VM and two staged
+  ISO files. Immediate internal physical space recovery was negligible, so no
+  logical-size savings are claimed. Historical volumes and evidence remain.
+- One fresh public preparation from clean published `523f719` is now in
+  `installer-running`, using the existing external qualification configuration.
+  Its original process is retained; no terminal success, cache admission or
+  independent-clone receipt exists yet. Qualification image encryption was
+  checked at the image layer; native Tart encryption remains a separate check.
+  Shared outer free space was about 257 GiB and qualification availability
+  about 77 GiB at preflight; these are not additive capacities.
+- Both ChatGPT recipes now include the existing once marker and startup counter
+  before GUI launch. Missing/foreign marker refusal, counter `1` then `2`,
+  unchanged marker bytes, session-intent change and unchanged preparation keys
+  passed targeted local fixtures. This does not establish real guest ordering,
+  GUI launch or a successful fresh preparation.
 
 - Focused post-migration review is frozen at `6588c88`. Its [hosted deterministic
   CI](https://github.com/weshofmann/boxwarden/actions/runs/36285329567) passed.
@@ -72,12 +80,11 @@ limits and supervisor fixture correction retain their recorded targeted checks.
   identities. General remount reconciliation remains an alpha limitation.
 - Recipe/usability review found no new Critical/Important issue and passed
   targeted Python, Node and Go checks. The quickstart now requires assigning
-  the export UUID before verification. Lifecycle/data review reproduced an Important
-  interrupted-export recovery gap: public resume cannot clear a Copying-stage
-  reservation. Fix that path before any stopped export; base preparation is
-  unaffected.
-- Next: run fresh public ChatGPT preparation through the operationally admitted
-  native store while resolving any path-specific source blockers. All twelve
+  the export UUID before verification. Lifecycle/data review reproduced the interrupted-export recovery gap
+  corrected in `523f719`. Its [hosted CI](https://github.com/weshofmann/boxwarden/actions/runs/36289716827)
+  passed the full deterministic matrix. Real-host export recovery remains pending.
+- Next: require this preparation's original exit zero, exact admission and
+  passed independent clone before creating fresh sessions and volumes. All twelve
   fresh host acceptance gates remain pending. No continuation automation is
   recreated; the rollback image stays detached and intact.
 
