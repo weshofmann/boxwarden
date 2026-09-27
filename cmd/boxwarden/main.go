@@ -14,6 +14,8 @@ import (
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/backend/tart"
 	"github.com/weshofmann/boxwarden/internal/basebuild"
+	"github.com/weshofmann/boxwarden/internal/clipboardhost"
+	"github.com/weshofmann/boxwarden/internal/clipboardx"
 	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/execx"
 	"github.com/weshofmann/boxwarden/internal/hostx"
@@ -38,7 +40,14 @@ func main() {
 	}
 
 	publicCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	err = app.Run(publicCtx, os.Args[1:], publicOptions(os.Stdout))
+	options := publicOptions(os.Stdout)
+	input := &clipboardInput{source: os.Stdin}
+	options.Input = input
+	clipboardOutput := &clipboardOutput{source: os.Stdout}
+	options.ClipboardOutput = clipboardOutput
+	err = app.Run(publicCtx, os.Args[1:], options)
+	input.Close()
+	clipboardOutput.Close()
 	stopSignals()
 	finish(err)
 }
@@ -54,6 +63,27 @@ func publicOptions(output io.Writer) app.Options {
 	hostInitializer := hostx.NewSystemInitializer()
 	hostDoctor := hostx.NewSystemDoctor()
 	return app.Options{
+		OutputTerminal: clipboardTerminal(os.Stdout),
+		Pasteboard:     clipboardhost.New(),
+		ClipboardTransferFactory: func(ctx context.Context, loaded config.Config, selected config.Domain) (app.ClipboardTransfer, error) {
+			admitted, err := loaded.Domain(string(selected.ID))
+			if err != nil || admitted != selected {
+				return nil, clipboardx.ErrAdmission
+			}
+			host, err := loaded.HostAdmission()
+			if err != nil {
+				return nil, clipboardx.ErrAdmission
+			}
+			request := hostx.Request{ConfiguredStateRoots: host.ConfiguredStateRoots, TartPath: host.Host.TartExecutable, TartHome: host.Host.TartHome, SoftnetPath: host.Host.SoftnetSource}
+			if _, err := hostDoctor.CheckRuntime(ctx, request); err != nil {
+				return nil, clipboardx.ErrAdmission
+			}
+			endpoint, err := supervisor.NewExactClipboardController(filepath.Join(selected.StateRoot, "runtime"))
+			if err != nil {
+				return nil, clipboardx.ErrAdmission
+			}
+			return session.NewClipboardService(selected, endpoint), nil
+		},
 		BackendFactory: func(loaded config.Config, selected config.Domain) (app.BackendDependencies, error) {
 			configured, err := loaded.Domain(string(selected.ID))
 			if err != nil || configured != selected {
@@ -199,6 +229,9 @@ func publicOptions(output io.Writer) app.Options {
 func runInternal(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, install rootInstaller, supervisorRun ...func(context.Context, string) error) (bool, error) {
 	if len(args) == 0 || args[0] != "internal" {
 		return false, nil
+	}
+	if len(args) == 4 && args[1] == "clipboard-pasteboard" {
+		return true, clipboardhost.RunPasteboardHelper(ctx, args[2], args[3], stdin, stdout)
 	}
 	if len(args) == 3 && args[1] == "session-supervisor" {
 		if len(supervisorRun) > 1 || (len(supervisorRun) == 1 && supervisorRun[0] == nil) {

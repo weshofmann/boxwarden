@@ -16,17 +16,30 @@ and native X11 refuse. Guest-local privileged metadata reads identify executable
 links only when ordinary same-user inspection is denied.
 
 Verification: guest helper/source fixtures and focused Go/race checks passed.
-The existing Go suite passed at the integration checkpoint. Real synthetic helper
+The existing Go suite and hosted CI passed at the guest checkpoint. Real synthetic helper
 checks passed Unicode/trailing LF, empty text and 1 MiB, later reads after writer
 exit, and malformed/NUL/oversize rejection preserving the previous value.
 These are helper checks, not production CLI or graphical application acceptance.
 
-In progress: four public CLI commands and private AppKit adapter; review-confirmed
-blocked native reads require a bounded child, and descriptor flags require cleanup
-after I/O quiescence. Pinned Tart strip/menu build is staged; independent shutdown
-review continues. No installed toolchain or root admission has changed.
+The four public CLI commands and private AppKit adapter are implemented. The
+host adapter isolates blocking AppKit calls in a bounded child and restores
+descriptor flags after owned I/O quiesces. Independent host/CLI and pinned Tart
+viewer reviews found no remaining Important/Critical issue. The source patch and
+separately signed Tart `2.32.1-boxwarden-clipboard-r3` are staged; the executable
+SHA-256 is `1573e4be9a10087f8e5dce5dcc5718cfef4d5d0274c60d5e209ba1f13c49f7a6`
+and the reproducible archive SHA-256 is
+`b5f487c3b092b48d23819d2828c45b96f7c84816d51b5ca9dd68f3de64fa3a64`.
+Full local Go and race suites passed using external scratch space. Source-only
+host admission accepts the exact r3 identity; the installed toolchain and root
+manifest have not changed. Real VM/window/menu acceptance is pending.
 
-Next: finish host adapters and patched-viewer review, publish their verified
-integration, then demonstrate synthetic Firefox/application copy and later paste.
+Independent guest review found a remaining Important liveness gap: a blocked
+native GTK call can outlive the preclaim Python signal deadline. A test-first
+correction is in progress. No fresh guest artifact or new VM qualification is
+claimed from the earlier synthetic helper checks.
+
+Next: fix and review the guest deadline, then demonstrate production CLI and synthetic Firefox/application
+copy and later paste in the existing disposable probe. Host deployment and
+real host-clipboard GUI testing remain attended gates.
 Valuable demo D is untouched; one disposable probe is used. No real host clipboard
 has been accessed. Deployment remains a separate concrete approval gate.

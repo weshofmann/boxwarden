@@ -284,6 +284,20 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) (re
 		SoftnetBinDir: expectation.SoftnetBinDir,
 		OperatorHome:  expectation.Manifest.Operator.Home, OperatorName: expectation.Manifest.Operator.Name,
 	}
+	if hostx.SupportsControlledClipboard(expectation.Manifest.Tart) {
+		executable, err := os.Executable()
+		if err != nil {
+			return errors.Join(fmt.Errorf("resolve clipboard command executable: %w", err), serial.Close())
+		}
+		executable, err = filepath.EvalSymlinks(executable)
+		if err != nil {
+			return errors.Join(fmt.Errorf("resolve exact clipboard command executable: %w", err), serial.Close())
+		}
+		launchConfig.Clipboard = &tart.ClipboardLaunchMetadata{
+			CLIPath: executable, ConfigPath: request.HostConfigPath, Domain: binding.Domain,
+			SessionName: string(record.Name), SessionID: binding.SessionID, Generation: binding.Generation,
+		}
+	}
 	launcher := o.deps.launcher(launchConfig)
 	if launcher == nil {
 		return errors.Join(fmt.Errorf("Tart launcher is unavailable"), serial.Close())

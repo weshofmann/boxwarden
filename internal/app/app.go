@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
+	"github.com/weshofmann/boxwarden/internal/clipboardx"
 	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/golden"
 	"github.com/weshofmann/boxwarden/internal/hostx"
@@ -77,31 +78,41 @@ type BackendFactory func(config.Config, config.Domain) (BackendDependencies, err
 
 // Options supplies trusted-host dependencies to Run. App depends only on the
 // narrow backend seams and never on Tart directly.
+type ClipboardTransfer interface {
+	Execute(context.Context, string, clipboardx.Request, io.Reader, io.Writer, clipboardx.Pasteboard) (clipboardx.Outcome, error)
+}
+type ClipboardTransferFactory func(context.Context, config.Config, config.Domain) (ClipboardTransfer, error)
+
 type Options struct {
-	ConfigPath            string
-	Env                   []string
-	Observer              backend.Observer
-	Creator               backend.Creator
-	BackendFactory        BackendFactory
-	HostInit              HostInitializer
-	HostDoctor            HostDoctor
-	CAInit                CAInitializer
-	SessionStarter        SessionStarter
-	SessionStarterFactory SessionStarterFactory
-	SessionStopper        SessionStopper
-	SessionStopperFactory SessionStopperFactory
-	StatusSnapshotFactory StatusSnapshotFactory
-	AlphaPrepare          AlphaPrepareFunc
-	AlphaRebuild          AlphaRebuildFunc
-	AlphaDelete           AlphaDeleteFunc
-	AlphaWorkspaceCreate  AlphaWorkspaceCreateFunc
-	AlphaExport           AlphaExportFunc
-	AlphaExportResume     AlphaExportResumeFunc
-	AlphaImport           AlphaImportFunc
-	AlphaImportVerify     AlphaImportVerifyFunc
-	AlphaAction           AlphaActionFunc
-	AlphaAutomatic        AlphaAutomaticFunc
-	Output                io.Writer
+	ClipboardTransferFactory ClipboardTransferFactory
+	Input                    io.Reader
+	ClipboardOutput          io.Writer
+	OutputTerminal           bool
+	Pasteboard               clipboardx.Pasteboard
+	ConfigPath               string
+	Env                      []string
+	Observer                 backend.Observer
+	Creator                  backend.Creator
+	BackendFactory           BackendFactory
+	HostInit                 HostInitializer
+	HostDoctor               HostDoctor
+	CAInit                   CAInitializer
+	SessionStarter           SessionStarter
+	SessionStarterFactory    SessionStarterFactory
+	SessionStopper           SessionStopper
+	SessionStopperFactory    SessionStopperFactory
+	StatusSnapshotFactory    StatusSnapshotFactory
+	AlphaPrepare             AlphaPrepareFunc
+	AlphaRebuild             AlphaRebuildFunc
+	AlphaDelete              AlphaDeleteFunc
+	AlphaWorkspaceCreate     AlphaWorkspaceCreateFunc
+	AlphaExport              AlphaExportFunc
+	AlphaExportResume        AlphaExportResumeFunc
+	AlphaImport              AlphaImportFunc
+	AlphaImportVerify        AlphaImportVerifyFunc
+	AlphaAction              AlphaActionFunc
+	AlphaAutomatic           AlphaAutomaticFunc
+	Output                   io.Writer
 }
 
 // DefaultConfigPath returns the conventional trusted-host configuration path.
@@ -158,6 +169,24 @@ func Run(ctx context.Context, args []string, options Options) error {
 	}
 
 	switch command.kind {
+	case commandClipboard:
+		if command.clipboard.Mode == clipboardx.Paste && options.OutputTerminal && !command.clipboard.Raw {
+			return clipboardx.ErrTerminal
+		}
+		if options.ClipboardTransferFactory == nil {
+			return clipboardx.ErrAdmission
+		}
+		transfer, err := options.ClipboardTransferFactory(ctx, loaded, selectedDomain)
+		if err != nil || transfer == nil {
+			return clipboardx.ErrAdmission
+		}
+		command.clipboard.Terminal = options.OutputTerminal
+		out := options.ClipboardOutput
+		if out == nil {
+			out = options.Output
+		}
+		_, err = transfer.Execute(ctx, command.name, command.clipboard, options.Input, out, options.Pasteboard)
+		return err
 	case commandAlphaActionList:
 		if selectedDomain.ID != "alpha" {
 			return errors.New("v0.2 session actions are limited to the explicit alpha domain")
@@ -500,6 +529,7 @@ type commandKind uint8
 
 const (
 	commandSessionStatus commandKind = iota + 1
+	commandClipboard
 	commandGoldenRegister
 	commandSessionCreate
 	commandSessionStart
@@ -524,6 +554,7 @@ const (
 
 type parsedCommand struct {
 	kind                 commandKind
+	clipboard            clipboardx.Request
 	configPath           string
 	domain               string
 	name                 string
@@ -551,22 +582,68 @@ func (c parsedCommand) requiresBackend() bool {
 	return c.kind == commandGoldenRegister || c.kind == commandSessionCreate || c.kind == commandSessionStatus || c.kind == commandWorkspaceAttach || c.kind == commandWorkspaceDetach || c.kind == commandWorkspaceExport || c.kind == commandWorkspaceExportResume || c.kind == commandWorkspaceImportVerify
 }
 
-func parseCommand(args []string, options Options) (parsedCommand, error) {
-	configPath := options.ConfigPath
-	if configPath == "" {
-		var err error
-		configPath, err = DefaultConfigPath()
-		if err != nil {
-			return parsedCommand{}, err
+// normalizeClipboardFlags accepts the viewer's SESSION-before-flags argv and
+// interactive interspersed flags. It moves complete argument elements only;
+// flag values are never split, quoted, expanded, or interpreted as shell text.
+// Other command parsers keep their existing flag ordering.
+func normalizeClipboardFlags(args []string) ([]string, error) {
+	flags := make([]string, 0, len(args))
+	positional := make([]string, 0, 1)
+	for index := 0; index < len(args); index++ {
+		token := args[index]
+		if token == "--" {
+			positional = append(positional, args[index+1:]...)
+			break
+		}
+		if !strings.HasPrefix(token, "-") || token == "-" {
+			positional = append(positional, token)
+			continue
+		}
+		name := strings.TrimPrefix(strings.TrimPrefix(token, "-"), "-")
+		name, _, inline := strings.Cut(name, "=")
+		switch name {
+		case "raw":
+			flags = append(flags, token)
+		case "expected-session-id", "expected-backend-kind", "expected-backend-object", "expected-generation":
+			flags = append(flags, token)
+			if !inline {
+				index++
+				if index == len(args) {
+					return nil, clipboardx.ErrRequest
+				}
+				flags = append(flags, args[index])
+			}
+		default:
+			return nil, clipboardx.ErrRequest
 		}
 	}
+	if len(positional) != 1 {
+		return nil, clipboardx.ErrRequest
+	}
+	return append(append(flags, "--"), positional[0]), nil
+}
 
+func parseCommand(args []string, options Options) (parsedCommand, error) {
+	configPath := options.ConfigPath
 	set := flag.NewFlagSet("boxwarden", flag.ContinueOnError)
 	set.SetOutput(io.Discard)
 	domain := set.String("domain", environmentValue(options.Env, "BOXWARDEN_DOMAIN"), "security domain")
 	config := set.String("config", configPath, "configuration file")
 	if err := set.Parse(args); err != nil {
 		return parsedCommand{}, fmt.Errorf("parse command: %w", err)
+	}
+	explicitConfig := false
+	set.Visit(func(f *flag.Flag) {
+		if f.Name == "config" {
+			explicitConfig = true
+		}
+	})
+	if *config == "" && !explicitConfig {
+		defaultPath, err := DefaultConfigPath()
+		if err != nil {
+			return parsedCommand{}, err
+		}
+		*config = defaultPath
 	}
 	if strings.TrimSpace(*config) == "" {
 		return parsedCommand{}, errors.New("configuration path is required")
@@ -595,6 +672,42 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		return parsedCommand{}, errors.New("domain is required; pass --domain or set BOXWARDEN_DOMAIN")
 	}
 	base.domain = *domain
+	if len(remaining) >= 2 && remaining[0] == "clipboard" {
+		if !explicitDomain {
+			return parsedCommand{}, errors.New("clipboard requires explicit --domain")
+		}
+		clipboardSet := flag.NewFlagSet("clipboard", flag.ContinueOnError)
+		clipboardSet.SetOutput(io.Discard)
+		request := clipboardx.Request{Mode: clipboardx.Mode(remaining[1])}
+		clipboardSet.BoolVar(&request.Raw, "raw", false, "allow text output to terminal")
+		clipboardSet.StringVar(&request.Target.SessionID, "expected-session-id", "", "exact launch session")
+		clipboardSet.StringVar(&request.Target.BackendKind, "expected-backend-kind", "", "exact launch backend kind")
+		clipboardSet.StringVar(&request.Target.BackendObject, "expected-backend-object", "", "exact launch backend object")
+		clipboardSet.StringVar(&request.Target.Generation, "expected-generation", "", "exact launch generation")
+		clipboardArgs, err := normalizeClipboardFlags(remaining[2:])
+		if err != nil || clipboardSet.Parse(clipboardArgs) != nil || len(clipboardSet.Args()) != 1 {
+			return parsedCommand{}, clipboardx.ErrRequest
+		}
+		switch request.Mode {
+		case clipboardx.Push, clipboardx.Pull, clipboardx.Copy, clipboardx.Paste:
+		default:
+			return parsedCommand{}, clipboardx.ErrRequest
+		}
+		if request.Raw && request.Mode != clipboardx.Paste {
+			return parsedCommand{}, clipboardx.ErrRequest
+		}
+		if request.Target != (clipboardx.Target{}) {
+			if request.Target.SessionID == "" || request.Target.BackendKind == "" || request.Target.BackendObject == "" || request.Target.Generation == "" {
+				return parsedCommand{}, clipboardx.ErrRequest
+			}
+			request.Target.Domain = *domain
+		}
+		if _, err := session.ParseName(clipboardSet.Args()[0]); err != nil {
+			return parsedCommand{}, clipboardx.ErrRequest
+		}
+		base.kind, base.name, base.clipboard = commandClipboard, clipboardSet.Args()[0], request
+		return base, nil
+	}
 	if len(remaining) >= 2 && remaining[0] == "alpha" && remaining[1] == "prepare" {
 		prepareSet := flag.NewFlagSet("alpha prepare", flag.ContinueOnError)
 		prepareSet.SetOutput(io.Discard)
