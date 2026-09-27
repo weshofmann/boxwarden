@@ -340,3 +340,18 @@ one argv element. Go caches and `TMPDIR`/`GOTMPDIR`, Swift module cache and
 Completed caches/scratch are removed before artifact admission; the caller
 removes the exact admitted bundle after capture. This allows an external-state
 workflow to avoid expanding internal disk use during inspector compilation.
+
+### Export builder cancellation ownership
+
+The host preallocates an empty private per-transaction output directory and
+records its identity before starting `prepare_export_bundle.sh`; argument 3 is
+that exact directory. The script builds there and does not own directory removal.
+The host runs the fixed script and non-detaching tools in a private process group.
+Cancellation signals that group while direct-child wait authority remains held;
+group signaling and `Wait4` are serialized so no signal follows reap or lost
+wait authority. Bounded stdout/stderr draining is required before cleanup.
+
+An unproven reap or drain returns an error naming the retained request and output
+paths and removes neither. Successful cancellation removes only the recorded
+identities. This source-level correction does not qualify inspector VM capture
+cancellation, which requires its independent stopped-receipt contract.

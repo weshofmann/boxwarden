@@ -3,10 +3,12 @@ package workspacex
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -57,23 +59,13 @@ func TestBuildInspectorBundleUsesExactJournalRequestAndRechecksSnapshot(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			var suffix [3]byte
-			if _, err := rand.Read(suffix[:]); err != nil {
-				t.Fatal(err)
-			}
 			stagingRoot := filepath.Join(root, "export-builds")
-			if err := os.Mkdir(stagingRoot, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			bundlePath := filepath.Join(stagingRoot, "boxwarden-alpha-inspector-export."+hex.EncodeToString(suffix[:]))
-			if err := os.Mkdir(bundlePath, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = os.RemoveAll(bundlePath) })
+			var bundlePath string
 			var requestPath string
-			builder := func(ctx context.Context, source, iso, request, goBinary, staging string) (string, error) {
+			builder := func(ctx context.Context, source, iso, request, goBinary, output string) (string, error) {
 				requestPath = request
-				if staging != stagingRoot || filepath.Dir(filepath.Dir(request)) != stagingRoot {
+				bundlePath = output
+				if filepath.Dir(output) != stagingRoot || filepath.Dir(filepath.Dir(request)) != stagingRoot {
 					return "", fmt.Errorf("builder request staging escaped configured state storage: %s", request)
 				}
 				if source != "/private/source" || iso != "/private/verified.iso" || goBinary != "/private/bin/go" {
@@ -150,7 +142,11 @@ func TestProductionTrustedInspectorBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path, err := runTrustedInspectorBuilder(context.Background(), source, iso, request, goBinary, staging)
+	output := filepath.Join(staging, "boxwarden-alpha-inspector-export.A12b3C")
+	if err := os.Mkdir(output, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path, err := runTrustedInspectorBuilder(context.Background(), source, iso, request, goBinary, output)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,18 +249,259 @@ set -eu
 [[ "${TMPDIR:-}" == "$3" ]]
 [[ -z "${BOXWARDEN_TEST_AMBIENT_SENTINEL:-}" ]]
 printf '%s\n' "$#" "$1" "$2" "$3" "${TMPDIR:-}" "${BOXWARDEN_TEST_AMBIENT_SENTINEL:-}" > "$3/argv.txt"
-printf 'prepared private export inspector artifacts: %s/boxwarden-alpha-inspector-export.A12b3C\n' "$3"
+printf 'prepared private export inspector artifacts: %s\n' "$3"
 `
 	if err := os.WriteFile(filepath.Join(scriptDir, "prepare_export_bundle.sh"), []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("BOXWARDEN_TEST_AMBIENT_SENTINEL", "must-not-reach-child")
-	got, err := runTrustedInspectorBuilder(context.Background(), source, iso, request, goBinary, staging)
+	output := filepath.Join(staging, "boxwarden-alpha-inspector-export.A12b3C")
+	if err := os.Mkdir(output, 0700); err != nil {
+		t.Fatal(err)
+	}
+	got, err := runTrustedInspectorBuilder(context.Background(), source, iso, request, goBinary, output)
 	if err != nil || got != filepath.Join(staging, "boxwarden-alpha-inspector-export.A12b3C") {
 		t.Fatalf("builder path=%q err=%v", got, err)
 	}
-	raw, err := os.ReadFile(filepath.Join(staging, "argv.txt"))
-	if err != nil || string(raw) != "3\n"+iso+"\n"+request+"\n"+staging+"\n"+staging+"\n\n" {
+	raw, err := os.ReadFile(filepath.Join(output, "argv.txt"))
+	if err != nil || string(raw) != "3\n"+iso+"\n"+request+"\n"+output+"\n"+output+"\n\n" {
 		t.Fatalf("child argv changed: %q, %v", raw, err)
 	}
+}
+
+func TestExportBuilderDescendantHelper(t *testing.T) {
+	if len(os.Args) < 3 || os.Args[len(os.Args)-3] != "--builder-descendant" {
+		return
+	}
+	conn, err := net.Dial("unix", os.Args[len(os.Args)-2])
+	if err != nil {
+		os.Exit(31)
+	}
+	_, _ = conn.Write([]byte("ready"))
+	var release [1]byte
+	if _, err := conn.Read(release[:]); err == nil {
+		_ = os.WriteFile(os.Args[len(os.Args)-1], []byte("late"), 0600)
+	}
+	_ = conn.Close()
+	os.Exit(0)
+}
+
+func TestTrustedInspectorBuilderCancellationTerminatesDescendants(t *testing.T) {
+	realBuilderLifetimeFixture(t, false)
+}
+func TestTrustedInspectorBuilderUnprovenDrainRetainsArtifacts(t *testing.T) {
+	realBuilderLifetimeFixture(t, true)
+}
+func realBuilderLifetimeFixture(t *testing.T, unproven bool) {
+	root := privateRoot(t)
+	journal := snapshotReadyBuilderJournal(t, root)
+	staging := filepath.Join(root, "export-builds")
+	if err := os.Mkdir(staging, 0700); err != nil {
+		t.Fatal(err)
+	}
+	neighbor := filepath.Join(staging, "neighbor")
+	if err := os.WriteFile(neighbor, []byte("untouched"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Darwin Unix socket paths are short; the fixture owns this disposable socket only.
+	socketDir, err := os.MkdirTemp("/tmp", "bw-cancel-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(socketDir)
+	socket := filepath.Join(socketDir, "s")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	source := filepath.Join(root, "source")
+	scripts := filepath.Join(source, "tools", "alpha-inspector")
+	if err := os.MkdirAll(scripts, 0700); err != nil {
+		t.Fatal(err)
+	}
+	binary, _ := os.Executable()
+	sideEffect := filepath.Join(root, "late")
+	finish := "wait\n"
+	if unproven {
+		finish = "exit 0\n"
+	}
+	script := "#!/bin/bash\nprintf partial > \"$3/partial\"\n" + shellBuilderFixtureQuote(binary) + " -test.run=^TestExportBuilderDescendantHelper$ -- --builder-descendant " + shellBuilderFixtureQuote(socket) + " " + shellBuilderFixtureQuote(sideEffect) + " &\n" + finish
+	if err := os.WriteFile(filepath.Join(scripts, "prepare_export_bundle.sh"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	goBinary := filepath.Join(root, "go")
+	if err := os.WriteFile(goBinary, []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	paths := make(chan [2]string, 1)
+	builder := func(ctx context.Context, source, iso, request, goBinary, output string) (string, error) {
+		paths <- [2]string{filepath.Dir(request), output}
+		return runTrustedInspectorBuilder(ctx, source, iso, request, goBinary, output)
+	}
+	admitter := func(context.Context, string, string, []byte) (exportx.InspectorBundle, error) {
+		t.Error("cancelled builder admitted")
+		return exportx.InspectorBundle{}, nil
+	}
+	go func() {
+		_, err := buildAdmittedExportInspectorBundle(ctx, root, domain.ID("work"), journal.ID, source, "/private/input.iso", goBinary, builder, admitter)
+		result <- err
+	}()
+	listener.(*net.UnixListener).SetDeadline(time.Now().Add(5 * time.Second))
+	conn, err := listener.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	ready := make([]byte, 5)
+	if _, err := io.ReadFull(conn, ready); err != nil || string(ready) != "ready" {
+		t.Fatalf("ready=%q: %v", ready, err)
+	}
+	ownedPaths := <-paths
+	if !unproven {
+		cancel()
+	}
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Error("unresolved builder succeeded")
+		}
+		if unproven && !errors.Is(err, errExportBuilderLifetimeUnproven) {
+			t.Errorf("drain not classified unproven: %v", err)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("builder cancellation did not return within bound")
+	}
+	conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	var data [1]byte
+	_, err = conn.Read(data[:])
+	if unproven {
+		if err == io.EOF {
+			t.Error("fixture writer unexpectedly terminated")
+		}
+		// Release the deliberate contract-violating writer only after retention is established.
+		conn.SetWriteDeadline(time.Now().Add(time.Second))
+		_, _ = conn.Write([]byte("release"))
+		conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+		if _, err := conn.Read(data[:]); err != io.EOF {
+			t.Errorf("released fixture did not close socket: %v", err)
+		}
+	} else if err != io.EOF {
+		t.Errorf("descendant survived cancellation: socket read=%v", err)
+		conn.SetWriteDeadline(time.Now().Add(time.Second))
+		_, _ = conn.Write([]byte("release"))
+	}
+	if _, err := os.Lstat(sideEffect); !unproven && !os.IsNotExist(err) {
+		t.Errorf("late side effect: %v", err)
+	}
+	for _, path := range ownedPaths {
+		_, err := os.Lstat(path)
+		if unproven && err != nil {
+			t.Errorf("unproven artifact removed: %s %v", path, err)
+		}
+		if !unproven && !os.IsNotExist(err) {
+			t.Errorf("cancelled artifact retained: %s %v", path, err)
+		}
+	}
+	if raw, err := os.ReadFile(neighbor); err != nil || string(raw) != "untouched" {
+		t.Errorf("neighbor changed: %q %v", raw, err)
+	}
+}
+
+func snapshotReadyBuilderJournal(t *testing.T, root string) ExportJournal {
+	t.Helper()
+	journal := testExportJournal(t.TempDir())
+	journal.SizeBytes = 4096
+	if err := createExportJournal(root, journal); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "exports", journal.ID)
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "snapshot.raw")
+	data := make([]byte, journal.SizeBytes)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := diskIdentity(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(data)
+	ready := journal
+	ready.Phase = ExportSnapshotReady
+	ready.Snapshot = &ExportSnapshot{Identity: identity, SHA256: hex.EncodeToString(digest[:])}
+	if err := advanceExportJournal(context.Background(), root, journal, ready); err != nil {
+		t.Fatal(err)
+	}
+	return ready
+}
+
+func TestInspectorBuilderCleanupRequiresProvenLifetime(t *testing.T) {
+	for _, unproven := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unproven=%t", unproven), func(t *testing.T) {
+			root := privateRoot(t)
+			journal := snapshotReadyBuilderJournal(t, root)
+			staging := filepath.Join(root, "export-builds")
+			if err := os.Mkdir(staging, 0700); err != nil {
+				t.Fatal(err)
+			}
+			neighbor := filepath.Join(staging, "neighbor")
+			if err := os.WriteFile(neighbor, []byte("untouched"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var requestPath, outputPath string
+			builder := func(_ context.Context, _, _, request, _, output string) (string, error) {
+				requestPath, outputPath = request, output
+				entries, err := os.ReadDir(output)
+				if err != nil || len(entries) != 0 {
+					t.Fatalf("output not preallocated empty: %v", err)
+				}
+				if err := os.WriteFile(filepath.Join(output, "partial"), []byte("partial"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if unproven {
+					return "", errExportBuilderLifetimeUnproven
+				}
+				return "", context.Canceled
+			}
+			admitter := func(context.Context, string, string, []byte) (exportx.InspectorBundle, error) {
+				t.Fatal("failed builder admitted")
+				return exportx.InspectorBundle{}, nil
+			}
+			bundle, err := buildAdmittedExportInspectorBundle(context.Background(), root, domain.ID("work"), journal.ID, "/private/source", "/private/input.iso", "/private/bin/go", builder, admitter)
+			if err == nil || bundle.Path != "" {
+				t.Fatalf("failed build returned cleanup authority: %+v %v", bundle, err)
+			}
+			if unproven && (!errors.Is(err, errExportBuilderLifetimeUnproven) || !strings.Contains(err.Error(), requestPath[:strings.LastIndex(requestPath, "/")]) || !strings.Contains(err.Error(), outputPath)) {
+				t.Fatalf("missing retained receipt: %v", err)
+			}
+			for _, path := range []string{filepath.Dir(requestPath), outputPath} {
+				_, statErr := os.Lstat(path)
+				if unproven && statErr != nil {
+					t.Fatalf("unproven builder artifact removed: %s %v", path, statErr)
+				}
+				if !unproven && !os.IsNotExist(statErr) {
+					t.Fatalf("resolved builder artifact retained: %s %v", path, statErr)
+				}
+			}
+			raw, err := os.ReadFile(neighbor)
+			if err != nil || string(raw) != "untouched" {
+				t.Fatalf("neighbor altered: %q %v", raw, err)
+			}
+		})
+	}
+}
+
+func shellBuilderFixtureQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }

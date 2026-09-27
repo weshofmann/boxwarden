@@ -5,12 +5,12 @@ umask 077
 # Prepare private source artifacts for one export transaction. This does not
 # launch a VM, attach a managed disk, or publish files to the destination.
 if [[ "$#" != 3 || ! -f "$1" || ! -f "$2" || ! -d "$3" ]]; then
-  echo 'usage: prepare_export_bundle.sh <verified Ubuntu 24.04.4 ARM64 ISO> <private journal-derived request.json> <private configured-state staging directory>' >&2
+  echo 'usage: prepare_export_bundle.sh <verified Ubuntu 24.04.4 ARM64 ISO> <private journal-derived request.json> <preallocated empty private output directory>' >&2
   exit 2
 fi
 iso=$1
 request=$2
-staging_root=$3
+output_dir=$3
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/../.." && pwd)"
 qualification=production
@@ -29,7 +29,7 @@ if [[ "$actual_iso" != "$expected_iso" ]]; then
   exit 1
 fi
 
-python3 - "$staging_root" "$script_dir" <<'PYROOT'
+python3 - "$output_dir" "$script_dir" <<'PYROOT'
 import os
 from pathlib import Path
 import stat
@@ -44,10 +44,13 @@ if (not root.is_absolute() or os.path.normpath(str(root)) != str(root)
         or info.st_uid != os.getuid()):
     raise SystemExit("inspector staging parent is not a private absolute directory")
 _check_no_acl(root)
+parent = root.parent
+parent_info = parent.lstat()
+if (not stat.S_ISDIR(parent_info.st_mode) or stat.S_IMODE(parent_info.st_mode) != 0o700
+        or parent_info.st_uid != os.getuid() or list(root.iterdir())):
+    raise SystemExit("inspector output must be empty with a private parent")
+_check_no_acl(parent)
 PYROOT
-output_dir="$(mktemp -d "$staging_root/boxwarden-alpha-inspector-export.XXXXXX")"
-prepared=0
-trap 'if [[ "$prepared" != 1 ]]; then rm -rf -- "$output_dir"; fi' EXIT
 mkdir -- "$output_dir/tmp"
 python3 - "$script_dir" "$request" "$output_dir/request.json" <<'PY'
 import os
@@ -190,4 +193,3 @@ finally:
     os.close(directory_fd)
 PY
 printf 'prepared private export inspector artifacts: %s\n' "$output_dir"
-prepared=1

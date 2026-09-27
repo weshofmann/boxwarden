@@ -3,10 +3,11 @@ package workspacex
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -87,7 +88,7 @@ func buildAdmittedExportInspectorBundle(ctx context.Context, stateRoot string, d
 	}
 	defer func() {
 		err = errors.Join(err, held.Release())
-		if err != nil && bundle.identity != nil {
+		if err != nil && bundle.identity != nil && !errors.Is(err, errExportBuilderLifetimeUnproven) {
 			err = errors.Join(err, bundle.Remove())
 			bundle = PreparedInspectorBundle{}
 		}
@@ -115,7 +116,27 @@ func buildAdmittedExportInspectorBundle(ctx context.Context, stateRoot string, d
 	if err != nil {
 		return bundle, err
 	}
-	defer func() { err = errors.Join(err, staging.RemoveAll(filepath.Base(requestDir))) }()
+	requestIdentity, err := staging.Lstat(filepath.Base(requestDir))
+	if err != nil {
+		return bundle, err
+	}
+	defer func() {
+		if errors.Is(err, errExportBuilderLifetimeUnproven) {
+			err = fmt.Errorf("%w; retained inspector request %s and output %s", err, requestDir, bundle.Path)
+			bundle = PreparedInspectorBundle{}
+			return
+		}
+		info, statErr := staging.Lstat(filepath.Base(requestDir))
+		if statErr != nil || privateDirectory(info) != nil || !os.SameFile(info, requestIdentity) {
+			err = errors.Join(err, fmt.Errorf("inspector request directory identity changed before cleanup: %v", statErr))
+			return
+		}
+		if aclErr := checkPrivateACL(requestDir, info); aclErr != nil {
+			err = errors.Join(err, aclErr)
+			return
+		}
+		err = errors.Join(err, staging.RemoveAll(filepath.Base(requestDir)))
+	}()
 	requestPath := filepath.Join(requestDir, "request.json")
 	requestFile, err := os.OpenFile(requestPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
@@ -128,19 +149,37 @@ func buildAdmittedExportInspectorBundle(ctx context.Context, stateRoot string, d
 	if err != nil {
 		return bundle, err
 	}
+	var suffix [3]byte
+	if _, err = rand.Read(suffix[:]); err != nil {
+		return bundle, err
+	}
+	bundle.Path = filepath.Join(staging.Name(), "boxwarden-alpha-inspector-export."+hex.EncodeToString(suffix[:]))
+	if err = staging.Mkdir(filepath.Base(bundle.Path), 0o700); err != nil {
+		bundle.Path = ""
+		return bundle, err
+	}
+	bundle.identity, err = staging.Lstat(filepath.Base(bundle.Path))
+	if err != nil {
+		return bundle, err
+	}
+	if err = checkPrivateACL(bundle.Path, bundle.identity); err != nil {
+		return bundle, err
+	}
 	buildContext, cancel := context.WithTimeout(ctx, inspectorBuildDeadline)
 	defer cancel()
 	err = diskreserve.Run(buildContext, []string{stateRoot, staging.Name()}, func(guarded context.Context) error {
-		var buildErr error
-		bundle.Path, buildErr = build(guarded, sourceRoot, isoPath, requestPath, goBinary, staging.Name())
+		builtPath, buildErr := build(guarded, sourceRoot, isoPath, requestPath, goBinary, bundle.Path)
 		if buildErr != nil {
 			return buildErr
+		}
+		if builtPath != bundle.Path {
+			return fmt.Errorf("builder returned a different inspector bundle path")
 		}
 		if err := exactPreparedInspectorBundlePath(bundle.Path, staging.Name()); err != nil {
 			return err
 		}
 		info, err := os.Lstat(bundle.Path)
-		if err != nil || privateDirectory(info) != nil {
+		if err != nil || privateDirectory(info) != nil || !os.SameFile(info, bundle.identity) {
 			return fmt.Errorf("builder output is not a private directory: %v", err)
 		}
 		if err := checkPrivateACL(bundle.Path, info); err != nil {
@@ -188,53 +227,51 @@ func exactPreparedInspectorBundlePath(path, parent string) error {
 // The executable is a tracked, clean-source build script with positional argv
 // elements. This explicit Bash invocation cannot be replaced by guest input;
 // both stdout and stderr are bounded and never include request bytes.
-func runTrustedInspectorBuilder(ctx context.Context, sourceRoot, isoPath, requestPath, goBinary, stagingRoot string) (string, error) {
+func runTrustedInspectorBuilder(ctx context.Context, sourceRoot, isoPath, requestPath, goBinary, outputDir string) (string, error) {
 	info, err := os.Lstat(goBinary)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
 		return "", fmt.Errorf("explicit Go executable is not regular and executable: %v", err)
 	}
 	script := filepath.Join(sourceRoot, "tools", "alpha-inspector", "prepare_export_bundle.sh")
-	command := exec.CommandContext(ctx, "/bin/bash", script, isoPath, requestPath, stagingRoot)
-	command.Env = []string{"PATH=" + filepath.Dir(goBinary) + ":/usr/bin:/bin", "LANG=C", "LC_ALL=C", "TMPDIR=" + stagingRoot}
-	command.Stdin = nil
-	command.WaitDelay = 5 * time.Second
-	stdout, stderr := &boundedBuildLog{limit: inspectorBuildLogLimit}, &boundedBuildLog{limit: inspectorBuildLogLimit}
-	command.Stdout, command.Stderr = stdout, stderr
-	if err := command.Run(); err != nil {
-		return "", fmt.Errorf("inspector builder failed: %w; stderr: %s", err, stderr.String())
-	}
-	if stdout.overflow || stderr.overflow {
-		return "", fmt.Errorf("inspector builder output exceeded bound")
+	stdout, stderr, err := runExportBuilderProcess(ctx, script, []string{isoPath, requestPath, outputDir},
+		[]string{"PATH=" + filepath.Dir(goBinary) + ":/usr/bin:/bin", "LANG=C", "LC_ALL=C", "TMPDIR=" + outputDir})
+	if err != nil {
+		return "", fmt.Errorf("inspector builder failed: %w; stderr: %s", err, stderr)
 	}
 	const marker = "prepared private export inspector artifacts: "
-	output := stdout.String()
+	output := stdout
 	if !strings.HasPrefix(output, marker) || !strings.HasSuffix(output, "\n") || strings.Count(output, "\n") != 1 {
 		return "", fmt.Errorf("inspector builder did not return one exact artifact path")
 	}
 	path := strings.TrimSuffix(strings.TrimPrefix(output, marker), "\n")
-	if err := exactPreparedInspectorBundlePath(path, stagingRoot); err != nil {
+	if err := exactPreparedInspectorBundlePath(path, filepath.Dir(outputDir)); err != nil {
 		return "", err
+	}
+	if path != outputDir {
+		return "", fmt.Errorf("builder returned a different inspector bundle path")
 	}
 	return path, nil
 }
 
 type boundedBuildLog struct {
-	bytes.Buffer
+	buffer   bytes.Buffer
 	limit    int
 	overflow bool
 }
 
 func (log *boundedBuildLog) Write(input []byte) (int, error) {
-	remaining := log.limit - log.Len()
+	remaining := log.limit - log.buffer.Len()
 	if remaining <= 0 {
 		log.overflow = true
 		return len(input), nil
 	}
 	if len(input) > remaining {
 		log.overflow = true
-		_, _ = log.Buffer.Write(input[:remaining])
+		_, _ = log.buffer.Write(input[:remaining])
 		return len(input), nil
 	}
-	_, _ = log.Buffer.Write(input)
+	_, _ = log.buffer.Write(input)
 	return len(input), nil
 }
+
+func (log *boundedBuildLog) String() string { return log.buffer.String() }
