@@ -251,3 +251,22 @@ and a full read-only preflight of exact bytes, native mount UUIDs, signature,
 healthy doctor, and all-stopped Tart inventory. An unprivileged apply refused
 without writing intent. Installed host admission remains r5; the attended
 administrator step and real r6 desktop/button verification are next.
+
+Wes approved a standalone macOS menu-bar clipboard utility and stopped
+custom Tart viewer development. The r6 admission request was canceled before
+execution; the installed host still binds r5, and no Tart VM is running. The
+official stock Tart 2.32.1 executable remains at its previously admitted
+digest. An exact private r5-to-stock return package now has current r5
+backups, candidate config/manifest changing only Tart identity, a clean
+source-bound CLI, and a bounded attended helper. The helper's synthetic
+atomic-write/refusal/rollback checks and full read-only host preflight passed;
+the administrator step has not run. The actual black-viewer observation is
+retained above as diagnosis, not a continuing Tart patch plan.
+
+Current work: implement a directly launchable native menu-bar frontend over
+the existing CLI transfer path, with explicit configured sandbox selection,
+generation binding, private clipboard tests, and no automatic transfer. After
+stock admission, remove patch-only launch arguments and toolchain policy in
+one verified source checkpoint, then verify stock desktop and both menu
+directions with a synthetic test window. The GUI acceptance and actual stock
+host return are pending. No general Mac clipboard content has been read.
