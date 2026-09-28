@@ -173,3 +173,13 @@ Host admission policy now recognizes only that coherent r5 tuple in addition
 to prior pinned variants; r5 host installation, doctor and real GUI acceptance
 have not occurred. Next: finish exact candidate review and attended admission,
 then use a fresh disposable public session to verify boot and compact controls.
+
+The exact r4-to-r5 host admission package is now prepared privately. The
+installed r4 config and manifest match their saved bytes; native mount UUIDs,
+source-bound CLI doctor, staged r5 signature and digest, and full-host
+all-stopped inventory passed a read-only preflight. Synthetic atomic-write,
+unknown-input refusal and rollback checks passed; an unprivileged `apply`
+refused without creating an intent record. The helper has not been run with
+administrator privilege. Hosted deterministic CI for `1b72794` passed the
+full test, race, vet and build matrix (run 36371651999). The remaining host
+gate is the attended r4-to-r5 admission; real r5 boot remains unverified.
