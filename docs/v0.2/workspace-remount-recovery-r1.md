@@ -90,6 +90,18 @@ remount, guest reattach, and independent post-remount content export remain
 unexecuted. A single operator-run new-image attach is pending; the
 deterministic changed-device tests and hosted CI do not replace that proof.
 
+An additional host-executed refusal trial used only two newly owned tiny
+synthetic fixtures and the clean source-bound R1 CLI. In the missing-mount
+case, the expected mountpoint was an ordinary directory on the outer APFS
+filesystem; all three public commands (`session create`, `workspace create`,
+and `workspace reconcile`) exited 1 because the observed mountpoint differed.
+In the wrong-storage case, the mountpoint was present but the enrolled APFS
+UUID intentionally differed; all three commands exited 1 on that UUID check.
+Exact before/after fixture-tree inventories were identical: no lock, record,
+or raw workspace was created. No VM or existing workspace was used. This is
+entry-state refusal evidence, not successful remount or physical-reconnect
+evidence.
+
 ## Diagnosis and identity model
 
 A verified formatter journal records `(st_dev, st_ino)` when the raw file is
