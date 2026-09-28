@@ -40,18 +40,18 @@ private struct ControlledClipboardMenu: View {
 }
 struct ControlledClipboardVMView: View {
   @ObservedObject var vm: VM
-  let capturesSystemKeys: Bool
+  let preparedDisplay: VZVirtualMachineView
   @StateObject private var controller: ClipboardWindowController
-  init(vm: VM, capturesSystemKeys: Bool, target: ClipboardTarget?) {
+  init(vm: VM, preparedDisplay: VZVirtualMachineView, target: ClipboardTarget?) {
     self.vm = vm
-    self.capturesSystemKeys = capturesSystemKeys
+    self.preparedDisplay = preparedDisplay
     _controller = StateObject(wrappedValue: ClipboardWindowController(target: target, invoker: ClipboardProcessInvoker()))
   }
   var body: some View {
     VStack(spacing: 0) {
       ClipboardStrip(controller: controller)
       Divider()
-      VMView(vm: vm, capturesSystemKeys: capturesSystemKeys)
+      PreparedVirtualMachineView(view: preparedDisplay)
     }
     .background(ClipboardWindowBinding(controller: controller))
     .focusedSceneValue(\.clipboardController, controller)
@@ -60,6 +60,14 @@ struct ControlledClipboardVMView: View {
     }
     .onDisappear { controller.close() }
   }
+}
+
+// SwiftUI must mount the exact view bound before VM startup. Creating a
+// replacement in makeNSView would discard that early Virtualization binding.
+struct PreparedVirtualMachineView: NSViewRepresentable {
+  let view: VZVirtualMachineView
+  func makeNSView(context: Context) -> VZVirtualMachineView { view }
+  func updateNSView(_ view: VZVirtualMachineView, context: Context) {}
 }
 // Keep the host-owned transfer affordance to one line above the guest display.
 // Full target identity and the no-sync explanation remain available as tooltips.

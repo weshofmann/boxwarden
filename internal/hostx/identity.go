@@ -25,6 +25,9 @@ const (
 	ControlledClipboardTartR5Version          = "2.32.1-boxwarden-clipboard-r5"
 	ControlledClipboardTartR5ExecutableSHA256 = "e0047ddb7ffff0967591a1bd03374980f1775bdb4ab44ffd5b9bfb4700d7b97b"
 	ControlledClipboardTartR5ArchiveSHA256    = "3a58485df6a10958e62da1fd2692c47cf54ddec0448338695b0daf327d7617bc"
+	ControlledClipboardTartR6Version          = "2.32.1-boxwarden-clipboard-r6"
+	ControlledClipboardTartR6ExecutableSHA256 = "e6d6894b793a6e3636e7438756a48fbdba35bf9885c4e08db7ad7bef8c118c99"
+	ControlledClipboardTartR6ArchiveSHA256    = "899773a1dfec8d66c9a42f68ab105c2912b751cd4da3c2883ca2a83db5e355f0"
 
 	SoftnetVersion          = "0.19.0"
 	SoftnetExecutableSHA256 = "ab333619fc8bd7277837545e49a771baa994c01c3e8c14904ae4cc4c1f37269e"
@@ -62,7 +65,8 @@ func SupportsControlledClipboard(identity ToolIdentity) bool {
 	return canonicalAbsolute(identity.Path) &&
 		((identity.Version == ControlledClipboardTartVersion && identity.ExecutableSHA256 == ControlledClipboardTartExecutableSHA256 && identity.ArchiveSHA256 == ControlledClipboardTartArchiveSHA256) ||
 			(identity.Version == ControlledClipboardTartR4Version && identity.ExecutableSHA256 == ControlledClipboardTartR4ExecutableSHA256 && identity.ArchiveSHA256 == ControlledClipboardTartR4ArchiveSHA256) ||
-			(identity.Version == ControlledClipboardTartR5Version && identity.ExecutableSHA256 == ControlledClipboardTartR5ExecutableSHA256 && identity.ArchiveSHA256 == ControlledClipboardTartR5ArchiveSHA256))
+			(identity.Version == ControlledClipboardTartR5Version && identity.ExecutableSHA256 == ControlledClipboardTartR5ExecutableSHA256 && identity.ArchiveSHA256 == ControlledClipboardTartR5ArchiveSHA256) ||
+			(identity.Version == ControlledClipboardTartR6Version && identity.ExecutableSHA256 == ControlledClipboardTartR6ExecutableSHA256 && identity.ArchiveSHA256 == ControlledClipboardTartR6ArchiveSHA256))
 }
 
 func qualifiedTart(identity ToolIdentity) bool {

@@ -13,8 +13,8 @@ stage=$2
 [ "$(shasum -a 256 "$source_tree/Package.resolved" | cut -d ' ' -f 1)" = 633b12e9adb9f5863783a28fce2a33fe51aa5f599cfb7c1d1aae775db88314ba ]
 # Require a fresh source baseline; never adopt unrelated source modifications.
 [ -z "$(git -C "$source_tree" status --porcelain --untracked-files=all)" ]
-git -C "$source_tree" apply --check "$base/tart-2.32.1.patch"
-git -C "$source_tree" apply "$base/tart-2.32.1.patch"
+git -C "$source_tree" apply --unidiff-zero --check "$base/tart-2.32.1.patch"
+git -C "$source_tree" apply --unidiff-zero "$base/tart-2.32.1.patch"
 (cd "$source_tree" && swift build -c release --disable-automatic-resolution)
 [ "$(shasum -a 256 "$source_tree/Package.resolved" | cut -d ' ' -f 1)" = 633b12e9adb9f5863783a28fce2a33fe51aa5f599cfb7c1d1aae775db88314ba ]
 mkdir -p "$stage"

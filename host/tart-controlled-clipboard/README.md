@@ -75,10 +75,11 @@ host/tart-controlled-clipboard/build.sh /absolute/pinned-tart-source /absolute/n
 ```
 
 The script checks Git revision, license/lock SHA-256, requires a clean checkout,
-applies the tracked patch, builds release with `--disable-automatic-resolution`,
+applies the tracked zero-context patch with `git apply --unidiff-zero`, builds
+release with `--disable-automatic-resolution`,
 and stages an ad-hoc signed executable. Signing identifier is
 `org.boxwarden.tart.controlled-clipboard`; version is
-`2.32.1-boxwarden-clipboard-r4`. It records compiler, signing, version, patch,
+`2.32.1-boxwarden-clipboard-r6`. It records compiler, signing, version, patch,
 lock, requested/signed entitlement and signed executable identities. Signing
 uses only `com.apple.security.virtualization`; the exact signed entitlement
 dictionary is extracted and checked. No `get-task-allow` or restricted

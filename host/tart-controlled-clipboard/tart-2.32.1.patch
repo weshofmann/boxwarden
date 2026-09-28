@@ -1,217 +1,13 @@
-diff --git a/Sources/tart/Commands/Run.swift b/Sources/tart/Commands/Run.swift
---- a/Sources/tart/Commands/Run.swift
-+++ b/Sources/tart/Commands/Run.swift
-@@ -7,2 +7,3 @@
- import OpenTelemetryApi
-+import Semaphore
- import System
-@@ -95,6 +95,24 @@
-     discussion: "Clipboard sharing requires spice-vdagent package on Linux and https://github.com/cirruslabs/tart-guest-agent on macOS."))
-   var noClipboard: Bool = false
- 
-+  @Option(name: .customLong("boxwarden-clipboard-cli"), help: ArgumentHelp("Boxwarden immutable clipboard target metadata", visibility: .private))
-+  var boxwardenClipboardCli: String?
-+
-+  @Option(name: .customLong("boxwarden-clipboard-config"), help: ArgumentHelp("Boxwarden immutable clipboard target metadata", visibility: .private))
-+  var boxwardenClipboardConfig: String?
-+
-+  @Option(name: .customLong("boxwarden-clipboard-domain"), help: ArgumentHelp("Boxwarden immutable clipboard target metadata", visibility: .private))
-+  var boxwardenClipboardDomain: String?
-+
-+  @Option(name: .customLong("boxwarden-clipboard-session"), help: ArgumentHelp("Boxwarden immutable clipboard target metadata", visibility: .private))
-+  var boxwardenClipboardSession: String?
-+
-+  @Option(name: .customLong("boxwarden-clipboard-session-id"), help: ArgumentHelp("Boxwarden immutable clipboard target metadata", visibility: .private))
-+  var boxwardenClipboardSessionID: String?
-+
-+  @Option(name: .customLong("boxwarden-clipboard-generation"), help: ArgumentHelp("Boxwarden immutable clipboard target metadata", visibility: .private))
-+  var boxwardenClipboardGeneration: String?
-+
-   #if arch(arm64)
-     @Flag(help: "Boot into recovery mode")
-   #endif
-@@ -285,7 +303,19 @@
-   @Flag(help: ArgumentHelp("Disable the keyboard"))
-   var noKeyboard: Bool = false
- 
-+  func clipboardTarget() throws -> ClipboardTarget? {
-+    try ClipboardTarget.validated(cli: boxwardenClipboardCli, config: boxwardenClipboardConfig,
-+      domain: boxwardenClipboardDomain, session: boxwardenClipboardSession,
-+      sessionID: boxwardenClipboardSessionID, backendObject: name,
-+      generation: boxwardenClipboardGeneration, noClipboard: noClipboard)
-+  }
-+
-   mutating func validate() throws {
-+    do { _ = try clipboardTarget() } catch {
-+      throw ValidationError("Boxwarden clipboard metadata requires all six valid options and --no-clipboard")
-+    }
-+    // This patched viewer promises explicit transfers even when unbound.
-+    noClipboard = true
-     if vnc && vncExperimental {
-       throw ValidationError("--vnc and --vnc-experimental are mutually exclusive")
-     }
-@@ -417,7 +447,7 @@
-       suspendable: suspendable,
-       nested: nested,
-       audio: !noAudio,
--      clipboard: !noClipboard,
-+      clipboard: false, // Controlled variant never enables automatic SPICE sharing.
-       sync: VZDiskImageSynchronizationMode(diskOptions.syncModeRaw),
-       caching: VZDiskImageCachingMode(diskOptions.cachingModeRaw),
-       noTrackpad: noTrackpad,
-@@ -459,3 +490,7 @@
--    let task = Task {
-+    // Run.run() is @MainActor and runUI() enters a synchronous AppKit loop.
-+    // Wait for the VM start task to finish its main-actor startup work before
-+    // entering that loop; otherwise the task can remain queued indefinitely.
-+    let startup = AsyncSemaphore(value: 0)
-+    let task = Task {
-       do {
-         var resume = false
-@@ -505,2 +540,4 @@
--        if let vncImpl = vncImpl {
-+        startup.signal()
-+
-+        if let vncImpl = vncImpl {
-           let vncURL = try await vncImpl.waitForURL(netBridged: !netBridged.isEmpty)
-@@ -525,6 +555,7 @@
-           try vncImpl.stop()
-         }
- 
-+        await ClipboardProcessLifecycle.shared.shutdown()
-         OTel.shared.flush()
-         Foundation.exit(0)
-       } catch {
-@@ -533,23 +564,25 @@
- 
-         fputs("\(error)\n", stderr)
- 
-+        await ClipboardProcessLifecycle.shared.shutdown()
-         OTel.shared.flush()
-         Foundation.exit(1)
-       }
-     }
- 
--    // "tart stop" support
--    let sigintSrc = DispatchSource.makeSignalSource(signal: SIGINT)
--    sigintSrc.setEventHandler {
-+    // A normal stop, TERM or terminal hangup must reap owned clipboard children
-+    // before the VM task can reach any process exit path.
-+    let stopSignalSources = ClipboardProcessLifecycle.shared.installStopSignals {
-       task.cancel()
-     }
--    sigintSrc.activate()
-+    defer { stopSignalSources.forEach { $0.cancel() } }
- 
-     // "tart suspend" / UI window closing support
-     signal(SIGUSR1, SIG_IGN)
-     let sigusr1Src = DispatchSource.makeSignalSource(signal: SIGUSR1)
-     sigusr1Src.setEventHandler {
-       Task {
-+        await ClipboardProcessLifecycle.shared.shutdown()
-         do {
-           #if arch(arm64)
-             if #available(macOS 14, *) {
-@@ -567,6 +600,7 @@
-             } else {
-               print(RuntimeError.SuspendFailed("this functionality is only supported on macOS 14 (Sonoma) or newer"))
- 
-+              await ClipboardProcessLifecycle.shared.shutdown()
-               OTel.shared.flush()
-               Foundation.exit(1)
-             }
-@@ -574,6 +608,7 @@
-         } catch (let e) {
-           print(RuntimeError.SuspendFailed(e.localizedDescription))
- 
-+          await ClipboardProcessLifecycle.shared.shutdown()
-           OTel.shared.flush()
-           Foundation.exit(1)
-         }
-@@ -596,2 +638,4 @@
--    let useVNCWithoutGraphics = (vnc || vncExperimental) && !graphics
-+    try await startup.waitUnlessCancelled()
-+
-+    let useVNCWithoutGraphics = (vnc || vncExperimental) && !graphics
-     if noGraphics || useVNCWithoutGraphics {
-@@ -752,6 +787,7 @@
-   }
- 
-   private func runUI(_ suspendable: Bool, _ captureSystemKeys: Bool) {
-+    MainApp.clipboardTarget = try? clipboardTarget()
-     MainApp.suspendable = suspendable
-     MainApp.capturesSystemKeys = captureSystemKeys
-     MainApp.main()
-@@ -759,6 +795,7 @@
- }
- 
- struct MainApp: App {
-+  static var clipboardTarget: ClipboardTarget?
-   static var suspendable: Bool = false
-   static var capturesSystemKeys: Bool = false
- 
-@@ -767,15 +804,15 @@
-   var body: some Scene {
-     WindowGroup(vm!.name) {
-       Group {
--        VMView(vm: vm!, capturesSystemKeys: MainApp.capturesSystemKeys).onAppear {
-+        ControlledClipboardVMView(vm: vm!, capturesSystemKeys: MainApp.capturesSystemKeys, target: MainApp.clipboardTarget).onAppear {
-           NSWindow.allowsAutomaticWindowTabbing = false
-         }.onDisappear {
--          let ret = kill(getpid(), MainApp.suspendable ? SIGUSR1 : SIGINT)
--          if ret != 0 {
--            // Fallback to the old termination method that doesn't
--            // propagate the cancellation to Task's in case graceful
--            // termination via kill(2) is not successful
--            NSApplication.shared.terminate(self)
-+          Task { @MainActor in
-+            await ClipboardProcessLifecycle.shared.shutdown()
-+            let ret = kill(getpid(), MainApp.suspendable ? SIGUSR1 : SIGINT)
-+            if ret != 0 {
-+              NSApplication.shared.terminate(self)
-+            }
-           }
-         }
-       }.frame(
-@@ -787,6 +824,7 @@
-         maxHeight: .infinity
-       )
-     }.commands {
-+      ControlledClipboardCommands()
-       // Remove some standard menu options
-       CommandGroup(replacing: .help, addition: {})
-       CommandGroup(replacing: .newItem, addition: {})
-@@ -826,11 +864,13 @@
-   }
- 
-   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
--    if (kill(getpid(), MainApp.suspendable ? SIGUSR1 : SIGINT) == 0) {
--      return .terminateLater
--    } else {
--      return .terminateNow
--    }
-+    Task { @MainActor in
-+      await ClipboardProcessLifecycle.shared.shutdown()
-+      if kill(getpid(), MainApp.suspendable ? SIGUSR1 : SIGINT) != 0 {
-+        sender.reply(toApplicationShouldTerminate: true)
-+      }
-+    }
-+    return .terminateLater
-   }
- }
- 
 diff --git a/Sources/tart/CI/CI.swift b/Sources/tart/CI/CI.swift
+index f0cf9f5..5b460f0 100644
 --- a/Sources/tart/CI/CI.swift
 +++ b/Sources/tart/CI/CI.swift
-@@ -1,5 +1,5 @@
- struct CI {
+@@ -2 +2 @@ struct CI {
 -  private static let rawVersion = "${CIRRUS_TAG}"
-+  private static let rawVersion = "2.32.1-boxwarden-clipboard-r5"
- 
-   static var version: String {
-     rawVersion.expanded() ? rawVersion : "SNAPSHOT"
++  private static let rawVersion = "2.32.1-boxwarden-clipboard-r6"
 diff --git a/Sources/tart/ClipboardInvocation.swift b/Sources/tart/ClipboardInvocation.swift
 new file mode 100644
+index 0000000..be3b8d6
 --- /dev/null
 +++ b/Sources/tart/ClipboardInvocation.swift
 @@ -0,0 +1,223 @@
@@ -440,9 +236,10 @@ new file mode 100644
 +}
 diff --git a/Sources/tart/ClipboardUI.swift b/Sources/tart/ClipboardUI.swift
 new file mode 100644
+index 0000000..c075e4e
 --- /dev/null
 +++ b/Sources/tart/ClipboardUI.swift
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,130 @@
 +// Original Boxwarden addition; retains pinned upstream VMView unchanged.
 +import Cocoa
 +import SwiftUI
@@ -485,18 +282,18 @@ new file mode 100644
 +}
 +struct ControlledClipboardVMView: View {
 +  @ObservedObject var vm: VM
-+  let capturesSystemKeys: Bool
++  let preparedDisplay: VZVirtualMachineView
 +  @StateObject private var controller: ClipboardWindowController
-+  init(vm: VM, capturesSystemKeys: Bool, target: ClipboardTarget?) {
++  init(vm: VM, preparedDisplay: VZVirtualMachineView, target: ClipboardTarget?) {
 +    self.vm = vm
-+    self.capturesSystemKeys = capturesSystemKeys
++    self.preparedDisplay = preparedDisplay
 +    _controller = StateObject(wrappedValue: ClipboardWindowController(target: target, invoker: ClipboardProcessInvoker()))
 +  }
 +  var body: some View {
 +    VStack(spacing: 0) {
 +      ClipboardStrip(controller: controller)
 +      Divider()
-+      VMView(vm: vm, capturesSystemKeys: capturesSystemKeys)
++      PreparedVirtualMachineView(view: preparedDisplay)
 +    }
 +    .background(ClipboardWindowBinding(controller: controller))
 +    .focusedSceneValue(\.clipboardController, controller)
@@ -505,6 +302,14 @@ new file mode 100644
 +    }
 +    .onDisappear { controller.close() }
 +  }
++}
++
++// SwiftUI must mount the exact view bound before VM startup. Creating a
++// replacement in makeNSView would discard that early Virtualization binding.
++struct PreparedVirtualMachineView: NSViewRepresentable {
++  let view: VZVirtualMachineView
++  func makeNSView(context: Context) -> VZVirtualMachineView { view }
++  func updateNSView(_ view: VZVirtualMachineView, context: Context) {}
 +}
 +// Keep the host-owned transfer affordance to one line above the guest display.
 +// Full target identity and the no-sync explanation remain available as tooltips.
@@ -565,8 +370,144 @@ new file mode 100644
 +    deinit { observers.forEach(NotificationCenter.default.removeObserver) }
 +  }
 +}
+diff --git a/Sources/tart/Commands/Run.swift b/Sources/tart/Commands/Run.swift
+index 2e89590..46e1cf2 100644
+--- a/Sources/tart/Commands/Run.swift
++++ b/Sources/tart/Commands/Run.swift
+@@ -7,0 +8 @@ import OpenTelemetryApi
++import Semaphore
+@@ -97,0 +99,18 @@ struct Run: AsyncParsableCommand {
++  @Option(name: .customLong("boxwarden-clipboard-cli"), help: ArgumentHelp("Boxwarden immutable clipboard target metadata", visibility: .private))
++  var boxwardenClipboardCli: String?
++
++  @Option(name: .customLong("boxwarden-clipboard-config"), help: ArgumentHelp("Boxwarden immutable clipboard target metadata", visibility: .private))
++  var boxwardenClipboardConfig: String?
++
++  @Option(name: .customLong("boxwarden-clipboard-domain"), help: ArgumentHelp("Boxwarden immutable clipboard target metadata", visibility: .private))
++  var boxwardenClipboardDomain: String?
++
++  @Option(name: .customLong("boxwarden-clipboard-session"), help: ArgumentHelp("Boxwarden immutable clipboard target metadata", visibility: .private))
++  var boxwardenClipboardSession: String?
++
++  @Option(name: .customLong("boxwarden-clipboard-session-id"), help: ArgumentHelp("Boxwarden immutable clipboard target metadata", visibility: .private))
++  var boxwardenClipboardSessionID: String?
++
++  @Option(name: .customLong("boxwarden-clipboard-generation"), help: ArgumentHelp("Boxwarden immutable clipboard target metadata", visibility: .private))
++  var boxwardenClipboardGeneration: String?
++
+@@ -287,0 +307,7 @@ struct Run: AsyncParsableCommand {
++  func clipboardTarget() throws -> ClipboardTarget? {
++    try ClipboardTarget.validated(cli: boxwardenClipboardCli, config: boxwardenClipboardConfig,
++      domain: boxwardenClipboardDomain, session: boxwardenClipboardSession,
++      sessionID: boxwardenClipboardSessionID, backendObject: name,
++      generation: boxwardenClipboardGeneration, noClipboard: noClipboard)
++  }
++
+@@ -288,0 +315,5 @@ struct Run: AsyncParsableCommand {
++    do { _ = try clipboardTarget() } catch {
++      throw ValidationError("Boxwarden clipboard metadata requires all six valid options and --no-clipboard")
++    }
++    // This patched viewer promises explicit transfers even when unbound.
++    noClipboard = true
+@@ -420 +451 @@ struct Run: AsyncParsableCommand {
+-      clipboard: !noClipboard,
++      clipboard: false, // Controlled variant never enables automatic SPICE sharing.
+@@ -458,0 +490,19 @@ struct Run: AsyncParsableCommand {
++    // Bind the Virtualization view while the VM is still stopped. Apple's GUI
++    // Linux sample attaches the display before starting the VM; a late-created
++    // view showed a black window despite an active guest framebuffer.
++    let useVNCWithoutGraphics = (vnc || vncExperimental) && !graphics
++    let preparedDisplay: VZVirtualMachineView? = {
++      guard !noGraphics && !useVNCWithoutGraphics else { return nil }
++      let display = VZVirtualMachineView()
++      display.capturesSystemKeys = captureSystemKeys
++      if #available(macOS 14.0, *), vm!.config.displayRefit ?? (vm!.config.os != .linux) {
++        display.automaticallyReconfiguresDisplay = true
++      }
++      display.virtualMachine = vm!.virtualMachine
++      return display
++    }()
++
++    // Run.run() is @MainActor and runUI() enters a synchronous AppKit loop.
++    // Wait for the VM start task to finish its main-actor startup work before
++    // entering that loop; otherwise the task can remain queued indefinitely.
++    let startup = AsyncSemaphore(value: 0)
+@@ -504,0 +555,2 @@ struct Run: AsyncParsableCommand {
++        startup.signal()
++
+@@ -527,0 +580 @@ struct Run: AsyncParsableCommand {
++        await ClipboardProcessLifecycle.shared.shutdown()
+@@ -535,0 +589 @@ struct Run: AsyncParsableCommand {
++        await ClipboardProcessLifecycle.shared.shutdown()
+@@ -541,3 +595,3 @@ struct Run: AsyncParsableCommand {
+-    // "tart stop" support
+-    let sigintSrc = DispatchSource.makeSignalSource(signal: SIGINT)
+-    sigintSrc.setEventHandler {
++    // A normal stop, TERM or terminal hangup must reap owned clipboard children
++    // before the VM task can reach any process exit path.
++    let stopSignalSources = ClipboardProcessLifecycle.shared.installStopSignals {
+@@ -546 +600 @@ struct Run: AsyncParsableCommand {
+-    sigintSrc.activate()
++    defer { stopSignalSources.forEach { $0.cancel() } }
+@@ -552,0 +607 @@ struct Run: AsyncParsableCommand {
++        await ClipboardProcessLifecycle.shared.shutdown()
+@@ -569,0 +625 @@ struct Run: AsyncParsableCommand {
++              await ClipboardProcessLifecycle.shared.shutdown()
+@@ -576,0 +633 @@ struct Run: AsyncParsableCommand {
++          await ClipboardProcessLifecycle.shared.shutdown()
+@@ -596 +653,2 @@ struct Run: AsyncParsableCommand {
+-    let useVNCWithoutGraphics = (vnc || vncExperimental) && !graphics
++    try await startup.waitUnlessCancelled()
++
+@@ -604 +662,2 @@ struct Run: AsyncParsableCommand {
+-      runUI(suspendable, captureSystemKeys)
++      guard let preparedDisplay else { throw ValidationError("VM display was not prepared") }
++      runUI(suspendable, preparedDisplay)
+@@ -754 +813,2 @@ struct Run: AsyncParsableCommand {
+-  private func runUI(_ suspendable: Bool, _ captureSystemKeys: Bool) {
++  private func runUI(_ suspendable: Bool, _ preparedDisplay: VZVirtualMachineView) {
++    MainApp.clipboardTarget = try? clipboardTarget()
+@@ -756 +816 @@ struct Run: AsyncParsableCommand {
+-    MainApp.capturesSystemKeys = captureSystemKeys
++    MainApp.preparedDisplay = preparedDisplay
+@@ -761,0 +822 @@ struct MainApp: App {
++  static var clipboardTarget: ClipboardTarget?
+@@ -763 +824 @@ struct MainApp: App {
+-  static var capturesSystemKeys: Bool = false
++  static var preparedDisplay: VZVirtualMachineView?
+@@ -770 +831 @@ struct MainApp: App {
+-        VMView(vm: vm!, capturesSystemKeys: MainApp.capturesSystemKeys).onAppear {
++        ControlledClipboardVMView(vm: vm!, preparedDisplay: MainApp.preparedDisplay!, target: MainApp.clipboardTarget).onAppear {
+@@ -773,6 +834,6 @@ struct MainApp: App {
+-          let ret = kill(getpid(), MainApp.suspendable ? SIGUSR1 : SIGINT)
+-          if ret != 0 {
+-            // Fallback to the old termination method that doesn't
+-            // propagate the cancellation to Task's in case graceful
+-            // termination via kill(2) is not successful
+-            NSApplication.shared.terminate(self)
++          Task { @MainActor in
++            await ClipboardProcessLifecycle.shared.shutdown()
++            let ret = kill(getpid(), MainApp.suspendable ? SIGUSR1 : SIGINT)
++            if ret != 0 {
++              NSApplication.shared.terminate(self)
++            }
+@@ -789,0 +851 @@ struct MainApp: App {
++      ControlledClipboardCommands()
+@@ -829,4 +891,5 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
+-    if (kill(getpid(), MainApp.suspendable ? SIGUSR1 : SIGINT) == 0) {
+-      return .terminateLater
+-    } else {
+-      return .terminateNow
++    Task { @MainActor in
++      await ClipboardProcessLifecycle.shared.shutdown()
++      if kill(getpid(), MainApp.suspendable ? SIGUSR1 : SIGINT) != 0 {
++        sender.reply(toApplicationShouldTerminate: true)
++      }
+@@ -833,0 +897 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
++    return .terminateLater
 diff --git a/Tests/TartTests/ControlledClipboardRunTests.swift b/Tests/TartTests/ControlledClipboardRunTests.swift
 new file mode 100644
+index 0000000..f63b115
 --- /dev/null
 +++ b/Tests/TartTests/ControlledClipboardRunTests.swift
 @@ -0,0 +1,35 @@

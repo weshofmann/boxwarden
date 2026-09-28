@@ -221,3 +221,22 @@ Apple's GUI Linux sample attaches that view before starting. The precise
 display failure boundary is still under investigation. Keep the disposable
 probe running for inspection; do not present r5 as graphical acceptance or
 access the general Mac clipboard.
+
+Wes also resized and restored the r5 window; the guest area stayed black. A
+bounded read-only probe of the active GNOME DRM primary framebuffer measured
+14,013 distinct colors, so the guest is rendering nonblack pixels; it did not
+export a screenshot or read any clipboard data. The black output lies between
+that guest buffer and the visible Tart surface. The r6 source binds a single
+`VZVirtualMachineView` to the VM before start and mounts that same view in the
+compact SwiftUI window. A focused view-identity regression failed before the
+change and passes now. The viewer suite, exact pinned Tart release build,
+signed executable check, targeted upstream Tart tests, and focused host policy
+tests passed locally. Exact staged r6 executable SHA-256:
+`e6d6894b793a6e3636e7438756a48fbdba35bf9885c4e08db7ad7bef8c118c99`;
+archive SHA-256:
+`899773a1dfec8d66c9a42f68ab105c2912b751cd4da3c2883ca2a83db5e355f0`.
+The build is retained privately. Source policy now recognizes that coherent
+r6 tuple, while the installed host still admits r5. Real r6 display behavior
+and clipboard buttons remain unverified. Next: review and prepare exact r5-to-r6
+admission, stop the disposable r5 probe, then test the r6 viewer with a fresh
+workspace-free public session.
