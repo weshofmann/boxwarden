@@ -294,3 +294,14 @@ suite encountered the host filesystem's existing free-space reserve check
 clipboard failure. Hosted CI and visible-menu/real-guest acceptance remain
 pending. The stock-return helper has not run; r5 remains installed and all
 VM starts remain on hold until the attended return is verified.
+
+Hosted deterministic CI for the published menu checkpoint `ed830cb` passed
+the complete configured matrix ([run 36379454592](https://github.com/weshofmann/boxwarden/actions/runs/36379454592)).
+A clean checkout of that commit produced an ad-hoc signed retained app whose
+bundled CLI reports the exact revision with `vcs.modified=false`; its copied
+bundle passed strict signature verification. A metadata-only app launch with
+the explicit alpha config produced a running menu process. Desktop inspection
+timed out, so visible menu behavior is still unverified. The default local
+Boxwarden config selects a different domain; alpha testing must pass its
+explicit config path. No VM or clipboard content was touched during this
+smoke test. The attended stock return remains pending.
