@@ -305,3 +305,23 @@ timed out, so visible menu behavior is still unverified. The default local
 Boxwarden config selects a different domain; alpha testing must pass its
 explicit config path. No VM or clipboard content was touched during this
 smoke test. The attended stock return remains pending.
+
+Wes ran the reviewed attended stock-return helper. Its terminal output reported
+stock Tart admitted, healthy doctor, and all VMs stopped. Independent read-only
+checks matched the installed root manifest and alpha config to the reviewed
+stock candidates; the pinned Tart 2.32.1 executable matched its qualified
+digest and strict signature, both native APFS mount UUIDs matched, and a clean
+source-bound CLI reported healthy doctor. This verifies host admission, not a
+clipboard transfer.
+
+The existing workspace-free synthetic `clipboardprobe20260927r1` was started
+through the public CLI. It returned `running` and `ready`, and target discovery
+reported its exact backend and live generation as the one available alpha
+target. Direct desktop inspection of stock Tart showed the nonblack Ubuntu
+desktop and Firefox rendering, resolving the custom viewer's visible black
+surface for this trial. The standalone utility was launched with the explicit
+alpha config and its process remains running, but UI inspection could not
+attach to the menu-only app. Its status item, target selection, and real menu
+transfers remain unverified. No general Mac pasteboard content was read or
+changed. The session remains running for the synthetic menu trial; no
+workspace is attached and no provider sign-in occurred.
