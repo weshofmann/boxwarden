@@ -47,3 +47,16 @@ func CheckStorage(expectation StorageExpectation) error {
 	}
 	return checkStorage(expectation)
 }
+
+// WriteEnrolledConfig publishes a fresh private configuration at ConfigPath
+// only after the operator-supplied APFS identity and a different output
+// filesystem have been checked. It never overwrites an existing config.
+func WriteEnrolledConfig(expectation StorageExpectation, data []byte) error {
+	if err := expectation.Validate(); err != nil {
+		return err
+	}
+	if len(data) == 0 || len(data) > 1<<20 {
+		return fmt.Errorf("enrolled configuration is empty or oversized")
+	}
+	return writeEnrolledConfig(expectation, data)
+}

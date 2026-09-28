@@ -53,6 +53,67 @@ type WorkspaceStorage struct {
 	VolumeUUID string
 }
 
+// EnrolledCopy renders a new complete configuration snapshot with one domain's
+// operator-supplied storage declaration. It never edits the source file.
+func (c Config) EnrolledCopy(rawDomain string, storage WorkspaceStorage) ([]byte, error) {
+	id, err := domain.Parse(rawDomain)
+	if err != nil {
+		return nil, err
+	}
+	selected, found := c.domains[id]
+	if !found {
+		return nil, fmt.Errorf("unknown domain %q", rawDomain)
+	}
+	if selected.WorkspaceStorage != nil {
+		return nil, fmt.Errorf("domain %s already has enrolled workspace storage", id)
+	}
+	if !filepath.IsAbs(storage.MountPoint) || filepath.Clean(storage.MountPoint) != storage.MountPoint || !canonicalUUID(storage.VolumeUUID) {
+		return nil, fmt.Errorf("workspace enrollment requires clean mount point and canonical lowercase APFS UUID")
+	}
+	if err := (hostidentity.StorageExpectation{ConfigPath: "/enrolled-config", StateRoot: selected.StateRoot,
+		MountPoint: storage.MountPoint, VolumeUUID: storage.VolumeUUID}).Validate(); err != nil {
+		return nil, err
+	}
+	type savedStorage struct {
+		MountPoint string `json:"mount_point"`
+		VolumeUUID string `json:"apfs_volume_uuid"`
+	}
+	type savedDomain struct {
+		StateRoot string        `json:"state_root"`
+		Storage   *savedStorage `json:"workspace_storage,omitempty"`
+	}
+	type savedHost struct {
+		TartExecutable string `json:"tart_executable"`
+		TartHome       string `json:"tart_home"`
+		SoftnetSource  string `json:"softnet_source"`
+	}
+	type savedConfig struct {
+		Version int                       `json:"version"`
+		Domains map[domain.ID]savedDomain `json:"domains"`
+		Host    *savedHost                `json:"host,omitempty"`
+	}
+	out := savedConfig{Version: legacyVersion, Domains: make(map[domain.ID]savedDomain, len(c.domains))}
+	if c.host != nil {
+		out.Version = version
+		out.Host = &savedHost{TartExecutable: c.host.TartExecutable, TartHome: c.host.TartHome, SoftnetSource: c.host.SoftnetSource}
+	}
+	for domainID, configured := range c.domains {
+		entry := savedDomain{StateRoot: configured.StateRoot}
+		if configured.WorkspaceStorage != nil {
+			entry.Storage = &savedStorage{MountPoint: configured.WorkspaceStorage.MountPoint, VolumeUUID: configured.WorkspaceStorage.VolumeUUID}
+		}
+		if domainID == id {
+			entry.Storage = &savedStorage{MountPoint: storage.MountPoint, VolumeUUID: storage.VolumeUUID}
+		}
+		out.Domains[domainID] = entry
+	}
+	raw, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(raw, '\n'), nil
+}
+
 // StorageExpectation binds this selected domain to an operator-enrolled
 // declaration in the exact configuration file outside its backing volume.
 func (d Domain) StorageExpectation(configPath string) (hostidentity.StorageExpectation, error) {

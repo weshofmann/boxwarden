@@ -419,6 +419,58 @@ func TestDomainWorkspaceStorageDeclarationIsStrictAndOptional(t *testing.T) {
 	}
 }
 
+func TestEnrolledCopyPreservesOtherDomainsAndHost(t *testing.T) {
+	base := canonicalTempDir(t)
+	work := makeRoot(t, base, "work")
+	personal := makeRoot(t, base, "personal")
+	tools := makeRoot(t, base, "tools")
+	tart := filepath.Join(tools, "tart")
+	softnet := filepath.Join(tools, "softnet")
+	if err := os.WriteFile(tart, []byte("tart"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(softnet, []byte("softnet"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tartHome := makeRoot(t, base, "tart-home")
+	source := writeConfig(t, base, fmt.Sprintf(`{"version":2,"host":{"tart_executable":%q,"tart_home":%q,"softnet_source":%q},"domains":{"work":{"state_root":%q},"personal":{"state_root":%q}}}`, tart, tartHome, softnet, work, personal))
+	loaded, err := Load(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storage := WorkspaceStorage{MountPoint: base, VolumeUUID: "00112233-4455-6677-8899-aabbccddeeff"}
+	raw, err := loaded.EnrolledCopy("work", storage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(base, "enrolled.json")
+	if err := os.WriteFile(target, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	enrolled, err := Load(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := enrolled.Domain("work")
+	if err != nil || selected.WorkspaceStorage == nil || *selected.WorkspaceStorage != storage {
+		t.Fatalf("selected enrollment = %+v, %v", selected, err)
+	}
+	other, err := enrolled.Domain("personal")
+	if err != nil || other.StateRoot != personal || other.WorkspaceStorage != nil {
+		t.Fatalf("other domain changed: %+v, %v", other, err)
+	}
+	host, err := enrolled.Host()
+	if err != nil || host != (Host{TartExecutable: tart, TartHome: tartHome, SoftnetSource: softnet}) {
+		t.Fatalf("host changed: %+v, %v", host, err)
+	}
+	if _, err := loaded.EnrolledCopy("work", WorkspaceStorage{MountPoint: storage.MountPoint, VolumeUUID: "BAD"}); err == nil {
+		t.Fatal("malformed supplied UUID accepted")
+	}
+	if _, err := enrolled.EnrolledCopy("work", storage); err == nil {
+		t.Fatal("already enrolled domain silently re-enrolled")
+	}
+}
+
 func writeConfig(t *testing.T, base, contents string) string {
 	t.Helper()
 	path := filepath.Join(base, strings.ReplaceAll(t.Name(), "/", "_")+".json")

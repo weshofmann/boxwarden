@@ -30,11 +30,19 @@ func TestStorageAnchorRequiresExpectedMountUUIDAndSeparateFilesystem(t *testing.
 }
 
 func TestStorageAnchorRejectsUnsafeConfigAndRootMetadata(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "state")
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(base, "state")
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	config := filepath.Join(t.TempDir(), "config.json")
+	configBase, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(configBase, "config.json")
 	if err := os.WriteFile(config, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -73,11 +81,19 @@ func TestStorageAnchorRejectsUnsafeConfigAndRootMetadata(t *testing.T) {
 }
 
 func TestStoragePrelockRejectsUnsafeMetadataWithoutCreatingLock(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "state")
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(base, "state")
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	config := filepath.Join(t.TempDir(), "config.json")
+	configBase, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(configBase, "config.json")
 	if err := os.WriteFile(config, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -100,5 +116,67 @@ func TestStoragePrelockRejectsUnsafeMetadataWithoutCreatingLock(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(root, "locks")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("unsafe authority config gained a lock directory: %v", err)
+	}
+}
+
+func TestStoragePrelockRejectsSymlinkedConfigPath(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(base, "state")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(base, "config.json")
+	if err := os.WriteFile(config, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(base, "config-alias.json")
+	if err := os.Symlink(config, alias); err != nil {
+		t.Fatal(err)
+	}
+	expected := StorageExpectation{ConfigPath: alias, StateRoot: root, MountPoint: base,
+		VolumeUUID: "00112233-4455-6677-8899-aabbccddeeff"}
+	if err := CheckStorage(expected); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlinked authority path accepted: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "locks")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("symlink refusal created lock: %v", err)
+	}
+}
+
+func TestEnrollmentRejectsSameFilesystemBeforeCreatingConfig(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(base, "state")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(base, "enrolled.json")
+	expected := StorageExpectation{ConfigPath: target, StateRoot: root, MountPoint: base,
+		VolumeUUID: "00112233-4455-6677-8899-aabbccddeeff"}
+	if err := WriteEnrolledConfig(expected, []byte("{}\n")); err == nil {
+		t.Fatal("same-filesystem enrollment accepted")
+	}
+	if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("refused enrollment wrote config: %v", err)
+	}
+}
+
+func TestEnrollmentObservationRequiresSeparateFSIDAndExpectedUUID(t *testing.T) {
+	expected := StorageExpectation{MountPoint: "/Volumes/Qualified", VolumeUUID: "00112233-4455-6677-8899-aabbccddeeff"}
+	backing := syscall.Fsid{Val: [2]int32{1, 2}}
+	output := syscall.Fsid{Val: [2]int32{3, 4}}
+	if err := validateEnrollmentObservations(expected, output, backing, "/Volumes/Qualified", expected.VolumeUUID); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateEnrollmentObservations(expected, backing, backing, "/Volumes/Qualified", expected.VolumeUUID); err == nil {
+		t.Fatal("same-filesystem output accepted")
+	}
+	if err := validateEnrollmentObservations(expected, output, backing, "/Volumes/Qualified", "10213243-5465-4768-899a-bbccddeeff00"); err == nil {
+		t.Fatal("wrong APFS UUID accepted")
 	}
 }

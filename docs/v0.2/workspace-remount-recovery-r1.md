@@ -4,16 +4,25 @@ Status: implementation in progress. The first checkpoint implements pinned
 APFS identity and duplicate-volume checks, v2 formatter receipts, strict
 `workspace_storage` parsing, and external mount admission before public
 workspace/start/rebuild/delete dispatch, detached owner launch, and managed
-formatter locks. Legacy reconciliation, enrollment CLI, and final qualification
-remain pending. Until enrollment is implemented, a legacy config can still be
-used for read-only status and stop/containment, but workspace operations and
-session start/rebuild/delete are deliberately refused. No installed or user
-config is changed by this checkpoint.
+formatter locks. This checkpoint adds explicit `workspace storage enroll`:
+it takes an independently supplied APFS UUID, accepts uppercase diskutil
+spelling, and writes a new non-overwriting config on a different filesystem.
+Legacy reconciliation and final qualification remain pending. A legacy config
+can still be used for read-only status and stop/containment, but workspace
+operations and session start/rebuild/delete are deliberately refused until an
+enrolled config is selected. No installed or user config is changed by this
+work.
 
 A host-only probe used a newly created external `0600` synthetic config and
 newly owned scratch state root. `hostidentity.CheckStorage` admitted the exact
 current DevelData APFS UUID and refused a wrong UUID. No VM or mount changed;
 this does not verify behavior across an actual remount.
+An additional host-only probe ran the current CLI with a synthetic v1 source
+config, an operator-supplied DevelData UUID, a newly owned external state root,
+and a private internal output directory. Enrollment wrote and reloaded the new
+`0600` config, left the source unchanged, and refused a second attempt to
+overwrite the output. The probe used only the current mount and does not prove
+remount recovery.
 Baseline: `ee3d7a20194d84fa05520f710d2992b6261ac556`.
 
 ## Diagnosis and identity model
@@ -121,9 +130,12 @@ and [Apple XNU `attr.h` capability and 64-bit ID definitions](https://raw.github
    A missing backing volume must fail before reconciliation creates any file.
 
 The explicit enrollment transfers the operator's knowledge of the expected
-APFS volume UUID into configuration outside the backing storage. The legacy
-receipt cannot supply that UUID. A legacy inode change, duplicated mounted
-volume UUID, or absent
+APFS volume UUID into configuration outside the backing storage. The new
+configuration is published without overwrite, then reread and compared byte
+for byte with the proposed copy before the CLI reports success. If an error
+occurs after publication, the new path may remain durable; inspect it and use
+a different path for a retry. The legacy receipt cannot supply that UUID. A
+legacy inode change, duplicated mounted volume UUID, or absent
 trusted expected UUID is an unsupported ambiguous case requiring separate
 manual data recovery; it is not eligible for R1 automatic reconciliation.
 
