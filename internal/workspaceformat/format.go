@@ -247,8 +247,8 @@ func Create(ctx context.Context, stateRoot string, request Request, formatter Fo
 		if hostErr != nil {
 			return Qualification{}, fmt.Errorf("read formatted host identity: %w", hostErr)
 		}
-		if host.FileID != identity.Inode {
-			return Qualification{}, fmt.Errorf("formatted host file ID differs from creation inode")
+		if err := requireCreationHostIdentity(request.Storage, host, identity.Inode); err != nil {
+			return Qualification{}, err
 		}
 		journal.HostIdentity = &host
 	}
@@ -319,6 +319,10 @@ func Admit(stateRoot string, request Request) (*os.File, Qualification, error) {
 // admitVerified is shared by public admission and the formatter's private
 // verified-publication settlement without crossing the lifecycle API boundary.
 func admitVerified(stateRoot string, request Request) (*os.File, Qualification, error) {
+	return admitVerifiedWithHost(stateRoot, request, hostidentity.Observe)
+}
+
+func admitVerifiedWithHost(stateRoot string, request Request, observe func(*os.File) (hostidentity.Identity, error)) (*os.File, Qualification, error) {
 	if err := validateRequest(request); err != nil {
 		return nil, Qualification{}, err
 	}
@@ -332,12 +336,19 @@ func admitVerified(stateRoot string, request Request) (*os.File, Qualification, 
 		return nil, Qualification{}, err
 	}
 	defer volumes.Close()
-	journal, err := readJournal(volumes, request)
+	journal, rawJournal, err := readJournalWithRaw(volumes, request)
 	if err != nil {
 		return nil, Qualification{}, err
 	}
 	if journal.State != StateVerified || journal.Identity == nil || journal.Evidence == nil || journal.Evidence.ObservedUUID != request.FilesystemUUID || !journal.Evidence.WholeDevice || !journal.Evidence.FilesystemClean {
 		return nil, Qualification{}, fmt.Errorf("workspace format is not verified")
+	}
+	var legacy *legacyBinding
+	if journal.Version == 1 {
+		legacy, err = readLegacyBinding(volumes, request, journal, rawJournal)
+		if err != nil {
+			return nil, Qualification{}, err
+		}
 	}
 	name := rawName(request.VolumeID)
 	info, err := volumes.Lstat(name)
@@ -357,8 +368,16 @@ func admitVerified(stateRoot string, request Request) (*os.File, Qualification, 
 	identity, err := exactFile(volumes, name, file, request.SizeBytes)
 	if err == nil {
 		if journal.Version == 1 {
-			if identity != *journal.Identity {
-				err = fmt.Errorf("raw disk identity does not match qualification")
+			if legacy == nil {
+				if identity != *journal.Identity {
+					err = fmt.Errorf("raw disk identity does not match qualification")
+				}
+			} else {
+				var host hostidentity.Identity
+				host, err = observe(file)
+				if err == nil && (host != legacy.HostIdentity || identity.Inode != journal.Identity.Inode || identity.Inode != host.FileID) {
+					err = fmt.Errorf("raw disk persistent APFS identity does not match legacy binding")
+				}
 			}
 		} else {
 			var host hostidentity.Identity
@@ -493,6 +512,10 @@ func openStateRoot(path string) (*os.Root, error) {
 }
 
 func openVolumes(root *os.Root, create bool) (*os.Root, error) {
+	return openVolumesWithCheck(root, create, samePinnedRootsFilesystem)
+}
+
+func openVolumesWithCheck(root *os.Root, create bool, sameFS func(*os.Root, *os.Root) error) (*os.Root, error) {
 	info, err := root.Lstat("volumes")
 	if errors.Is(err, os.ErrNotExist) && create {
 		if err := root.Mkdir("volumes", 0o700); err != nil && !errors.Is(err, os.ErrExist) {
@@ -529,6 +552,14 @@ func openVolumes(root *os.Root, create bool) (*os.Root, error) {
 	if err := checkPrivateACL(path, opened); err != nil {
 		volumes.Close()
 		return nil, err
+	}
+	if sameFS == nil {
+		volumes.Close()
+		return nil, fmt.Errorf("missing pinned filesystem checker")
+	}
+	if err := sameFS(root, volumes); err != nil {
+		volumes.Close()
+		return nil, fmt.Errorf("volumes directory differs from state-root filesystem: %w", err)
 	}
 	return volumes, nil
 }
@@ -568,6 +599,10 @@ func diskIdentity(info os.FileInfo) (DiskIdentity, error) {
 }
 
 func exactFile(volumes *os.Root, name string, file *os.File, size int64) (DiskIdentity, error) {
+	return exactFileWithCheck(volumes, name, file, size, samePinnedRootAndFileFilesystem)
+}
+
+func exactFileWithCheck(volumes *os.Root, name string, file *os.File, size int64, sameFS func(*os.Root, *os.File) error) (DiskIdentity, error) {
 	opened, err := file.Stat()
 	if err != nil {
 		return DiskIdentity{}, err
@@ -588,10 +623,70 @@ func exactFile(volumes *os.Root, name string, file *os.File, size int64) (DiskId
 	if !os.SameFile(opened, entry) {
 		return DiskIdentity{}, fmt.Errorf("raw disk path no longer names pinned file")
 	}
+	if sameFS == nil {
+		return DiskIdentity{}, fmt.Errorf("missing pinned raw-file filesystem checker")
+	}
+	if err := sameFS(volumes, file); err != nil {
+		return DiskIdentity{}, fmt.Errorf("raw disk differs from volumes filesystem: %w", err)
+	}
 	if err := checkPrivateACL(filepath.Join(volumes.Name(), name), opened); err != nil {
 		return DiskIdentity{}, err
 	}
 	return diskIdentity(opened)
+}
+
+func samePinnedRootsFilesystem(parent, child *os.Root) error {
+	parentFile, err := parent.Open(".")
+	if err != nil {
+		return err
+	}
+	defer parentFile.Close()
+	childFile, err := child.Open(".")
+	if err != nil {
+		return err
+	}
+	defer childFile.Close()
+	return samePinnedFilesFilesystem(parentFile, childFile)
+}
+
+func samePinnedRootAndFileFilesystem(parent *os.Root, child *os.File) error {
+	parentFile, err := parent.Open(".")
+	if err != nil {
+		return err
+	}
+	defer parentFile.Close()
+	return samePinnedFilesFilesystem(parentFile, child)
+}
+
+func samePinnedFilesFilesystem(parent, child *os.File) error {
+	var parentFS, childFS syscall.Statfs_t
+	if err := syscall.Fstatfs(int(parent.Fd()), &parentFS); err != nil {
+		return err
+	}
+	if err := syscall.Fstatfs(int(child.Fd()), &childFS); err != nil {
+		return err
+	}
+	parentInfo, err := parent.Stat()
+	if err != nil {
+		return err
+	}
+	childInfo, err := child.Stat()
+	if err != nil {
+		return err
+	}
+	parentStat, parentOK := parentInfo.Sys().(*syscall.Stat_t)
+	childStat, childOK := childInfo.Sys().(*syscall.Stat_t)
+	if !parentOK || !childOK || parentFS.Fsid != childFS.Fsid || parentStat.Dev != childStat.Dev {
+		return fmt.Errorf("pinned descriptors have different filesystem IDs")
+	}
+	return nil
+}
+
+func requireCreationHostIdentity(storage *hostidentity.StorageExpectation, host hostidentity.Identity, inode uint64) error {
+	if host.FileID != inode || (storage != nil && host.VolumeUUID != storage.VolumeUUID) {
+		return fmt.Errorf("formatted raw APFS identity differs from creation inode or enrolled volume")
+	}
+	return nil
 }
 
 func verifyExt4Header(file *os.File, expectedUUID string) error {
@@ -808,37 +903,47 @@ func replaceJournalWithHook(volumes *os.Root, journal Journal, hook func(journal
 }
 
 func readJournal(volumes *os.Root, request Request) (Journal, error) {
+	journal, _, err := readJournalWithRaw(volumes, request)
+	return journal, err
+}
+
+func readJournalWithRaw(volumes *os.Root, request Request) (Journal, []byte, error) {
 	name := journalName(request.VolumeID)
 	info, err := volumes.Lstat(name)
 	if err != nil {
-		return Journal{}, err
+		return Journal{}, nil, err
 	}
 	if err := privateRegular(info); err != nil {
-		return Journal{}, err
+		return Journal{}, nil, err
 	}
 	path := filepath.Join(volumes.Name(), name)
 	if err := checkPrivateACL(path, info); err != nil {
-		return Journal{}, err
+		return Journal{}, nil, err
 	}
 	file, err := volumes.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
-		return Journal{}, err
+		return Journal{}, nil, err
 	}
 	defer file.Close()
 	opened, err := file.Stat()
 	if err != nil || !os.SameFile(info, opened) {
-		return Journal{}, fmt.Errorf("format journal changed while opening: %v", err)
+		return Journal{}, nil, fmt.Errorf("format journal changed while opening: %v", err)
 	}
 	if err := privateRegular(opened); err != nil {
-		return Journal{}, err
+		return Journal{}, nil, err
 	}
 	if err := checkPrivateACL(path, opened); err != nil {
-		return Journal{}, err
+		return Journal{}, nil, err
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, maxJournalBytes+1))
 	if err != nil || len(raw) > maxJournalBytes {
-		return Journal{}, fmt.Errorf("format journal unreadable or oversized: %v", err)
+		return Journal{}, nil, fmt.Errorf("format journal unreadable or oversized: %v", err)
 	}
+	journal, err := decodeJournal(raw, request)
+	return journal, raw, err
+}
+
+func decodeJournal(raw []byte, request Request) (Journal, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := rejectDuplicateJSON(raw); err != nil {

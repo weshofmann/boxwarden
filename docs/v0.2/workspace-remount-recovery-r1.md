@@ -1,17 +1,23 @@
 # R1 workspace remount recovery: design and implementation plan
 
-Status: implementation in progress. The first checkpoint implements pinned
-APFS identity and duplicate-volume checks, v2 formatter receipts, strict
+Status: implementation and qualification in progress. Published checkpoints
+implement pinned APFS identity and duplicate-volume checks, v2 formatter receipts, strict
 `workspace_storage` parsing, and external mount admission before public
 workspace/start/rebuild/delete dispatch, detached owner launch, and managed
-formatter locks. This checkpoint adds explicit `workspace storage enroll`:
-it takes an independently supplied APFS UUID, accepts uppercase diskutil
+formatter locks. Explicit `workspace storage enroll` takes an independently
+supplied APFS UUID, accepts uppercase diskutil
 spelling, and writes a new non-overwriting config on a different filesystem.
-Legacy reconciliation and final qualification remain pending. A legacy config
+The current checkpoint adds write-once v1 reconciliation, pinned
+state-root/volumes/raw filesystem membership checks, and export snapshot
+distinctness against the source's current pinned identity. Enrolled domains
+also check backing storage before domain-state entry paths including session
+create, golden registration, domain init, alpha preparation/actions, status,
+and clipboard. Final qualification remains pending. A legacy config
 can still be used for read-only status and stop/containment, but workspace
 operations and session start/rebuild/delete are deliberately refused until an
-enrolled config is selected. No installed or user config is changed by this
-work.
+enrolled config is selected; its other established commands retain their
+legacy entry behavior. Stop/containment remains available when enrolled
+storage is unavailable. No installed or user config is changed by this work.
 
 A host-only probe used a newly created external `0600` synthetic config and
 newly owned scratch state root. `hostidentity.CheckStorage` admitted the exact
@@ -24,6 +30,15 @@ and a private internal output directory. Enrollment wrote and reloaded the new
 overwrite the output. The probe used only the current mount and does not prove
 remount recovery.
 Baseline: `ee3d7a20194d84fa05520f710d2992b6261ac556`.
+
+The same-filesystem guard compares pinned `Fstatfs` FSIDs and `st_dev` for the
+state root, volumes directory, and admitted raw file. It prevents a private
+nested mount under `volumes` from passing the external state-root check while
+using another filesystem. Existing non-create mutators still have a window
+between public storage preflight and their later lock acquisition if a mount
+is forcibly removed in that interval; R1 does not claim atomic mount pinning
+through every command. The clean-remount path and missing/wrong mount at
+entry fail before those mutations.
 
 ## Diagnosis and identity model
 
@@ -111,9 +126,11 @@ and [Apple XNU `attr.h` capability and 64-bit ID definitions](https://raw.github
    or mismatched mount, duplicate/ambiguous identity, changed inode, unsafe
    path, or unresolved backend remains blocked with an actionable diagnostic.
    Repeating an identical reconciliation returns success after full recheck;
-   a conflicting existing binding refuses. A failed write before rename
-   leaves no authority; failure after rename is settled by exact reread and
-   directory sync.
+   a conflicting existing binding refuses. A failed write before the atomic
+   link leaves no authority. A returned error after the link runs temporary
+   cleanup; retry settles an exact one-link binding by reread and directory
+   sync. A process crash between link and temporary removal can leave two
+   links; admission and retry refuse that ambiguous state for diagnosis.
 4. Version-1 journals without a v1 binding keep their existing strict
    device/inode admission when unchanged. Drifted legacy records require the
    explicit operation above; they are never automatically promoted merely

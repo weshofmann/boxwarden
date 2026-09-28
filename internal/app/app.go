@@ -156,7 +156,7 @@ func Run(ctx context.Context, args []string, options Options) error {
 			return err
 		}
 	}
-	if command.requiresWorkspaceStorage() {
+	if command.requiresWorkspaceStorage() || selectedDomain.WorkspaceStorage != nil && command.checksEnrolledStorage() {
 		check := options.storageCheck
 		if check == nil {
 			check = hostidentity.CheckStorage
@@ -175,7 +175,7 @@ func Run(ctx context.Context, args []string, options Options) error {
 	if command.requiresBackend() {
 		if command.kind == commandGoldenRegister {
 			err = backend.ValidateObjectID(command.name)
-		} else if command.kind != commandClipboardTargets && command.kind != commandWorkspaceExport && command.kind != commandWorkspaceExportResume && command.kind != commandWorkspaceImportVerify {
+		} else if command.kind != commandClipboardTargets && command.kind != commandWorkspaceExport && command.kind != commandWorkspaceExportResume && command.kind != commandWorkspaceImportVerify && command.kind != commandWorkspaceReconcile {
 			_, err = session.ParseName(command.name)
 		}
 		if err != nil {
@@ -495,6 +495,16 @@ func Run(ctx context.Context, args []string, options Options) error {
 			return fmt.Errorf("attach workspace: %w", err)
 		}
 		return writeWorkspaceAttachment(options.Output, record, "attached")
+	case commandWorkspaceReconcile:
+		expected, err := selectedDomain.StorageExpectation(command.configPath)
+		if err != nil {
+			return err
+		}
+		record, err := workspacex.ReconcileLegacy(ctx, selectedDomain.StateRoot, selectedDomain.ID, command.volumeID, expected, options.Observer)
+		if err != nil {
+			return fmt.Errorf("reconcile legacy workspace: %w", err)
+		}
+		return writeWorkspaceAttachment(options.Output, record, "reconciled")
 	case commandWorkspaceCreate:
 		if selectedDomain.ID != "alpha" {
 			return errors.New("v0.2 workspace create is limited to the explicit alpha domain")
@@ -611,6 +621,7 @@ const (
 	commandWorkspaceImport
 	commandWorkspaceImportVerify
 	commandWorkspaceStorageEnroll
+	commandWorkspaceReconcile
 	commandAlphaAction
 	commandAlphaActionList
 	commandClipboardTargets
@@ -649,7 +660,21 @@ func (c parsedCommand) requiresWorkspaceStorage() bool {
 	case commandSessionStart, commandSessionRebuild, commandSessionDelete,
 		commandWorkspaceCreate, commandWorkspaceAttach, commandWorkspaceDetach,
 		commandWorkspaceExport, commandWorkspaceExportResume,
-		commandWorkspaceImport, commandWorkspaceImportVerify:
+		commandWorkspaceImport, commandWorkspaceImportVerify, commandWorkspaceReconcile:
+		return true
+	default:
+		return false
+	}
+}
+
+// These commands can open locks or write domain state. Existing legacy
+// configurations retain their prior behavior, but an enrolled domain must
+// prove its external backing before any command-specific factory or lock.
+func (c parsedCommand) checksEnrolledStorage() bool {
+	switch c.kind {
+	case commandDomainInit, commandGoldenRegister, commandSessionCreate,
+		commandSessionStatus, commandAlphaPrepare, commandAlphaAction,
+		commandAlphaActionList, commandClipboard:
 		return true
 	default:
 		return false
@@ -657,7 +682,7 @@ func (c parsedCommand) requiresWorkspaceStorage() bool {
 }
 
 func (c parsedCommand) requiresBackend() bool {
-	return c.kind == commandGoldenRegister || c.kind == commandSessionCreate || c.kind == commandSessionStatus || c.kind == commandClipboardTargets || c.kind == commandWorkspaceAttach || c.kind == commandWorkspaceDetach || c.kind == commandWorkspaceExport || c.kind == commandWorkspaceExportResume || c.kind == commandWorkspaceImportVerify
+	return c.kind == commandGoldenRegister || c.kind == commandSessionCreate || c.kind == commandSessionStatus || c.kind == commandClipboardTargets || c.kind == commandWorkspaceAttach || c.kind == commandWorkspaceDetach || c.kind == commandWorkspaceExport || c.kind == commandWorkspaceExportResume || c.kind == commandWorkspaceImportVerify || c.kind == commandWorkspaceReconcile
 }
 
 // normalizeClipboardFlags accepts the viewer's SESSION-before-flags argv and
@@ -960,6 +985,13 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 			return parsedCommand{}, fmt.Errorf("workspace storage enroll requires canonical UUID and clean absolute output config")
 		}
 		base.kind, base.expectedAPFSUUID, base.mountPath, base.outputConfigPath = commandWorkspaceStorageEnroll, normalized, *mountPoint, *outputConfig
+		return base, nil
+	}
+	if len(remaining) == 3 && remaining[0] == "workspace" && remaining[1] == "reconcile" {
+		if !alphaCreateUUID(remaining[2]) {
+			return parsedCommand{}, fmt.Errorf("workspace reconcile requires an exact volume UUID")
+		}
+		base.kind, base.volumeID = commandWorkspaceReconcile, remaining[2]
 		return base, nil
 	}
 	if len(remaining) >= 3 && remaining[0] == "workspace" && remaining[1] == "create" {
