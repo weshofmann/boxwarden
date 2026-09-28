@@ -369,3 +369,21 @@ for the menu trial.
 The subsequent documentation checkpoint `9bc0553` also passed hosted
 deterministic CI
 ([run 36383477240](https://github.com/weshofmann/boxwarden/actions/runs/36383477240)).
+
+Wes then directly observed the standalone menu item, selected the retained
+workspace-free alpha sandbox, and completed both explicit menu transfers:
+host to guest, then guest to host with Unicode text. This is real menu-bar
+acceptance reported by the operator, separate from the earlier public CLI and
+guest-application checks. The agent did not inspect or change the Mac general
+pasteboard. The running app was launched from the earlier `ed830cb` menu build;
+the verified clean `544a691` bundle has unchanged menu and transfer source but
+has not itself been manually exercised. A full-host read-only status check after
+Wes's transfer found `clipboardprobe20260927r1` still consistent and READY;
+sandboxed Tart/status reads falsely reported this running VM stopped. The
+documentation checkpoint `8700915` passed hosted deterministic CI
+([run 36383934034](https://github.com/weshofmann/boxwarden/actions/runs/36383934034)).
+
+The real menu has not yet been exercised for Quit, cancellation, or a restarted
+target. Automated tests cover those state transitions and the existing limits,
+including empty text and 1 MiB. Keep the current sandbox running for Wes's
+trial; a final Quit/VM-preservation observation is still pending.
