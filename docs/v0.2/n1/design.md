@@ -1,8 +1,9 @@
 # N1: host-service containment candidate
 
-Status: independently reviewed candidate design; no changed toolchain admitted or host
-qualification claimed. The installed stock policy retains ADR 015's gateway
-exposure until deliberate deployment and qualification of this candidate.
+Status: independently reviewed candidate design. The 2026-09-28 bounded host
+qualification is recorded in [the matrix](matrix.md); its temporary candidate
+admission was removed. The installed stock policy retains ADR 015's gateway
+exposure until a separate deliberate promotion.
 
 ## Outcome and scope
 

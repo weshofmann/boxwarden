@@ -1,10 +1,12 @@
 # N1 acceptance matrix
 
-Candidate source evidence below was observed on 2026-09-28. Stock evidence is
-context, not candidate qualification. **Every real guest row awaits attended
-deployment.** No candidate vmnet containment has been exercised on this Mac.
+The source and host-only evidence below was recorded before the 2026-09-28
+attended trial. The live results from that trial appear separately below. The
+candidate was temporarily admitted for two disposable guests and then removed;
+the default installation still uses stock Softnet and retains ADR 015 gateway
+exposure.
 
-| Case | Deterministic boundary tests | Host-only / isolated guest gate |
+| Case | Deterministic boundary tests | Planned host-only / isolated guest gate |
 |---|---|---|
 | DHCP discover, ACK, renewal, lease expiry | MAC/source/ports, trusted ACK, unicast renewal | fresh address + renewal after lease interval |
 | DNS UDP and TCP53, fallback | gateway advertised, UDP/TCP framing, fragments denied | UDP, TCP, truncated/large answer fallback |
@@ -18,9 +20,10 @@ deployment.** No candidate vmnet containment has been exercised on this Mac.
 | Initialization/metadata failure | alias rejection, missing/failed address refresh, no forwarding | failed startup remains non-ready; no stock fallback |
 | Start/stop/restart/rebuild | exact child argv and admission mismatch tests | repeat lifecycle with policy and listener controls |
 
-Evidence labels: SOURCE INSPECTION; DETERMINISTIC; HOST-ONLY INTEGRATION;
-REAL ISOLATED GUEST; AWAITING ATTENDED DEPLOYMENT. Native IPv6 and effectively
-IPv6-only upstream remain unsupported/unqualified; no insecure fallback.
+The pretrial evidence labels were SOURCE INSPECTION; DETERMINISTIC; HOST-ONLY
+INTEGRATION; REAL ISOLATED GUEST; AWAITING ATTENDED DEPLOYMENT. The last label
+is historical where the live table below now records a result. Native IPv6 and
+effectively IPv6-only upstream remain unsupported/unqualified; no insecure fallback.
 
 ## Observed source and host-only results
 
@@ -44,10 +47,12 @@ IPv6-only upstream remain unsupported/unqualified; no insecure fallback.
 - **SOURCE INSPECTION:** stock Tart passes the selector as two Softnet argv
   elements; candidate rejects missing/duplicate selectors and incompatible
   network overrides before privilege setup and again at proxy construction.
-- **NOT EXERCISED:** real DHCP and lease timing, vmnet UDP/TCP DNS and fallback,
+- **PRETRIAL STATUS (2026-09-28, before admission):** real DHCP and lease timing, vmnet UDP/TCP DNS and fallback,
   scoped/split DNS, VPN/resolver transitions, DNS64, public HTTPS, pinned SSH,
   controlled clipboard, guest-root changes, and real start/stop/restart listener
-  comparisons. The retained DNS endpoint, vmnet and hypervisor remain exposed.
+  comparisons had not been exercised at that checkpoint. The later live results
+  below supersede that status where tested. The retained DNS endpoint, vmnet
+  and hypervisor remain exposed.
 
 Run the pure tests with `rustc --edition=2024 --test
  tools/n1-softnet/policy.rs -o /path/to/new/tests`, then execute that test binary.
@@ -63,3 +68,27 @@ CI runs both suites without vmnet or privilege. Use
   invalid-configuration cases reject at the expected argument boundary. The
   verifier checks ownership, metadata and digest before executing any probe;
   wrong-executable nonexecution and mocked privileged-mode regressions pass.
+
+## Attended live results, 2026-09-28
+
+Two fresh task-owned guests used the same selected generic base: stock control
+and explicit N1 candidate. The private qualification report is summarized here;
+its raw bounded receipts remain in the operator's N1 archive. The temporary
+candidate digest and both guests were removed after the trial, and stock doctor
+remained healthy.
+
+| Case | Live result | Evidence and limit |
+|---|---|---|
+| Ordinary service on vmnet gateway, TCP and UDP | **PASS: N1 denied** | Three owned listener intervals, including after candidate restart and DHCP renewal. Host and stock guest received the exact response before and after candidate timeouts; each reaped listener counted four TCP and four UDP positive responses. |
+| DHCP and management | **PASS for tested path** | Distinct leased IPv4 addresses, observed renewal, and exact-generation pinned SSH before and after renewal; candidate public restart reached READY with a new generation. Lease expiry and rebuild were not live-tested. |
+| DHCP-advertised gateway DNS and public HTTPS | **PASS for tested path** | Both guests completed explicit UDP and TCP DNS, truncated UDP DNSKEY followed by a complete TCP answer, and direct HTTPS 200. No public DNS resolver was hard-coded. |
+| Non-gateway host private address | **PASS for existing private deny** | Host reached the owned listener; both stock and candidate guests timed out. This does not distinguish N1 from the default private-address rule. |
+| Synthetic CLI clipboard | **ATTEMPTED / UNQUALIFIED** | Both writes reported destination outcome unknown; read-only pulls were unavailable. The selected base's source provenance predates the fixed guest clipboard mode and adapter. Exact installed bytes were not inspected before deletion, so the guest-side failure path remains an inference. No retry or Mac pasteboard access occurred. |
+| Cross-guest listener | **INVALID** | The owned control-guest listener could not be reached even by the host positive control; candidate timeout is not isolation evidence. |
+| Guest-root route/firewall bypass and live parser/metadata failures | **NOT EXERCISED live** | Deterministic fixtures cover the packet and failure paths; no hostile real-host probe or guest firewall change was used. |
+| Scoped/split DNS, VPN transitions, DNS64, IPv6-only upstream | **NOT EXERCISED** | No representative authorized environment. Native guest IPv6 and effectively IPv6-only upstream remain unsupported/unqualified. |
+
+The bounded [follow-up trial](follow-up-trial.md) addresses only clipboard
+compatibility and a positive-controlled cross-guest TCP check. Address-refresh
+observation/write races and public NAT hairpin aliases remain design limits, not
+results of this live trial.

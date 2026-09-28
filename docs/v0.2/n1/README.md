@@ -5,16 +5,21 @@ into vmnet. It denies ordinary host-service destinations while retaining narrow
 DHCP, DHCP-advertised gateway DNS, and responses to host-initiated SSH. Stock
 Tart, its viewer, and the controlled clipboard protocol are unchanged.
 
-**This is a reviewed source candidate, not Mac qualification.** The default
-Boxwarden build still selects stock Softnet and reports its ADR 015 gateway
-exposure. A separate `n1candidate` build admits only the exact new artifact and
-requires its containment selector in normal and installer launch paths. Neither
-build accepts the other's Softnet identity. There is no runtime override.
+**This is a reviewed explicit candidate with bounded Mac qualification, not a
+change to the working installation.** On 2026-09-28, two disposable guests
+completed three positive-controlled live gateway-denial intervals and the tested
+DHCP, DNS, HTTPS, pinned-management and restart paths. The temporary candidate
+was removed after the trial. The default Boxwarden build still selects stock
+Softnet and reports its ADR 015 gateway exposure. A separate `n1candidate`
+build admits only the exact candidate artifact and requires its containment
+selector in normal and installer launch paths. Neither build accepts the
+other's Softnet identity; there is no runtime override.
 
 - [Decision and limits](design.md)
 - [Observed acceptance matrix](matrix.md)
 - [Review findings and resolutions](review-ledger.md)
 - [Attended deployment, positive controls and rollback](attended-qualification.md)
+- [Bounded follow-up trial and renewed admission gate](follow-up-trial.md)
 - [Exact source and artifact identity](../../../tools/n1-softnet/artifact.json)
 - [Pinned build and licensing instructions](../../../tools/n1-softnet/README.md)
 
@@ -33,10 +38,12 @@ source tests never use upstream's privileged Cargo test runner. `build.py`
 requires separately verified source/compiler inputs and a populated locked
 Cargo cache; it refuses any output digest different from the staged identity.
 
-Privileged admission remains a separate operator decision. Do not copy the
-candidate into a working toolchain or invoke its accepted launch path directly.
-Use the attended gate and paired owned-listener controls before making a live
-containment claim. Real DNS/VPN, management, clipboard and lifecycle compatibility
-remain unexercised. The necessary DNS endpoint is still reachable; address
-refresh races, public NAT hairpin aliases and IPv6-only environments are outside
-the demonstrated claim.
+Any future privileged admission needs a new exact attended approval; the
+completed window is closed. The [matrix](matrix.md) separates passed live
+gateway denial and compatibility from attempted/unqualified clipboard, an
+invalid cross-guest listener interval, and unexercised environments. The
+necessary DNS endpoint is still reachable. Scoped/VPN/DNS64 behavior, native
+and effectively IPv6-only upstream, address-refresh races and public NAT
+hairpin aliases remain outside the demonstrated claim. Merging this branch
+would retain the explicit candidate build and stock default; it would not
+install or enable N1 on this Mac.

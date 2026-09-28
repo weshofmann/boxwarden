@@ -1,5 +1,10 @@
 # N1 implementation plan
 
+Historical source-only plan, written before the 2026-09-28 attended trial. Its
+unchecked task list is retained as a planning record, not current completion
+status; see [the acceptance matrix](matrix.md) for observed live results and
+the [follow-up trial](follow-up-trial.md) for the remaining narrow gate.
+
 Goal: deliver a reviewed, tested source/build candidate and an exact attended
 deployment package without changing the working privileged installation.
 Architecture: a small pinned Softnet Rust patch selects a strict packet policy
