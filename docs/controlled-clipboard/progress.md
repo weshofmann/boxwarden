@@ -354,3 +354,18 @@ The first build from a worktree containing untracked files reported
 checkout was removed after its verified durable copy. The clean CLI's public
 status still reports the existing synthetic session `ready`; real menu
 selection and transfers remain pending.
+
+With the same READY stock Tart guest, the clean public CLI `clipboard copy`
+sent one synthetic 49-byte Unicode string through stdin directly to the guest
+clipboard. Firefox's own Paste context menu inserted the text into its address
+field without navigation; its Select All and Copy actions then placed that
+text back on the guest clipboard. Public CLI `clipboard paste --raw` returned
+byte-identical data to a private temporary file. LibreOffice Writer's Edit >
+Paste inserted the same text into an unsaved synthetic document. This verifies
+Firefox and a second real guest application against the stock guest clipboard
+path. It does not verify the macOS menu buttons or access the Mac general
+pasteboard. The unsaved Writer test document and READY guest remain available
+for the menu trial.
+The subsequent documentation checkpoint `9bc0553` also passed hosted
+deterministic CI
+([run 36383477240](https://github.com/weshofmann/boxwarden/actions/runs/36383477240)).

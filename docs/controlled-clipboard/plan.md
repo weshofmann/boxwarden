@@ -35,7 +35,7 @@ ambiguous commit acknowledgement and focus changes before/after click.
 - [x] Return host admission to the previously qualified stock Tart through the
   reviewed attended rollback; then remove viewer patch sources, patch-only
   launch args and custom toolchain support without changing Softnet policy.
-- [ ] Run focused tests/race, guest/Swift checks, applicable full suite and CI;
+- [x] Run focused tests/race, guest/Swift checks, applicable full suite and CI;
   independently review cumulative clipboard boundary and fix confirmed findings.
 - [ ] Complete attended synthetic GUI acceptance after stock display is usable;
   document launch, review outcomes and truthful remaining limitations.
