@@ -99,15 +99,25 @@ R4 has **not** been installed or host-admitted. The installed r3 identity remain
 active, and its real viewer buttons/menus and host clipboard transfer remain
 unverified against a READY guest.
 
-The next source checkpoint recognizes the exact signed r4 version, executable
+The published source checkpoint recognizes the exact signed r4 version, executable
 digest and archive digest as one coherent host identity while retaining the
 admitted r3 tuple. A mismatched r3/r4 tuple is rejected, and ordinary host init
 still admits only stock Tart. Focused host admission tests, including a simulated
 r4 doctor success and wrong-executable refusal, pass. This changes source policy
 only; installed config and root manifest still bind r3.
 
-Next: attribute the black guest boot and independently review the compact r4
-diff/build; then prepare an exact r4 admission and a bounded disposable GUI
-run. Do not use demo D or a provider account for this test. The synthetic Mac
+The r4 executable is staged side by side, and a new exact-source CLI passes
+read-only doctor against admitted r3. An attended r3-to-r4 admission/rollback
+helper has private exact backups and candidate bytes. Its read-only preflight,
+synthetic atomic-write/refusal/rollback fixture, and independent security review
+passed with all ten VM objects stopped. The requested administrator action is
+pending; no r4 host mutation or real r4 viewer test has occurred. A bounded
+macOS log read for the failed r3 Tart process showed the raw VM disk opened and
+a Virtualization event-tap connection, but did not establish VM start completion
+or explain the missing serial prompt.
+
+Next: verify any attended r4 admission from its exact journal/config/manifest,
+then collect bounded VM start and serial evidence during a disposable GUI run.
+Do not use demo D or a provider account for this test. The synthetic Mac
 clipboard window still needs explicit agreement before any general pasteboard
 read or write. Preserve the failed disposable disk and its observations.
