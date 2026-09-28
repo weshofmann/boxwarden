@@ -10,12 +10,16 @@ func TestParseManifestRejectsUnknownFieldsAndWrongQualifiedIdentity(t *testing.T
 	valid := `{"version":2,"platform":"darwin","macos":"26.6.2","macos_build":"25G83","tart":{"path":"/opt/qualified/tart","version":"2.32.1","executable_sha256":"05b65d5c14e8b41e8e44b6d9fd1278de4bedbc8b735d9b99f3c748f76f75862d","archive_sha256":"8554ab4f7fc12afe52f9b7e3093a935673cbac737a83973d2db7a0683c814529"},"softnet":{"path":"/Library/Boxwarden/toolchains/softnet/0.19.0/ab333619fc8bd7277837545e49a771baa994c01c3e8c14904ae4cc4c1f37269e/softnet","version":"0.19.0","executable_sha256":"ab333619fc8bd7277837545e49a771baa994c01c3e8c14904ae4cc4c1f37269e","archive_sha256":"1612e1296834aae0b6389650c7c5190add1ee8d71474e328691e67679ecda53c"},"root_uid":0,"group":{"id":20,"name":"boxwarden-operators","members":[501]},"operator":{"uid":501,"name":"wes","home":"/Users/wes"},"tart_home":"/Users/wes/Library/Application Support/boxwarden/tart","softnet_mode":2408,"installed_at":"2026-09-01T00:00:00Z"}`
 
 	for name, contents := range map[string]string{
-		"unknown field":          strings.Replace(valid, `"version":2`, `"version":2,"extra":true`, 1),
-		"duplicate field":        strings.Replace(valid, `"version":2`, `"version":2,"version":2`, 1),
-		"missing field":          strings.Replace(valid, `"platform":"darwin",`, ``, 1),
-		"missing macos build":    strings.Replace(valid, `"macos_build":"25G83",`, ``, 1),
-		"wrong macos build":      strings.Replace(valid, `"macos_build":"25G83"`, `"macos_build":"25G84"`, 1),
-		"wrong softnet digest":   strings.Replace(valid, SoftnetExecutableSHA256, strings.Repeat("0", 64), 1),
+		"unknown field":        strings.Replace(valid, `"version":2`, `"version":2,"extra":true`, 1),
+		"duplicate field":      strings.Replace(valid, `"version":2`, `"version":2,"version":2`, 1),
+		"missing field":        strings.Replace(valid, `"platform":"darwin",`, ``, 1),
+		"missing macos build":  strings.Replace(valid, `"macos_build":"25G83",`, ``, 1),
+		"wrong macos build":    strings.Replace(valid, `"macos_build":"25G83"`, `"macos_build":"25G84"`, 1),
+		"wrong softnet digest": strings.Replace(valid, SoftnetExecutableSHA256, strings.Repeat("0", 64), 1),
+		"retired custom Tart": strings.Replace(strings.Replace(strings.Replace(valid,
+			`"version":"2.32.1"`, `"version":"2.32.1-boxwarden-clipboard-r5"`, 1),
+			TartExecutableSHA256, "e0047ddb7ffff0967591a1bd03374980f1775bdb4ab44ffd5b9bfb4700d7b97b", 1),
+			TartArchiveSHA256, "3a58485df6a10958e62da1fd2692c47cf54ddec0448338695b0daf327d7617bc", 1),
 		"noncanonical tart path": strings.Replace(valid, `"/opt/qualified/tart"`, `"relative/tart"`, 1),
 		"trailing JSON":          valid + `{}`,
 	} {

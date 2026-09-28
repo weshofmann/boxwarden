@@ -32,7 +32,7 @@ ambiguous commit acknowledgement and focus changes before/after click.
 - [x] Build a standalone menu-bar `.app` with the current CLI bundled; test
   immutable click capture, all configured domains, availability, stale refresh,
   subprocess argv/environment, cancellation/status and no payload output.
-- [ ] Return host admission to the previously qualified stock Tart through the
+- [x] Return host admission to the previously qualified stock Tart through the
   reviewed attended rollback; then remove viewer patch sources, patch-only
   launch args and custom toolchain support without changing Softnet policy.
 - [ ] Run focused tests/race, guest/Swift checks, applicable full suite and CI;

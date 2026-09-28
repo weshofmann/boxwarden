@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           python3 guest/ubuntu-24.04-arm64/tests/clipboard_test.py
-          bash host/tart-controlled-clipboard/test.sh
+          bash host/clipboard-menu/test.sh
 
       - name: Set up Node for synthetic demo checks
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

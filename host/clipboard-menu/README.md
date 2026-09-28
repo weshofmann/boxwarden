@@ -14,6 +14,8 @@ The build stages a signed app containing the current `boxwarden` CLI at
 configuration file, launch the app executable with `--config /absolute/path`.
 Rebuild the app after changing the CLI or menu sources. Building and opening the
 utility do not start or stop a sandbox.
+The VM backend remains on admitted stock Tart and disables Tart's automatic
+clipboard sharing; the menu app supplies the explicit transfer surface.
 
 The sandbox submenu lists sessions from every configured domain. Select one
 explicitly before using a transfer action; a replaced session requires a new

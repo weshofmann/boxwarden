@@ -13,19 +13,11 @@ import (
 	"unicode"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
-	"github.com/weshofmann/boxwarden/internal/domain"
 )
-
-// ClipboardLaunchMetadata binds the optional qualified viewer controls to one
-// exact supervisor generation. It carries locators and identity, never text.
-type ClipboardLaunchMetadata struct {
-	CLIPath, ConfigPath, Domain, SessionName, SessionID, Generation string
-}
 
 // LaunchConfig carries the V3-admitted Tart/Softnet and operator facts. Start
 // policy is fixed here rather than being accepted from lifecycle callers.
 type LaunchConfig struct {
-	Clipboard     *ClipboardLaunchMetadata
 	TartPath      string
 	TartHome      string
 	SoftnetBinDir string
@@ -60,10 +52,6 @@ type Launcher struct {
 func NewLauncher(config LaunchConfig) Launcher { return newLauncher(config, osProcessStarter{}) }
 
 func newLauncher(config LaunchConfig, process processStarter) Launcher {
-	if config.Clipboard != nil {
-		metadata := *config.Clipboard
-		config.Clipboard = &metadata
-	}
 	return Launcher{config: config, process: process}
 }
 
@@ -76,11 +64,6 @@ func (l Launcher) Start(ctx context.Context, request backend.StartRequest) (back
 	}
 	if err := validateLaunchConfig(l.config); err != nil {
 		return nil, fmt.Errorf("start Tart: %w", err)
-	}
-	if l.config.Clipboard != nil {
-		if err := validateClipboardLaunch(*l.config.Clipboard, request.GenerationDirectory); err != nil {
-			return nil, fmt.Errorf("start Tart: %w", err)
-		}
 	}
 	if l.process == nil {
 		return nil, fmt.Errorf("start Tart: process starter is required")
@@ -102,14 +85,6 @@ func (l Launcher) Start(ctx context.Context, request backend.StartRequest) (back
 		// Tart defaults extra file disks to automatic caching, unlike its
 		// cached Linux root disk. Keep managed ext4 on the same cache mode.
 		args = append(args, "--disk", disk.Operand()+":caching=cached")
-	}
-	if m := l.config.Clipboard; m != nil {
-		args = append(args, "--boxwarden-clipboard-cli", m.CLIPath,
-			"--boxwarden-clipboard-config", m.ConfigPath,
-			"--boxwarden-clipboard-domain", m.Domain,
-			"--boxwarden-clipboard-session", m.SessionName,
-			"--boxwarden-clipboard-session-id", m.SessionID,
-			"--boxwarden-clipboard-generation", m.Generation)
 	}
 	args = append(args, request.ObjectID)
 	spec := processSpec{
@@ -144,47 +119,6 @@ func (l Launcher) Start(ctx context.Context, request backend.StartRequest) (back
 		return owned, fmt.Errorf("start Tart process: %w", err)
 	}
 	return owned, nil
-}
-
-func validateClipboardLaunch(m ClipboardLaunchMetadata, directory string) error {
-	if !canonicalAbsolutePath(m.CLIPath) || !canonicalAbsolutePath(m.ConfigPath) {
-		return fmt.Errorf("clipboard command locators must be canonical and absolute")
-	}
-	if _, err := domain.Parse(m.Domain); err != nil {
-		return fmt.Errorf("invalid clipboard domain")
-	}
-	// Session names and security-domain names use the same identifier grammar.
-	if _, err := domain.Parse(m.SessionName); err != nil {
-		return fmt.Errorf("invalid clipboard session name")
-	}
-	if !validClipboardUUID(m.SessionID) || !validClipboardUUID(m.Generation) {
-		return fmt.Errorf("invalid clipboard session or generation identity")
-	}
-	parent := filepath.Dir(directory)
-	domainDirectory := filepath.Dir(parent)
-	if filepath.Base(directory) != m.Generation || filepath.Base(parent) != m.SessionID ||
-		filepath.Base(domainDirectory) != m.Domain || filepath.Base(filepath.Dir(domainDirectory)) != "runtime" {
-		return fmt.Errorf("clipboard metadata differs from exact runtime generation")
-	}
-	return nil
-}
-
-func validClipboardUUID(raw string) bool {
-	if len(raw) != 36 {
-		return false
-	}
-	for index := range raw {
-		if index == 8 || index == 13 || index == 18 || index == 23 {
-			if raw[index] != '-' {
-				return false
-			}
-			continue
-		}
-		if !((raw[index] >= '0' && raw[index] <= '9') || (raw[index] >= 'a' && raw[index] <= 'f')) {
-			return false
-		}
-	}
-	return true
 }
 
 func validateLaunchConfig(config LaunchConfig) error {

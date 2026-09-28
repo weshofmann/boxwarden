@@ -81,6 +81,9 @@ The app is a menu-bar accessory with a sandbox submenu, `HOST -> GUEST` and
 and Quit. It has no VM lifecycle controls, shortcuts, history, or login item.
 The build stages a directly launchable `.app` with the current CLI bundled.
 Quit does not operate on a VM; the CLI works independently of the app.
+The Tart backend launches the admitted stock executable with automatic
+clipboard sharing disabled; it passes no clipboard metadata or patch-only
+arguments to Tart.
 
 The app reads configured domain names from the explicit Boxwarden config JSON.
 For each name, it invokes `--domain <name> clipboard targets` using a direct
