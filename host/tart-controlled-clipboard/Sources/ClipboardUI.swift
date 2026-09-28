@@ -49,24 +49,7 @@ struct ControlledClipboardVMView: View {
   }
   var body: some View {
     VStack(spacing: 0) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Copy text between the host and guest clipboards.")
-        Text("Nothing transfers automatically.")
-        Text(controller.target.map { "Target sandbox: \($0.domain)/\($0.session) (\($0.sessionID))" } ?? "Target sandbox: unavailable")
-          .font(.caption).textSelection(.disabled)
-        HStack {
-          Button("HOST -> GUEST") {
-            let captured = controller
-            captured.perform(.push)
-          }.disabled(!controller.available)
-          Button("GUEST -> HOST") {
-            let captured = controller
-            captured.perform(.pull)
-          }.disabled(!controller.available)
-          Text(controller.status).font(.caption)
-        }
-      }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .windowBackgroundColor))
+      ClipboardStrip(controller: controller)
       Divider()
       VMView(vm: vm, capturesSystemKeys: capturesSystemKeys)
     }
@@ -76,6 +59,35 @@ struct ControlledClipboardVMView: View {
       controller.running = state == .running
     }
     .onDisappear { controller.close() }
+  }
+}
+// Keep the host-owned transfer affordance to one line above the guest display.
+// Full target identity and the no-sync explanation remain available as tooltips.
+struct ClipboardStrip: View {
+  @ObservedObject var controller: ClipboardWindowController
+  var body: some View {
+    HStack(spacing: 8) {
+      Text("Clipboard copy:").font(.caption)
+      Text(controller.target.map { "\($0.domain)/\($0.session)" } ?? "unavailable")
+        .font(.caption).lineLimit(1).truncationMode(.middle)
+        .help(controller.target.map { "Target sandbox: \($0.domain)/\($0.session) (\($0.sessionID))" } ?? "Target sandbox: unavailable")
+      Spacer(minLength: 4)
+      Button("GUEST -> HOST") {
+        let captured = controller
+        captured.perform(.pull)
+      }.disabled(!controller.available).fixedSize(horizontal: true, vertical: false)
+      Button("HOST -> GUEST") {
+        let captured = controller
+        captured.perform(.push)
+      }.disabled(!controller.available).fixedSize(horizontal: true, vertical: false)
+      Text(controller.status).font(.caption).lineLimit(1).truncationMode(.tail)
+        .frame(maxWidth: 180, alignment: .leading).help(controller.status)
+    }
+    .controlSize(.small)
+    .padding(.horizontal, 8).padding(.vertical, 4)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(Color(nsColor: .windowBackgroundColor))
+    .help("Copy text between the host and guest clipboards. Nothing transfers automatically.")
   }
 }
 // Key-window eligibility is checked separately from SwiftUI focus: auxiliary

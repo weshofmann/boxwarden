@@ -4,6 +4,8 @@ base=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 temporary=$(mktemp -d "${TMPDIR:-/private/tmp}/boxwarden-ui-tests.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 swiftc -typecheck "$base/Sources/ClipboardInvocation.swift" "$base/Sources/ClipboardUI.swift" "$base/Tests/UIStubs.swift"
+swiftc -parse-as-library "$base/Sources/ClipboardInvocation.swift" "$base/Sources/ClipboardUI.swift" "$base/Tests/UIStubs.swift" "$base/Tests/strip-main.swift" -o "$temporary/strip-tests"
+"$temporary/strip-tests"
 swiftc -parse-as-library "$base/Sources/ClipboardInvocation.swift" "$base/Tests/main.swift" -o "$temporary/tests"
 "$temporary/tests"
 swiftc -parse-as-library "$base/Sources/ClipboardInvocation.swift" "$base/Tests/shutdown-main.swift" -o "$temporary/shutdown-tests"

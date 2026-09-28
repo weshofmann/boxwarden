@@ -30,8 +30,9 @@ SHA-256 is `1573e4be9a10087f8e5dce5dcc5718cfef4d5d0274c60d5e209ba1f13c49f7a6`
 and the reproducible archive SHA-256 is
 `b5f487c3b092b48d23819d2828c45b96f7c84816d51b5ca9dd68f3de64fa3a64`.
 Full local Go and race suites passed using external scratch space. Source-only
-host admission accepts the exact r3 identity; the installed toolchain and root
-manifest have not changed. Real VM/window/menu acceptance is pending.
+host admission accepts the exact r3 identity. At this source-only checkpoint,
+the installed toolchain and root manifest had not changed; the later attended
+r3 admission is recorded below. Real VM/window/menu acceptance is pending.
 
 Independent guest review found an Important liveness gap: a blocked native GTK
 call could outlive the preclaim Python signal deadline. The source correction
@@ -64,22 +65,42 @@ library and left the exact disposable session READY. Its independent source
 review found no Important/Critical issue. This proves application-widget
 interoperability, not Firefox behavior or the patched host viewer controls.
 The disposable probe was then stopped through the public workflow and verified
-stopped; host doctor remained healthy. Demo D remains running and untouched.
+stopped; host doctor remained healthy. Independent cumulative review of the
+feature diff against merged `main` found no remaining Important/Critical issue.
+Hosted deterministic CI passed for the previous documentation checkpoints
+`d0dc6cc` (run 36359585931) and `a41b59e` (run 36360506303).
 
-Independent cumulative review of the feature diff against merged `main` found
-no remaining Important/Critical issue. The signed patched Tart is staged beside
-the stock executable at its exact digest. Read-only host admission preflight
-passed exact mounts, original backups, both executable identities, signature,
-and doctor. A private attended cutover/rollback helper passed synthetic atomic
-file replacement and refusal checks and independent source review. It has **not**
-run with administrator privileges or changed the installed admission. Its
-all-stopped/no-new-starts requirement means the running demo must be stopped
-gracefully before the cutover.
+With Wes's attended Terminal action, the exact signed r3 Tart was admitted by
+its reviewed helper. The config and root manifest match their reviewed SHA-256
+digests; host doctor is healthy and the native APFS mount UUIDs remain exact.
+Demo D's backend was already stopped with intended-running drift; the public
+stop reconciled it to consistently stopped while preserving its disk and
+workspace. The private admission journal is root-readable; the helper's
+terminal success output followed its synced admitted phase. No general Mac
+clipboard content was read or changed.
 
-Next: obtain the single concrete attended approval for temporary host-toolchain
-admission and a synthetic Mac clipboard test window; then verify real viewer
-buttons, menus, target selection and later guest application paste. Host
-buttons/menus and the real host-clipboard GUI path remain untested until then.
+The first r3 public viewer start showed the host strip but a black guest display.
+It timed out waiting for the guest `hvc0` autologin prompt, so the session never
+became READY and no clipboard transfer was attempted. The public stop timed
+out while its exact Tart object remained running; a bounded exact-target Tart
+stop succeeded, followed by a public stop that reconciled the session record.
+All Tart objects are now stopped. The boot failure is unattributed; no retry is
+claimed as qualified.
 
-Valuable demo D is untouched; one disposable probe is used. No real host clipboard
-has been accessed. Deployment remains a separate concrete approval gate.
+Wes found the strip too tall and specified a single row. The r4 source reduces
+three explanatory rows plus buttons to one row with sandbox identity, both
+buttons and status; full explanation moves to tooltips. An offscreen rendered
+height regression failed before implementation and now passes at <=52 points.
+The local viewer suite, exact pinned Tart release build, signed executable
+verification, and targeted Tart Swift tests passed. Staged r4 executable SHA-256:
+`46e809c95260d6a264b15662bd2117eddd13b0a0ca19dcdc6bae244cc7799fc2`;
+archive SHA-256: `4126636c097dffaefff70c0abec116623885554419c87825b4e9e458a9f987ff`.
+R4 has **not** been installed or host-admitted. The installed r3 identity remains
+active, and its real viewer buttons/menus and host clipboard transfer remain
+unverified against a READY guest.
+
+Next: attribute the black guest boot and independently review the compact r4
+diff/build; then prepare an exact r4 admission and a bounded disposable GUI
+run. Do not use demo D or a provider account for this test. The synthetic Mac
+clipboard window still needs explicit agreement before any general pasteboard
+read or write. Preserve the failed disposable disk and its observations.

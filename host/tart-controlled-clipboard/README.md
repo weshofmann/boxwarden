@@ -8,10 +8,10 @@ unchanged; metadata requires `--no-clipboard`. Auxiliary/non-key windows have no
 
 The exact strip says:
 
-> Copy text between the host and guest clipboards.
-> Nothing transfers automatically.
-
-Buttons are `HOST -> GUEST` and `GUEST -> HOST`. Menu entries are
+The compact strip shows one line: `Clipboard copy: DOMAIN/SESSION`, then
+`GUEST -> HOST` and `HOST -> GUEST` buttons and a short status. The full target
+identity and “Nothing transfers automatically” explanation are available as
+tooltips. The strip never expands into explanatory rows. Buttons are per-window. Menu entries are
 `Copy Host Clipboard to Guest` and `Copy Guest Clipboard to Host`, without key
 equivalents. Each uses the same controller method and exact argument-array
 invocation of `clipboard push` or `clipboard pull`. Only a successful child exit
@@ -78,7 +78,7 @@ The script checks Git revision, license/lock SHA-256, requires a clean checkout,
 applies the tracked patch, builds release with `--disable-automatic-resolution`,
 and stages an ad-hoc signed executable. Signing identifier is
 `org.boxwarden.tart.controlled-clipboard`; version is
-`2.32.1-boxwarden-clipboard-r3`. It records compiler, signing, version, patch,
+`2.32.1-boxwarden-clipboard-r4`. It records compiler, signing, version, patch,
 lock, requested/signed entitlement and signed executable identities. Signing
 uses only `com.apple.security.virtualization`; the exact signed entitlement
 dictionary is extracted and checked. No `get-task-allow` or restricted

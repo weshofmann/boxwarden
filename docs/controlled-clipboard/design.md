@@ -81,17 +81,19 @@ Retain its Fair Source 0.9 notices and review distribution constraints. No newer
 source is borrowed. Tart exec already transmits EOF but has an upstream EOF
 readability-handler issue; it offers no advantage over existing pinned SSH.
 
-The always-visible host strip identifies the sandbox and says:
-“Copy text between the host and guest clipboards. Nothing transfers automatically.”
-Buttons are HOST -> GUEST and GUEST -> HOST. Application menu items are Copy Host
-Clipboard to Guest and Copy Guest Clipboard to Host; unavailable targets disabled.
+The always-visible host strip uses one compact row: `Clipboard copy:`, the
+sandbox domain/session, `GUEST -> HOST` and `HOST -> GUEST` buttons, and a short
+status. The full target identity and “Nothing transfers automatically” explanation
+are tooltips. Application menu items are Copy Host Clipboard to Guest and Copy
+Guest Clipboard to Host; unavailable targets are disabled.
 No key equivalents replace normal guest shortcuts. Both call the same CLI with
 expected immutable target metadata and show only success/failure/unknown status.
 
 Track upstream source revision/archive hash, patch hash, reproducible build
 instructions, signing details and executable digest as a distinct staged identity.
-No installed Tart replacement, root manifest mutation or validation bypass. A
-reviewed exact deployment/rollback gate follows safe implementation testing.
+Keep the stock Tart executable intact and never bypass digest validation. Any
+root manifest/config admission requires a separate reviewed exact deployment
+and rollback gate after safe implementation testing and an all-stopped window.
 
 ## Verification and exclusions
 
