@@ -226,7 +226,7 @@ private func admitCreatingJournal(_ arguments: FormatterArguments) throws -> (Fi
     let bytes = try handle.readToEnd() ?? Data()
     guard bytes.count == initial.st_size,
           let journal = try? JSONDecoder().decode(CreatingJournal.self, from: bytes),
-          journal.version == 1, !journal.domain.isEmpty,
+          (journal.version == 1 || journal.version == 2), !journal.domain.isEmpty,
           journal.volumeID == volumeName,
           journal.filesystemUUID == arguments.filesystemUUID,
           journal.sizeBytes == arguments.size,

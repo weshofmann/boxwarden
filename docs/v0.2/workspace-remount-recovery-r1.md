@@ -80,25 +80,49 @@ binding, or uncertain backend state remains blocked for separate recovery.
 
 ## Native acceptance boundary
 
-The original new task-owned APFS image was created under approved host
-execution, but `hdiutil attach` exited 1 with `Permission denied`. The
-approval review had allowed the attach; it was the host command that failed.
-A later request to create a distinct disposable image was rejected by Codex
-automatic approval review because it considered that a repeat after the
-earlier denial. No second image was created by the agent. Native detach,
-remount, guest reattach, and independent post-remount content export remain
-unexecuted. A single operator-run new-image attach is pending; the
-deterministic changed-device tests and hosted CI do not replace that proof.
-Before that action, the public formatter's reserve check was reread:
+The first task-owned APFS image was created under approved host execution,
+but `hdiutil attach` exited 1 with `Permission denied`. The approval review
+had allowed the attach; the host command failed. Codex automatic review then
+rejected agent creation of another image as a repeat. The operator instead
+created and attached one new image from Terminal. Before that action, the
+public formatter's reserve check was reread:
 `workspaceformat.checkHeadroomValues` requires more than the greater of
 20 GiB and 10% of filesystem capacity free **inside the image**. The original
 256 MiB image and a proposed 512 MiB follow-up could not support public
 workspace creation even if attach succeeded. The 512 MiB request was
-superseded before execution. The corrected trial requests a 24 GiB logical
-sparse APFS image and measures actual mounted free space and outer allocation
-before creating a workspace; the expected synthetic writes are much smaller
-than its logical capacity. No such corrected image has been created or
-attached as of this record.
+superseded before execution. The corrected 24 GiB logical sparse image was
+independently observed as a distinct APFS volume with more than 20 GiB free;
+its initial outer allocation was about 7.4 MiB. An isolated domain state root
+was created on that image and the public enrollment command wrote a new
+configuration on a different filesystem.
+
+The old source-bound public CLI created a synthetic **v1** workspace and its
+original verified formatter receipt. One disposable guest imported three known
+project files, ran the known edit inside the guest, and produced four expected
+files. An initial stopped export matched their predetermined bytes and the
+guest's reported hashes independently. After public stop and an exact clean
+detach, the underlying mountpoint was empty. While the image was absent,
+`session create`, `session status`, and `workspace reconcile` all refused at
+configuration loading and created nothing there. The same image remounted with
+the same APFS UUID, raw-file inode, and transient device number. Public v1
+reconciliation, with the attached backend freshly observed stopped, wrote a
+separate binding; the historical receipt and attached workspace record stayed
+byte-for-byte unchanged by that operation. Public detach/reattach of the same
+workspace and start reached READY without formatting or importing again. Guest
+readback retained the edited hashes, and a **new** stopped export matched all
+four files from the initial export byte-for-byte. This real run did not observe
+device-number drift; the deterministic changed-number regression remains the
+evidence for that case. Physical disconnect and interrupted I/O remain untested.
+
+The first fresh **v2** workspace attempt failed before ext4 formatting: its
+signed formatter child exited 1, the journal ended failed at version 2, and
+the raw file lacked ext4 magic. A no-boot signed Swift preflight reproduced the
+specific cause: the formatter admitted only a version-1 creating journal while
+R1 writes version 2. The regression failed on the original source and passed
+after a narrow change admitting versions 1 and 2 while rejecting version 3.
+The failed test volume remains private evidence. A fresh v2 creation and full
+remount/export path are still pending; source review and preflight alone do not
+establish v2 native acceptance.
 
 An additional host-executed refusal trial used only two newly owned tiny
 synthetic fixtures and the clean source-bound R1 CLI. In the missing-mount

@@ -61,6 +61,19 @@ def main(kernel: Path, initrd: Path) -> None:
         admitted = subprocess.run(request, capture_output=True, text=True, timeout=30)
         if admitted.returncode != 0 or json.loads(admitted.stdout).get("validated") is not True:
             raise AssertionError(f"bound managed preflight rejected: {admitted.stderr}")
+        journal = root / "volumes" / (raw.stem + ".format.json")
+        document = json.loads(journal.read_text())
+        document["version"] = 2
+        journal.write_text(json.dumps(document))
+        admitted_v2 = subprocess.run(request, capture_output=True, text=True, timeout=30)
+        if admitted_v2.returncode != 0 or json.loads(admitted_v2.stdout).get("validated") is not True:
+            raise AssertionError(f"bound managed preflight rejected a creating v2 journal: {admitted_v2.stderr}")
+        document["version"] = 3
+        journal.write_text(json.dumps(document))
+        if subprocess.run(request, capture_output=True, timeout=30).returncode == 0:
+            raise AssertionError("bound managed preflight accepted an unknown journal version")
+        document["version"] = 1
+        journal.write_text(json.dumps(document))
         request[1] = "preflight-run"
         if subprocess.run(request, capture_output=True, timeout=30).returncode == 0:
             raise AssertionError("synthetic mode accepted a managed state root")
@@ -70,7 +83,6 @@ def main(kernel: Path, initrd: Path) -> None:
         if subprocess.run(command(binary, "preflight-managed", kernel, initrd, other, other_marker),
                           capture_output=True, timeout=30).returncode == 0:
             raise AssertionError("managed mode accepted another private root")
-        journal = root / "volumes" / (raw.stem + ".format.json")
         journal.write_text(journal.read_text().replace('"alpha"', '"other"'))
         if subprocess.run(command(binary, "preflight-managed", kernel, initrd, raw, marker),
                           capture_output=True, timeout=30).returncode == 0:
