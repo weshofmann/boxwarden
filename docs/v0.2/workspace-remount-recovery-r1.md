@@ -89,6 +89,16 @@ earlier denial. No second image was created by the agent. Native detach,
 remount, guest reattach, and independent post-remount content export remain
 unexecuted. A single operator-run new-image attach is pending; the
 deterministic changed-device tests and hosted CI do not replace that proof.
+Before that action, the public formatter's reserve check was reread:
+`workspaceformat.checkHeadroomValues` requires more than the greater of
+20 GiB and 10% of filesystem capacity free **inside the image**. The original
+256 MiB image and a proposed 512 MiB follow-up could not support public
+workspace creation even if attach succeeded. The 512 MiB request was
+superseded before execution. The corrected trial requests a 24 GiB logical
+sparse APFS image and measures actual mounted free space and outer allocation
+before creating a workspace; the expected synthetic writes are much smaller
+than its logical capacity. No such corrected image has been created or
+attached as of this record.
 
 An additional host-executed refusal trial used only two newly owned tiny
 synthetic fixtures and the clean source-bound R1 CLI. In the missing-mount
