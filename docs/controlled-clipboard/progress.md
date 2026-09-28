@@ -206,3 +206,18 @@ surface. The session remains running for Wes to inspect. No clipboard transfer,
 general Mac pasteboard access, provider sign-in, or workspace attachment was
 performed. This confirms the r5 VM startup correction reaches READY, while
 graphical display and button behavior still need direct user observation.
+
+Wes's direct screenshot confirms that the r5 guest area itself is black. This
+is a real GUI acceptance failure, despite public READY, an active GNOME Wayland
+login, and a connected virtual display with an active 1024×768 DRM primary
+framebuffer allocated by GNOME Shell. The compact buttons are visible but have
+not been exercised. A legacy fbdev buffer read as zero, but it is distinct
+from GNOME's current DRM framebuffer, so it does not establish guest pixel
+content. The guest screenshot API refused an unattended capture. Focused
+no-VM probes show that SwiftUI `onAppear` runs in Tart's command-shaped app
+loop while subsequently queued main-actor and main-queue work does not run.
+The pinned r5 source attaches its `VZVirtualMachineView` after VM start;
+Apple's GUI Linux sample attaches that view before starting. The precise
+display failure boundary is still under investigation. Keep the disposable
+probe running for inspection; do not present r5 as graphical acceptance or
+access the general Mac clipboard.
