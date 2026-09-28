@@ -95,9 +95,9 @@ The local viewer suite, exact pinned Tart release build, signed executable
 verification, and targeted Tart Swift tests passed. Staged r4 executable SHA-256:
 `46e809c95260d6a264b15662bd2117eddd13b0a0ca19dcdc6bae244cc7799fc2`;
 archive SHA-256: `4126636c097dffaefff70c0abec116623885554419c87825b4e9e458a9f987ff`.
-R4 has **not** been installed or host-admitted. The installed r3 identity remains
-active, and its real viewer buttons/menus and host clipboard transfer remain
-unverified against a READY guest.
+At that source checkpoint, r4 had not yet been installed. Its subsequent
+admission and viewer attempt are recorded below; the real viewer buttons/menus
+and host clipboard transfer remain unverified against a READY guest.
 
 The published source checkpoint recognizes the exact signed r4 version, executable
 digest and archive digest as one coherent host identity while retaining the
@@ -106,18 +106,46 @@ still admits only stock Tart. Focused host admission tests, including a simulate
 r4 doctor success and wrong-executable refusal, pass. This changes source policy
 only; installed config and root manifest still bind r3.
 
-The r4 executable is staged side by side, and a new exact-source CLI passes
+The r4 executable was staged side by side, and a new exact-source CLI passed
 read-only doctor against admitted r3. An attended r3-to-r4 admission/rollback
-helper has private exact backups and candidate bytes. Its read-only preflight,
+helper had private exact backups and candidate bytes. Its read-only preflight,
 synthetic atomic-write/refusal/rollback fixture, and independent security review
-passed with all ten VM objects stopped. The requested administrator action is
-pending; no r4 host mutation or real r4 viewer test has occurred. A bounded
+passed with all ten VM objects stopped. A bounded
 macOS log read for the failed r3 Tart process showed the raw VM disk opened and
 a Virtualization event-tap connection, but did not establish VM start completion
 or explain the missing serial prompt.
 
-Next: verify any attended r4 admission from its exact journal/config/manifest,
-then collect bounded VM start and serial evidence during a disposable GUI run.
-Do not use demo D or a provider account for this test. The synthetic Mac
-clipboard window still needs explicit agreement before any general pasteboard
-read or write. Preserve the failed disposable disk and its observations.
+Wes then ran the reviewed r3-to-r4 admission helper in Terminal. Its reported
+synced admitted phase was checked against the exact installed config and root
+manifest digests. The installed r4 executable, mount UUIDs and host doctor also
+match the reviewed plan; doctor is healthy. This is actual host admission, not
+guest or clipboard acceptance. Hosted deterministic CI passed for the compact
+viewer documentation checkpoint `7995b72` (run 36368615488).
+
+The domain had no current-golden pointer. We selected the existing qualified,
+stopped `boxwarden-alpha-base-af8cf2494da4e5f578f651fbd12bbd87` via public
+`golden register`, then used public `session create` for one fresh disposable
+`clipboardprobe20260928r2` (session ID
+`b637727b-4126-49aa-9a42-fc96afb9f458`), with no workspace attached.
+This changed the domain current-golden pointer from absent to that exact base;
+it did not rebuild a base or modify demo D.
+
+The public r4 `session start` opened its viewer, but the guest display stayed
+black and startup timed out awaiting the `hvc0` autologin prompt. It never
+became READY. Public stop initially timed out; bounded exact-target Tart stop
+then succeeded, followed by public stop reconciliation. Full-host Tart
+inventory shows all objects stopped and doctor is healthy. No clipboard
+transfer or general Mac pasteboard access occurred. Preserve both failed
+viewer probes and their observations pending attribution.
+
+During the second failure, the exact Tart process sample showed its AppKit
+event loop idle, three threads, and no active Softnet child. Its raw disk and
+NVRAM timestamps did not advance. These observations point to startup not
+progressing, but do not establish whether the VM start task was scheduled,
+Softnet exited early, or Virtualization failed before boot. Simple standalone
+Swift/AppKit and SwiftUI task-before-event-loop probes did run successfully,
+so event-loop scheduling alone is not an established explanation. The next
+step is to attribute this startup boundary with bounded diagnostics before
+another VM run. Do not use demo D or a provider account for that test. The
+synthetic Mac clipboard window still needs explicit agreement before any
+general pasteboard read or write.
