@@ -40,6 +40,56 @@ is forcibly removed in that interval; R1 does not claim atomic mount pinning
 through every command. The clean-remount path and missing/wrong mount at
 entry fail before those mutations.
 
+## Existing-installation upgrade sequence
+
+Use a clean R1 CLI side by side with the installed binary. Obtain the expected
+backing APFS volume UUID from a trusted inventory made independently of the
+current mount; verify that the expected filesystem is mounted at the intended
+path. Select the old config only as the **source** of enrollment, and choose a
+new config path on a different filesystem that does not exist yet:
+
+```sh
+"$BW" --config "$OLD_CONFIG" --domain "$DOMAIN" workspace storage enroll \
+  --expected-apfs-volume-uuid "$EXPECTED_APFS_UUID" \
+  --mount-point "$MOUNT_POINT" --output-config "$NEW_CONFIG"
+```
+
+Inspect the reported new config, then select it explicitly with
+`--config "$NEW_CONFIG"` for future workspace and session operations. Enrollment
+does not overwrite the old config or infer authority from whichever volume is
+present. A missing or wrong mount prevents enrolled operations before their
+command-specific locks or factories. `session status` also checks enrolled
+storage because status can inspect an action plan through a lock. The old
+unenrolled config retains its prior status behavior; `session stop` remains
+available for containment even when enrolled backing storage is unavailable.
+
+Fresh version-2 formatter receipts need no reconciliation after a clean
+remount of the same APFS volume and file. For a verified version-1 receipt
+whose historical device number has drifted, first stop the exact owning
+session and establish that its backend is freshly observed stopped. Then run:
+
+```sh
+"$BW" --config "$NEW_CONFIG" --domain "$DOMAIN" workspace reconcile "$VOLUME_UUID"
+```
+
+This requires an available, idle workspace with no pending operation; it
+checks the original receipt and record and writes only a private, write-once
+binding. Do not edit the historical receipt, raw disk, or workspace record.
+An absent expected UUID, changed file ID, substituted disk, conflicting
+binding, or uncertain backend state remains blocked for separate recovery.
+
+## Native acceptance boundary
+
+The original new task-owned APFS image was created under approved host
+execution, but `hdiutil attach` exited 1 with `Permission denied`. The
+approval review had allowed the attach; it was the host command that failed.
+A later request to create a distinct disposable image was rejected by Codex
+automatic approval review because it considered that a repeat after the
+earlier denial. No second image was created by the agent. Native detach,
+remount, guest reattach, and independent post-remount content export remain
+unexecuted. A single operator-run new-image attach is pending; the
+deterministic changed-device tests and hosted CI do not replace that proof.
+
 ## Diagnosis and identity model
 
 A verified formatter journal records `(st_dev, st_ino)` when the raw file is
