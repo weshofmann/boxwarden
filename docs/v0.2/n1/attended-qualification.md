@@ -37,6 +37,21 @@ Before requesting execution, the package must contain:
   and the isolated state root must be on its verified mounted APFS volume. The
   networking trial does not attach a workspace. Reuse a deliberately selected
   existing stopped generic base; do not rebuild Ubuntu for N1.
+- Before selecting that base for a clipboard compatibility row, inspect its
+  existing build/qualification provenance rather than inferring capabilities
+  from a stopped name or `golden register`. The source revision that actually
+  built the base must include the guest bootstrapper's fixed `clipboard` mode,
+  the `clipboard.py` adapter, and its autoinstall placement. After the clone is
+  READY, use a separate read-only SSH command with that generation's certificate,
+  host-key pin, and strict management transport options to check that
+  `/usr/local/libexec/boxwarden-guest-clipboard.py` is a regular root-owned
+  executable before any clipboard write. The fixed Boxwarden management helper
+  has no file-inspection operation. If provenance or the installed adapter is
+  absent or unverifiable,
+  mark clipboard **NOT EXERCISED: capability unverified or incompatible**.
+  Do not issue a write and mistake an ambiguous transport result for
+  a network-policy regression. This check does not require a new Ubuntu build
+  merely for the N1 gateway test.
 - Current free-space/memory capacity and resource inventory. Native APFS and
   neighboring APFS volumes share a container budget. Keep existing guards.
 
@@ -87,6 +102,10 @@ Use public lifecycle commands for start, status, stop and restart of the owned
 guest. Repeat the host-listener controls after restart. Exercise controlled
 clipboard with synthetic input and explicit output file only, never `pbpaste`
 or the real system clipboard. Preserve exact management pin/certificate checks.
+An unknown clipboard write outcome must not be retried or counted as a pass;
+retain the exact base provenance and guest-capability observation when
+attributing it. Clipboard transfer itself is separate from N1 packet-policy
+enforcement.
 
 Private/link-local and two-guest denial use only explicitly owned fixture
 endpoints. Guest-root route/firewall changes in the disposable guest must not
