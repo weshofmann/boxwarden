@@ -183,3 +183,13 @@ refused without creating an intent record. The helper has not been run with
 administrator privilege. Hosted deterministic CI for `1b72794` passed the
 full test, race, vet and build matrix (run 36371651999). The remaining host
 gate is the attended r4-to-r5 admission; real r5 boot remains unverified.
+
+Wes ran the exact attended r5 admission helper, which reported its synced
+admitted phase and healthy doctor with all VMs stopped. Independent read-only
+host checks found the installed root manifest and domain config byte-identical
+to the reviewed r5 candidates, the signed r5 executable at its pinned digest,
+both native APFS mount UUIDs unchanged, healthy doctor, and every Tart object
+stopped. The root-owned private phase file exists; its contents were not read
+under the unprivileged operator account. The installed r5 identity is admitted;
+a real r5 guest launch and clipboard operation remain pending. Next: one fresh
+workspace-free public disposable viewer probe from the existing qualified base.
