@@ -383,7 +383,12 @@ sandboxed Tart/status reads falsely reported this running VM stopped. The
 documentation checkpoint `8700915` passed hosted deterministic CI
 ([run 36383934034](https://github.com/weshofmann/boxwarden/actions/runs/36383934034)).
 
-The real menu has not yet been exercised for Quit, cancellation, or a restarted
-target. Automated tests cover those state transitions and the existing limits,
-including empty text and 1 MiB. Keep the current sandbox running for Wes's
-trial; a final Quit/VM-preservation observation is still pending.
+Wes then chose **Quit Clipboard Utility** and observed it exit. A full-host
+process check found no menu app executable. The public CLI reported the same
+session intended-running, observed-running, consistent, and READY, and
+`clipboard targets` still reported its exact live generation as available.
+Authoritative Tart inventory also showed its backend running. These were
+read-only checks: no clipboard bytes were read, no VM was stopped, and no
+workspace was changed. Cancellation, restarted-target selection and limit
+cases have automated coverage but were not manually exercised in the menu.
+The running synthetic sandbox is preserved for Wes.

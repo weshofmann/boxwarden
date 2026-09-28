@@ -37,8 +37,11 @@ ambiguous commit acknowledgement and focus changes before/after click.
   launch args and custom toolchain support without changing Softnet policy.
 - [x] Run focused tests/race, guest/Swift checks, applicable full suite and CI;
   independently review cumulative clipboard boundary and fix confirmed findings.
-- [ ] Complete attended synthetic GUI acceptance after stock display is usable;
-  document launch, review outcomes and truthful remaining limitations.
+- [x] Complete attended synthetic GUI acceptance after stock display is usable:
+  Wes observed menu selection and both transfer directions, then Quit; the
+  exact sandbox remained READY and available through the CLI. Cancellation,
+  stale-target and boundary cases retain automated rather than manual coverage.
+  Document launch, review outcomes and truthful remaining limitations.
 
 Every verified meaningful increment is committed/pushed promptly; new Draft PR
 against main. Do not alter merged PR12 or merge the feature. Progress stays short.
