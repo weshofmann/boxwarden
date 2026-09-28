@@ -11,7 +11,14 @@ open '.build/Boxwarden Clipboard.app'
 The build stages a signed app containing the current `boxwarden` CLI at
 `.build/Boxwarden Clipboard.app`. It uses the normal configuration path,
 `~/Library/Application Support/boxwarden/config.json`. For another fixed
-configuration file, launch the app executable with `--config /absolute/path`.
+configuration file, quit any running Clipboard Utility instance, then launch:
+
+```sh
+open -a '.build/Boxwarden Clipboard.app' --args --config '/absolute/path/config.json'
+```
+
+The app reads that path at launch; reopening an already running instance does
+not change its configuration.
 Rebuild the app after changing the CLI or menu sources. Building and opening the
 utility do not start or stop a sandbox.
 The VM backend remains on admitted stock Tart and disables Tart's automatic

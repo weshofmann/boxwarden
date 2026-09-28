@@ -325,3 +325,32 @@ attach to the menu-only app. Its status item, target selection, and real menu
 transfers remain unverified. No general Mac pasteboard content was read or
 changed. The session remains running for the synthetic menu trial; no
 workspace is attached and no provider sign-in occurred.
+
+After actual stock host return, source checkpoint `544a691` removes the
+custom Tart viewer patch/build tree, six launch metadata arguments, and
+custom r3-r6 Tart admission tuples. It retains stock `--no-clipboard`, the
+Softnet policy, managed-disk behavior, the bounded transfer service, four
+public CLI commands, and the guest adapter. A new manifest regression rejects
+the retired r5 custom identity. The macOS CI job now runs the native menu
+suite. Independent review found no Important/Critical source issue. The Swift
+menu/AppKit checks, 59 guest helper tests, and affected Go admission/backend
+checks passed. The broad local Go run encountered the host free-space reserve
+at about 20 GiB available versus 24.5 GiB required; private pasteboard tests
+also failed under sandbox access. Hosted deterministic CI for `544a691`
+passed the complete configured matrix
+([run 36382961572](https://github.com/weshofmann/boxwarden/actions/runs/36382961572)).
+The targeted `internal/clipboardhost` race suite passed with full host access
+using private named pasteboards; the Mac general pasteboard was untouched.
+
+A clean checkout of `544a691` produced a signed menu app with a bundled CLI
+reporting exact revision and `vcs.modified=false`; its durable private copy
+passed byte-digest comparison, strict signature verification, and plist lint.
+The app executable SHA-256 is
+`320833c0044ad0b8d2da0ef04da3d3ef517ca4c5d1e75a999a954dd19f127cca`;
+the bundled CLI SHA-256 is
+`91e33a9fe5c88647d28271a37ec6cbaa85a13bfafb2482cfec05bc72770e7000`.
+The first build from a worktree containing untracked files reported
+`vcs.modified=true` and is not the delivery artifact. The temporary clean
+checkout was removed after its verified durable copy. The clean CLI's public
+status still reports the existing synthetic session `ready`; real menu
+selection and transfers remain pending.
