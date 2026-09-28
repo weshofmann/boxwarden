@@ -31,9 +31,12 @@ Before requesting execution, the package must contain:
   root-owned digest path. Confirm current admitted stock doctor is healthy and
   record its exact identity without changing it.
 - A new private test configuration/state root, synthetic inputs, explicit
-  domain initialization, and current R1 workspace enrollment if a workspace is
-  needed. No workspace is needed merely to test networking. Reuse a deliberately
-  selected existing stopped generic base; do not rebuild Ubuntu for N1.
+  domain initialization, and current R1 workspace storage enrollment. Public
+  session start and the detached launcher check enrollment even when no workspace
+  is attached: the private config must be outside the enrolled backing filesystem,
+  and the isolated state root must be on its verified mounted APFS volume. The
+  networking trial does not attach a workspace. Reuse a deliberately selected
+  existing stopped generic base; do not rebuild Ubuntu for N1.
 - Current free-space/memory capacity and resource inventory. Native APFS and
   neighboring APFS volumes share a container budget. Keep existing guards.
 
