@@ -168,3 +168,42 @@ func TestDoctorAdmitsOnlyExactR4ManifestAndExecutable(t *testing.T) {
 		t.Fatal("r4 manifest accepted with r3 executable")
 	}
 }
+
+func TestControlledClipboardStageR5ExactIdentity(t *testing.T) {
+	identity := ToolIdentity{
+		Path:             "/Library/Boxwarden/toolchains/tart/clipboard-r5/tart",
+		Version:          "2.32.1-boxwarden-clipboard-r5",
+		ExecutableSHA256: "e0047ddb7ffff0967591a1bd03374980f1775bdb4ab44ffd5b9bfb4700d7b97b",
+		ArchiveSHA256:    "3a58485df6a10958e62da1fd2692c47cf54ddec0448338695b0daf327d7617bc",
+	}
+	if !SupportsControlledClipboard(identity) || !qualifiedTart(identity) {
+		t.Fatal("exact signed stage-r5 identity refused")
+	}
+	identity.ArchiveSHA256 = ControlledClipboardTartR4ArchiveSHA256
+	if SupportsControlledClipboard(identity) || qualifiedTart(identity) {
+		t.Fatal("mixed r4/r5 identity accepted")
+	}
+}
+
+func TestDoctorAdmitsOnlyExactR5ManifestAndExecutable(t *testing.T) {
+	inspector, request := healthyDoctorFixture(t)
+	path, manifest := setControlledManifest(t, inspector, request)
+	manifest.Tart.Version = "2.32.1-boxwarden-clipboard-r5"
+	manifest.Tart.ExecutableSHA256 = "e0047ddb7ffff0967591a1bd03374980f1775bdb4ab44ffd5b9bfb4700d7b97b"
+	manifest.Tart.ArchiveSHA256 = "3a58485df6a10958e62da1fd2692c47cf54ddec0448338695b0daf327d7617bc"
+	fact := inspector.paths[path]
+	fact.Data, _ = json.Marshal(manifest)
+	inspector.paths[path] = fact
+	tool := inspector.paths[request.TartPath]
+	tool.SHA256 = manifest.Tart.ExecutableSHA256
+	inspector.paths[request.TartPath] = tool
+	inspector.outputs[commandKey(request.TartPath, "--version")] = manifest.Tart.Version
+	if report := (SystemDoctor{inspector: inspector}).Doctor(t.Context(), request); report.Status != Healthy {
+		t.Fatalf("exact r5 manifest and runtime refused: %+v", report)
+	}
+	tool.SHA256 = ControlledClipboardTartR4ExecutableSHA256
+	inspector.paths[request.TartPath] = tool
+	if report := (SystemDoctor{inspector: inspector}).Doctor(t.Context(), request); report.Status == Healthy {
+		t.Fatal("r5 manifest accepted with r4 executable")
+	}
+}

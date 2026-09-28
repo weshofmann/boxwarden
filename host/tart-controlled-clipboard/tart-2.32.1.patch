@@ -1,6 +1,10 @@
 diff --git a/Sources/tart/Commands/Run.swift b/Sources/tart/Commands/Run.swift
 --- a/Sources/tart/Commands/Run.swift
 +++ b/Sources/tart/Commands/Run.swift
+@@ -7,2 +7,3 @@
+ import OpenTelemetryApi
++import Semaphore
+ import System
 @@ -95,6 +95,24 @@
      discussion: "Clipboard sharing requires spice-vdagent package on Linux and https://github.com/cirruslabs/tart-guest-agent on macOS."))
    var noClipboard: Bool = false
@@ -55,6 +59,21 @@ diff --git a/Sources/tart/Commands/Run.swift b/Sources/tart/Commands/Run.swift
        sync: VZDiskImageSynchronizationMode(diskOptions.syncModeRaw),
        caching: VZDiskImageCachingMode(diskOptions.cachingModeRaw),
        noTrackpad: noTrackpad,
+@@ -459,3 +490,7 @@
+-    let task = Task {
++    // Run.run() is @MainActor and runUI() enters a synchronous AppKit loop.
++    // Wait for the VM start task to finish its main-actor startup work before
++    // entering that loop; otherwise the task can remain queued indefinitely.
++    let startup = AsyncSemaphore(value: 0)
++    let task = Task {
+       do {
+         var resume = false
+@@ -505,2 +540,4 @@
+-        if let vncImpl = vncImpl {
++        startup.signal()
++
++        if let vncImpl = vncImpl {
+           let vncURL = try await vncImpl.waitForURL(netBridged: !netBridged.isEmpty)
 @@ -525,6 +555,7 @@
            try vncImpl.stop()
          }
@@ -109,6 +128,12 @@ diff --git a/Sources/tart/Commands/Run.swift b/Sources/tart/Commands/Run.swift
            OTel.shared.flush()
            Foundation.exit(1)
          }
+@@ -596,2 +638,4 @@
+-    let useVNCWithoutGraphics = (vnc || vncExperimental) && !graphics
++    try await startup.waitUnlessCancelled()
++
++    let useVNCWithoutGraphics = (vnc || vncExperimental) && !graphics
+     if noGraphics || useVNCWithoutGraphics {
 @@ -752,6 +787,7 @@
    }
  
@@ -181,7 +206,7 @@ diff --git a/Sources/tart/CI/CI.swift b/Sources/tart/CI/CI.swift
 @@ -1,5 +1,5 @@
  struct CI {
 -  private static let rawVersion = "${CIRRUS_TAG}"
-+  private static let rawVersion = "2.32.1-boxwarden-clipboard-r4"
++  private static let rawVersion = "2.32.1-boxwarden-clipboard-r5"
  
    static var version: String {
      rawVersion.expanded() ? rawVersion : "SNAPSHOT"

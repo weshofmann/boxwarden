@@ -149,3 +149,27 @@ step is to attribute this startup boundary with bounded diagnostics before
 another VM run. Do not use demo D or a provider account for that test. The
 synthetic Mac clipboard window still needs explicit agreement before any
 general pasteboard read or write.
+
+Startup attribution after that checkpoint found a scheduling race in pinned
+Tart: `Run.run()` is main-actor isolated, creates a task to start Softnet and
+the VM, then enters the synchronous SwiftUI application loop. An exact-shaped
+no-VM `AsyncParsableCommand`/SwiftUI probe reproduced the queued task never
+running; an explicit awaited startup handshake made it run before the UI
+loop. This explains the idle Tart sample and missing Softnet child more
+directly than a guest or serial failure. It remains a source-level diagnosis
+until a new viewer starts a VM successfully.
+
+The r5 pinned Tart patch now waits for the VM start task's success signal
+before entering the UI loop. It does not weaken `--no-clipboard`, change the
+guest definition, or modify installed r4. The patch applied to a clean pinned
+source tree, and its generated `Run.swift` matched the compiled tree byte for
+byte. Focused viewer checks, the exact Tart release build and two targeted
+upstream Tart tests passed locally. A signed r5 candidate was packaged with
+exact executable SHA-256
+`e0047ddb7ffff0967591a1bd03374980f1775bdb4ab44ffd5b9bfb4700d7b97b`
+and final archive SHA-256
+`3a58485df6a10958e62da1fd2692c47cf54ddec0448338695b0daf327d7617bc`.
+Host admission policy now recognizes only that coherent r5 tuple in addition
+to prior pinned variants; r5 host installation, doctor and real GUI acceptance
+have not occurred. Next: finish exact candidate review and attended admission,
+then use a fresh disposable public session to verify boot and compact controls.
