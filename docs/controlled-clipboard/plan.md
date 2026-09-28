@@ -2,8 +2,8 @@
 
 **Goal:** Deliver explicit clipboard transfers through one shared implementation.
 **Architecture:** Typed exact-generation supervisor/pinned-SSH operations plus a
-small desktop selection adapter; Tart invokes the same host CLI.
-**Tech stack:** Go, GTK3/Python desktop helper, Darwin AppKit, pinned Tart Swift.
+small desktop selection adapter; a standalone menu-bar app invokes the same host CLI.
+**Tech stack:** Go, GTK3/Python desktop helper, Darwin AppKit and Swift.
 **Spec:** [design.md](design.md). User delegates routine design/plan review decisions.
 
 ## Constraints and review focus
@@ -15,26 +15,30 @@ ambiguous commit acknowledgement and focus changes before/after click.
 
 ## Increments
 
-- [ ] Independently review design; prove synthetic desktop copy and later paste
+- [x] Independently review design; prove synthetic desktop copy and later paste
   over pinned SSH on one disposable non-logged-in guest. Record exact packages,
   clipboard ownership and transport results. No alpha rebuild campaign.
 - [x] Add internal/clipboardx bounded text/frame and transfer service tests first;
   implement shared validation, immutable target and commit outcome contracts.
-- [ ] Add fixed guest clipboard helper and SSH/supervisor/session runtime capability.
+- [x] Add fixed guest clipboard helper and SSH/supervisor/session runtime capability.
   Test protocol framing, sanitized errors, generation/deadline/lock behavior and
   guest owner lifetime. Keep recipe/action channels untouched.
-- [ ] Add clipboard push/pull/copy/paste public parsing and adapters; Darwin AppKit
+- [x] Add clipboard push/pull/copy/paste public parsing and adapters; Darwin AppKit
   isolated behind injected Pasteboard. Tests prove stdin/stdout/TTY --raw, exact
   output and preservation on failure. No real host pasteboard automated tests.
-- [ ] Track narrow Tart patch/build/license identity and window/menu invocation;
-  test immutable target, availability, concurrent clicks, cancellation/status and
-  menu/button equivalence. Add admitted launch metadata without broad backend API.
-- [ ] Run focused tests/race and guest/Swift checks; at integration checkpoints
-  run existing applicable suite and hosted CI. Independent cumulative security/
-  patched executable review; fix confirmed Important/Critical findings.
-- [ ] Stage exact CLI/guest/Tart identities; create one deployment/rollback request
-  only if needed. Complete safe GUI synthetic acceptance first where possible.
-  Finish usage, review outcomes and truthful remaining attended tests.
+- [x] Add structured one-domain target discovery with fresh readiness evidence;
+  test exact tuple, stale snapshot, and unavailable targets. The menu enumerates
+  configured domains and issues one explicit-domain query per domain.
+- [x] Build a standalone menu-bar `.app` with the current CLI bundled; test
+  immutable click capture, all configured domains, availability, stale refresh,
+  subprocess argv/environment, cancellation/status and no payload output.
+- [ ] Return host admission to the previously qualified stock Tart through the
+  reviewed attended rollback; then remove viewer patch sources, patch-only
+  launch args and custom toolchain support without changing Softnet policy.
+- [ ] Run focused tests/race, guest/Swift checks, applicable full suite and CI;
+  independently review cumulative clipboard boundary and fix confirmed findings.
+- [ ] Complete attended synthetic GUI acceptance after stock display is usable;
+  document launch, review outcomes and truthful remaining limitations.
 
 Every verified meaningful increment is committed/pushed promptly; new Draft PR
 against main. Do not alter merged PR12 or merge the feature. Progress stays short.

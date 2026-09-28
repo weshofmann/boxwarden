@@ -1,7 +1,7 @@
 # Controlled clipboard design
 
 Scope: explicit host-authorized UTF-8 plain-text transfers, at most 1 MiB,
-through window buttons, active-window menu commands and the four public CLI
+through a standalone macOS menu-bar utility and the four public CLI
 commands. No automatic SPICE bridge, paste/keyboard injection, history, payload
 logging/hashing, persistent action journal or host credential forwarding.
 
@@ -15,9 +15,9 @@ then sends only that binding. A ready-to-receive supervisor handshake must
 succeed before source capture; nonblocking frontend admission prevents a
 connection backlog from retaining clipboard payloads. No queued delivery or generation retry. The runtime
 owner rechecks the retained connection and binding before invoking the fixed
-clipboard helper. A window gets immutable launch-time target metadata and the
-exact Boxwarden command/config locator; focus only selects which window begins a
-new menu operation. The viewer never handles clipboard bytes itself.
+clipboard helper. The menu captures the selected target's exact tuple at click
+time and uses the bundled CLI and fixed configuration locator. A selection
+change does not redirect a transfer. The utility never handles clipboard bytes.
 
 Control/SSH exchanges use bounded metadata plus a separately length-framed raw
 payload. Existing non-clipboard control limits remain unchanged. Clipboard-specific exec
@@ -74,26 +74,35 @@ host commit point). AppKit does not supply a proven rollback transaction: a
 write failure after mutation is outcome unknown, not destination-preserved.
 No payload preview.
 
-## Tart patch and admission
+## Standalone macOS menu
 
-Patch only pinned Tart 2.32.1 commit 8aa377b71ebfd90b2df9803d3e20033f58d6800c.
-Retain its Fair Source 0.9 notices and review distribution constraints. No newer
-source is borrowed. Tart exec already transmits EOF but has an upstream EOF
-readability-handler issue; it offers no advantage over existing pinned SSH.
+The app is a menu-bar accessory with a sandbox submenu, `HOST -> GUEST` and
+`GUEST -> HOST`, the explicit no-automatic-transfer reminder, a short status,
+and Quit. It has no VM lifecycle controls, shortcuts, history, or login item.
+The build stages a directly launchable `.app` with the current CLI bundled.
+Quit does not operate on a VM; the CLI works independently of the app.
 
-The always-visible host strip uses one compact row: `Clipboard copy:`, the
-sandbox domain/session, `GUEST -> HOST` and `HOST -> GUEST` buttons, and a short
-status. The full target identity and “Nothing transfers automatically” explanation
-are tooltips. Application menu items are Copy Host Clipboard to Guest and Copy
-Guest Clipboard to Host; unavailable targets are disabled.
-No key equivalents replace normal guest shortcuts. Both call the same CLI with
-expected immutable target metadata and show only success/failure/unknown status.
+The app reads configured domain names from the explicit Boxwarden config JSON.
+For each name, it invokes `--domain <name> clipboard targets` using a direct
+argument vector and a closed environment. The read-only command returns
+validated session metadata and marks a target available only after backend
+observation and fresh exact-generation supervisor readiness. No clipboard data
+is read during discovery or selection. Metadata is a UI hint, not transfer
+authority: the existing service re-admits exact READY under its locks before
+source capture. Unsupported, stopped, drifted, stale, and unresolved targets
+cannot enable transfer buttons. Discovery and transfers run off the menu thread.
 
-Track upstream source revision/archive hash, patch hash, reproducible build
-instructions, signing details and executable digest as a distinct staged identity.
-Keep the stock Tart executable intact and never bypass digest validation. Any
-root manifest/config admission requires a separate reviewed exact deployment
-and rollback gate after safe implementation testing and an all-stopped window.
+The menu starts with no selected sandbox and requires an explicit choice. It
+preserves a choice across refresh only when the domain, session name, session
+UUID, backend identity, and generation still match; replacement or restart
+clears it. One domain's discovery failure leaves successfully discovered
+domains visible and reports a partial-status warning.
+The menu always identifies the selected domain/session. A click captures the
+session UUID, backend kind/object, and generation and invokes the existing
+CLI push or pull with expected-binding flags. A changed selection or
+replacement generation cannot retarget that invocation. A failed or cancelled
+transfer reports an unknown outcome rather than a rollback guarantee. The app
+discards child output and diagnostics, never logs or previews payloads.
 
 ## Verification and exclusions
 

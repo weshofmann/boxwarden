@@ -270,3 +270,27 @@ stock admission, remove patch-only launch arguments and toolchain policy in
 one verified source checkpoint, then verify stock desktop and both menu
 directions with a synthetic test window. The GUI acceptance and actual stock
 host return are pending. No general Mac clipboard content has been read.
+
+The standalone menu source checkpoint adds a signed, directly launchable
+`Boxwarden Clipboard.app` build and a read-only, explicit-domain `clipboard
+targets` CLI command. Target discovery uses current backend and exact live
+supervisor readiness; a click passes the selected domain, session ID, backend
+object and generation to the existing public push/pull implementation. No
+target is selected on launch, and a replaced session or changed generation
+requires a new selection. A failed configured-domain query leaves other
+freshly verified domains available and reports partial status. AppKit menu
+validation preserves disabled transfer actions. The utility does not read
+clipboard contents during launch, discovery, or selection; its CLI children
+have bounded deadlines and are reaped on Quit. A failed or cancelled transfer
+reports an unknown destination outcome. The build script now fails if it
+cannot replace an old app bundle instead of silently nesting a new one.
+
+Verification for this source checkpoint: Swift model, synthetic CLI-child,
+and real AppKit menu-validation tests passed; Swift typecheck, app build,
+strict ad-hoc signature check, shell syntax, plist lint, and targeted Go race
+tests for discovery/session/clipboardx/CLI passed. The broader local Go app
+suite encountered the host filesystem's existing free-space reserve check
+(about 22.0 GB available versus a 24.5 GB reserve), before any relevant
+clipboard failure. Hosted CI and visible-menu/real-guest acceptance remain
+pending. The stock-return helper has not run; r5 remains installed and all
+VM starts remain on hold until the attended return is verified.

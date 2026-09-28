@@ -153,7 +153,7 @@ func Run(ctx context.Context, args []string, options Options) error {
 	if command.requiresBackend() {
 		if command.kind == commandGoldenRegister {
 			err = backend.ValidateObjectID(command.name)
-		} else if command.kind != commandWorkspaceExport && command.kind != commandWorkspaceExportResume && command.kind != commandWorkspaceImportVerify {
+		} else if command.kind != commandClipboardTargets && command.kind != commandWorkspaceExport && command.kind != commandWorkspaceExportResume && command.kind != commandWorkspaceImportVerify {
 			_, err = session.ParseName(command.name)
 		}
 		if err != nil {
@@ -187,6 +187,8 @@ func Run(ctx context.Context, args []string, options Options) error {
 		}
 		_, err = transfer.Execute(ctx, command.name, command.clipboard, options.Input, out, options.Pasteboard)
 		return err
+	case commandClipboardTargets:
+		return writeClipboardTargets(ctx, options.Output, loaded, selectedDomain, options.Observer, options.StatusSnapshotFactory)
 	case commandAlphaActionList:
 		if selectedDomain.ID != "alpha" {
 			return errors.New("v0.2 session actions are limited to the explicit alpha domain")
@@ -550,6 +552,7 @@ const (
 	commandWorkspaceImportVerify
 	commandAlphaAction
 	commandAlphaActionList
+	commandClipboardTargets
 )
 
 type parsedCommand struct {
@@ -579,7 +582,7 @@ func (c parsedCommand) requiresDomain() bool {
 }
 
 func (c parsedCommand) requiresBackend() bool {
-	return c.kind == commandGoldenRegister || c.kind == commandSessionCreate || c.kind == commandSessionStatus || c.kind == commandWorkspaceAttach || c.kind == commandWorkspaceDetach || c.kind == commandWorkspaceExport || c.kind == commandWorkspaceExportResume || c.kind == commandWorkspaceImportVerify
+	return c.kind == commandGoldenRegister || c.kind == commandSessionCreate || c.kind == commandSessionStatus || c.kind == commandClipboardTargets || c.kind == commandWorkspaceAttach || c.kind == commandWorkspaceDetach || c.kind == commandWorkspaceExport || c.kind == commandWorkspaceExportResume || c.kind == commandWorkspaceImportVerify
 }
 
 // normalizeClipboardFlags accepts the viewer's SESSION-before-flags argv and
@@ -675,6 +678,10 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 	if len(remaining) >= 2 && remaining[0] == "clipboard" {
 		if !explicitDomain {
 			return parsedCommand{}, errors.New("clipboard requires explicit --domain")
+		}
+		if len(remaining) == 2 && remaining[1] == "targets" {
+			base.kind = commandClipboardTargets
+			return base, nil
 		}
 		clipboardSet := flag.NewFlagSet("clipboard", flag.ContinueOnError)
 		clipboardSet.SetOutput(io.Discard)
