@@ -16,9 +16,12 @@ const (
 	TartExecutableSHA256 = "05b65d5c14e8b41e8e44b6d9fd1278de4bedbc8b735d9b99f3c748f76f75862d"
 	TartArchiveSHA256    = "8554ab4f7fc12afe52f9b7e3093a935673cbac737a83973d2db7a0683c814529"
 
-	ControlledClipboardTartVersion          = "2.32.1-boxwarden-clipboard-r3"
-	ControlledClipboardTartExecutableSHA256 = "1573e4be9a10087f8e5dce5dcc5718cfef4d5d0274c60d5e209ba1f13c49f7a6"
-	ControlledClipboardTartArchiveSHA256    = "b5f487c3b092b48d23819d2828c45b96f7c84816d51b5ca9dd68f3de64fa3a64"
+	ControlledClipboardTartVersion            = "2.32.1-boxwarden-clipboard-r3"
+	ControlledClipboardTartExecutableSHA256   = "1573e4be9a10087f8e5dce5dcc5718cfef4d5d0274c60d5e209ba1f13c49f7a6"
+	ControlledClipboardTartArchiveSHA256      = "b5f487c3b092b48d23819d2828c45b96f7c84816d51b5ca9dd68f3de64fa3a64"
+	ControlledClipboardTartR4Version          = "2.32.1-boxwarden-clipboard-r4"
+	ControlledClipboardTartR4ExecutableSHA256 = "46e809c95260d6a264b15662bd2117eddd13b0a0ca19dcdc6bae244cc7799fc2"
+	ControlledClipboardTartR4ArchiveSHA256    = "4126636c097dffaefff70c0abec116623885554419c87825b4e9e458a9f987ff"
 
 	SoftnetVersion          = "0.19.0"
 	SoftnetExecutableSHA256 = "ab333619fc8bd7277837545e49a771baa994c01c3e8c14904ae4cc4c1f37269e"
@@ -53,7 +56,9 @@ func qualifiedSoftnet(identity ToolIdentity) bool {
 // SupportsControlledClipboard recognizes only the separately staged exact variant.
 // It does not install the variant or alter root-owned host admission.
 func SupportsControlledClipboard(identity ToolIdentity) bool {
-	return canonicalAbsolute(identity.Path) && identity.Version == ControlledClipboardTartVersion && identity.ExecutableSHA256 == ControlledClipboardTartExecutableSHA256 && identity.ArchiveSHA256 == ControlledClipboardTartArchiveSHA256
+	return canonicalAbsolute(identity.Path) &&
+		((identity.Version == ControlledClipboardTartVersion && identity.ExecutableSHA256 == ControlledClipboardTartExecutableSHA256 && identity.ArchiveSHA256 == ControlledClipboardTartArchiveSHA256) ||
+			(identity.Version == ControlledClipboardTartR4Version && identity.ExecutableSHA256 == ControlledClipboardTartR4ExecutableSHA256 && identity.ArchiveSHA256 == ControlledClipboardTartR4ArchiveSHA256))
 }
 
 func qualifiedTart(identity ToolIdentity) bool {

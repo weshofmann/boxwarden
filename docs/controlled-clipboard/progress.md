@@ -99,6 +99,13 @@ R4 has **not** been installed or host-admitted. The installed r3 identity remain
 active, and its real viewer buttons/menus and host clipboard transfer remain
 unverified against a READY guest.
 
+The next source checkpoint recognizes the exact signed r4 version, executable
+digest and archive digest as one coherent host identity while retaining the
+admitted r3 tuple. A mismatched r3/r4 tuple is rejected, and ordinary host init
+still admits only stock Tart. Focused host admission tests, including a simulated
+r4 doctor success and wrong-executable refusal, pass. This changes source policy
+only; installed config and root manifest still bind r3.
+
 Next: attribute the black guest boot and independently review the compact r4
 diff/build; then prepare an exact r4 admission and a bounded disposable GUI
 run. Do not use demo D or a provider account for this test. The synthetic Mac

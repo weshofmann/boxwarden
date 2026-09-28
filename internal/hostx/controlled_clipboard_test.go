@@ -129,3 +129,42 @@ func TestControlledClipboardStageR3ExactIdentity(t *testing.T) {
 		t.Fatal("superseded stage-r2 identity accepted")
 	}
 }
+
+func TestControlledClipboardStageR4ExactIdentity(t *testing.T) {
+	identity := ToolIdentity{
+		Path:             "/Library/Boxwarden/toolchains/tart/clipboard-r4/tart",
+		Version:          "2.32.1-boxwarden-clipboard-r4",
+		ExecutableSHA256: "46e809c95260d6a264b15662bd2117eddd13b0a0ca19dcdc6bae244cc7799fc2",
+		ArchiveSHA256:    "4126636c097dffaefff70c0abec116623885554419c87825b4e9e458a9f987ff",
+	}
+	if !SupportsControlledClipboard(identity) || !qualifiedTart(identity) {
+		t.Fatal("exact signed stage-r4 identity refused")
+	}
+	identity.ArchiveSHA256 = ControlledClipboardTartArchiveSHA256
+	if SupportsControlledClipboard(identity) || qualifiedTart(identity) {
+		t.Fatal("mixed r3/r4 identity accepted")
+	}
+}
+
+func TestDoctorAdmitsOnlyExactR4ManifestAndExecutable(t *testing.T) {
+	inspector, request := healthyDoctorFixture(t)
+	path, manifest := setControlledManifest(t, inspector, request)
+	manifest.Tart.Version = ControlledClipboardTartR4Version
+	manifest.Tart.ExecutableSHA256 = ControlledClipboardTartR4ExecutableSHA256
+	manifest.Tart.ArchiveSHA256 = ControlledClipboardTartR4ArchiveSHA256
+	fact := inspector.paths[path]
+	fact.Data, _ = json.Marshal(manifest)
+	inspector.paths[path] = fact
+	tool := inspector.paths[request.TartPath]
+	tool.SHA256 = ControlledClipboardTartR4ExecutableSHA256
+	inspector.paths[request.TartPath] = tool
+	inspector.outputs[commandKey(request.TartPath, "--version")] = ControlledClipboardTartR4Version
+	if report := (SystemDoctor{inspector: inspector}).Doctor(t.Context(), request); report.Status != Healthy {
+		t.Fatalf("exact r4 manifest and runtime refused: %+v", report)
+	}
+	tool.SHA256 = ControlledClipboardTartExecutableSHA256
+	inspector.paths[request.TartPath] = tool
+	if report := (SystemDoctor{inspector: inspector}).Doctor(t.Context(), request); report.Status == Healthy {
+		t.Fatal("r4 manifest accepted with r3 executable")
+	}
+}
