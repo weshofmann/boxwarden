@@ -1,7 +1,8 @@
 # N1 acceptance matrix
 
-All candidate rows initially pending. Stock evidence is context, not candidate
-qualification. Record exact source/build and test command for each promotion.
+Candidate source evidence below was observed on 2026-09-28. Stock evidence is
+context, not candidate qualification. **Every real guest row awaits attended
+deployment.** No candidate vmnet containment has been exercised on this Mac.
 
 | Case | Deterministic boundary tests | Host-only / isolated guest gate |
 |---|---|---|
@@ -20,3 +21,45 @@ qualification. Record exact source/build and test command for each promotion.
 Evidence labels: SOURCE INSPECTION; DETERMINISTIC; HOST-ONLY INTEGRATION;
 REAL ISOLATED GUEST; AWAITING ATTENDED DEPLOYMENT. Native IPv6 and effectively
 IPv6-only upstream remain unsupported/unqualified; no insecure fallback.
+
+## Observed source and host-only results
+
+- **DETERMINISTIC:** 24 standalone Rust policy tests pass; 25 pass when linked
+  with the actual locked `ip_network` 0.4.1 fallback dependency. These cover
+  DHCP discovery/trusted ACK/unicast renewal/expiry, UDP and TCP gateway DNS
+  permission, MAC/IP spoofing, host and multicast/broadcast denial, actual
+  private/link-local/loopback/CGNAT fallback denial, public fallback admission,
+  exact management tuples, handshake/close/expiry/capacity, address removal,
+  checksum-valid fragment variants, padding, unsupported frames, metadata
+  failure before write, and bounded valid-seed mutations. Packet admission is
+  not proof that a real DNS resolver or public HTTPS connection works.
+- **DETERMINISTIC, INDEPENDENT REVIEW:** 29 tests pass in the review harness
+  (25 package tests plus four independently authored regressions), including
+  recovery after lost final TCP handshake ACK. Earlier false-path fixtures
+  were corrected and checked against deliberately removed enforcement checks.
+- **HOST-ONLY INTEGRATION:** two listener tests pass using owned loopback TCP
+  and UDP endpoints; fixed responses, bounded lifetime, rejection of invalid
+  binds/ports/durations, and child cleanup observed. These establish the
+  fixture's positive control, not a candidate guest denial.
+- **SOURCE INSPECTION:** stock Tart passes the selector as two Softnet argv
+  elements; candidate rejects missing/duplicate selectors and incompatible
+  network overrides before privilege setup and again at proxy construction.
+- **NOT EXERCISED:** real DHCP and lease timing, vmnet UDP/TCP DNS and fallback,
+  scoped/split DNS, VPN/resolver transitions, DNS64, public HTTPS, pinned SSH,
+  controlled clipboard, guest-root changes, and real start/stop/restart listener
+  comparisons. The retained DNS endpoint, vmnet and hypervisor remain exposed.
+
+Run the pure tests with `rustc --edition=2024 --test
+ tools/n1-softnet/policy.rs -o /path/to/new/tests`, then execute that test binary.
+The pinned build script runs the additional actual-dependency fallback test.
+CI runs both suites without vmnet or privilege. Use
+`python3 tools/n1-qualification/listener_test.py` for the bounded host fixture.
+
+- **DETERMINISTIC GO INTEGRATION:** full default and `n1candidate` race suites,
+  vet and builds pass. Exact artifact mismatch tests, normal/installer child
+  argv, status labeling and observer manifest fixtures cover the closed build
+  selection. These do not claim an actual VM restart passed.
+- **HOST-ONLY CLI INTEGRATION:** exact unprivileged candidate version plus six
+  invalid-configuration cases reject at the expected argument boundary. The
+  verifier checks ownership, metadata and digest before executing any probe;
+  wrong-executable nonexecution and mocked privileged-mode regressions pass.

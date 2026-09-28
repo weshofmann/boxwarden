@@ -1270,6 +1270,9 @@ func writeStatus(output io.Writer, record session.Record, observed backend.Obser
 			return fmt.Errorf("write reconciliation diagnostic: %w", err)
 		}
 	}
+	if _, err := fmt.Fprintf(output, "network-policy-build: %s\n", hostx.NetworkPolicyBuild); err != nil {
+		return fmt.Errorf("write network policy build: %w", err)
+	}
 	return nil
 }
 

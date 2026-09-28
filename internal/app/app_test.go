@@ -902,7 +902,7 @@ func TestSessionStatusRendersPersistedAndObservedState(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	const want = "domain: work\nsession: dev\nmode: clean\nintended: stopped\nobserved: stopped\ngolden: golden-work-r1\nconsistency: consistent\n"
+	want := "domain: work\nsession: dev\nmode: clean\nintended: stopped\nobserved: stopped\ngolden: golden-work-r1\nconsistency: consistent\nnetwork-policy-build: " + hostx.NetworkPolicyBuild + "\n"
 	if got := output.String(); got != want {
 		t.Fatalf("Run() output =\n%s\nwant:\n%s", got, want)
 	}

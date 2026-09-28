@@ -1,0 +1,12 @@
+{
+  "version": "0.19.0-boxwarden-n1.1",
+  "source_commit": "df84a30016e3d6acc0d30acc660cf3a726f42a9b",
+  "patch_sha256": "f91669592f2231c29d159d753d772dcbe9d08c3446832eadb7c731ba226b80ef",
+  "policy_sha256": "37491b19e58bc0aaed1d3730b40d52e2cad53c74b8337df96fd8c6c145331ddf",
+  "compiler": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "compiler_sha256": "766eda9d8f53afd6fc7f27b3cd2e444dd22afacb5afa710a5625fc8e45b8c941",
+  "archive_format": "ustar, softnet regular 0755 uid=0 gid=0 mtime=0",
+  "cargo_sha256": "6e17e865f3a20dd55a1d212f849f58b77124179f0de7c52973096d84ba34118d",
+  "executable_sha256": "064206d28d82b86093244114f44f726f4f5967575a9b298a7123bf0beb740ef0",
+  "archive_sha256": "e06a722dfc9ab998f99144adc88ff9b03cd3356d1d1b62cb3c692cd4731b458e"
+}

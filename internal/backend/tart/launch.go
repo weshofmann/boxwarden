@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
+	"github.com/weshofmann/boxwarden/internal/hostx"
 )
 
 // LaunchConfig carries the V3-admitted Tart/Softnet and operator facts. Start
@@ -80,7 +81,11 @@ func (l Launcher) Start(ctx context.Context, request backend.StartRequest) (back
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("start Tart: %w", err), closeManagedDiskLifetimes(disks))
 	}
-	args := []string{"run", "--net-softnet", "--no-audio", "--no-clipboard", "--serial-path", request.SerialDevice}
+	args := []string{"run", "--net-softnet"}
+	if hostx.SoftnetBlockTarget != "" {
+		args = append(args, "--net-softnet-block="+hostx.SoftnetBlockTarget)
+	}
+	args = append(args, "--no-audio", "--no-clipboard", "--serial-path", request.SerialDevice)
 	for _, disk := range disks {
 		// Tart defaults extra file disks to automatic caching, unlike its
 		// cached Linux root disk. Keep managed ext4 on the same cache mode.

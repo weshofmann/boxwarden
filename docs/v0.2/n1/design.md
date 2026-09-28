@@ -77,7 +77,7 @@ Guest-side processing, before upstream prefix/global fallback:
    immediately for each guest dispatch; failure terminates the proxy, without
    forwarding using stale metadata. Host-address changes have an unavoidable
    observation-to-write race; test refresh and document this qualification limit.
-6. Explicitly deny IPv4 multicast (224.0.0.0/4), limited and directed broadcast
+6. Explicitly deny IPv4 multicast (224.0.0.0/4), limited and current host-interface directed broadcast
    destinations except the exact DHCP exception. Stock ip_network 0.4.1
    is_global() includes multicast, so it is insufficient alone. Remaining public
    egress and private/link-local denial retain stock behavior.
@@ -136,3 +136,7 @@ address reconfiguration. Public NAT hairpin to a host service through an address
 not assigned locally is indistinguishable from permitted public egress. The
 candidate does not claim either case is contained; stable directly assigned
 IPv4 host endpoints are the bounded target for qualification.
+
+Remote subnet broadcast addresses cannot be inferred without remote topology;
+only limited broadcast and trusted current host-interface directed broadcasts
+are classified explicitly. No remote network discovery is introduced.
