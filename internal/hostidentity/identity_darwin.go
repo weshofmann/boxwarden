@@ -78,5 +78,17 @@ func observe(file *os.File) (Identity, error) {
 		return Identity{}, fmt.Errorf("read pinned APFS identity: %w", syscall.Errno(code))
 	}
 	raw := hex.EncodeToString(uuid[:])
-	return Identity{VolumeUUID: raw[:8] + "-" + raw[8:12] + "-" + raw[12:16] + "-" + raw[16:20] + "-" + raw[20:], FileID: uint64(fileID)}, nil
+	identity := Identity{VolumeUUID: raw[:8] + "-" + raw[8:12] + "-" + raw[12:16] + "-" + raw[16:20] + "-" + raw[20:], FileID: uint64(fileID)}
+	var filesystem syscall.Statfs_t
+	if err := syscall.Fstatfs(int(file.Fd()), &filesystem); err != nil {
+		return Identity{}, fmt.Errorf("read pinned filesystem: %w", err)
+	}
+	mounts, err := mountedAPFSVolumes()
+	if err != nil {
+		return Identity{}, err
+	}
+	if err := requireUniqueMountedUUID(identity.VolumeUUID, filesystem.Fsid, mounts); err != nil {
+		return Identity{}, err
+	}
+	return identity, nil
 }
