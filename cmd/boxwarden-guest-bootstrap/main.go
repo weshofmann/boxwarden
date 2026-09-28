@@ -19,7 +19,7 @@ func main() {
 
 func run(args []string, input io.Reader, output, _ io.Writer, bootstrapper *guestproto.Bootstrapper) error {
 	if len(args) != 1 {
-		return fmt.Errorf("usage: boxwarden-guest-bootstrap serial-bootstrap|management|action")
+		return fmt.Errorf("usage: boxwarden-guest-bootstrap serial-bootstrap|management|action|clipboard")
 	}
 	if bootstrapper == nil {
 		bootstrapper = guestproto.NewBootstrapper("/", guestproto.ExecRunner{})
@@ -64,6 +64,40 @@ func run(args []string, input io.Reader, output, _ io.Writer, bootstrapper *gues
 			return err
 		}
 		return writeExact(output, []byte("\n"))
+	case "clipboard":
+		// Decode on a bounded-lived worker so incomplete SSH stdin cannot keep
+		// this fixed helper alive beyond the operation deadline.
+		type decodedClipboard struct {
+			request guestproto.ClipboardRequest
+			payload []byte
+			err     error
+		}
+		decoded := make(chan decodedClipboard, 1)
+		go func() {
+			request, payload, err := guestproto.DecodeClipboardRequest(input)
+			decoded <- decodedClipboard{request, payload, err}
+		}()
+		var message decodedClipboard
+		select {
+		case message = <-decoded:
+		case <-ctx.Done():
+			return fmt.Errorf("clipboard request timeout")
+		}
+		if message.err != nil {
+			return fmt.Errorf("invalid clipboard request")
+		}
+		response, payload, err := bootstrapper.Clipboard(ctx, message.request, message.payload)
+		if err != nil {
+			return fmt.Errorf("clipboard target unavailable")
+		}
+		encoded, err := guestproto.EncodeClipboardResponse(message.request, response, payload)
+		if err != nil {
+			return fmt.Errorf("invalid clipboard response")
+		}
+		if err := writeExact(output, encoded); err != nil {
+			return fmt.Errorf("clipboard acknowledgement unavailable")
+		}
+		return nil
 	case "action":
 		request, err := guestproto.DecodeActionRequest(input)
 		if err != nil {

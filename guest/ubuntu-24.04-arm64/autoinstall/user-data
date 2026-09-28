@@ -138,7 +138,7 @@ autoinstall:
       PermitUserRC no
       EOF
     - install -d -o root -g root -m 0755 /target/usr/local/libexec
-    - "printf '%s  %s\\n' 'ecdb752197c6d36f9594d234e4035745f55e1e38c95426a78d473e5d26dadf06' '/cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap' | sha256sum -c -"
+    - "printf '%s  %s\\n' '33b12b9e293bcbdf7d6c91f933b42003ca394e7a678ac83b8d80df714d27c57e' '/cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap' | sha256sum -c -"
     - install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/boxwarden-guest-bootstrap /target/usr/local/libexec/boxwarden-guest-bootstrap
     - "printf '%s  %s\\n' '__BOXWARDEN_FINALIZER_SHA256__' '/cdrom/boxwarden-artifacts/finalize-golden.sh' | sha256sum -c -"
     - install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/finalize-golden.sh /target/usr/local/libexec/boxwarden-finalize-golden
@@ -148,6 +148,8 @@ autoinstall:
     - install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/install-pinned-chatgpt.py /target/usr/local/libexec/boxwarden-install-pinned-chatgpt
     - "printf '%s  %s\\n' '__BOXWARDEN_CHATGPT_LAUNCHER_SHA256__' '/cdrom/boxwarden-artifacts/launch-chatgpt.py' | sha256sum -c -"
     - install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/launch-chatgpt.py /target/usr/local/libexec/boxwarden-launch-chatgpt
+    - "printf '%s  %s\\n' '__BOXWARDEN_CLIPBOARD_HELPER_SHA256__' '/cdrom/boxwarden-artifacts/clipboard.py' | sha256sum -c -"
+    - install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/clipboard.py /target/usr/local/libexec/boxwarden-guest-clipboard.py
     - "printf '%s  %s\\n' '__BOXWARDEN_RECIPE_PAYLOAD_SHA256__' '/cdrom/boxwarden-artifacts/recipe-prepare.json' | sha256sum -c -"
     - install -d -o root -g root -m 0700 /target/var/lib/boxwarden
     - install -o root -g root -m 0600 /cdrom/boxwarden-artifacts/recipe-prepare.json /target/var/lib/boxwarden/recipe-prepare.json

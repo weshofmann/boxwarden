@@ -38,9 +38,11 @@ func qualifiedPlatformFact(platform PlatformFact) bool {
 	return platform.OS == QualifiedPlatform && platform.Arch == QualifiedArch && platform.Release == QualifiedMacOS && platform.Build == QualifiedMacOSBuild
 }
 
-func qualifiedTart(identity ToolIdentity) bool {
+func qualifiedStockTart(identity ToolIdentity) bool {
 	return identity.Version == TartVersion && identity.ExecutableSHA256 == TartExecutableSHA256 && identity.ArchiveSHA256 == TartArchiveSHA256
 }
+
+func qualifiedTart(identity ToolIdentity) bool { return qualifiedStockTart(identity) }
 
 func qualifiedSoftnet(identity ToolIdentity) bool {
 	return identity.Path == QualifiedSoftnetPath && identity.Version == SoftnetVersion && identity.ExecutableSHA256 == SoftnetExecutableSHA256 && identity.ArchiveSHA256 == SoftnetArchiveSHA256

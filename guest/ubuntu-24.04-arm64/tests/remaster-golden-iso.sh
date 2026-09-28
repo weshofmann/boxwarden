@@ -57,11 +57,13 @@ finalizer="${guest_dir}/finalize-golden.sh"
 recipe_helper="${guest_dir}/recipe-prepare.py"
 chatgpt_installer="${guest_dir}/install-pinned-chatgpt.py"
 chatgpt_launcher="${guest_dir}/launch-chatgpt.py"
+clipboard_helper="${guest_dir}/clipboard.py"
 for required in "$helper" /boxwarden-artifacts/boxwarden-guest-bootstrap \
   "$finalizer" /boxwarden-artifacts/finalize-golden.sh \
   "$recipe_helper" /boxwarden-artifacts/recipe-prepare.py \
   "$chatgpt_installer" /boxwarden-artifacts/install-pinned-chatgpt.py \
   "$chatgpt_launcher" /boxwarden-artifacts/launch-chatgpt.py \
+  "$clipboard_helper" /boxwarden-artifacts/clipboard.py \
   "$preparation" /boxwarden-artifacts/recipe-prepare.json /autoinstall.yaml; do
   grep -Fxq -- "$required" "$log" || fail "ISO did not map ${required}"
 done
@@ -71,6 +73,8 @@ grep -Fq "'$(shasum -a 256 "$recipe_helper" | awk '{print $1}')'" "$mapped" || f
 grep -Fq "'$(shasum -a 256 "$chatgpt_installer" | awk '{print $1}')'" "$mapped" || fail 'mapped autoinstall is not bound to ChatGPT installer bytes'
 grep -Fq "'$(shasum -a 256 "$chatgpt_launcher" | awk '{print $1}')'" "$mapped" || fail 'mapped autoinstall is not bound to ChatGPT launcher bytes'
 grep -Fq "'$(shasum -a 256 "$preparation" | awk '{print $1}')'" "$mapped" || fail 'mapped autoinstall is not bound to recipe payload bytes'
+grep -Fq "'$(shasum -a 256 "$clipboard_helper" | awk '{print $1}')'" "$mapped" || fail 'mapped autoinstall is not bound to clipboard helper bytes'
+grep -Fq 'install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/clipboard.py /target/usr/local/libexec/boxwarden-guest-clipboard.py' "$mapped" || fail 'mapped autoinstall does not install fixed clipboard adapter'
 ! grep -Fq __BOXWARDEN_ "$mapped" || fail 'mapped autoinstall retains a build placeholder'
 
 sed '/__BOXWARDEN_FINALIZER_SHA256__/d' "$rendered" >"${test_dir}/missing-finalizer-lock"

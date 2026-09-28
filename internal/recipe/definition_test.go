@@ -46,3 +46,12 @@ func TestGuestDefinitionDigestBindsEveryTrackedBuildInput(t *testing.T) {
 		t.Fatalf("linked build input was accepted: %v", err)
 	}
 }
+
+func TestGuestDefinitionIncludesClipboardAdapter(t *testing.T) {
+	for _, name := range guestDefinitionFiles {
+		if name == "clipboard.py" {
+			return
+		}
+	}
+	t.Fatal("clipboard adapter missing from prepared-image identity")
+}

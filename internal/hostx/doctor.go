@@ -176,14 +176,6 @@ func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspec
 			add("paths.overlap", Drifted, "host paths overlap", "disjoint host paths and configured state roots", "correct version-2 host configuration")
 		}
 	}
-	if !canonicalAbsolute(request.TartPath) {
-		add("tart.path", Drifted, "noncanonical configured path", "canonical absolute Tart path", "correct version-2 host configuration")
-	} else {
-		tartFact, _ := checkTool(inspector, &report, "tart", request.TartPath, TartExecutableSHA256, 0, -1, -1)
-		if tartFact.Exists && !safeUnprivilegedExecutableMode(tartFact.Mode) {
-			add("tart.mode", Drifted, fmt.Sprintf("%04o", tartFact.Mode), "executable without setuid or setgid", "install the exact qualified Tart executable")
-		}
-	}
 
 	manifestPath := filepath.Join(filepath.Dir(QualifiedSoftnetPath), "manifest.json")
 	manifestFact, manifestOK := checkTool(inspector, &report, "manifest", manifestPath, "", manifestMode, 0, 0)
@@ -200,6 +192,19 @@ func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspec
 			manifest = parsed
 		}
 	}
+	tartDigest := TartExecutableSHA256
+	if manifestOK && manifestFact.Mode == manifestMode && manifestFact.UID == 0 && manifestFact.GID == 0 && manifest.Version == ManifestVersion && manifest.Tart.Path == request.TartPath && manifest.TartHome == request.TartHome {
+		tartDigest = manifest.Tart.ExecutableSHA256
+	}
+	if !canonicalAbsolute(request.TartPath) {
+		add("tart.path", Drifted, "noncanonical configured path", "canonical absolute Tart path", "correct version-2 host configuration")
+	} else {
+		tartFact, _ := checkTool(inspector, &report, "tart", request.TartPath, tartDigest, 0, -1, -1)
+		if tartFact.Exists && !safeUnprivilegedExecutableMode(tartFact.Mode) {
+			add("tart.mode", Drifted, fmt.Sprintf("%04o", tartFact.Mode), "executable without setuid or setgid", "install the exact qualified Tart executable")
+		}
+	}
+
 	for _, directory := range trustedSoftnetDirectories() {
 		fact, err := inspector.InspectPath(directory)
 		if err != nil {
