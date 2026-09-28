@@ -21,7 +21,7 @@ func TestWorkspaceImportRoutesExactAlphaBindingAndReportsTransferOnly(t *testing
 	input := AlphaImportInput{SourcePath: "/private/source", VolumeID: volume, SessionName: "dev"}
 	called := 0
 	var output bytes.Buffer
-	options := Options{Output: &output, AlphaImport: func(_ context.Context, actual config.Domain, received AlphaImportInput) (workspacex.ImportJournal, supervisor.ImportResult, error) {
+	options := Options{storageCheck: syntheticStorageCheck, Output: &output, AlphaImport: func(_ context.Context, actual config.Domain, received AlphaImportInput) (workspacex.ImportJournal, supervisor.ImportResult, error) {
 		called++
 		if actual != selected || received.SourcePath != input.SourcePath || received.VolumeID != volume || received.SessionName != "dev" || received.Resume || !alphaCreateUUID(received.TransactionID) {
 			t.Fatalf("import lost exact request: domain=%+v input=%+v", actual, received)
@@ -58,7 +58,7 @@ func TestWorkspaceImportResumeKeepsTransactionAndRejectsFalseReceipt(t *testing.
 	const volume = "00112233-4455-4677-8899-aabbccddeeff"
 	called := 0
 	var output bytes.Buffer
-	options := Options{Output: &output, AlphaImport: func(_ context.Context, actual config.Domain, received AlphaImportInput) (workspacex.ImportJournal, supervisor.ImportResult, error) {
+	options := Options{storageCheck: syntheticStorageCheck, Output: &output, AlphaImport: func(_ context.Context, actual config.Domain, received AlphaImportInput) (workspacex.ImportJournal, supervisor.ImportResult, error) {
 		called++
 		if actual != selected || received.TransactionID != transaction || received.VolumeID != volume || received.SessionName != "dev" || received.SourcePath != "" || !received.Resume {
 			t.Fatalf("resume lost exact binding: domain=%+v input=%+v", actual, received)
@@ -92,7 +92,7 @@ func TestWorkspaceImportVerifyRoutesExactPublishedExportAndRejectsFalseResult(t 
 	observer := fake.New(backend.Observation{ObjectID: "owned", Exists: true, State: backend.ObjectStopped})
 	called := 0
 	var output bytes.Buffer
-	options := Options{Output: &output, Observer: observer,
+	options := Options{storageCheck: syntheticStorageCheck, Output: &output, Observer: observer,
 		AlphaImportVerify: func(_ context.Context, actual config.Domain, input AlphaImportVerifyInput, actualObserver backend.Observer) (workspacex.ImportJournal, error) {
 			called++
 			if actual != selected || input.TransactionID != transaction || input.ExportID != exportID || actualObserver != observer {

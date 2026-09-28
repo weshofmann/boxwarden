@@ -9,6 +9,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/weshofmann/boxwarden/internal/hostidentity"
 )
 
 const (
@@ -20,6 +22,22 @@ type formatFunc func(context.Context, FormatRequest) (FormatEvidence, error)
 
 func (f formatFunc) FormatAndVerify(ctx context.Context, request FormatRequest) (FormatEvidence, error) {
 	return f(ctx, request)
+}
+
+func (formatFunc) SyntheticLegacyForTests() bool { return true }
+
+type publicationFormatter struct {
+	Formatter
+	failAt map[journalPublicationStage]bool
+}
+
+func (publicationFormatter) SyntheticLegacyForTests() bool { return true }
+
+func (f publicationFormatter) journalPublicationStage(stage journalPublicationStage) error {
+	if f.failAt[stage] {
+		return errors.New("injected journal publication failure")
+	}
+	return nil
 }
 
 func testRequest() Request {
@@ -144,6 +162,37 @@ func TestCreatePersistsFailureAndNeverRetriesFormat(t *testing.T) {
 	if file, _, err := Admit(root, testRequest()); err == nil {
 		file.Close()
 		t.Fatal("failed volume admitted")
+	}
+}
+
+func TestVerifiedJournalPublicationSettlesRenameAndSyncFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		fail       []journalPublicationStage
+		wantState  JournalState
+		wantCreate bool
+	}{
+		{"before-rename", []journalPublicationStage{journalBeforeRename}, StateFormatting, false},
+		{"after-rename", []journalPublicationStage{journalAfterRename}, StateVerified, true},
+		{"before-sync", []journalPublicationStage{journalBeforeSync}, StateVerified, true},
+		{"after-sync", []journalPublicationStage{journalAfterSync}, StateVerified, true},
+		{"settlement-sync-fails", []journalPublicationStage{journalAfterRename, journalBeforeSettleSync}, StateVerified, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := testRoot(t)
+			fail := make(map[journalPublicationStage]bool)
+			for _, stage := range tc.fail {
+				fail[stage] = true
+			}
+			_, err := Create(t.Context(), root, testRequest(), publicationFormatter{Formatter: successfulFormatter(t), failAt: fail})
+			if (err == nil) != tc.wantCreate {
+				t.Fatalf("create settled=%t, err=%v", tc.wantCreate, err)
+			}
+			journal, readErr := ReadJournal(root, testRequest())
+			if readErr != nil || journal.State != tc.wantState {
+				t.Fatalf("receipt = %+v, %v; want %s", journal, readErr, tc.wantState)
+			}
+		})
 	}
 }
 
@@ -290,6 +339,35 @@ func TestInterruptedJournalBlocksReformatAndAdmit(t *testing.T) {
 	if file, _, err := Admit(root, request); err == nil {
 		file.Close()
 		t.Fatal("incomplete journal admitted")
+	}
+}
+
+func TestIncompleteJournalCannotClaimPersistentHostIdentity(t *testing.T) {
+	root := testRoot(t)
+	opened, err := openStateRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer opened.Close()
+	volumes, err := openVolumes(opened, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer volumes.Close()
+	request := testRequest()
+	for _, state := range []JournalState{StateReserved, StateFormatting, StateFailed} {
+		journal := Journal{Version: 2, Domain: request.Domain, VolumeID: request.VolumeID, FilesystemUUID: request.FilesystemUUID,
+			SizeBytes: request.SizeBytes, State: state, HostIdentity: &hostidentity.Identity{VolumeUUID: "00112233-4455-6677-8899-aabbccddeeff", FileID: 7}}
+		if state == StateReserved {
+			if err := writeInitialJournal(volumes, journal); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := replaceJournal(volumes, journal); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := readJournal(volumes, request); err == nil {
+			t.Fatalf("%s journal claimed host identity", state)
+		}
 	}
 }
 

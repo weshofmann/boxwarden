@@ -1,6 +1,6 @@
 # After the v0.2 prototype
 
-Owner-approved closeout and next-feature scope, 2026-09-27.
+Owner-approved closeout and follow-up scope, updated 2026-09-28.
 
 ## Baseline and interpretation
 
@@ -20,92 +20,46 @@ must not be restarted merely because older plans still contain pending gates.
 
 | ID | Work | Completion evidence |
 | --- | --- | --- |
-| C1 | Controlled clipboard transfer and login usability | Explicit transfers through window buttons, application menu, and CLI; no unsolicited synchronization; actual guest-application copy/paste and an attended login trial. |
-| R1 | Workspace remount/reconnect identity reconciliation | Retained workspace remains usable after an authorized remount/reconnect without reformatting or blindly rebinding to a different disk; wrong-volume cases refuse. |
+| C1 | Controlled clipboard transfer | Merged PR #13 provides a standalone menu-bar utility and CLI; Wes observed explicit transfer in both directions and Quit preserving the running sandbox. Provider login remains untested. |
+| R1 | Workspace clean-remount identity recovery | A retained workspace survives a clean backing-filesystem remount without reformatting or blind rebinding; missing/wrong storage refuses. Physical reconnect and corruption remain outside this claim. |
 | N1 | Guest-to-host vmnet-gateway exposure | Review and test a host-enforced approach while preserving required DNS/network compatibility; retain the current explicit limitation until demonstrated. |
 | A1 | Remaining interruption and user acceptance | Targeted snapshot-copy and other untested interruption/recovery cases, controlled native reboot/reconnect, authenticated provider use, and subjective GUI usability; evidence must name the tested case. |
 
-C1 is the next feature. R1 and N1 remain substantive reliability/containment
-work, not cosmetic polish. None is completed by merging the prototype.
-Reboot, physical reconnect, credential entry, and host-security changes still
-require their applicable operator authorization. Do not bundle them into the
-clipboard feature merely to clear this table.
+C1 is merged at `ee3d7a2`; R1 is the current reliability assignment. N1 and
+A1 remain separate work. Reboot, physical reconnect, credential entry, and
+host-security changes still require their applicable operator authorization.
 
-## C1: controlled clipboard feature handoff
+## C1: merged controlled clipboard
 
-### Approved user-facing direction
+The approved frontend is a standalone `Boxwarden Clipboard.app` menu-bar
+utility over the shared bounded transfer implementation and public
+`boxwarden clipboard push|pull|copy|paste` CLI. Stock Tart is restored; its
+automatic clipboard sharing remains disabled. The abandoned patched Tart
+viewer is retained only in Git history and diagnostic records, not the
+current build or host admission. See the
+[clipboard design](../controlled-clipboard/design.md),
+[progress](../controlled-clipboard/progress.md), and
+[launch instructions](../../host/clipboard-menu/README.md).
 
-Add a narrow, versioned Boxwarden integration patch to the pinned Tart viewer.
-The host-owned strip stays visible alongside the guest display and identifies
-its sandbox. Include explanatory text and these two buttons:
+Wes directly observed the menu, selected the retained synthetic sandbox,
+transferred text in both directions, and chose Quit. Full-host checks then
+found the menu process absent and the exact sandbox still consistent and
+READY; the CLI still discovered its live generation. Firefox and LibreOffice
+Writer pasted synthetic text through the guest/CLI path. Cancellation,
+restarted-target behavior and size boundaries have automated coverage; those
+edges were not all manually exercised in the menu. Provider sign-in and
+subjective authenticated-app usability remain untested A1 actions.
 
-- `HOST -> GUEST`: copy the host clipboard into that guest's clipboard once.
-- `GUEST -> HOST`: copy that guest's clipboard into the host clipboard once.
+## R1: current clean-remount recovery boundary
 
-Add application-menu items for the same operations:
-
-- `Copy Host Clipboard to Guest`
-- `Copy Guest Clipboard to Host`
-
-Menu actions target the active VM window; per-window buttons retain their own
-VM target. Disable unavailable targets and do not deliver an old request to a
-replacement/restarted sandbox. Preserve ordinary guest copy/paste shortcuts.
-No operation automatically pastes, presses Enter, or submits a form.
-
-Provide CLI equivalents using the same transfer implementation. Proposed
-command names are `boxwarden clipboard push|pull|copy|paste <session>` with
-the existing explicit domain/config selection. `push`/`pull` match the buttons;
-`copy` consumes stdin and `paste` produces stdout, analogous to pbcopy/pbpaste.
-Optional pbcopy/pbpaste aliases and exact syntax belong in the feature design.
-These are proposed commands, not implemented features in the prototype.
-
-### Implementation constraints and remaining choices
-
-Keep Tart's automatic SPICE clipboard sharing disabled. Do not implement a
-one-shot action by briefly enabling automatic sharing. Explicit host actions
-are the authority to transfer; the guest gets no general host-clipboard API.
-
-Evaluate the existing Tart exec/RPC facilities against Boxwarden's existing
-management connection before introducing new transport machinery. Check the
-exact pinned versions, relevant upstream fixes, graphical-session access,
-and applicable source licenses. Do not assume a guest system service can
-already read the active desktop clipboard.
-
-Keep the viewer patch thin. Share behavior across UI, menu, and CLI rather
-than maintaining separate clipboard implementations. Give a patched Tart
-binary its own source/patch/build/signing identity and validation; it is not
-the previously admitted upstream executable under the old digest. Do not
-silently replace the installed toolchain or reinterpret its manifest.
-
-A text-first implementation with bounded UTF-8 payloads is the recommended
-initial scope. Finalize supported types, limits, empty-clipboard behavior,
-CLI terminal-output behavior, and transport in the written feature design.
-Do not silently claim image/rich-text support or alter text/newlines.
-Clipboard payloads must not enter command arguments, recipes, logs, content
-hash records, clipboard history, or persistent action journals. Failed reads,
-unsupported/oversized data, stale targets, and cancelled transfers must not
-clear or overwrite the destination clipboard. Secrets sent intentionally to
-the guest become available to that guest; receiving text is not approval to
-execute it on the host.
-
-Verify both directions in the actual guest desktop with synthetic data,
-including guest Firefox/application paste, Unicode and multiline text,
-multiple VM targets, stopped/replaced targets, and malformed/oversized guest
-responses. Verify that unrelated subsequent clipboard changes do not cross
-without a new host action. A helper's zero exit alone is not GUI acceptance.
-
-### Start the next session
-
-Use a fresh Codex conversation and a focused branch from merged `main`, such
-as `weshofmann/feature/controlled-clipboard`. Inspect the actual merged SHA and
-current runtime state; do not reset the old worktree or recreate the full
-prototype. Preserve the tested build, handoff, workspace data, and rollback.
-
-The requested driver remains GPT-6 Sol / High, with a fresh independent
-review for the transfer boundary and patched host executable. Record actual
-model availability rather than claiming an unverified switch. Complete a short
-written design and implementation plan for this feature before changing host
-integration. Publish small coherent commits and a new Draft PR. Do not add more
-features to PR #12, publish a release, recreate the cancelled continuation
-automation, or infer permission to merge future PRs from the one-time approval
-of #12.
+The alpha demonstrated a retained raw workspace becoming inadmissible after
+the qualification filesystem was cleanly remounted with a different transient
+device number. R1 must distinguish persistent host-storage and workspace
+identity from observations valid only in one mount instance. It must preserve
+the existing path, ownership, lease, backend and export safety checks while
+rejecting absent/wrong storage and substituted files. New synthetic backing
+images may be detached/remounted for testing; the existing user/demo volumes,
+installed host toolchain and running clipboard-trial sandbox are excluded.
+The focused design, progress and reviewed evidence belong to R1's branch and
+Draft PR. A clean-remount result must not be described as proof of sudden disk
+removal, filesystem corruption, reboot or physical reconnect recovery.

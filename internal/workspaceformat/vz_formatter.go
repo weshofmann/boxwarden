@@ -21,14 +21,17 @@ import (
 // VM report bound to this format attempt. Create retains the storage lock,
 // journal, and raw file and performs its independent ext4/identity checks.
 type VZFormatter struct {
-	StateRoot    string
-	Domain       domain.ID
-	BundlePath   string
-	SourceRoot   string
-	runner       execx.Runner
-	pins         formatterPins
-	sourceCommit func(context.Context, string) (string, error)
+	StateRoot               string
+	Domain                  domain.ID
+	BundlePath              string
+	SourceRoot              string
+	runner                  execx.Runner
+	pins                    formatterPins
+	sourceCommit            func(context.Context, string) (string, error)
+	syntheticLegacyForTests bool
 }
+
+func (v VZFormatter) SyntheticLegacyForTests() bool { return v.syntheticLegacyForTests }
 
 func (v VZFormatter) admittedSourceCommit(ctx context.Context) (string, error) {
 	if v.sourceCommit != nil {

@@ -16,7 +16,7 @@ type AlphaWorkspaceCreateInput struct {
 	BundlePath, SourceRoot   string
 }
 
-type AlphaWorkspaceCreateFunc func(context.Context, config.Domain, AlphaWorkspaceCreateInput) (workspacex.Record, error)
+type AlphaWorkspaceCreateFunc func(context.Context, config.Domain, string, AlphaWorkspaceCreateInput) (workspacex.Record, error)
 
 func validAlphaWorkspaceCreateInput(input AlphaWorkspaceCreateInput) error {
 	if !alphaCreateUUID(input.VolumeID) || !alphaCreateUUID(input.FilesystemUUID) || input.SizeBytes < 16<<20 || input.SizeBytes > 1<<43 || input.SizeBytes%(1<<20) != 0 {

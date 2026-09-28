@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/weshofmann/boxwarden/internal/domain"
+	"github.com/weshofmann/boxwarden/internal/hostidentity"
 )
 
 const (
@@ -40,8 +41,88 @@ type HostAdmission struct {
 }
 
 type Domain struct {
-	ID        domain.ID
-	StateRoot string
+	ID               domain.ID
+	StateRoot        string
+	WorkspaceStorage *WorkspaceStorage
+}
+
+// WorkspaceStorage is an operator-enrolled APFS mount declaration. Runtime
+// admission verifies its UUID and mount point before workspace mutation.
+type WorkspaceStorage struct {
+	MountPoint string
+	VolumeUUID string
+}
+
+// EnrolledCopy renders a new complete configuration snapshot with one domain's
+// operator-supplied storage declaration. It never edits the source file.
+func (c Config) EnrolledCopy(rawDomain string, storage WorkspaceStorage) ([]byte, error) {
+	id, err := domain.Parse(rawDomain)
+	if err != nil {
+		return nil, err
+	}
+	selected, found := c.domains[id]
+	if !found {
+		return nil, fmt.Errorf("unknown domain %q", rawDomain)
+	}
+	if selected.WorkspaceStorage != nil {
+		return nil, fmt.Errorf("domain %s already has enrolled workspace storage", id)
+	}
+	if !filepath.IsAbs(storage.MountPoint) || filepath.Clean(storage.MountPoint) != storage.MountPoint || !canonicalUUID(storage.VolumeUUID) {
+		return nil, fmt.Errorf("workspace enrollment requires clean mount point and canonical lowercase APFS UUID")
+	}
+	if err := (hostidentity.StorageExpectation{ConfigPath: "/enrolled-config", StateRoot: selected.StateRoot,
+		MountPoint: storage.MountPoint, VolumeUUID: storage.VolumeUUID}).Validate(); err != nil {
+		return nil, err
+	}
+	type savedStorage struct {
+		MountPoint string `json:"mount_point"`
+		VolumeUUID string `json:"apfs_volume_uuid"`
+	}
+	type savedDomain struct {
+		StateRoot string        `json:"state_root"`
+		Storage   *savedStorage `json:"workspace_storage,omitempty"`
+	}
+	type savedHost struct {
+		TartExecutable string `json:"tart_executable"`
+		TartHome       string `json:"tart_home"`
+		SoftnetSource  string `json:"softnet_source"`
+	}
+	type savedConfig struct {
+		Version int                       `json:"version"`
+		Domains map[domain.ID]savedDomain `json:"domains"`
+		Host    *savedHost                `json:"host,omitempty"`
+	}
+	out := savedConfig{Version: legacyVersion, Domains: make(map[domain.ID]savedDomain, len(c.domains))}
+	if c.host != nil {
+		out.Version = version
+		out.Host = &savedHost{TartExecutable: c.host.TartExecutable, TartHome: c.host.TartHome, SoftnetSource: c.host.SoftnetSource}
+	}
+	for domainID, configured := range c.domains {
+		entry := savedDomain{StateRoot: configured.StateRoot}
+		if configured.WorkspaceStorage != nil {
+			entry.Storage = &savedStorage{MountPoint: configured.WorkspaceStorage.MountPoint, VolumeUUID: configured.WorkspaceStorage.VolumeUUID}
+		}
+		if domainID == id {
+			entry.Storage = &savedStorage{MountPoint: storage.MountPoint, VolumeUUID: storage.VolumeUUID}
+		}
+		out.Domains[domainID] = entry
+	}
+	raw, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(raw, '\n'), nil
+}
+
+// StorageExpectation binds this selected domain to an operator-enrolled
+// declaration in the exact configuration file outside its backing volume.
+func (d Domain) StorageExpectation(configPath string) (hostidentity.StorageExpectation, error) {
+	if d.WorkspaceStorage == nil {
+		return hostidentity.StorageExpectation{}, fmt.Errorf("domain %s has no enrolled workspace storage; use workspace storage enroll", d.ID)
+	}
+	expected := hostidentity.StorageExpectation{ConfigPath: configPath, StateRoot: d.StateRoot,
+		MountPoint: d.WorkspaceStorage.MountPoint, VolumeUUID: d.WorkspaceStorage.VolumeUUID}
+	return expected, expected.Validate()
 }
 
 func Load(path string) (Config, error) {
@@ -337,18 +418,27 @@ func decodeDomain(decoder *json.Decoder, id domain.ID) (Domain, error) {
 	seen := map[string]bool{}
 	var root string
 	var gotRoot bool
+	var storage *WorkspaceStorage
 	for decoder.More() {
 		name, err := objectField(decoder, seen)
 		if err != nil {
 			return Domain{}, fmt.Errorf("domain %q: %w", id, err)
 		}
-		if name != "state_root" {
+		switch name {
+		case "state_root":
+			if err := decoder.Decode(&root); err != nil {
+				return Domain{}, fmt.Errorf("domain %q state_root: %w", id, err)
+			}
+			gotRoot = true
+		case "workspace_storage":
+			parsed, err := decodeWorkspaceStorage(decoder)
+			if err != nil {
+				return Domain{}, fmt.Errorf("domain %q workspace_storage: %w", id, err)
+			}
+			storage = &parsed
+		default:
 			return Domain{}, fmt.Errorf("domain %q: unknown field %q", id, name)
 		}
-		if err := decoder.Decode(&root); err != nil {
-			return Domain{}, fmt.Errorf("domain %q state_root: %w", id, err)
-		}
-		gotRoot = true
 	}
 	if err := requireObjectEnd(decoder); err != nil {
 		return Domain{}, fmt.Errorf("domain %q: %w", id, err)
@@ -360,7 +450,56 @@ func decodeDomain(decoder *json.Decoder, id domain.ID) (Domain, error) {
 	if err != nil {
 		return Domain{}, fmt.Errorf("domain %q state_root: %w", id, err)
 	}
-	return Domain{ID: id, StateRoot: canonical}, nil
+	return Domain{ID: id, StateRoot: canonical, WorkspaceStorage: storage}, nil
+}
+
+func decodeWorkspaceStorage(decoder *json.Decoder) (WorkspaceStorage, error) {
+	if err := requireObjectStart(decoder); err != nil {
+		return WorkspaceStorage{}, err
+	}
+	seen := map[string]bool{}
+	var storage WorkspaceStorage
+	for decoder.More() {
+		name, err := objectField(decoder, seen)
+		if err != nil {
+			return WorkspaceStorage{}, err
+		}
+		switch name {
+		case "mount_point":
+			if err := decoder.Decode(&storage.MountPoint); err != nil {
+				return WorkspaceStorage{}, err
+			}
+		case "apfs_volume_uuid":
+			if err := decoder.Decode(&storage.VolumeUUID); err != nil {
+				return WorkspaceStorage{}, err
+			}
+		default:
+			return WorkspaceStorage{}, fmt.Errorf("unknown field %q", name)
+		}
+	}
+	if err := requireObjectEnd(decoder); err != nil {
+		return WorkspaceStorage{}, err
+	}
+	if !seen["mount_point"] || !seen["apfs_volume_uuid"] || !filepath.IsAbs(storage.MountPoint) || filepath.Clean(storage.MountPoint) != storage.MountPoint || !canonicalUUID(storage.VolumeUUID) {
+		return WorkspaceStorage{}, fmt.Errorf("requires clean absolute mount_point and canonical apfs_volume_uuid")
+	}
+	return storage, nil
+}
+
+func canonicalUUID(raw string) bool {
+	if len(raw) != 36 {
+		return false
+	}
+	for i := range raw {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if raw[i] != '-' {
+				return false
+			}
+		} else if raw[i] < '0' || raw[i] > '9' && raw[i] < 'a' || raw[i] > 'f' {
+			return false
+		}
+	}
+	return true
 }
 
 func requireRegularFile(path string) error {

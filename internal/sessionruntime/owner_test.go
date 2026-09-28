@@ -20,6 +20,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/backend/tart"
 	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/guestproto"
+	"github.com/weshofmann/boxwarden/internal/hostidentity"
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/serialx"
 	"github.com/weshofmann/boxwarden/internal/session"
@@ -79,7 +80,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	path := filepath.Join(base, "config.json")
-	contents := fmt.Sprintf(`{"version":2,"domains":{"work":{"state_root":%q},"personal":{"state_root":%q}},"host":{"tart_executable":%q,"tart_home":%q,"softnet_source":%q}}`, f.root, f.personal, f.tartPath, f.tartHome, f.softnet)
+	contents := fmt.Sprintf(`{"version":2,"domains":{"work":{"state_root":%q,"workspace_storage":{"mount_point":%q,"apfs_volume_uuid":"00112233-4455-6677-8899-aabbccddeeff"}},"personal":{"state_root":%q}},"host":{"tart_executable":%q,"tart_home":%q,"softnet_source":%q}}`, f.root, filepath.Dir(f.root), f.personal, f.tartPath, f.tartHome, f.softnet)
 	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -87,6 +88,7 @@ func newFixture(t *testing.T) *fixture {
 	f.serial = &fakeSerial{trace: f.trace, endpoint: filepath.Join(f.request.RuntimeDirectory, "serial", "tart-serial")}
 	f.handle = &fakeHandle{trace: f.trace, done: make(chan struct{}), waiting: make(chan struct{})}
 	f.owner = &Owner{deps: dependencies{
+		storageCheck: func(_ hostidentity.StorageExpectation) error { return nil },
 		host: hostFunc(func(_ context.Context, r hostx.Request) (hostx.RuntimeExpectation, error) {
 			f.trace.add("host")
 			if !reflect.DeepEqual(r, hostx.Request{TartPath: f.tartPath, TartHome: f.tartHome, SoftnetPath: f.softnet, ConfiguredStateRoots: []string{f.personal, f.root}}) {
@@ -982,6 +984,8 @@ type ownerFormatFunc func(context.Context, workspaceformat.FormatRequest) (works
 func (f ownerFormatFunc) FormatAndVerify(ctx context.Context, request workspaceformat.FormatRequest) (workspaceformat.FormatEvidence, error) {
 	return f(ctx, request)
 }
+
+func (ownerFormatFunc) SyntheticLegacyForTests() bool { return true }
 
 func TestOwnerPassesExactQualifiedWorkspaceLeaseToLauncher(t *testing.T) {
 	f := newFixture(t)

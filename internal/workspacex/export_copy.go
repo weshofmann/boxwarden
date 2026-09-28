@@ -255,8 +255,11 @@ func copyExportSnapshot(ctx context.Context, stateRoot string, request workspace
 		return ExportSnapshot{}, fmt.Errorf("export snapshot length changed: %v", err)
 	}
 	copyIdentity, err := diskIdentity(copyInfo)
-	if err != nil || copyIdentity == journal.Source {
-		return ExportSnapshot{}, fmt.Errorf("export snapshot is not a distinct inode: %v", err)
+	if err != nil {
+		return ExportSnapshot{}, err
+	}
+	if err := requireDistinctExportSnapshot(copyIdentity, source); err != nil {
+		return ExportSnapshot{}, err
 	}
 	pathInfo, err := dir.Lstat("snapshot.raw")
 	if err != nil || !os.SameFile(copyInfo, pathInfo) || privateRegular(pathInfo) != nil {
@@ -290,6 +293,21 @@ func copyExportSnapshot(ctx context.Context, stateRoot string, request workspace
 		return ExportSnapshot{}, err
 	}
 	return ExportSnapshot{Identity: copyIdentity, SHA256: hex.EncodeToString(copyHash.Sum(nil))}, nil
+}
+
+func requireDistinctExportSnapshot(snapshot DiskIdentity, source *os.File) error {
+	info, err := source.Stat()
+	if err != nil {
+		return err
+	}
+	current, err := diskIdentity(info)
+	if err != nil {
+		return err
+	}
+	if snapshot == current {
+		return fmt.Errorf("export snapshot is not distinct from pinned source inode")
+	}
+	return nil
 }
 
 func verifyExportSource(ctx context.Context, stateRoot string, request workspaceformat.Request, source *os.File, expected DiskIdentity, copiedSHA []byte) error {

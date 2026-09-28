@@ -28,6 +28,9 @@ func CreateManaged(ctx context.Context, stateRoot string, request workspaceforma
 	if formatter == nil {
 		return Record{}, fmt.Errorf("workspace formatter is required")
 	}
+	if err := workspaceformat.CheckCreationStorage(stateRoot, request, formatter); err != nil {
+		return Record{}, err
+	}
 	existing, found, err := loadManagedRecord(ctx, stateRoot, request)
 	if err != nil {
 		return Record{}, err
@@ -48,22 +51,18 @@ func CreateManaged(ctx context.Context, stateRoot string, request workspaceforma
 			return Record{}, fmt.Errorf("admit workspace formatter: %w", err)
 		}
 		if _, err := workspaceformat.Create(ctx, stateRoot, request, formatter); err != nil {
-			// Another invocation may have finished the exact journal while this
-			// one waited for the storage lock. Only a fresh verified admission
-			// permits publication; a failed journal remains immutable evidence.
-			file, _, admitted := workspaceformat.Admit(stateRoot, request)
-			if admitted != nil {
-				return Record{}, fmt.Errorf("format workspace: %w", err)
-			}
-			if closeErr := file.Close(); closeErr != nil {
-				return Record{}, closeErr
-			}
+			// Create settles an ambiguous Verified rename itself. A returned
+			// error never grants record publication in the same invocation.
+			return Record{}, fmt.Errorf("format workspace: %w", err)
 		}
 	}
 
 	held, err := AcquireStorageOperation(ctx, stateRoot, request.Domain)
 	if err != nil {
 		return Record{}, err
+	}
+	if err := workspaceformat.CheckCreationStorage(stateRoot, request, formatter); err != nil {
+		return Record{}, errors.Join(err, held.Release())
 	}
 	existing, err = LoadRecord(stateRoot, request.Domain, request.VolumeID)
 	if errors.Is(err, os.ErrNotExist) {

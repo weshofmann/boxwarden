@@ -19,6 +19,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/golden"
+	"github.com/weshofmann/boxwarden/internal/hostidentity"
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/recipe"
 	"github.com/weshofmann/boxwarden/internal/session"
@@ -34,6 +35,10 @@ func (f appFormatFunc) FormatAndVerify(ctx context.Context, request workspacefor
 	return f(ctx, request)
 }
 
+func (appFormatFunc) SyntheticLegacyForTests() bool { return true }
+
+func syntheticStorageCheck(hostidentity.StorageExpectation) error { return nil }
+
 func TestWorkspaceCreateRoutesExactAlphaRequest(t *testing.T) {
 	configPath, selected := writeV2DomainFixture(t, "alpha")
 	input := AlphaWorkspaceCreateInput{VolumeID: "00112233-4455-4677-8899-aabbccddeeff",
@@ -41,7 +46,7 @@ func TestWorkspaceCreateRoutesExactAlphaRequest(t *testing.T) {
 		BundlePath: "/private/formatter.app", SourceRoot: "/private/clean-source"}
 	called := 0
 	var output bytes.Buffer
-	options := Options{Output: &output, AlphaWorkspaceCreate: func(_ context.Context, actual config.Domain, received AlphaWorkspaceCreateInput) (workspacex.Record, error) {
+	options := Options{storageCheck: syntheticStorageCheck, Output: &output, AlphaWorkspaceCreate: func(_ context.Context, actual config.Domain, _ string, received AlphaWorkspaceCreateInput) (workspacex.Record, error) {
 		called++
 		if actual != selected || received != input {
 			t.Fatalf("create lost selected domain or request: %+v, %+v", actual, received)
@@ -70,10 +75,32 @@ func TestWorkspaceCreateRoutesExactAlphaRequest(t *testing.T) {
 	}
 }
 
+func TestWorkspaceMutationRequiresExternalStorageAnchorBeforeDispatch(t *testing.T) {
+	configPath, _ := writeV2DomainFixture(t, "alpha")
+	called := false
+	options := Options{Output: &bytes.Buffer{}, AlphaWorkspaceCreate: func(context.Context, config.Domain, string, AlphaWorkspaceCreateInput) (workspacex.Record, error) {
+		called = true
+		return workspacex.Record{}, nil
+	}}
+	args := []string{"--config", configPath, "--domain", "alpha", "workspace", "create", "--bundle", "/private/formatter.app", "--source-root", "/private/clean-source", "--filesystem-uuid", "10213243-5465-4768-899a-bbccddeeff00", "--size-mib", "64", "00112233-4455-4677-8899-aabbccddeeff"}
+	if err := Run(t.Context(), args, options); err == nil || called {
+		t.Fatalf("unanchored workspace creation reached mutator: called=%t, err=%v", called, err)
+	}
+}
+
+func TestSessionStartChecksWorkspaceAnchorBeforeStarter(t *testing.T) {
+	configPath, _ := writeV2DomainFixture(t, "alpha")
+	starter := &sessionStarterFake{}
+	options := Options{Output: &bytes.Buffer{}, SessionStarter: starter}
+	if err := Run(t.Context(), []string{"--config", configPath, "--domain", "alpha", "session", "start", "dev"}, options); err == nil || starter.name != "" {
+		t.Fatalf("unanchored start reached intent writer: name=%q, err=%v", starter.name, err)
+	}
+}
+
 func TestWorkspaceAttachAndDetachUseExactStoppedSessionAndQualifiedVolume(t *testing.T) {
 	configPath, selected := writeDomainFixture(t, "work")
 	observer := fake.New(backend.Observation{ObjectID: "golden-work-r1", Exists: true, State: backend.ObjectStopped})
-	options := Options{Observer: observer, Creator: observer, Output: &bytes.Buffer{}}
+	options := Options{storageCheck: syntheticStorageCheck, Observer: observer, Creator: observer, Output: &bytes.Buffer{}}
 	for _, suffix := range [][]string{{"golden", "register", "golden-work-r1"}, {"session", "create", "dev"}} {
 		if err := Run(t.Context(), append([]string{"--config", configPath, "--domain", "work"}, suffix...), options); err != nil {
 			t.Fatal(err)
@@ -155,7 +182,7 @@ func TestWorkspaceExportRoutesExactDomainSelectionAndInputs(t *testing.T) {
 		ISOPath: "/private/ubuntu.iso", GoBinary: "/private/bin/go"}
 	called := 0
 	var output bytes.Buffer
-	options := Options{Observer: observer, Output: &output,
+	options := Options{storageCheck: syntheticStorageCheck, Observer: observer, Output: &output,
 		AlphaExport: func(_ context.Context, actual config.Domain, received AlphaExportInput, actualObserver backend.Observer) (workspacex.ExportJournal, string, error) {
 			called++
 			if actual != selected || actualObserver != observer || !reflect.DeepEqual(received, input) {
@@ -198,7 +225,7 @@ func TestWorkspaceExportResumeRoutesExactJournalWithoutNewSelection(t *testing.T
 	called := 0
 	var output bytes.Buffer
 	observer := fake.New()
-	options := Options{Output: &output, BackendFactory: func(actual config.Config, domain config.Domain) (BackendDependencies, error) {
+	options := Options{storageCheck: syntheticStorageCheck, Output: &output, BackendFactory: func(actual config.Config, domain config.Domain) (BackendDependencies, error) {
 		if domain != selected {
 			return BackendDependencies{}, errors.New("wrong resume backend domain")
 		}
@@ -490,11 +517,11 @@ func TestSessionRebuildRoutesExactBaseAndJournalResume(t *testing.T) {
 		return session.Record{Domain: "work", Name: "dev", IntendedState: session.StateRunning, GoldenRevision: "golden-work-r2"}, nil
 	}
 	base := []string{"--config", configPath, "--domain", "work", "session", "rebuild"}
-	if err := Run(context.Background(), append(append([]string(nil), base...), "--base", "golden-work-r2", "dev"), Options{AlphaRebuild: rebuild, Output: &output}); err != nil || called != 1 || !strings.Contains(output.String(), "base: golden-work-r2\n") {
+	if err := Run(context.Background(), append(append([]string(nil), base...), "--base", "golden-work-r2", "dev"), Options{storageCheck: syntheticStorageCheck, AlphaRebuild: rebuild, Output: &output}); err != nil || called != 1 || !strings.Contains(output.String(), "base: golden-work-r2\n") {
 		t.Fatalf("explicit rebuild = %q, %v, calls=%d", output.String(), err, called)
 	}
 	output.Reset()
-	if err := Run(context.Background(), append(append([]string(nil), base...), "dev"), Options{AlphaRebuild: rebuild, Output: &output}); err != nil || called != 2 {
+	if err := Run(context.Background(), append(append([]string(nil), base...), "dev"), Options{storageCheck: syntheticStorageCheck, AlphaRebuild: rebuild, Output: &output}); err != nil || called != 2 {
 		t.Fatalf("journal resume routing = %q, %v, calls=%d", output.String(), err, called)
 	}
 	for _, args := range [][]string{
@@ -502,7 +529,7 @@ func TestSessionRebuildRoutesExactBaseAndJournalResume(t *testing.T) {
 		append(append([]string(nil), base...), "--base", "--all", "dev"),
 		append(append([]string(nil), base...), "--base", "golden-work-r2", "--recipe", "recipe.json", "dev"),
 	} {
-		if err := Run(context.Background(), args, Options{AlphaRebuild: rebuild, Output: &bytes.Buffer{}}); err == nil || called != 2 {
+		if err := Run(context.Background(), args, Options{storageCheck: syntheticStorageCheck, AlphaRebuild: rebuild, Output: &bytes.Buffer{}}); err == nil || called != 2 {
 			t.Fatalf("invalid rebuild reached mutation: %v, calls=%d", err, called)
 		}
 	}
@@ -523,7 +550,7 @@ func TestSessionDeleteRoutesOnlyExplicitDomainAndExactName(t *testing.T) {
 		return nil
 	}
 	args := []string{"--config", configPath, "--domain", "work", "session", "delete", "dev"}
-	if err := Run(context.Background(), args, Options{AlphaDelete: deleter, Output: &output}); err != nil || called != 1 ||
+	if err := Run(context.Background(), args, Options{storageCheck: syntheticStorageCheck, AlphaDelete: deleter, Output: &output}); err != nil || called != 1 ||
 		!strings.Contains(output.String(), "state: deleted\nworkspaces: retained\n") {
 		t.Fatalf("delete route = %q, %v, calls=%d", output.String(), err, called)
 	}
@@ -532,7 +559,7 @@ func TestSessionDeleteRoutesOnlyExplicitDomainAndExactName(t *testing.T) {
 		{"--config", configPath, "--domain", "work", "session", "delete", "../dev"},
 		{"--config", configPath, "--domain", "work", "session", "delete", "--all", "dev"},
 	} {
-		if err := Run(context.Background(), invalid, Options{AlphaDelete: deleter, Output: &bytes.Buffer{}}); err == nil || called != 1 {
+		if err := Run(context.Background(), invalid, Options{storageCheck: syntheticStorageCheck, AlphaDelete: deleter, Output: &bytes.Buffer{}}); err == nil || called != 1 {
 			t.Fatalf("invalid delete reached mutation: %v, calls=%d", err, called)
 		}
 	}
@@ -554,7 +581,7 @@ func TestSessionRebuildRecipeRequiresQualifiedPreparedReceipt(t *testing.T) {
 		}
 		return session.Record{Domain: "alpha", Name: "dev", IntendedState: session.StateRunning, GoldenRevision: prepared}, nil
 	}
-	if err := Run(context.Background(), args, Options{AlphaPrepare: func(_ context.Context, _ config.Config, got config.Domain, _ string, received AlphaPrepareInput) (AlphaPrepared, error) {
+	if err := Run(context.Background(), args, Options{storageCheck: syntheticStorageCheck, AlphaPrepare: func(_ context.Context, _ config.Config, got config.Domain, _ string, received AlphaPrepareInput) (AlphaPrepared, error) {
 		if got != selected || received != input {
 			t.Fatalf("wrong preparation input: %+v %+v", got, received)
 		}
@@ -564,12 +591,12 @@ func TestSessionRebuildRecipeRequiresQualifiedPreparedReceipt(t *testing.T) {
 	}
 	invalid := valid
 	invalid.Record.Qualification.Passed = false
-	if err := Run(context.Background(), args, Options{AlphaPrepare: func(context.Context, config.Config, config.Domain, string, AlphaPrepareInput) (AlphaPrepared, error) {
+	if err := Run(context.Background(), args, Options{storageCheck: syntheticStorageCheck, AlphaPrepare: func(context.Context, config.Config, config.Domain, string, AlphaPrepareInput) (AlphaPrepared, error) {
 		return AlphaPrepared{Base: invalid}, nil
 	}, AlphaRebuild: rebuild, Output: &bytes.Buffer{}}); err == nil || called != 1 {
 		t.Fatalf("invalid receipt reached rebuild: %v, calls=%d", err, called)
 	}
-	if err := Run(context.Background(), args, Options{AlphaPrepare: func(context.Context, config.Config, config.Domain, string, AlphaPrepareInput) (AlphaPrepared, error) {
+	if err := Run(context.Background(), args, Options{storageCheck: syntheticStorageCheck, AlphaPrepare: func(context.Context, config.Config, config.Domain, string, AlphaPrepareInput) (AlphaPrepared, error) {
 		return AlphaPrepared{Base: valid}, nil
 	}, AlphaRebuild: rebuild, Output: &bytes.Buffer{}}); err == nil || called != 1 {
 		t.Fatalf("missing intent digest reached rebuild: %v, calls=%d", err, called)
@@ -658,7 +685,7 @@ func TestSessionStartDispatchesOnlySelectedDomainStarter(t *testing.T) {
 	configPath, _ := writeDomainFixture(t, "work")
 	starter := &sessionStarterFake{record: session.Record{Domain: "work", Name: "dev", IntendedState: session.StateRunning, Readiness: session.ReadinessRecord{Status: session.ReadinessReady}}}
 	var output bytes.Buffer
-	if err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "session", "start", "dev"}, Options{SessionStarter: starter, Output: &output}); err != nil {
+	if err := Run(context.Background(), []string{"--config", configPath, "--domain", "work", "session", "start", "dev"}, Options{storageCheck: syntheticStorageCheck, SessionStarter: starter, Output: &output}); err != nil {
 		t.Fatalf("Run(session start) error = %v", err)
 	}
 	if starter.name != "dev" {
@@ -679,7 +706,7 @@ func TestSessionStarterFactoryReceivesAdmittedConfigDomainAndExactPath(t *testin
 	starter := &sessionStarterFake{record: session.Record{Domain: "work", Name: "dev", IntendedState: session.StateStarting, Readiness: session.ReadinessRecord{Status: session.ReadinessStarting}}}
 	var output bytes.Buffer
 	calls := 0
-	err = Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "start", "dev"}, Options{
+	err = Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "start", "dev"}, Options{storageCheck: syntheticStorageCheck,
 		ConfigPath: "/unused/config.json", Output: &output,
 		SessionStarterFactory: func(got config.Config, domain config.Domain, exactPath string) (SessionStarter, error) {
 			calls++
@@ -724,7 +751,7 @@ func TestSessionStarterFactoryFailureAndNilStarterAreErrors(t *testing.T) {
 	path, _ := writeDomainFixture(t, "work")
 	want := errors.New("construction denied")
 	for _, factoryErr := range []error{want, nil} {
-		err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "start", "dev"}, Options{Output: &bytes.Buffer{}, SessionStarterFactory: func(config.Config, config.Domain, string) (SessionStarter, error) { return nil, factoryErr }})
+		err := Run(context.Background(), []string{"--config", path, "--domain", "work", "session", "start", "dev"}, Options{storageCheck: syntheticStorageCheck, Output: &bytes.Buffer{}, SessionStarterFactory: func(config.Config, config.Domain, string) (SessionStarter, error) { return nil, factoryErr }})
 		if err == nil || (factoryErr != nil && !errors.Is(err, want)) {
 			t.Fatalf("factory failure = %v", err)
 		}
@@ -740,7 +767,7 @@ func TestAlphaRecipeStartReportsAutomaticCompletionAfterManagementReady(t *testi
 	starter := &sessionStarterFake{record: record}
 	var output bytes.Buffer
 	called := false
-	err := Run(t.Context(), []string{"--config", path, "--domain", "alpha", "session", "start", "dev"}, Options{
+	err := Run(t.Context(), []string{"--config", path, "--domain", "alpha", "session", "start", "dev"}, Options{storageCheck: syntheticStorageCheck,
 		SessionStarter: starter, Output: &output,
 		AlphaAutomatic: func(_ context.Context, domain config.Domain, started session.Record) ([]session.ActionAttempt, error) {
 			called = true
@@ -766,7 +793,7 @@ func TestAlphaRecipeStartReportsUncertainAttemptWithoutClaimingSetupComplete(t *
 		ActionID: "configure-agent", ActionPhase: "once", AttemptID: "00112233-4455-4677-8899-aabbccddeeff", State: session.ActionAttemptIndeterminate}
 	var output bytes.Buffer
 	want := errors.New("guest reply lost")
-	err := Run(t.Context(), []string{"--config", path, "--domain", "alpha", "session", "start", "dev"}, Options{
+	err := Run(t.Context(), []string{"--config", path, "--domain", "alpha", "session", "start", "dev"}, Options{storageCheck: syntheticStorageCheck,
 		SessionStarter: &sessionStarterFake{record: record}, Output: &output,
 		AlphaAutomatic: func(context.Context, config.Domain, session.Record) ([]session.ActionAttempt, error) {
 			return []session.ActionAttempt{attempt}, want
@@ -785,7 +812,7 @@ func TestAlphaRecipeStartDoesNotRunActionsBeforeManagementReady(t *testing.T) {
 		RecipeIntentDigest: strings.Repeat("a", 64), StartGeneration: "00000000-0000-4000-8000-000000000003",
 		Readiness: session.ReadinessRecord{Status: session.ReadinessStarting}}
 	var output bytes.Buffer
-	err := Run(t.Context(), []string{"--config", path, "--domain", "alpha", "session", "start", "dev"}, Options{
+	err := Run(t.Context(), []string{"--config", path, "--domain", "alpha", "session", "start", "dev"}, Options{storageCheck: syntheticStorageCheck,
 		SessionStarter: &sessionStarterFake{record: record}, Output: &output,
 		AlphaAutomatic: func(context.Context, config.Domain, session.Record) ([]session.ActionAttempt, error) {
 			t.Fatal("automatic runner called before management READY")
@@ -1850,7 +1877,7 @@ func TestWorkspaceExportFailureReportsRecoveryTransaction(t *testing.T) {
 	configPath, _ := writeV2DomainFixture(t, "alpha")
 	const id = "10213243-5465-4768-899a-bbccddeeff00"
 	var output bytes.Buffer
-	options := Options{Observer: fake.New(), Output: &output, AlphaExport: func(context.Context, config.Domain, AlphaExportInput, backend.Observer) (workspacex.ExportJournal, string, error) {
+	options := Options{storageCheck: syntheticStorageCheck, Observer: fake.New(), Output: &output, AlphaExport: func(context.Context, config.Domain, AlphaExportInput, backend.Observer) (workspacex.ExportJournal, string, error) {
 		return workspacex.ExportJournal{ID: id, Domain: "alpha", Phase: workspacex.ExportCopying}, "", errors.New("injected copy failure")
 	}}
 	args := []string{"--config", configPath, "--domain", "alpha", "workspace", "export", "--destination", "/private/returned", "--select", "project/report.txt", "--source-root", "/private/source", "--iso", "/private/ubuntu.iso", "--go", "/private/bin/go", "00112233-4455-4677-8899-aabbccddeeff"}
@@ -1867,7 +1894,7 @@ func TestWorkspaceExportAbortedResumeNeverClaimsPublication(t *testing.T) {
 	configPath, selected := writeV2DomainFixture(t, "alpha")
 	const id = "10213243-5465-4768-899a-bbccddeeff00"
 	var output bytes.Buffer
-	options := Options{Observer: fake.New(), Output: &output, AlphaExportResume: func(_ context.Context, domain config.Domain, in AlphaExportResumeInput, observer backend.Observer) (workspacex.ExportJournal, string, error) {
+	options := Options{storageCheck: syntheticStorageCheck, Observer: fake.New(), Output: &output, AlphaExportResume: func(_ context.Context, domain config.Domain, in AlphaExportResumeInput, observer backend.Observer) (workspacex.ExportJournal, string, error) {
 		if domain != selected || observer == nil {
 			t.Fatal("resume lost exact backend binding")
 		}
