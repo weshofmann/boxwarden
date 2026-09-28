@@ -235,8 +235,19 @@ tests passed locally. Exact staged r6 executable SHA-256:
 `e6d6894b793a6e3636e7438756a48fbdba35bf9885c4e08db7ad7bef8c118c99`;
 archive SHA-256:
 `899773a1dfec8d66c9a42f68ab105c2912b751cd4da3c2883ca2a83db5e355f0`.
+Hosted deterministic CI for the r6 source checkpoint `e8dc856` passed
+([run 36376589149](https://github.com/weshofmann/boxwarden/actions/runs/36376589149)).
 The build is retained privately. Source policy now recognizes that coherent
 r6 tuple, while the installed host still admits r5. Real r6 display behavior
-and clipboard buttons remain unverified. Next: review and prepare exact r5-to-r6
-admission, stop the disposable r5 probe, then test the r6 viewer with a fresh
-workspace-free public session.
+and clipboard buttons remain unverified.
+
+The r5 public stop reached its deadline with the exact backend still running.
+A bounded Tart stop targeted only that disposable object; the subsequent
+public stop reconciled the session to stopped without deleting its disk. The
+signed r6 executable is staged side by side. Private exact r5 backups, r6
+candidate config/manifest, and a clean source-bound CLI are prepared. The
+attended r5-to-r6 helper passed synthetic atomic write/refusal/rollback checks
+and a full read-only preflight of exact bytes, native mount UUIDs, signature,
+healthy doctor, and all-stopped Tart inventory. An unprivileged apply refused
+without writing intent. Installed host admission remains r5; the attended
+administrator step and real r6 desktop/button verification are next.
