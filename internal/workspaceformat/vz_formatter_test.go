@@ -84,7 +84,7 @@ func TestVZFormatterRunsExactManagedRequestAndReapsBeforeReturning(t *testing.T)
 	}
 	bundle, pins := vzFixtureBundle(t, root)
 	var commands []execx.Command
-	formatter := VZFormatter{StateRoot: root, Domain: "work", BundlePath: bundle, pins: pins, sourceCommit: fixtureSourceCommit}
+	formatter := VZFormatter{StateRoot: root, Domain: "work", BundlePath: bundle, pins: pins, sourceCommit: fixtureSourceCommit, syntheticLegacyForTests: true}
 	formatter.runner = vzRunnerFunc(func(_ context.Context, command execx.Command) (execx.Result, error) {
 		commands = append(commands, command)
 		switch command.Path {
@@ -144,7 +144,7 @@ func TestVZFormatterRejectsModifiedBundleBeforeRunner(t *testing.T) {
 func TestVZFormatterRejectsRunnerThatDoesNotProveVMStopped(t *testing.T) {
 	root := testRoot(t)
 	bundle, pins := vzFixtureBundle(t, root)
-	formatter := VZFormatter{StateRoot: root, Domain: "work", BundlePath: bundle, pins: pins, sourceCommit: fixtureSourceCommit}
+	formatter := VZFormatter{StateRoot: root, Domain: "work", BundlePath: bundle, pins: pins, sourceCommit: fixtureSourceCommit, syntheticLegacyForTests: true}
 	formatter.runner = vzRunnerFunc(func(_ context.Context, command execx.Command) (execx.Result, error) {
 		switch command.Path {
 		case "/usr/bin/codesign":

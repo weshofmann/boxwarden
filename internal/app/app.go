@@ -17,6 +17,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/clipboardx"
 	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/golden"
+	"github.com/weshofmann/boxwarden/internal/hostidentity"
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/lifecycle"
 	"github.com/weshofmann/boxwarden/internal/recipe"
@@ -113,6 +114,9 @@ type Options struct {
 	AlphaAction              AlphaActionFunc
 	AlphaAutomatic           AlphaAutomaticFunc
 	Output                   io.Writer
+	// storageCheck is an identity source for synthetic command tests. Production
+	// uses the pinned APFS check when this is nil.
+	storageCheck func(hostidentity.StorageExpectation) error
 }
 
 // DefaultConfigPath returns the conventional trusted-host configuration path.
@@ -148,6 +152,22 @@ func Run(ctx context.Context, args []string, options Options) error {
 		selectedDomain, err = loaded.Domain(command.domain)
 		if err != nil {
 			return err
+		}
+	}
+	if command.requiresWorkspaceStorage() {
+		check := options.storageCheck
+		if check == nil {
+			check = hostidentity.CheckStorage
+		}
+		var expected hostidentity.StorageExpectation
+		if selectedDomain.WorkspaceStorage != nil || options.storageCheck == nil {
+			expected, err = selectedDomain.StorageExpectation(command.configPath)
+			if err != nil {
+				return err
+			}
+		}
+		if err := check(expected); err != nil {
+			return fmt.Errorf("admit workspace backing storage: %w", err)
 		}
 	}
 	if command.requiresBackend() {
@@ -442,7 +462,7 @@ func Run(ctx context.Context, args []string, options Options) error {
 		if options.AlphaWorkspaceCreate == nil {
 			return errors.New("alpha workspace creator is required")
 		}
-		record, err := options.AlphaWorkspaceCreate(ctx, selectedDomain, command.alphaWorkspaceCreate)
+		record, err := options.AlphaWorkspaceCreate(ctx, selectedDomain, command.configPath, command.alphaWorkspaceCreate)
 		if err != nil {
 			return fmt.Errorf("create workspace: %w", err)
 		}
@@ -579,6 +599,18 @@ type parsedCommand struct {
 
 func (c parsedCommand) requiresDomain() bool {
 	return c.kind != commandInit && c.kind != commandDoctor
+}
+
+func (c parsedCommand) requiresWorkspaceStorage() bool {
+	switch c.kind {
+	case commandSessionStart, commandSessionRebuild, commandSessionDelete,
+		commandWorkspaceCreate, commandWorkspaceAttach, commandWorkspaceDetach,
+		commandWorkspaceExport, commandWorkspaceExportResume,
+		commandWorkspaceImport, commandWorkspaceImportVerify:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c parsedCommand) requiresBackend() bool {

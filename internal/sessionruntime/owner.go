@@ -16,6 +16,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/execx"
 	"github.com/weshofmann/boxwarden/internal/guestproto"
+	"github.com/weshofmann/boxwarden/internal/hostidentity"
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/serialx"
 	"github.com/weshofmann/boxwarden/internal/session"
@@ -63,6 +64,7 @@ type importClient interface {
 }
 
 type dependencies struct {
+	storageCheck   func(hostidentity.StorageExpectation) error
 	host           session.RuntimeChecker
 	ca             session.CAValidator
 	observer       func(string, string) backend.Observer
@@ -124,8 +126,9 @@ type Owner struct {
 // carries no admitted objects: Start reads the configuration and record again.
 func NewOwner() *Owner {
 	return &Owner{deps: dependencies{
-		host: hostx.NewSystemDoctor(),
-		ca:   sshx.NewCAStore(sshx.CAStoreOptions{Runner: sshx.NewExecRunner(), Identity: sshx.OSIdentity{}}),
+		storageCheck: hostidentity.CheckStorage,
+		host:         hostx.NewSystemDoctor(),
+		ca:           sshx.NewCAStore(sshx.CAStoreOptions{Runner: sshx.NewExecRunner(), Identity: sshx.OSIdentity{}}),
 		observer: func(path, home string) backend.Observer {
 			return tart.NewQualifiedObserver(execx.OSRunner{MaxOutputBytes: 1 << 20}, path, home)
 		},
@@ -174,6 +177,17 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) (re
 	selected, err := loaded.Domain(request.Binding.Domain)
 	if err != nil {
 		return err
+	}
+	expectedStorage, err := selected.StorageExpectation(request.HostConfigPath)
+	if err != nil {
+		return err
+	}
+	storageCheck := o.deps.storageCheck
+	if storageCheck == nil {
+		storageCheck = hostidentity.CheckStorage
+	}
+	if err := storageCheck(expectedStorage); err != nil {
+		return fmt.Errorf("admit workspace backing storage before detached launch: %w", err)
 	}
 	record, err := session.LoadRecord(selected.StateRoot, string(selected.ID), request.SessionRecordName)
 	if err != nil {

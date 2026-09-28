@@ -20,6 +20,8 @@ func (f formatFixture) FormatAndVerify(ctx context.Context, request workspacefor
 	return f(ctx, request)
 }
 
+func (formatFixture) SyntheticLegacyForTests() bool { return true }
+
 // The fixture fills only the host-readable fields of a clean ext4 header.
 // Real formatter qualification still requires a fresh Linux guest and e2fsck.
 func writeFixtureExt4Header(path, uuid string) error {

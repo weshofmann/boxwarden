@@ -4,15 +4,37 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/weshofmann/boxwarden/internal/domain"
+	"github.com/weshofmann/boxwarden/internal/hostidentity"
 	"github.com/weshofmann/boxwarden/internal/workspaceformat"
 )
 
 type managedFormatter struct {
 	checks, formats     int
 	checkErr, formatErr error
+}
+
+func (*managedFormatter) SyntheticLegacyForTests() bool { return true }
+
+type productionShapeFormatter struct{ managedFormatter }
+
+func (productionShapeFormatter) SyntheticLegacyForTests() bool { return false }
+
+func TestCreateManagedRejectsMissingBackingBeforeLockCreation(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "absent-mount", "state")
+	request := managedRequest()
+	request.Storage = &hostidentity.StorageExpectation{ConfigPath: filepath.Join(t.TempDir(), "config.json"), StateRoot: root,
+		MountPoint: filepath.Dir(root), VolumeUUID: "00112233-4455-6677-8899-aabbccddeeff"}
+	formatter := &productionShapeFormatter{}
+	if _, err := CreateManaged(t.Context(), root, request, formatter); err == nil {
+		t.Fatal("missing backing storage accepted")
+	}
+	if _, err := os.Lstat(root); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("prelock check created state under absent backing mount: %v", err)
+	}
 }
 
 func (f *managedFormatter) Check(context.Context) error {

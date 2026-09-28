@@ -134,11 +134,15 @@ func publicOptions(output io.Writer) app.Options {
 			}
 			return session.NewActionService(selected, controller).RunAutomaticActions(ctx, started)
 		},
-		AlphaWorkspaceCreate: func(ctx context.Context, selected config.Domain, input app.AlphaWorkspaceCreateInput) (workspacex.Record, error) {
+		AlphaWorkspaceCreate: func(ctx context.Context, selected config.Domain, configPath string, input app.AlphaWorkspaceCreateInput) (workspacex.Record, error) {
+			expected, err := selected.StorageExpectation(configPath)
+			if err != nil {
+				return workspacex.Record{}, err
+			}
 			formatter := workspaceformat.VZFormatter{StateRoot: selected.StateRoot, Domain: selected.ID,
 				BundlePath: input.BundlePath, SourceRoot: input.SourceRoot}
 			return workspacex.CreateManaged(ctx, selected.StateRoot, workspaceformat.Request{Domain: selected.ID,
-				VolumeID: input.VolumeID, FilesystemUUID: input.FilesystemUUID, SizeBytes: input.SizeBytes}, formatter)
+				VolumeID: input.VolumeID, FilesystemUUID: input.FilesystemUUID, SizeBytes: input.SizeBytes, Storage: &expected}, formatter)
 		},
 		StatusSnapshotFactory: func(loaded config.Config, selected config.Domain) (app.StatusSnapshotReader, error) {
 			configured, err := loaded.Domain(string(selected.ID))

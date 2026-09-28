@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weshofmann/boxwarden/internal/app"
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/backend/tart"
 	"github.com/weshofmann/boxwarden/internal/config"
+	"github.com/weshofmann/boxwarden/internal/hostidentity"
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/sshx"
@@ -31,23 +31,36 @@ func TestMain(m *testing.M) {
 	if len(os.Args) == 3 && os.Args[1] == "test-initiate" {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		err := app.Run(ctx, []string{"--config", os.Args[2], "--domain", "work", "session", "start", "dev"}, app.Options{
-			Output: os.Stdout,
-			SessionStarterFactory: func(loaded config.Config, selected config.Domain, path string) (app.SessionStarter, error) {
-				deps, err := startDependencies(loaded, selected, path)
-				if err != nil {
-					return nil, err
-				}
-				deps.Host, deps.CA = processHost(), processCA()
-				deps.Observer = observerFunc(func(_ context.Context, object string) (backend.Observation, error) {
-					return backend.Observation{ObjectID: object, Exists: true, State: backend.ObjectStopped}, nil
-				})
-				return session.NewStartService(selected, deps), nil
-			},
-		})
-		processExit(err)
+		processExit(runProcessInitiator(ctx, os.Args[2]))
 	}
 	os.Exit(m.Run())
+}
+
+// The subprocess exercises detached ownership with synthetic host/runtime
+// dependencies. Public app storage admission is tested in app itself.
+func runProcessInitiator(ctx context.Context, path string) error {
+	loaded, err := config.Load(path)
+	if err != nil {
+		return err
+	}
+	selected, err := loaded.Domain("work")
+	if err != nil {
+		return err
+	}
+	deps, err := startDependencies(loaded, selected, path)
+	if err != nil {
+		return err
+	}
+	deps.Host, deps.CA = processHost(), processCA()
+	deps.Observer = observerFunc(func(_ context.Context, object string) (backend.Observation, error) {
+		return backend.Observation{ObjectID: object, Exists: true, State: backend.ObjectStopped}, nil
+	})
+	record, err := session.NewStartService(selected, deps).Start(ctx, "dev")
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(os.Stdout, "domain: %s\nsession: %s\nstate: %s\nreadiness: %s\n", record.Domain, record.Name, record.IntendedState, record.Readiness.Status)
+	return err
 }
 
 func processExit(err error) {
@@ -83,6 +96,7 @@ func runProcessOwner(path string) error {
 	handle := &fakeHandle{trace: trace, done: make(chan struct{}), waiting: make(chan struct{})}
 	var running atomic.Bool
 	owner := NewOwner()
+	owner.deps.storageCheck = func(hostidentity.StorageExpectation) error { return nil }
 	owner.deps.host, owner.deps.ca = processHost(), processCA()
 	owner.deps.observer = func(string, string) backend.Observer {
 		return observerFunc(func(_ context.Context, object string) (backend.Observation, error) {
