@@ -1,0 +1,1329 @@
+//! Boxwarden N1 packet policy. Pure std: no vmnet, privilege, or ambient network lookup.
+use std::net::Ipv4Addr;
+
+const MAX_FLOWS: usize = 64;
+const SYN_TIMEOUT: u64 = 30;
+const IDLE_TIMEOUT: u64 = 3600;
+const CLOSE_TIMEOUT: u64 = 30;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Decision {
+    Allow,
+    Deny,
+    Fallback,
+}
+
+#[derive(Clone, Copy)]
+struct Lease {
+    address: Ipv4Addr,
+    expires: u64,
+    gateway_dns: bool,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    Syn,
+    SynAck,
+    Established,
+}
+struct Flow {
+    host: Ipv4Addr,
+    host_port: u16,
+    guest: Ipv4Addr,
+    syn_seq: u32,
+    guest_seq: u32,
+    stage: Stage,
+    last: u64,
+    handshake_at: u64,
+    closing_at: Option<u64>,
+}
+
+pub struct Policy {
+    guest_mac: [u8; 6],
+    gateway: Ipv4Addr,
+    lease: Option<Lease>,
+    flows: Vec<Flow>,
+}
+impl Policy {
+    pub fn new(guest_mac: [u8; 6], gateway: Ipv4Addr) -> Self {
+        Self {
+            guest_mac,
+            gateway,
+            lease: None,
+            flows: Vec::new(),
+        }
+    }
+    fn refresh(&mut self, locals: &[Ipv4Addr], now: u64) {
+        if self.lease.is_some_and(|l| now >= l.expires) {
+            self.lease = None;
+            self.flows.clear();
+        }
+        self.flows.retain(|f| {
+            locals.contains(&f.host)
+                && if let Some(start) = f.closing_at {
+                    now.saturating_sub(start) < CLOSE_TIMEOUT
+                } else {
+                    if f.stage == Stage::Established {
+                        now.saturating_sub(f.last) < IDLE_TIMEOUT
+                    } else {
+                        now.saturating_sub(f.handshake_at) < SYN_TIMEOUT
+                    }
+                }
+        });
+    }
+    pub fn forward_with_refresh<E, R, F, W>(
+        &mut self,
+        frame: &[u8],
+        now: u64,
+        refresh: R,
+        fallback: F,
+        write: W,
+    ) -> Result<bool, E>
+    where
+        R: FnOnce() -> Result<(Vec<Ipv4Addr>, Vec<Ipv4Addr>), E>,
+        F: FnOnce(&[u8]) -> bool,
+        W: FnOnce(&[u8]) -> Result<(), E>,
+    {
+        let (locals, broadcasts) = refresh()?;
+        let allowed = match self.guest_with_broadcasts(frame, &locals, &broadcasts, now) {
+            Decision::Allow => true,
+            Decision::Deny => false,
+            Decision::Fallback => fallback(frame),
+        };
+        if allowed {
+            write(frame)?;
+        }
+        Ok(allowed)
+    }
+    #[cfg(test)]
+    pub fn guest(&mut self, frame: &[u8], locals: &[Ipv4Addr], now: u64) -> Decision {
+        self.guest_with_broadcasts(frame, locals, &[], now)
+    }
+    pub fn guest_with_broadcasts(
+        &mut self,
+        frame: &[u8],
+        locals: &[Ipv4Addr],
+        broadcasts: &[Ipv4Addr],
+        now: u64,
+    ) -> Decision {
+        self.refresh(locals, now);
+        let Some(eth) = Ethernet::parse(frame) else {
+            return Decision::Deny;
+        };
+        if eth.src != self.guest_mac {
+            return Decision::Deny;
+        }
+        match eth.kind {
+            0x0806 => {
+                return if self.guest_arp(eth.payload, locals) {
+                    Decision::Allow
+                } else {
+                    Decision::Deny
+                };
+            }
+            0x0800 => {}
+            _ => return Decision::Deny,
+        }
+        let Some(ip) = Ipv4::parse(eth.payload) else {
+            return Decision::Deny;
+        };
+        let Some(transport) = Transport::parse(&ip) else {
+            return Decision::Deny;
+        };
+        if let Transport::Udp {
+            src: 68,
+            dst: 67,
+            data,
+        } = transport
+        {
+            if (ip.dst == Ipv4Addr::BROADCAST || ip.dst == self.gateway)
+                && self.dhcp_request(&ip, data)
+            {
+                return Decision::Allow;
+            }
+        }
+        let Some(lease) = self.lease else {
+            return Decision::Deny;
+        };
+        if ip.src != lease.address {
+            return Decision::Deny;
+        };
+        if ip.dst.is_multicast() || ip.dst == Ipv4Addr::BROADCAST || broadcasts.contains(&ip.dst) {
+            return Decision::Deny;
+        };
+        if ip.dst == self.gateway && lease.gateway_dns {
+            if matches!(
+                transport,
+                Transport::Udp { dst: 53, .. } | Transport::Tcp { dst: 53, .. }
+            ) {
+                return Decision::Allow;
+            }
+        }
+        if let Transport::Tcp {
+            src: 22,
+            dst,
+            seq,
+            ack,
+            flags,
+            ..
+        } = transport
+        {
+            if let Some(i) = self
+                .flows
+                .iter()
+                .position(|f| f.host == ip.dst && f.host_port == dst && f.guest == ip.src)
+            {
+                let f = &mut self.flows[i];
+                if flags & 0x04 != 0 {
+                    self.flows.remove(i);
+                    return Decision::Allow;
+                }
+                let valid = match f.stage {
+                    Stage::Syn => flags & 0x12 == 0x12 && ack == f.syn_seq.wrapping_add(1),
+                    Stage::SynAck => {
+                        flags & 0x12 == 0x12
+                            && ack == f.syn_seq.wrapping_add(1)
+                            && seq == f.guest_seq
+                    }
+                    Stage::Established => {
+                        (flags & 0x02 == 0 && flags & 0x10 != 0)
+                            || (flags == 0x12
+                                && seq == f.guest_seq
+                                && ack == f.syn_seq.wrapping_add(1)
+                                && now.saturating_sub(f.handshake_at) < SYN_TIMEOUT)
+                    }
+                };
+                if valid {
+                    if f.stage == Stage::Syn {
+                        f.stage = Stage::SynAck;
+                        f.guest_seq = seq;
+                    }
+                    f.last = now;
+                    if flags & 0x01 != 0 {
+                        f.closing_at.get_or_insert(now);
+                    }
+                    return Decision::Allow;
+                }
+            }
+        }
+        if ip.dst == self.gateway || locals.contains(&ip.dst) {
+            return Decision::Deny;
+        }
+        Decision::Fallback
+    }
+    pub fn host(&mut self, frame: &[u8], locals: &[Ipv4Addr], now: u64) -> bool {
+        self.refresh(locals, now);
+        let Some(eth) = Ethernet::parse(frame) else {
+            return false;
+        };
+        if eth.kind == 0x0806 {
+            return true;
+        }
+        if eth.kind != 0x0800 {
+            return false;
+        }
+        let Some(ip) = Ipv4::parse(eth.payload) else {
+            return true;
+        };
+        let Some(transport) = Transport::parse(&ip) else {
+            return true;
+        };
+        if (eth.dst == self.guest_mac || eth.dst == [255; 6]) && ip.src == self.gateway {
+            if let Transport::Udp {
+                src: 67,
+                dst: 68,
+                data,
+            } = transport
+            {
+                self.dhcp_reply(data, now);
+            }
+        }
+        if eth.dst != self.guest_mac {
+            return true;
+        }
+        let Some(lease) = self.lease else { return true };
+        if ip.dst != lease.address || !locals.contains(&ip.src) {
+            return true;
+        }
+        if let Transport::Tcp {
+            src,
+            dst: 22,
+            seq,
+            ack,
+            flags,
+            ..
+        } = transport
+        {
+            if flags & 0x04 != 0 {
+                self.flows
+                    .retain(|f| !(f.host == ip.src && f.host_port == src && f.guest == ip.dst));
+            } else if flags & 0x12 == 0x02 && ack == 0 {
+                if let Some(f) = self
+                    .flows
+                    .iter_mut()
+                    .find(|f| f.host == ip.src && f.host_port == src && f.guest == ip.dst)
+                {
+                    f.syn_seq = seq;
+                    f.stage = Stage::Syn;
+                    f.last = now;
+                    f.handshake_at = now;
+                    f.closing_at = None;
+                } else if self.flows.len() < MAX_FLOWS {
+                    self.flows.push(Flow {
+                        host: ip.src,
+                        host_port: src,
+                        guest: ip.dst,
+                        syn_seq: seq,
+                        guest_seq: 0,
+                        stage: Stage::Syn,
+                        last: now,
+                        handshake_at: now,
+                        closing_at: None,
+                    });
+                }
+            } else if let Some(f) = self
+                .flows
+                .iter_mut()
+                .find(|f| f.host == ip.src && f.host_port == src && f.guest == ip.dst)
+            {
+                if f.stage == Stage::SynAck
+                    && flags & 0x10 != 0
+                    && ack == f.guest_seq.wrapping_add(1)
+                {
+                    f.stage = Stage::Established;
+                    f.last = now;
+                } else if f.stage == Stage::Established && flags & 0x10 != 0 {
+                    f.last = now;
+                    if flags & 0x01 != 0 {
+                        f.closing_at.get_or_insert(now);
+                    }
+                }
+            }
+        }
+        true
+    }
+    fn guest_arp(&self, p: &[u8], locals: &[Ipv4Addr]) -> bool {
+        if (p.len() != 28 && p.len() != 46)
+            || p[0..6] != [0, 1, 8, 0, 6, 4]
+            || !matches!(p[7], 1 | 2)
+            || p[6] != 0
+            || p[8..14] != self.guest_mac
+        {
+            return false;
+        }
+        let src = Ipv4Addr::new(p[14], p[15], p[16], p[17]);
+        let dst = Ipv4Addr::new(p[24], p[25], p[26], p[27]);
+        let valid_src = match self.lease {
+            Some(l) => src == l.address,
+            None => src.is_unspecified(),
+        };
+        valid_src && (dst == self.gateway || self.lease.is_some() && locals.contains(&dst))
+    }
+    fn dhcp_request(&self, ip: &Ipv4<'_>, data: &[u8]) -> bool {
+        if data.len() < 240
+            || data[0] != 1
+            || data[1] != 1
+            || data[2] != 6
+            || data[28..34] != self.guest_mac
+            || data[236..240] != [99, 130, 83, 99]
+        {
+            return false;
+        }
+        let Some(opts) = DhcpOptions::parse(&data[240..]) else {
+            return false;
+        };
+        if !matches!(opts.kind, Some(1) | Some(3)) {
+            return false;
+        }
+        if ip.src.is_unspecified() {
+            return ip.dst == Ipv4Addr::BROADCAST && opts.kind == Some(1)
+                || opts.kind == Some(3) && ip.dst == Ipv4Addr::BROADCAST;
+        }
+        self.lease.is_some_and(|l| l.address == ip.src)
+            && ip.dst == self.gateway
+            && opts.kind == Some(3)
+            && data[12..16] == ip.src.octets()
+    }
+    fn dhcp_reply(&mut self, data: &[u8], now: u64) {
+        if data.len() < 240
+            || data[0] != 2
+            || data[1] != 1
+            || data[2] != 6
+            || data[28..34] != self.guest_mac
+            || data[236..240] != [99, 130, 83, 99]
+        {
+            return;
+        }
+        let Some(opts) = DhcpOptions::parse(&data[240..]) else {
+            return;
+        };
+        if opts.server != Some(self.gateway) {
+            return;
+        }
+        if opts.kind == Some(6) {
+            self.lease = None;
+            self.flows.clear();
+            return;
+        }
+        if opts.kind != Some(5) {
+            return;
+        }
+        let addr = Ipv4Addr::new(data[16], data[17], data[18], data[19]);
+        if addr.is_unspecified() || addr.is_multicast() || addr == Ipv4Addr::BROADCAST {
+            return;
+        }
+        let Some(duration) = opts.lease else { return };
+        if duration == 0 {
+            return;
+        }
+        if self
+            .lease
+            .is_none_or(|l| l.address != addr || now >= l.expires)
+        {
+            self.flows.clear();
+        }
+        self.lease = Some(Lease {
+            address: addr,
+            expires: now.saturating_add(duration as u64).saturating_sub(1),
+            gateway_dns: opts.gateway_dns(self.gateway),
+        });
+    }
+}
+struct Ethernet<'a> {
+    src: [u8; 6],
+    dst: [u8; 6],
+    kind: u16,
+    payload: &'a [u8],
+}
+impl<'a> Ethernet<'a> {
+    fn parse(f: &'a [u8]) -> Option<Self> {
+        if f.len() < 14 {
+            return None;
+        }
+        Some(Self {
+            dst: f[..6].try_into().ok()?,
+            src: f[6..12].try_into().ok()?,
+            kind: u16::from_be_bytes(f[12..14].try_into().ok()?),
+            payload: &f[14..],
+        })
+    }
+}
+fn checksum(p: &[u8]) -> u16 {
+    let mut n = 0u32;
+    for c in p.chunks(2) {
+        n += u16::from_be_bytes([c[0], *c.get(1).unwrap_or(&0)]) as u32;
+    }
+    while n >> 16 != 0 {
+        n = (n & 65535) + (n >> 16);
+    }
+    !(n as u16)
+}
+struct Ipv4<'a> {
+    src: Ipv4Addr,
+    dst: Ipv4Addr,
+    proto: u8,
+    payload: &'a [u8],
+}
+impl<'a> Ipv4<'a> {
+    fn parse(p: &'a [u8]) -> Option<Self> {
+        if p.len() < 20 || p[0] != 0x45 || checksum(&p[..20]) != 0 || p[6] & 0xbf != 0 || p[7] != 0
+        {
+            return None;
+        }
+        let len = u16::from_be_bytes([p[2], p[3]]) as usize;
+        if len < 20 || len > p.len() || (len != p.len() && p.len() != 46) {
+            return None;
+        }
+        Some(Self {
+            src: Ipv4Addr::new(p[12], p[13], p[14], p[15]),
+            dst: Ipv4Addr::new(p[16], p[17], p[18], p[19]),
+            proto: p[9],
+            payload: &p[20..len],
+        })
+    }
+}
+#[derive(Clone, Copy)]
+enum Transport<'a> {
+    Udp {
+        src: u16,
+        dst: u16,
+        data: &'a [u8],
+    },
+    Tcp {
+        src: u16,
+        dst: u16,
+        seq: u32,
+        ack: u32,
+        flags: u8,
+    },
+    Other,
+}
+impl<'a> Transport<'a> {
+    fn parse(ip: &Ipv4<'a>) -> Option<Self> {
+        let p = ip.payload;
+        match ip.proto {
+            17 => {
+                if p.len() < 8 || u16::from_be_bytes([p[4], p[5]]) as usize != p.len() {
+                    return None;
+                }
+                if p[6] != 0 || p[7] != 0 {
+                    if transport_checksum(ip, p) != 0 {
+                        return None;
+                    }
+                }
+                Some(Self::Udp {
+                    src: u16::from_be_bytes([p[0], p[1]]),
+                    dst: u16::from_be_bytes([p[2], p[3]]),
+                    data: &p[8..],
+                })
+            }
+            6 => {
+                if p.len() < 20
+                    || p[12] >> 4 < 5
+                    || (p[12] >> 4) as usize * 4 > p.len()
+                    || p[12] & 0x0f != 0
+                    || transport_checksum(ip, p) != 0
+                {
+                    return None;
+                }
+                Some(Self::Tcp {
+                    src: u16::from_be_bytes([p[0], p[1]]),
+                    dst: u16::from_be_bytes([p[2], p[3]]),
+                    seq: u32::from_be_bytes(p[4..8].try_into().ok()?),
+                    ack: u32::from_be_bytes(p[8..12].try_into().ok()?),
+                    flags: p[13],
+                })
+            }
+            1 => {
+                if p.len() < 4 || checksum(p) != 0 {
+                    return None;
+                }
+                Some(Self::Other)
+            }
+            _ => None,
+        }
+    }
+}
+fn transport_checksum(ip: &Ipv4<'_>, p: &[u8]) -> u16 {
+    let mut pseudo = Vec::with_capacity(12 + p.len());
+    pseudo.extend(ip.src.octets());
+    pseudo.extend(ip.dst.octets());
+    pseudo.extend([0, ip.proto]);
+    pseudo.extend((p.len() as u16).to_be_bytes());
+    pseudo.extend(p);
+    checksum(&pseudo)
+}
+#[derive(Default)]
+struct DhcpOptions {
+    kind: Option<u8>,
+    server: Option<Ipv4Addr>,
+    lease: Option<u32>,
+    dns: Vec<Ipv4Addr>,
+}
+impl DhcpOptions {
+    fn parse(p: &[u8]) -> Option<Self> {
+        let mut o = Self::default();
+        let mut i = 0;
+        let mut end = false;
+        while i < p.len() {
+            let tag = p[i];
+            i += 1;
+            if tag == 0 {
+                continue;
+            }
+            if tag == 255 {
+                end = true;
+                break;
+            }
+            if i >= p.len() {
+                return None;
+            }
+            let len = p[i] as usize;
+            i += 1;
+            if i + len > p.len() {
+                return None;
+            }
+            let v = &p[i..i + len];
+            match tag {
+                53 if len == 1 => o.kind = Some(v[0]),
+                54 if len == 4 => o.server = Some(Ipv4Addr::new(v[0], v[1], v[2], v[3])),
+                51 if len == 4 => o.lease = Some(u32::from_be_bytes(v.try_into().ok()?)),
+                6 if len > 0 && len % 4 == 0 => {
+                    for a in v.chunks(4) {
+                        o.dns.push(Ipv4Addr::new(a[0], a[1], a[2], a[3]))
+                    }
+                }
+                53 | 54 | 51 | 6 => return None,
+                _ => {}
+            }
+            i += len;
+        }
+        if !end {
+            return None;
+        }
+        Some(o)
+    }
+    fn gateway_dns(&self, gateway: Ipv4Addr) -> bool {
+        self.dns.contains(&gateway)
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const MAC: [u8; 6] = [2, 0, 0, 0, 0, 1];
+    const GW_MAC: [u8; 6] = [2, 0, 0, 0, 0, 2];
+    const GUEST: Ipv4Addr = Ipv4Addr::new(192, 168, 64, 2);
+    const GW: Ipv4Addr = Ipv4Addr::new(192, 168, 64, 1);
+    const HOST: Ipv4Addr = Ipv4Addr::new(198, 51, 100, 9);
+    fn sum(bytes: &[u8]) -> u16 {
+        let mut n = 0u32;
+        for c in bytes.chunks(2) {
+            n += u16::from_be_bytes([c[0], *c.get(1).unwrap_or(&0)]) as u32;
+        }
+        while n >> 16 != 0 {
+            n = (n & 65535) + (n >> 16);
+        }
+        !(n as u16)
+    }
+    fn pkt(
+        src: Ipv4Addr,
+        dst: Ipv4Addr,
+        proto: u8,
+        payload: &[u8],
+        flags: u16,
+        mac: [u8; 6],
+    ) -> Vec<u8> {
+        let mut f = vec![0; 34 + payload.len()];
+        f[..6].copy_from_slice(if mac == GW_MAC { &MAC } else { &GW_MAC });
+        f[6..12].copy_from_slice(&mac);
+        f[12..14].copy_from_slice(&[8, 0]);
+        f[14] = 0x45;
+        f[16..18].copy_from_slice(&((20 + payload.len()) as u16).to_be_bytes());
+        f[20..22].copy_from_slice(&flags.to_be_bytes());
+        f[22] = 64;
+        f[23] = proto;
+        f[26..30].copy_from_slice(&src.octets());
+        f[30..34].copy_from_slice(&dst.octets());
+        f[34..].copy_from_slice(payload);
+        let c = sum(&f[14..34]);
+        f[24..26].copy_from_slice(&c.to_be_bytes());
+        f
+    }
+    fn transport_checksum(src: Ipv4Addr, dst: Ipv4Addr, proto: u8, payload: &[u8]) -> u16 {
+        let mut pseudo = Vec::new();
+        pseudo.extend(src.octets());
+        pseudo.extend(dst.octets());
+        pseudo.extend([0, proto]);
+        pseudo.extend((payload.len() as u16).to_be_bytes());
+        pseudo.extend(payload);
+        sum(&pseudo)
+    }
+    fn udp(src: Ipv4Addr, dst: Ipv4Addr, sp: u16, dp: u16, data: &[u8]) -> Vec<u8> {
+        let mut p = vec![0; 8 + data.len()];
+        p[0..2].copy_from_slice(&sp.to_be_bytes());
+        p[2..4].copy_from_slice(&dp.to_be_bytes());
+        let len = p.len() as u16;
+        p[4..6].copy_from_slice(&len.to_be_bytes());
+        p[8..].copy_from_slice(data);
+        let c = transport_checksum(src, dst, 17, &p);
+        p[6..8].copy_from_slice(&c.to_be_bytes());
+        pkt(src, dst, 17, &p, 0, MAC)
+    }
+    fn tcp(
+        src: Ipv4Addr,
+        dst: Ipv4Addr,
+        sp: u16,
+        dp: u16,
+        seq: u32,
+        ack: u32,
+        flags: u8,
+        mac: [u8; 6],
+    ) -> Vec<u8> {
+        let mut p = vec![0; 20];
+        p[0..2].copy_from_slice(&sp.to_be_bytes());
+        p[2..4].copy_from_slice(&dp.to_be_bytes());
+        p[4..8].copy_from_slice(&seq.to_be_bytes());
+        p[8..12].copy_from_slice(&ack.to_be_bytes());
+        p[12] = 0x50;
+        p[13] = flags;
+        p[14..16].copy_from_slice(&4096u16.to_be_bytes());
+        let c = transport_checksum(src, dst, 6, &p);
+        p[16..18].copy_from_slice(&c.to_be_bytes());
+        pkt(src, dst, 6, &p, 0, mac)
+    }
+    fn dhcp_reply(addr: Ipv4Addr, dns: bool, lease: u32) -> Vec<u8> {
+        let mut d = vec![0; 240];
+        d[0] = 2;
+        d[1] = 1;
+        d[2] = 6;
+        d[16..20].copy_from_slice(&addr.octets());
+        d[28..34].copy_from_slice(&MAC);
+        d[236..240].copy_from_slice(&[99, 130, 83, 99]);
+        d.extend([53, 1, 5, 51, 4]);
+        d.extend(lease.to_be_bytes());
+        d.extend([54, 4]);
+        d.extend(GW.octets());
+        if dns {
+            d.extend([6, 4]);
+            d.extend(GW.octets());
+        }
+        d.push(255);
+        let mut f = udp(GW, Ipv4Addr::BROADCAST, 67, 68, &d);
+        f[..6].copy_from_slice(&MAC);
+        f[6..12].copy_from_slice(&GW_MAC);
+        f
+    }
+    fn repair_ip(f: &mut [u8]) {
+        f[24..26].copy_from_slice(&[0, 0]);
+        let c = sum(&f[14..34]);
+        f[24..26].copy_from_slice(&c.to_be_bytes());
+    }
+    fn repair_udp(f: &mut [u8]) {
+        f[40..42].copy_from_slice(&[0, 0]);
+        let src = Ipv4Addr::new(f[26], f[27], f[28], f[29]);
+        let dst = Ipv4Addr::new(f[30], f[31], f[32], f[33]);
+        let c = transport_checksum(src, dst, 17, &f[34..]);
+        f[40..42].copy_from_slice(&c.to_be_bytes());
+    }
+    fn lease(p: &mut Policy, now: u64) {
+        assert!(p.host(&dhcp_reply(GUEST, true, 600), &[GW, HOST], now));
+    }
+    #[test]
+    fn dhcp_and_dns_require_trusted_lease() {
+        let mut p = Policy::new(MAC, GW);
+        let discover = udp(Ipv4Addr::UNSPECIFIED, Ipv4Addr::BROADCAST, 68, 67, &{
+            let mut d = vec![0; 240];
+            d[0] = 1;
+            d[1] = 1;
+            d[2] = 6;
+            d[28..34].copy_from_slice(&MAC);
+            d[236..240].copy_from_slice(&[99, 130, 83, 99]);
+            d.extend([53, 1, 1, 255]);
+            d
+        });
+        assert_eq!(p.guest(&discover, &[GW, HOST], 1), Decision::Allow);
+        let dns = udp(GUEST, GW, 50000, 53, &[1, 2]);
+        assert_eq!(p.guest(&dns, &[GW, HOST], 1), Decision::Deny);
+        lease(&mut p, 2);
+        assert_eq!(p.guest(&dns, &[GW, HOST], 3), Decision::Allow);
+        assert_eq!(
+            p.guest(&udp(GUEST, GW, 50000, 54, &[1]), &[GW, HOST], 3),
+            Decision::Deny
+        );
+        assert_eq!(
+            p.guest(&udp(GUEST, GW, 50000, 53, &[1]), &[GW, HOST], 700),
+            Decision::Deny
+        );
+    }
+    #[test]
+    fn only_host_syn_creates_exact_ssh_flow() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        let synack = tcp(GUEST, HOST, 22, 40000, 101, 201, 0x12, MAC);
+        assert_eq!(p.guest(&synack, &[GW, HOST], 2), Decision::Deny);
+        assert!(p.host(
+            &tcp(HOST, GUEST, 40000, 22, 200, 0, 0x02, GW_MAC),
+            &[GW, HOST],
+            2
+        ));
+        assert_eq!(p.guest(&synack, &[GW, HOST], 3), Decision::Allow);
+        assert_eq!(
+            p.guest(
+                &tcp(GUEST, HOST, 22, 40001, 101, 201, 0x12, MAC),
+                &[GW, HOST],
+                3
+            ),
+            Decision::Deny
+        );
+        assert_eq!(
+            p.guest(
+                &tcp(GUEST, HOST, 22, 40000, 102, 201, 0x10, MAC),
+                &[GW, HOST],
+                3
+            ),
+            Decision::Deny
+        );
+        assert_ne!(
+            p.guest(&tcp(GUEST, HOST, 22, 40000, 102, 201, 0x10, MAC), &[GW], 4),
+            Decision::Allow
+        );
+    }
+    #[test]
+    fn malformed_and_special_destinations_never_fallback() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        for dst in [Ipv4Addr::new(224, 0, 0, 1), Ipv4Addr::BROADCAST, GW, HOST] {
+            assert_eq!(
+                p.guest(&udp(GUEST, dst, 50000, 123, &[1]), &[GW, HOST], 2),
+                Decision::Deny
+            );
+        }
+        let good = udp(GUEST, Ipv4Addr::new(8, 8, 8, 8), 50000, 443, &[1]);
+        assert_eq!(p.guest(&good, &[GW, HOST], 2), Decision::Fallback);
+        let mut bad = good.clone();
+        bad[14] = 0x46;
+        bad.splice(34..34, [1, 1, 1, 1]);
+        let ip_len = (bad.len() - 14) as u16;
+        bad[16..18].copy_from_slice(&ip_len.to_be_bytes());
+        bad[24..26].copy_from_slice(&[0, 0]);
+        let ip_checksum = sum(&bad[14..38]);
+        bad[24..26].copy_from_slice(&ip_checksum.to_be_bytes());
+        assert_eq!(p.guest(&bad, &[GW, HOST], 2), Decision::Deny);
+        let mut bad = good.clone();
+        bad[20] = 0x20;
+        repair_ip(&mut bad);
+        assert_eq!(p.guest(&bad, &[GW, HOST], 2), Decision::Deny);
+        let mut bad = good.clone();
+        bad[24] ^= 1;
+        assert_eq!(p.guest(&bad, &[GW, HOST], 2), Decision::Deny);
+        let mut bad = good.clone();
+        bad[40] ^= 1;
+        assert_eq!(p.guest(&bad, &[GW, HOST], 2), Decision::Deny);
+        let mut bad = good.clone();
+        bad[6] = 3;
+        assert_eq!(p.guest(&bad, &[GW, HOST], 2), Decision::Deny);
+        let mut bad = good.clone();
+        bad[21] = 1; // IPv4 fragment offset low byte, not Ethernet source MAC.
+        repair_ip(&mut bad);
+        assert_eq!(&bad[6..12], &MAC);
+        assert_eq!(sum(&bad[14..34]), 0);
+        assert_eq!(p.guest(&bad, &[GW, HOST], 2), Decision::Deny);
+        let mut bad = good.clone();
+        bad[12..14].copy_from_slice(&[0x81, 0]);
+        assert_eq!(p.guest(&bad, &[GW, HOST], 2), Decision::Deny);
+        let mut bad = good.clone();
+        bad[12..14].copy_from_slice(&[0x86, 0xdd]);
+        assert_eq!(p.guest(&bad, &[GW, HOST], 2), Decision::Deny);
+    }
+    #[test]
+    fn renewal_preserves_flow_but_expiry_revokes() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        let syn = tcp(HOST, GUEST, 40000, 22, 200, 0, 0x02, GW_MAC);
+        let synack = tcp(GUEST, HOST, 22, 40000, 101, 201, 0x12, MAC);
+        assert!(p.host(&syn, &[GW, HOST], 2));
+        assert_eq!(p.guest(&synack, &[GW, HOST], 3), Decision::Allow);
+        assert!(p.host(
+            &tcp(HOST, GUEST, 40000, 22, 201, 102, 0x10, GW_MAC),
+            &[GW, HOST],
+            4
+        ));
+        lease(&mut p, 5);
+        assert_eq!(
+            p.guest(
+                &tcp(GUEST, HOST, 22, 40000, 102, 201, 0x10, MAC),
+                &[GW, HOST],
+                6
+            ),
+            Decision::Allow
+        );
+        assert_eq!(
+            p.guest(
+                &tcp(GUEST, HOST, 22, 40000, 102, 201, 0x10, MAC),
+                &[GW, HOST],
+                700
+            ),
+            Decision::Deny
+        );
+    }
+    #[test]
+    fn foreign_dhcp_identity_and_spoofed_mac_denied() {
+        let mut p = Policy::new(MAC, GW);
+        let mut reply = dhcp_reply(GUEST, true, 600);
+        reply[34 + 8 + 28] = 99;
+        repair_udp(&mut reply); // DHCP client identity
+        assert!(p.host(&reply, &[GW, HOST], 1));
+        assert_eq!(
+            p.guest(&udp(GUEST, GW, 50000, 53, &[1]), &[GW, HOST], 2),
+            Decision::Deny
+        );
+        lease(&mut p, 3);
+        let mut spoof = udp(GUEST, Ipv4Addr::new(8, 8, 8, 8), 50000, 443, &[1]);
+        spoof[6] = 99;
+        assert_eq!(p.guest(&spoof, &[GW, HOST], 4), Decision::Deny);
+    }
+    #[test]
+    fn tcp_dns_and_gateway_ceiling() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        assert_eq!(
+            p.guest(&tcp(GUEST, GW, 51000, 53, 1, 0, 0x02, MAC), &[GW, HOST], 2),
+            Decision::Allow
+        );
+        assert_eq!(
+            p.guest(&tcp(GUEST, GW, 51000, 54, 1, 0, 0x02, MAC), &[GW, HOST], 2),
+            Decision::Deny
+        );
+        assert_eq!(
+            p.guest(
+                &tcp(GUEST, HOST, 51000, 53, 1, 0, 0x02, MAC),
+                &[GW, HOST],
+                2
+            ),
+            Decision::Deny
+        );
+        let mut no_dns = Policy::new(MAC, GW);
+        assert!(no_dns.host(&dhcp_reply(GUEST, false, 600), &[GW, HOST], 1));
+        assert_eq!(
+            no_dns.guest(&tcp(GUEST, GW, 51000, 53, 1, 0, 0x02, MAC), &[GW, HOST], 2),
+            Decision::Deny
+        );
+    }
+    #[test]
+    fn lease_address_change_revokes_management() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        assert!(p.host(
+            &tcp(HOST, GUEST, 40000, 22, 10, 0, 0x02, GW_MAC),
+            &[GW, HOST],
+            2
+        ));
+        let mut other = dhcp_reply(Ipv4Addr::new(192, 168, 64, 3), true, 600);
+        assert!(p.host(&other, &[GW, HOST], 3));
+        assert_eq!(
+            p.guest(
+                &tcp(GUEST, HOST, 22, 40000, 10, 11, 0x12, MAC),
+                &[GW, HOST],
+                4
+            ),
+            Decision::Deny
+        );
+        other = dhcp_reply(Ipv4Addr::new(192, 168, 64, 4), true, 600);
+        other[34 + 8 + 28] = 42; // foreign BOOTP chaddr
+        repair_udp(&mut other);
+        assert!(p.host(&other, &[GW, HOST], 4));
+        assert_eq!(
+            p.guest(
+                &udp(Ipv4Addr::new(192, 168, 64, 3), GW, 5000, 53, &[1]),
+                &[GW, HOST],
+                5
+            ),
+            Decision::Allow
+        );
+        assert_eq!(
+            p.guest(
+                &udp(Ipv4Addr::new(192, 168, 64, 4), GW, 5000, 53, &[1]),
+                &[GW, HOST],
+                5
+            ),
+            Decision::Deny
+        );
+    }
+    #[test]
+    fn capacity_fails_closed() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        for port in 40000..40000 + MAX_FLOWS as u16 {
+            assert!(p.host(
+                &tcp(HOST, GUEST, port, 22, 10, 0, 0x02, GW_MAC),
+                &[GW, HOST],
+                2
+            ));
+        }
+        assert!(p.host(
+            &tcp(HOST, GUEST, 49000, 22, 10, 0, 0x02, GW_MAC),
+            &[GW, HOST],
+            2
+        ));
+        assert_eq!(
+            p.guest(
+                &tcp(GUEST, HOST, 22, 49000, 10, 11, 0x12, MAC),
+                &[GW, HOST],
+                3
+            ),
+            Decision::Deny
+        );
+    }
+    #[test]
+    fn arp_only_resolves_gateway_or_current_local() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        let mut arp = vec![0u8; 42];
+        arp[..6].copy_from_slice(&GW_MAC);
+        arp[6..12].copy_from_slice(&MAC);
+        arp[12..14].copy_from_slice(&[8, 6]);
+        arp[14..22].copy_from_slice(&[0, 1, 8, 0, 6, 4, 0, 1]);
+        arp[22..28].copy_from_slice(&MAC);
+        arp[28..32].copy_from_slice(&GUEST.octets());
+        arp[38..42].copy_from_slice(&GW.octets());
+        assert_eq!(p.guest(&arp, &[GW, HOST], 2), Decision::Allow);
+        arp[38..42].copy_from_slice(&HOST.octets());
+        assert_eq!(p.guest(&arp, &[GW, HOST], 2), Decision::Allow);
+        arp[38..42].copy_from_slice(&Ipv4Addr::new(8, 8, 8, 8).octets());
+        assert_eq!(p.guest(&arp, &[GW, HOST], 2), Decision::Deny);
+    }
+    #[test]
+    fn bounded_arbitrary_frames_never_panic_or_authorize_host() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        let mut x = 0x12345678u32;
+        for len in 0..1500 {
+            let mut f = vec![0u8; len];
+            for b in &mut f {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                *b = x as u8;
+            }
+            assert_ne!(p.guest(&f, &[GW, HOST], 2), Decision::Allow);
+            p.host(&f, &[GW, HOST], 2);
+        }
+    }
+
+    #[test]
+    fn minimum_ethernet_padding_preserves_tcp_syn() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        let mut syn = tcp(HOST, GUEST, 40000, 22, 10, 0, 0x02, GW_MAC);
+        syn.resize(60, 0);
+        assert!(p.host(&syn, &[GW, HOST], 2));
+        let mut synack = tcp(GUEST, HOST, 22, 40000, 20, 11, 0x12, MAC);
+        synack.resize(60, 0);
+        assert_eq!(p.guest(&synack, &[GW, HOST], 3), Decision::Allow);
+    }
+
+    #[test]
+    fn current_host_interface_directed_broadcast_is_denied() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        let b = Ipv4Addr::new(203, 0, 113, 255);
+        let f = udp(GUEST, b, 50000, 443, &[1]);
+        assert_eq!(
+            p.guest_with_broadcasts(&f, &[GW, HOST], &[b], 2),
+            Decision::Deny
+        );
+    }
+
+    #[test]
+    fn forwarding_hook_drops_before_write_and_fails_on_metadata_error() {
+        use std::cell::Cell;
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        let wrote = Cell::new(false);
+        let deny = udp(GUEST, HOST, 50000, 8080, &[1]);
+        assert_eq!(
+            p.forward_with_refresh(
+                &deny,
+                2,
+                || Ok::<_, &str>((vec![GW, HOST], vec![])),
+                |_| true,
+                |_| {
+                    wrote.set(true);
+                    Ok(())
+                }
+            ),
+            Ok(false)
+        );
+        assert!(!wrote.get());
+        let public = udp(GUEST, Ipv4Addr::new(8, 8, 8, 8), 50000, 443, &[1]);
+        assert_eq!(
+            p.forward_with_refresh(
+                &public,
+                2,
+                || Err::<(Vec<Ipv4Addr>, Vec<Ipv4Addr>), _>("getifaddrs failed"),
+                |_| true,
+                |_| {
+                    wrote.set(true);
+                    Ok(())
+                }
+            ),
+            Err("getifaddrs failed")
+        );
+        assert!(!wrote.get());
+        assert_eq!(
+            p.forward_with_refresh(
+                &public,
+                2,
+                || Ok::<_, &str>((vec![GW, HOST], vec![])),
+                |_| true,
+                |_| {
+                    wrote.set(true);
+                    Ok(())
+                }
+            ),
+            Ok(true)
+        );
+        assert!(wrote.get());
+    }
+    #[test]
+    fn unknown_protocol_reset_and_dns_lease_change() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        let unknown = pkt(GUEST, Ipv4Addr::new(8, 8, 8, 8), 99, &[1], 0, MAC);
+        assert_eq!(p.guest(&unknown, &[GW, HOST], 2), Decision::Deny);
+        assert!(p.host(
+            &tcp(HOST, GUEST, 40000, 22, 10, 0, 0x02, GW_MAC),
+            &[GW, HOST],
+            2
+        ));
+        assert_eq!(
+            p.guest(
+                &tcp(GUEST, HOST, 22, 40000, 20, 11, 0x12, MAC),
+                &[GW, HOST],
+                3
+            ),
+            Decision::Allow
+        );
+        assert!(p.host(
+            &tcp(HOST, GUEST, 40000, 22, 11, 21, 0x10, GW_MAC),
+            &[GW, HOST],
+            3
+        ));
+        assert_eq!(
+            p.guest(
+                &tcp(GUEST, HOST, 22, 40000, 21, 11, 0x14, MAC),
+                &[GW, HOST],
+                4
+            ),
+            Decision::Allow
+        );
+        assert_eq!(
+            p.guest(
+                &tcp(GUEST, HOST, 22, 40000, 22, 11, 0x10, MAC),
+                &[GW, HOST],
+                5
+            ),
+            Decision::Deny
+        );
+        assert!(p.host(&dhcp_reply(GUEST, false, 600), &[GW, HOST], 6));
+        assert_eq!(
+            p.guest(&udp(GUEST, GW, 50000, 53, &[1]), &[GW, HOST], 7),
+            Decision::Deny
+        );
+    }
+
+    #[test]
+    fn ethernet_minimum_padding_allows_valid_arp() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        let mut arp = vec![0u8; 60];
+        arp[..6].copy_from_slice(&GW_MAC);
+        arp[6..12].copy_from_slice(&MAC);
+        arp[12..14].copy_from_slice(&[8, 6]);
+        arp[14..22].copy_from_slice(&[0, 1, 8, 0, 6, 4, 0, 1]);
+        arp[22..28].copy_from_slice(&MAC);
+        arp[28..32].copy_from_slice(&GUEST.octets());
+        arp[38..42].copy_from_slice(&GW.octets());
+        assert_eq!(p.guest(&arp, &[GW, HOST], 2), Decision::Allow);
+    }
+    #[test]
+    fn leased_source_cannot_be_spoofed() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        let other = Ipv4Addr::new(192, 168, 64, 3);
+        let packet = udp(other, Ipv4Addr::new(8, 8, 8, 8), 50000, 443, &[1]);
+        assert_eq!(p.guest(&packet, &[GW, HOST], 2), Decision::Deny);
+    }
+
+    #[test]
+    fn reserved_ipv4_flag_is_denied_with_valid_checksum() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        let mut f = udp(GUEST, Ipv4Addr::new(8, 8, 8, 8), 50000, 443, &[1]);
+        f[20] = 0x80;
+        repair_ip(&mut f);
+        assert_eq!(p.guest(&f, &[GW, HOST], 2), Decision::Deny);
+    }
+    #[test]
+    fn ipv4_udp_zero_checksum_is_valid_for_gateway_dns() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        let mut dns = udp(GUEST, GW, 50000, 53, &[1]);
+        dns[40..42].copy_from_slice(&[0, 0]);
+        assert_eq!(p.guest(&dns, &[GW, HOST], 2), Decision::Allow);
+    }
+    #[test]
+    fn ssh_fin_exchange_keeps_final_ack_with_bounded_close() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        assert!(p.host(
+            &tcp(HOST, GUEST, 40000, 22, 10, 0, 0x02, GW_MAC),
+            &[GW, HOST],
+            2
+        ));
+        assert_eq!(
+            p.guest(
+                &tcp(GUEST, HOST, 22, 40000, 20, 11, 0x12, MAC),
+                &[GW, HOST],
+                3
+            ),
+            Decision::Allow
+        );
+        assert!(p.host(
+            &tcp(HOST, GUEST, 40000, 22, 11, 21, 0x10, GW_MAC),
+            &[GW, HOST],
+            4
+        ));
+        assert_eq!(
+            p.guest(
+                &tcp(GUEST, HOST, 22, 40000, 21, 11, 0x11, MAC),
+                &[GW, HOST],
+                5
+            ),
+            Decision::Allow
+        );
+        assert!(p.host(
+            &tcp(HOST, GUEST, 40000, 22, 11, 22, 0x11, GW_MAC),
+            &[GW, HOST],
+            6
+        ));
+        assert_eq!(
+            p.guest(
+                &tcp(GUEST, HOST, 22, 40000, 22, 12, 0x10, MAC),
+                &[GW, HOST],
+                7
+            ),
+            Decision::Allow
+        );
+        assert_eq!(
+            p.guest(
+                &tcp(GUEST, HOST, 22, 40000, 22, 12, 0x02, MAC),
+                &[GW, HOST],
+                8
+            ),
+            Decision::Deny
+        );
+        assert_eq!(
+            p.guest(
+                &tcp(GUEST, HOST, 22, 40000, 22, 12, 0x10, MAC),
+                &[GW, HOST],
+                36
+            ),
+            Decision::Deny
+        );
+    }
+    #[test]
+    fn ssh_synack_retransmits_after_lost_host_ack() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        let syn = tcp(HOST, GUEST, 40000, 22, 10, 0, 0x02, GW_MAC);
+        let synack = tcp(GUEST, HOST, 22, 40000, 20, 11, 0x12, MAC);
+        assert!(p.host(&syn, &[GW, HOST], 2));
+        assert_eq!(p.guest(&synack, &[GW, HOST], 3), Decision::Allow);
+        assert!(p.host(
+            &tcp(HOST, GUEST, 40000, 22, 11, 21, 0x10, GW_MAC),
+            &[GW, HOST],
+            4
+        ));
+        assert_eq!(p.guest(&synack, &[GW, HOST], 5), Decision::Allow);
+        assert_eq!(p.guest(&synack, &[GW, HOST], 33), Decision::Deny);
+    }
+    #[test]
+    fn half_open_handshake_expires_without_guest_retransmit_extension() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        let synack = tcp(GUEST, HOST, 22, 40000, 20, 11, 0x12, MAC);
+        assert!(p.host(
+            &tcp(HOST, GUEST, 40000, 22, 10, 0, 0x02, GW_MAC),
+            &[GW, HOST],
+            2
+        ));
+        for now in [3, 10, 20, 30] {
+            assert_eq!(p.guest(&synack, &[GW, HOST], now), Decision::Allow);
+        }
+        assert_eq!(p.guest(&synack, &[GW, HOST], 32), Decision::Deny);
+    }
+    #[test]
+    fn fragment_variants_never_create_outbound_or_inbound_authority() {
+        for flags in [0x2000u16, 0x2001, 0x0001, 0x001f, 0x8000] {
+            let mut p = Policy::new(MAC, GW);
+            lease(&mut p, 1);
+            let mut outgoing = udp(GUEST, GW, 40000, 53, &[1, 2]);
+            outgoing[20..22].copy_from_slice(&flags.to_be_bytes());
+            repair_ip(&mut outgoing);
+            assert_eq!(p.guest(&outgoing, &[GW, HOST], 2), Decision::Deny);
+            let mut syn = tcp(HOST, GUEST, 40000, 22, 10, 0, 0x02, GW_MAC);
+            syn[20..22].copy_from_slice(&flags.to_be_bytes());
+            repair_ip(&mut syn);
+            p.host(&syn, &[GW, HOST], 3);
+            assert_eq!(
+                p.guest(
+                    &tcp(GUEST, HOST, 22, 40000, 20, 11, 0x12, MAC),
+                    &[GW, HOST],
+                    4
+                ),
+                Decision::Deny
+            );
+        }
+    }
+    #[test]
+    fn unicast_dhcp_renewal_requires_live_lease_and_ciaddr() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        let mut data = vec![0; 240];
+        data[0] = 1;
+        data[1] = 1;
+        data[2] = 6;
+        data[12..16].copy_from_slice(&GUEST.octets());
+        data[28..34].copy_from_slice(&MAC);
+        data[236..240].copy_from_slice(&[99, 130, 83, 99]);
+        data.extend([53, 1, 3, 255]);
+        assert_eq!(
+            p.guest(&udp(GUEST, GW, 68, 67, &data), &[GW, HOST], 2),
+            Decision::Allow
+        );
+        data[12] ^= 1;
+        assert_eq!(
+            p.guest(&udp(GUEST, GW, 68, 67, &data), &[GW, HOST], 2),
+            Decision::Deny
+        );
+        data[12] ^= 1;
+        assert_eq!(
+            p.guest(&udp(GUEST, GW, 68, 67, &data), &[GW, HOST], 700),
+            Decision::Deny
+        );
+    }
+    #[test]
+    fn bounded_valid_seed_mutations_never_escape_local_ceiling() {
+        let mut p = Policy::new(MAC, GW);
+        lease(&mut p, 1);
+        let seed = udp(GUEST, HOST, 50000, 443, &[1, 2, 3, 4]);
+        for position in 14..seed.len() {
+            if (30..34).contains(&position) {
+                continue;
+            } // retain exact host destination
+            for bit in [1u8, 0x80] {
+                let mut packet = seed.clone();
+                packet[position] ^= bit;
+                // Recompute checksums where possible so parsing reaches deeper policy stages.
+                repair_ip(&mut packet);
+                repair_udp(&mut packet);
+                assert_eq!(p.guest(&packet, &[GW, HOST], 2), Decision::Deny);
+            }
+        }
+    }
+    #[cfg(feature = "pinned_fallback_test")]
+    #[test]
+    fn pinned_ip_network_fallback_preserves_public_only_egress() {
+        for (dst, expected) in [
+            (Ipv4Addr::new(10, 1, 2, 3), false),
+            (Ipv4Addr::new(172, 16, 1, 1), false),
+            (Ipv4Addr::new(192, 168, 1, 1), false),
+            (Ipv4Addr::new(169, 254, 1, 1), false),
+            (Ipv4Addr::new(127, 0, 0, 2), false),
+            (Ipv4Addr::new(100, 64, 0, 1), false),
+            (Ipv4Addr::new(8, 8, 8, 8), true),
+        ] {
+            let mut p = Policy::new(MAC, GW);
+            lease(&mut p, 1);
+            let frame = udp(GUEST, dst, 40000, 443, &[1]);
+            let wrote = std::cell::Cell::new(false);
+            let result = p.forward_with_refresh(
+                &frame,
+                2,
+                || Ok::<_, ()>((vec![GW, HOST], vec![])),
+                |bytes| {
+                    ip_network::IpNetwork::from(Ipv4Addr::new(
+                        bytes[30], bytes[31], bytes[32], bytes[33],
+                    ))
+                    .is_global()
+                },
+                |_| {
+                    wrote.set(true);
+                    Ok(())
+                },
+            );
+            assert_eq!(result, Ok(expected));
+            assert_eq!(wrote.get(), expected);
+        }
+    }
+}

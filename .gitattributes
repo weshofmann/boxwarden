@@ -1,0 +1,3 @@
+# Unified diff context encodes blank source lines as one significant space.
+# Check the extracted Rust source separately; retain other whitespace checks.
+tools/n1-softnet/softnet.patch whitespace=-blank-at-eol

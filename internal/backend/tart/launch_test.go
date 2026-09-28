@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
+	"github.com/weshofmann/boxwarden/internal/hostx"
 )
 
 func TestLauncherUsesClosedQualifiedTartInvocation(t *testing.T) {
@@ -33,6 +34,9 @@ func TestLauncherUsesClosedQualifiedTartInvocation(t *testing.T) {
 		t.Fatal("Start() returned no owned process handle")
 	}
 	wantArgs := []string{"run", "--net-softnet", "--no-audio", "--no-clipboard", "--serial-path", "/dev/ttys004", "boxwarden-work-dev"}
+	if hostx.SoftnetBlockTarget != "" {
+		wantArgs = append(wantArgs[:2], append([]string{"--net-softnet-block=@boxwarden-host-containment"}, wantArgs[2:]...)...)
+	}
 	if got := process.spec.path; got != "/opt/qualified/tart" {
 		t.Fatalf("process path = %q, want configured absolute Tart path", got)
 	}

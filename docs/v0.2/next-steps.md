@@ -22,7 +22,7 @@ must not be restarted merely because older plans still contain pending gates.
 | --- | --- | --- |
 | C1 | Controlled clipboard transfer | Merged PR #13 provides a standalone menu-bar utility and CLI; Wes observed explicit transfer in both directions and Quit preserving the running sandbox. Provider login remains untested. |
 | R1 | Workspace clean-remount identity recovery | A retained workspace survives a clean backing-filesystem remount without reformatting or blind rebinding; missing/wrong storage refuses. Physical reconnect and corruption remain outside this claim. |
-| N1 | Guest-to-host vmnet-gateway exposure | Review and test a host-enforced approach while preserving required DNS/network compatibility; retain the current explicit limitation until demonstrated. |
+| N1 | Guest-to-host vmnet-gateway exposure | A [reviewed candidate](n1/design.md) is in development, with [separate deterministic and attended gates](n1/matrix.md); retain the current explicit limitation until demonstrated. |
 | A1 | Remaining interruption and user acceptance | Targeted snapshot-copy and other untested interruption/recovery cases, controlled native reboot/reconnect, authenticated provider use, and subjective GUI usability; evidence must name the tested case. |
 
 C1 is merged at `ee3d7a2`; R1 is the current reliability assignment. N1 and

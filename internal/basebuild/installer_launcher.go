@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
+	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/serialx"
 )
 
@@ -101,9 +102,14 @@ func startInstaller(ctx context.Context, launch InstallerLaunch, createSerial in
 	if serial.TartSlave() != filepath.Join(request.SerialDirectory, "tart-serial") {
 		return nil, errors.Join(errors.New("installer serial returned an unexpected endpoint"), serial.Close(), iso.Close())
 	}
+	args := []string{"run", "--net-softnet"}
+	if hostx.SoftnetBlockTarget != "" {
+		args = append(args, "--net-softnet-block="+hostx.SoftnetBlockTarget)
+	}
+	args = append(args, "--no-audio", "--no-clipboard", "--serial-path", serial.TartSlave(), "--disk="+request.ISOPath+":ro", request.CandidateID)
 	spec := installerProcessSpec{
 		path: launch.TartPath,
-		args: []string{"run", "--net-softnet", "--no-audio", "--no-clipboard", "--serial-path", serial.TartSlave(), "--disk=" + request.ISOPath + ":ro", request.CandidateID},
+		args: args,
 		env:  []string{"PATH=" + launch.SoftnetBinDir, "HOME=" + launch.OperatorHome, "USER=" + launch.OperatorName, "LOGNAME=" + launch.OperatorName, "TART_HOME=" + launch.TartHome, "TMPDIR=" + attemptDir, "LANG=C", "LC_ALL=C"},
 		dir:  attemptDir,
 	}

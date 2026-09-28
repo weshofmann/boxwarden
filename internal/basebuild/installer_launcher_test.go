@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
+	"github.com/weshofmann/boxwarden/internal/hostx"
 )
 
 type fakeInstallerSerial struct {
@@ -83,6 +84,9 @@ func TestInstallerLauncherUsesExactReadOnlyISOAndOwnedSerial(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"run", "--net-softnet", "--no-audio", "--no-clipboard", "--serial-path", serial.endpoint, "--disk=" + launch.Request.ISOPath + ":ro", launch.Request.CandidateID}
+	if hostx.SoftnetBlockTarget != "" {
+		want = append(want[:2], append([]string{"--net-softnet-block=@boxwarden-host-containment"}, want[2:]...)...)
+	}
 	if strings.Join(spec.args, "|") != strings.Join(want, "|") || spec.path != launch.TartPath || spec.dir != filepath.Dir(launch.Request.ISOPath) {
 		t.Fatalf("installer child argv/path/dir = %+v", spec)
 	}

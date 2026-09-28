@@ -11,6 +11,7 @@ import (
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/domain"
+	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/lock"
 )
 
@@ -68,6 +69,9 @@ func TestLauncherPassesExactManagedRawPathAndRetainsLeaseUntilReap(t *testing.T)
 		t.Fatal(err)
 	}
 	want := []string{"run", "--net-softnet", "--no-audio", "--no-clipboard", "--serial-path", "/dev/ttys004", "--disk", path + ":caching=cached", "boxwarden-work-dev"}
+	if hostx.SoftnetBlockTarget != "" {
+		want = append(want[:2], append([]string{"--net-softnet-block=@boxwarden-host-containment"}, want[2:]...)...)
+	}
 	if !sameLifecycleStrings(process.spec.args, want) {
 		t.Fatalf("child argv = %#v, want %#v", process.spec.args, want)
 	}

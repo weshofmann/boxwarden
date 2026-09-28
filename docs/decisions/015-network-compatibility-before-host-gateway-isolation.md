@@ -94,3 +94,13 @@ that eventually opt into exact private CIDRs require their own validation. Task
 0 closes under ADR 020 while IPv6-only-upstream behavior and its dependent
 IPv4-only/IPv6-only destination cases remain unqualified. See
 `docs/evidence/m1a-work-vpn-network-validation.md` and ADR 020.
+
+## N1 candidate (not yet qualified)
+
+The [N1 design](../v0.2/n1/design.md) stages a distinct Softnet source/artifact
+with a transport-aware host-service policy and exact host-initiated management
+flows. It retains vmnet DNS and requires separate attended deployment and
+qualification. The default installed policy and this ADR's accepted gateway
+exposure remain unchanged. Candidate deterministic tests are not evidence of
+Mac enforcement or of VPN/IPv6-only compatibility. See the
+[acceptance matrix](../v0.2/n1/matrix.md) for evidence categories and limits.
