@@ -1,6 +1,7 @@
 # R1 workspace remount recovery: design and implementation plan
 
-Status: implementation and qualification in progress. Published checkpoints
+Status: R1 implementation and clean-remount acceptance complete; physical
+disconnect and interrupted I/O remain untested. Published checkpoints
 implement pinned APFS identity and duplicate-volume checks, v2 formatter receipts, strict
 `workspace_storage` parsing, and external mount admission before public
 workspace/start/rebuild/delete dispatch, detached owner launch, and managed
@@ -12,7 +13,7 @@ state-root/volumes/raw filesystem membership checks, and export snapshot
 distinctness against the source's current pinned identity. Enrolled domains
 also check backing storage before domain-state entry paths including session
 create, golden registration, domain init, alpha preparation/actions, status,
-and clipboard. Final qualification remains pending. A legacy config
+and clipboard. A legacy config
 can still be used for read-only status and stop/containment, but workspace
 operations and session start/rebuild/delete are deliberately refused until an
 enrolled config is selected; its other established commands retain their
@@ -120,9 +121,28 @@ the raw file lacked ext4 magic. A no-boot signed Swift preflight reproduced the
 specific cause: the formatter admitted only a version-1 creating journal while
 R1 writes version 2. The regression failed on the original source and passed
 after a narrow change admitting versions 1 and 2 while rejecting version 3.
-The failed test volume remains private evidence. A fresh v2 creation and full
-remount/export path are still pending; source review and preflight alone do not
-establish v2 native acceptance.
+The failed attempt's journal and diagnostic remain in private evidence. A
+**fresh** v2 workspace then completed public creation with a verified v2
+formatter journal and APFS host binding. The same disposable guest imported
+three known synthetic files, edited them, and stopped. An independent stopped
+export matched all four predetermined files. After exact clean detach and
+remount of the same image, the APFS UUID, raw-file inode, original formatter
+receipt, and transient device number were unchanged. Without calling
+`workspace reconcile`, public detach/reattach and start reached READY; guest
+readback retained the edited hashes. A new stopped export matched the first
+four-file tree byte-for-byte, and no v2 binding file was created. The image's
+device number was reused, so the real run did not exercise changed-device
+admission. The deterministic regression covers that case.
+
+Both remount trials used a new isolated APFS image and one disposable guest;
+the existing clipboard sandbox and user workspaces were untouched. After
+retaining private non-credential receipts and result summaries, the guest was
+deleted through the public lifecycle, the test image was cleanly detached,
+and its exact 688 MiB allocated sparseimage was retired. The final source-fix
+head `273dbfecc27c0469f8acd65457294e7e19534f3c` passed hosted
+deterministic CI run `36457063295`. This CI result does not cover native host
+operations. Physical reconnect, forced detach, and interrupted writes remain
+outside R1 acceptance.
 
 An additional host-executed refusal trial used only two newly owned tiny
 synthetic fixtures and the clean source-bound R1 CLI. In the missing-mount
