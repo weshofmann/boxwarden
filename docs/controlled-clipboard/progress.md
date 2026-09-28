@@ -193,3 +193,16 @@ stopped. The root-owned private phase file exists; its contents were not read
 under the unprivileged operator account. The installed r5 identity is admitted;
 a real r5 guest launch and clipboard operation remain pending. Next: one fresh
 workspace-free public disposable viewer probe from the existing qualified base.
+
+The fresh public r5 probe `clipboardprobe20260928r3` was created from that
+qualified base with no workspace attached. Public `session start` returned
+`running` and `ready`; a subsequent public status read remained consistent and
+READY. Full-host Tart observation showed the exact new backend running with
+its Softnet child. A targeted capture of that Tart window showed the compact
+single-row strip and both clipboard buttons. The capture showed a black guest
+area both initially and after a short boot interval; direct on-screen
+confirmation is pending because a host window capture may omit the VM display
+surface. The session remains running for Wes to inspect. No clipboard transfer,
+general Mac pasteboard access, provider sign-in, or workspace attachment was
+performed. This confirms the r5 VM startup correction reaches READY, while
+graphical display and button behavior still need direct user observation.
