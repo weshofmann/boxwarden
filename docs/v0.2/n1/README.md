@@ -20,6 +20,7 @@ other's Softnet identity; there is no runtime override.
 - [Review findings and resolutions](review-ledger.md)
 - [Attended deployment, positive controls and rollback](attended-qualification.md)
 - [Bounded follow-up trial and renewed admission gate](follow-up-trial.md)
+- [Read-only follow-up preflight and current blocker](follow-up-preflight.md)
 - [Exact source and artifact identity](../../../tools/n1-softnet/artifact.json)
 - [Pinned build and licensing instructions](../../../tools/n1-softnet/README.md)
 
@@ -38,12 +39,17 @@ source tests never use upstream's privileged Cargo test runner. `build.py`
 requires separately verified source/compiler inputs and a populated locked
 Cargo cache; it refuses any output digest different from the staged identity.
 
-Any future privileged admission needs a new exact attended approval; the
-completed window is closed. The [matrix](matrix.md) separates passed live
-gateway denial and compatibility from attempted/unqualified clipboard, an
+The original attended window is closed. The separately authorized narrow
+follow-up remains blocked at preflight on this host. The [matrix](matrix.md)
+separates passed live gateway denial and compatibility from
+attempted/unqualified clipboard, an
 invalid cross-guest listener interval, and unexercised environments. The
-necessary DNS endpoint is still reachable. Scoped/VPN/DNS64 behavior, native
+approved narrow follow-up has not reached admission: a later read-only
+preflight found this Mac on macOS 27.0.1, outside the exact 26.6.2 candidate
+and cleanup binding, with the qualification volumes unmounted. No second
+clipboard or cross-guest test has run. The previous trial showed the necessary
+DNS endpoint reachable in its tested topology. Scoped/VPN/DNS64 behavior, native
 and effectively IPv6-only upstream, address-refresh races and public NAT
-hairpin aliases remain outside the demonstrated claim. Merging this branch
-would retain the explicit candidate build and stock default; it would not
-install or enable N1 on this Mac.
+hairpin aliases remain outside the demonstrated claim. The merged N1
+implementation retains the explicit candidate build and stock default; N1 is
+not currently installed or enabled on this Mac.

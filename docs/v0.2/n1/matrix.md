@@ -92,3 +92,18 @@ The bounded [follow-up trial](follow-up-trial.md) addresses only clipboard
 compatibility and a positive-controlled cross-guest TCP check. Address-refresh
 observation/write races and public NAT hairpin aliases remain design limits, not
 results of this live trial.
+
+## Follow-up preflight, 2026-09-28 — blocked before admission
+
+A later read-only preflight on the same Mac found macOS 27.0.1 (build 26A434),
+while the exact candidate build, host-toolchain admission and cleanup procedure
+remain bound to macOS 26.6.2 (build 25G83). The previously enrolled
+`BoxwardenAlphaQualification` APFS volume and dedicated Tart home were not
+mounted. The temporary N1 candidate digest was absent. No candidate was
+installed, guest created, clipboard write issued, or cross-guest interval run
+in this follow-up. These findings do not change the completed 2026-09-28 live
+trial results above; clipboard and cross-guest TCP remain unqualified.
+
+The [preflight record](follow-up-preflight.md) names the exact admission and
+cleanup blockers. Do not treat a platform-constant edit or a remount alone as
+qualification of the new host build.

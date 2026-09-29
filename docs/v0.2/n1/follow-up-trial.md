@@ -1,12 +1,15 @@
 # N1 narrow follow-up trial: clipboard and cross-guest TCP
 
-This is a request design, **not authorization**. The 2026-09-28 attended
-candidate installation and two-guest window ended with exact candidate removal.
-Keep the PR Draft and the working stock installation unchanged. A new attended
-window must bind the exact host artifacts, guest-helper bytes, private config,
-task-owned guest names and cleanup procedure before privileged admission. Bind
-the generated guest IDs and generations before any clone-only stage or clipboard
-write.
+This was prepared as a request design, not standalone authorization. The
+original 2026-09-28 attended window ended with exact candidate removal, and
+PR #15 has since merged. A later, separate one-window authorization covered
+this narrow follow-up, but its [read-only preflight](follow-up-preflight.md)
+found the current Mac outside the exact qualified platform binding. No new
+candidate admission or guest operation has run. Keep the working stock
+installation unchanged. Any executable window must bind the exact host
+artifacts, guest-helper bytes, private config, task-owned guest names and
+cleanup procedure before privileged admission. Bind the generated guest IDs
+and generations before any clone-only stage or clipboard write.
 
 ## Reusable inputs and preflight
 
