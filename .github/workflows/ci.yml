@@ -48,6 +48,7 @@ jobs:
           python3 guest/ubuntu-24.04-arm64/tests/clipboard_test.py
           bash host/clipboard-menu/test.sh
           python3 tools/n1-qualification/listener_test.py
+          python3 tools/n1-qualification/followup_tcp_verdict_test.py
           python3 tools/n1-softnet/test_verify_cli.py tools/n1-softnet/verify_cli.py
 
       - name: Set up Node for synthetic demo checks

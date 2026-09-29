@@ -91,6 +91,18 @@ manufacture reachability. This checks preservation of TCP session isolation in
 this topology, not N1-specific gateway denial; UDP cross-guest isolation remains
 unqualified without its own working positive control.
 
+The trial-only [`followup_tcp_verdict.py`](../../../tools/n1-qualification/followup_tcp_verdict.py)
+can classify a bounded JSON interval receipt from a separately reviewed exact
+probe (`python3 tools/n1-qualification/followup_tcp_verdict.py < interval.json`).
+It exits zero only for a timeout with both same-generation host positives and
+healthy candidate management, gateway DNS and public HTTPS controls. A completed
+connect fails even without a banner; a missing positive is invalid; any other
+candidate socket error is unqualified. This offline check does not perform SSH
+or authenticate the receipt's provenance. Retain the exact SSH argv, pin and
+runtime receipts from the live probe; its verdict alone is not qualification.
+The archived first-trial cross-guest script accepts generic no-payload errors
+and targets a different listener; do not replay it.
+
 Stop and reap both owned guests through public lifecycle commands, preserve
 bounded receipts, then use a **newly approved** exact-path attended cleanup to
 remove only the temporary candidate digest after consumer/tree checks. Verify
