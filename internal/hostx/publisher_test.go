@@ -54,6 +54,67 @@ func TestRootedPublisherPublishesManifestLastAndValidatesExactTree(t *testing.T)
 	}
 }
 
+func TestRootedPublisherRecordsActual27InstallationPlatform(t *testing.T) {
+	root, source, digest := publisherFixture(t)
+	p := testPublisher(root, digest)
+	p.platform = PlatformFact{OS: QualifiedPlatform, Arch: QualifiedArch, Release: "27.0.1", Build: "26A434"}
+	request := publisherRequest(source)
+	caller := Caller{UID: os.Getuid(), Name: "operator", Home: filepath.Join(root, "home")}
+	group := Group{ID: os.Getgid(), Name: OperatorGroupName, Members: []int{caller.UID}}
+	if err := p.Publish(t.Context(), request, caller, group); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(p.finalDir(), "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := ParseManifest(data)
+	if err != nil || manifest.MacOS != "27.0.1" || manifest.MacOSBuild != "26A434" {
+		t.Fatalf("published manifest = %#v, %v; want actual 27 platform", manifest, err)
+	}
+	p.platform = PlatformFact{OS: QualifiedPlatform, Arch: QualifiedArch, Release: QualifiedMacOS, Build: QualifiedMacOSBuild}
+	if state, err := p.State(t.Context(), request, caller, group); err != nil || state != publicationUnexpected {
+		t.Fatalf("State(27 manifest on older host) = %v, %v; want refusal", state, err)
+	}
+}
+
+func TestRootedPublisherPreflightPreservesDirectionalInstallationFacts(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		install PlatformFact
+		current PlatformFact
+		want    publicationState
+	}{
+		{"26 installation on 27", PlatformFact{OS: QualifiedPlatform, Arch: QualifiedArch, Release: QualifiedMacOS, Build: QualifiedMacOSBuild}, PlatformFact{OS: QualifiedPlatform, Arch: QualifiedArch, Release: TrialMacOS, Build: TrialMacOSBuild}, publicationComplete},
+		{"27 installation on 26", PlatformFact{OS: QualifiedPlatform, Arch: QualifiedArch, Release: TrialMacOS, Build: TrialMacOSBuild}, PlatformFact{OS: QualifiedPlatform, Arch: QualifiedArch, Release: QualifiedMacOS, Build: QualifiedMacOSBuild}, publicationUnexpected},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root, source, digest := publisherFixture(t)
+			p := testPublisher(root, digest)
+			p.platform = test.install
+			request := publisherRequest(source)
+			caller := Caller{UID: os.Getuid(), Name: "operator", Home: filepath.Join(root, "home")}
+			group := Group{ID: os.Getgid(), Name: OperatorGroupName, Members: []int{caller.UID}}
+			if err := p.Publish(t.Context(), request, caller, group); err != nil {
+				t.Fatal(err)
+			}
+			manifestPath := filepath.Join(p.finalDir(), "manifest.json")
+			before, err := os.ReadFile(manifestPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p.platform = test.current
+			if state, err := p.Preflight(t.Context(), request, caller); err != nil || state != test.want {
+				t.Fatalf("Preflight() = %v, %v; want %v", state, err, test.want)
+			}
+			after, err := os.ReadFile(manifestPath)
+			if err != nil || string(after) != string(before) {
+				t.Fatalf("Preflight() rewrote original manifest: %v", err)
+			}
+		})
+	}
+}
+
 func TestRootedPublisherRejectsLegacyPrivateManifestWithoutMutation(t *testing.T) {
 	root, source, digest := publisherFixture(t)
 	p := testPublisher(root, digest)
@@ -312,6 +373,7 @@ func testPublisher(root, digest string) RootedPublisher {
 	return RootedPublisher{
 		Root:          root,
 		Now:           func() time.Time { return time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC) },
+		platform:      PlatformFact{OS: QualifiedPlatform, Arch: QualifiedArch, Release: QualifiedMacOS, Build: QualifiedMacOSBuild},
 		rootUID:       os.Getuid(),
 		rootGID:       os.Getgid(),
 		softnetDigest: digest,

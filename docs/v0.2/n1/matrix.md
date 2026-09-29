@@ -107,3 +107,14 @@ trial results above; clipboard and cross-guest TCP remain unqualified.
 The [preflight record](follow-up-preflight.md) names the exact admission and
 cleanup blockers. Do not treat a platform-constant edit or a remount alone as
 qualification of the new host build.
+
+## 2026-09-29 macOS 27 source checkpoint — pending live qualification
+
+The follow-up branch now carries an exact 27.0.1/26A434 source admission path
+and preserves the installed stock manifest's 26.6.2/25G83 facts. This is code
+and deterministic-test evidence only, not a new live result. The changed CLI
+has not been published or admitted. The native Tart APFS volume was observed
+present but locked/unmounted; the qualification APFS UUID was absent from the
+current inventory. The candidate remains removed. Gateway and compatibility
+results on 27, synthetic clipboard, and positive-controlled cross-guest TCP
+remain **NOT EXERCISED** in the new window. The 26 results above are unchanged.

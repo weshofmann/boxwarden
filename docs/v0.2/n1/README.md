@@ -21,6 +21,7 @@ other's Softnet identity; there is no runtime override.
 - [Attended deployment, positive controls and rollback](attended-qualification.md)
 - [Bounded follow-up trial and renewed admission gate](follow-up-trial.md)
 - [Read-only follow-up preflight and current blocker](follow-up-preflight.md)
+- [Exact macOS 27 source policy and pending qualification](macos27-compatibility.md)
 - [Exact source and artifact identity](../../../tools/n1-softnet/artifact.json)
 - [Pinned build and licensing instructions](../../../tools/n1-softnet/README.md)
 
@@ -40,13 +41,17 @@ requires separately verified source/compiler inputs and a populated locked
 Cargo cache; it refuses any output digest different from the staged identity.
 
 The original attended window is closed. The separately authorized narrow
-follow-up remains blocked at preflight on this host. The [matrix](matrix.md)
+follow-up has not reached live admission on this host. The [matrix](matrix.md)
 separates passed live gateway denial and compatibility from
 attempted/unqualified clipboard, an
 invalid cross-guest listener interval, and unexercised environments. The
-approved narrow follow-up has not reached admission: a later read-only
-preflight found this Mac on macOS 27.0.1, outside the exact 26.6.2 candidate
-and cleanup binding, with the qualification volumes unmounted. No second
+approved narrow follow-up has not reached admission: a 2026-09-28 read-only
+preflight found this Mac on macOS 27.0.1, outside the then-current exact
+26.6.2 executable and cleanup binding. The source on this branch now admits
+the exact 27.0.1/26A434 pair for a new attended qualification, while retaining
+the stock manifest's 26.6.2 installation record. No new CLI has been
+published, the native Tart volume remains locked/unmounted, and the separate
+qualification volume is absent from the APFS inventory. No second
 clipboard or cross-guest test has run. The previous trial showed the necessary
 DNS endpoint reachable in its tested topology. Scoped/VPN/DNS64 behavior, native
 and effectively IPv6-only upstream, address-refresh races and public NAT

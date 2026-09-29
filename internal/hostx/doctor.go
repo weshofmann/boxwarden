@@ -160,11 +160,11 @@ func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspec
 	if platform.OS != QualifiedPlatform || platform.Arch != QualifiedArch {
 		add("platform.unsupported", Unsupported, platform.OS+"/"+platform.Arch, QualifiedPlatform+"/"+QualifiedArch, "use the qualified M1A host")
 	}
-	if platform.Release != QualifiedMacOS {
-		add("platform.release", Unsupported, publicValue(platform.Release), QualifiedMacOS, "use the exact qualified macOS release")
+	if platform.Release != QualifiedMacOS && platform.Release != TrialMacOS {
+		add("platform.release", Unsupported, publicValue(platform.Release), QualifiedMacOS+" or "+TrialMacOS, "use an exact admitted macOS release")
 	}
-	if platform.Build != QualifiedMacOSBuild {
-		add("platform.build", Unsupported, publicValue(platform.Build), QualifiedMacOSBuild, "use the exact qualified macOS build")
+	if !admittedPlatformFact(platform) && platform.OS == QualifiedPlatform && platform.Arch == QualifiedArch {
+		add("platform.build", Unsupported, publicValue(platform.Build), QualifiedMacOS+"/"+QualifiedMacOSBuild+" or "+TrialMacOS+"/"+TrialMacOSBuild, "use an exact admitted macOS release/build pair")
 	}
 	if err := validateHostPathOverlaps(request); err != nil {
 		switch {
@@ -190,6 +190,9 @@ func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspec
 			}
 		} else {
 			manifest = parsed
+			if !compatibleInstallationPlatform(platform, manifest) {
+				add("manifest.platform", Unsupported, manifest.MacOS+"/"+manifest.MacOSBuild, "exact compatible installation/current host pair", "inspect original installation facts and host upgrade policy")
+			}
 		}
 	}
 	tartDigest := TartExecutableSHA256

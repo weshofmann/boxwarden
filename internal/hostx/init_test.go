@@ -56,6 +56,19 @@ func TestSystemInitUsesSameExactSafeTartAdmissionAsDoctor(t *testing.T) {
 	}
 }
 
+func TestSystemInitAdmitsExact27PlatformForAttendedRootBoundary(t *testing.T) {
+	inspector, request := healthyDoctorFixture(t)
+	inspector.platform.Release, inspector.platform.Build = "27.0.1", "26A434"
+	runner := &privilegeRunnerFake{result: execx.Result{Stdout: `{"published":true,"already_installed":false,"refresh_login_session":false}`}}
+	service := SystemInitializer{inspector: inspector, privilege: runner, executable: "/opt/boxwarden/bin/boxwarden", sourceValidator: func(string, string) error { return nil }}
+	if _, err := service.Init(t.Context(), request); err != nil {
+		t.Fatalf("Init() on exact 27 host: %v", err)
+	}
+	if runner.command.Path != "/usr/bin/sudo" {
+		t.Fatalf("Init() skipped attended root boundary: %#v", runner.command)
+	}
+}
+
 func TestSystemInitRefusesUnsafeHomebrewOrUnsupportedPlatformWithoutPrivilege(t *testing.T) {
 	for name, mutate := range map[string]func(*doctorInspectorFake){
 		"unsafe Homebrew": func(inspector *doctorInspectorFake) {

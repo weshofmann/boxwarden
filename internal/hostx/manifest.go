@@ -135,7 +135,7 @@ func (m Manifest) Validate() error {
 	if m.Version != ManifestVersion {
 		return fmt.Errorf("%w %d", ErrUnsupportedManifestVersion, m.Version)
 	}
-	if m.Platform != QualifiedPlatform || m.MacOS != QualifiedMacOS || m.MacOSBuild != QualifiedMacOSBuild {
+	if !recordedInstallationPlatform(m.Platform, m.MacOS, m.MacOSBuild) {
 		return fmt.Errorf("manifest has unqualified platform %q macOS %q build %q", m.Platform, m.MacOS, m.MacOSBuild)
 	}
 	if !qualifiedTart(m.Tart) || !canonicalAbsolute(m.Tart.Path) {

@@ -47,4 +47,22 @@ func TestParseManifestRejectsUnknownFieldsAndWrongQualifiedIdentity(t *testing.T
 	if manifest.Softnet.Path != QualifiedSoftnetPath {
 		t.Fatalf("softnet path = %q, want %q", manifest.Softnet.Path, QualifiedSoftnetPath)
 	}
+
+	// These fields record the platform where the tree was installed. An
+	// upgrade must not make the original exact installation record invalid.
+	installedOn27 := strings.Replace(strings.Replace(valid, `"macos":"26.6.2"`, `"macos":"27.0.1"`, 1),
+		`"macos_build":"25G83"`, `"macos_build":"26A434"`, 1)
+	if newer, err := ParseManifest([]byte(installedOn27)); err != nil || newer.MacOS != "27.0.1" || newer.MacOSBuild != "26A434" {
+		t.Fatalf("ParseManifest(27 installation) = %#v, %v", newer, err)
+	}
+	for name, data := range map[string]string{
+		"cross-paired build": strings.Replace(installedOn27, `"macos_build":"26A434"`, `"macos_build":"25G83"`, 1),
+		"unknown release":    strings.Replace(installedOn27, `"macos":"27.0.1"`, `"macos":"28.0"`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseManifest([]byte(data)); err == nil {
+				t.Fatal("ParseManifest() admitted an unrecorded installation platform")
+			}
+		})
+	}
 }

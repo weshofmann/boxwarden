@@ -8,6 +8,8 @@ const (
 	QualifiedPlatform     = "darwin"
 	QualifiedMacOS        = "26.6.2"
 	QualifiedMacOSBuild   = "25G83"
+	TrialMacOS            = "27.0.1"
+	TrialMacOSBuild       = "26A434"
 	QualifiedArch         = "arm64"
 	ManifestVersion       = 2
 	InstallRequestVersion = 1
@@ -30,8 +32,32 @@ type ToolIdentity struct {
 	ArchiveSHA256    string `json:"archive_sha256"`
 }
 
-func qualifiedPlatformFact(platform PlatformFact) bool {
-	return platform.OS == QualifiedPlatform && platform.Arch == QualifiedArch && platform.Release == QualifiedMacOS && platform.Build == QualifiedMacOSBuild
+// admittedPlatformFact permits only the original qualified host and the exact
+// upgraded host selected for an attended qualification trial. Admission alone
+// does not assert that Tart/Softnet runtime behavior has passed on macOS 27.
+func admittedPlatformFact(platform PlatformFact) bool {
+	return platform.OS == QualifiedPlatform && platform.Arch == QualifiedArch && admittedMacOSPair(platform.Release, platform.Build)
+}
+
+func recordedInstallationPlatform(platform, release, build string) bool {
+	return platform == QualifiedPlatform && admittedMacOSPair(release, build)
+}
+
+func admittedMacOSPair(release, build string) bool {
+	return (release == QualifiedMacOS && build == QualifiedMacOSBuild) ||
+		(release == TrialMacOS && build == TrialMacOSBuild)
+}
+
+// A manifest records where its exact tree was installed, not the host's
+// present OS. The sole admitted upgrade is the original 26 installation on
+// this exact 27 host; a newer installation cannot be adopted by an older host.
+func compatibleInstallationPlatform(current PlatformFact, manifest Manifest) bool {
+	if !admittedPlatformFact(current) || !recordedInstallationPlatform(manifest.Platform, manifest.MacOS, manifest.MacOSBuild) {
+		return false
+	}
+	return (manifest.MacOS == current.Release && manifest.MacOSBuild == current.Build) ||
+		(current.Release == TrialMacOS && current.Build == TrialMacOSBuild &&
+			manifest.MacOS == QualifiedMacOS && manifest.MacOSBuild == QualifiedMacOSBuild)
 }
 
 func qualifiedStockTart(identity ToolIdentity) bool {
