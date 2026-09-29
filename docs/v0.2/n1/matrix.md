@@ -126,6 +126,30 @@ unattached. Its normal remount succeeded with the recorded inner APFS UUID
 `A178510A-D5EC-4495-828B-BD5445E2B66D`, writable state and ownership enabled.
 The reviewed wrapper passed read-only preflight and a regression proving
 that a nested filesystem cannot impersonate the recorded backing image.
-Native Tart remains locked/unmounted; R1 config validation, renewed candidate
-admission and every macOS 27 guest/network/clipboard row remain pending.
-This storage result does not change any runtime verdict above.
+At that checkpoint native Tart remained locked/unmounted and R1 config
+validation and renewed admission were pending. This storage result did not
+change any runtime verdict above.
+
+## 2026-09-29 native remount and R1 admission — live window pending
+
+After explicit owner authorization, the reviewed normal helper unlocked and
+mounted native Tart volume `568EE3B5-885B-4278-BD0E-5FE77C5D01A8` at its
+canonical Tart home. Exact container/store identity, encryption, writable state,
+ownership and directory mode `0700` were verified. The original Tart
+sparsebundle remains retired; the separate qualification sparsebundle remains
+its own storage input.
+
+The protected twelve-object Tart name set and four qualification workspace
+record hashes/raw metadata matched the recorded baselines. VM disk contents
+were not hashed, so this is not a full historical byte-equality claim. Only a
+fresh private trial state root was created. Both public R1 enrollment commands
+passed and produced new configs byte-identical to the reviewed preparations.
+The staged stock CLI reported healthy on 27 while retaining the unchanged
+26.6.2/25G83 stock manifest. An initial host-only preparation refusal caused by
+an incorrect metadata assumption was preserved and corrected before any root
+creation; it was not a guest qualification interval.
+
+Candidate publication and every macOS 27 guest/network/clipboard row remain
+**NOT EXERCISED** pending the refreshed attended window. No existing VM or
+workspace was operated on. These prerequisite results do not change the
+2026-09-28 runtime verdicts or enable N1 in the installed default.

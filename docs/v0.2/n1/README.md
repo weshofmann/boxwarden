@@ -20,7 +20,7 @@ other's Softnet identity; there is no runtime override.
 - [Review findings and resolutions](review-ledger.md)
 - [Attended deployment, positive controls and rollback](attended-qualification.md)
 - [Bounded follow-up trial and renewed admission gate](follow-up-trial.md)
-- [Read-only follow-up preflight and current blocker](follow-up-preflight.md)
+- [Dated read-only follow-up preflight](follow-up-preflight.md)
 - [Exact macOS 27 source policy and pending qualification](macos27-compatibility.md)
 - [Exact source and artifact identity](../../../tools/n1-softnet/artifact.json)
 - [Pinned build and licensing instructions](../../../tools/n1-softnet/README.md)
@@ -50,12 +50,14 @@ preflight found this Mac on macOS 27.0.1, outside the then-current exact
 26.6.2 executable and cleanup binding. The source on this branch now admits
 the exact 27.0.1/26A434 pair for a new attended qualification, while retaining
 the stock manifest's 26.6.2 installation record. No new CLI has been
-published, and the native Tart volume remains locked/unmounted. On 2026-09-29
-the retained qualification sparsebundle was normally remounted and its exact
-APFS UUID, writable state and ownership were verified. The prepared R1 configs
-still await validation after native Tart access is restored. No second
-clipboard or cross-guest test has run. The previous trial showed the necessary
-DNS endpoint reachable in its tested topology. Scoped/VPN/DNS64 behavior, native
+published. On 2026-09-29 both retained storage mounts were restored through
+the reviewed normal paths and their exact APFS identities were verified. Public
+R1 enrollment produced new config files byte-identical to the reviewed
+preparations, and the staged stock CLI reported healthy on the current host
+without rewriting the stock installation record. These are prerequisite checks;
+renewed candidate admission and every macOS 27 guest/network/clipboard test
+remain pending. No second clipboard or cross-guest test has run. The previous
+trial showed the necessary DNS endpoint reachable in its tested topology. Scoped/VPN/DNS64 behavior, native
 and effectively IPv6-only upstream, address-refresh races and public NAT
 hairpin aliases remain outside the demonstrated claim. The merged N1
 implementation retains the explicit candidate build and stock default; N1 is

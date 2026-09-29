@@ -2,8 +2,9 @@
 
 This records the bounded source policy and attended-trial design for the
 intentionally upgraded macOS 27.0.1 (build 26A434) host. Source admission on
-this branch is **pending final review and live qualification**, not a runtime
-result or authorization to install the N1 candidate.
+this branch has passed source review and deterministic verification. **Live
+qualification remains pending.** Source verification is not a runtime result
+or authorization to install the N1 candidate.
 The 2026-09-28 macOS 26.6.2 results remain historical evidence in the
 [matrix](matrix.md). The stock toolchain remains the installed default.
 
@@ -37,10 +38,20 @@ A later 2026-09-29 provenance check found the retained qualification
 sparsebundle already present on mounted DevelData. Its authorized normal
 attachment succeeded at the established mountpoint with the exact inner UUID,
 writable APFS and ownership enabled. This resolves the qualification-storage
-attachment blocker. Native Tart remains locked, so the exact R1 configs still
-cannot complete their private Tart-home directory check. Preserve the bare
-`0000` mountpoint; native access, renewed admission and runtime qualification
-remain separate pending gates.
+attachment blocker. At that checkpoint native Tart was still locked and R1
+validation remained pending.
+
+After explicit owner authorization later on 2026-09-29, the reviewed native
+helper completed normal unlock/mount with the exact native volume, container
+and physical-store identities. The canonical Tart home was verified encrypted,
+writable, ownership-enabled and `0700`; the bare mountpoint was not changed.
+Protected inventory checks preceded creation of only the fresh trial root.
+Both public enrollment commands produced new R1 configs byte-identical to the
+reviewed preparations, outside the backing filesystem. The staged stock CLI
+reported healthy on the current exact 27 host while preserving the original
+stock manifest bytes. Candidate publication and live runtime qualification
+remain separate pending gates; these checks do not establish enforcement or
+desktop compatibility on 27.
 
 ## Exact source policy
 
