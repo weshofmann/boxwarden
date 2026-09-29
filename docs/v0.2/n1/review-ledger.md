@@ -78,3 +78,41 @@ candidate before any execution, with bounded subprocess lifetimes. Wrong-digest
 marker tests prove nonexecution; forbidden-mode cases use synthetic metadata.
 Full default/candidate Go race suites, vet and builds pass. A historical observer
 fixture was made build-aware; no admission rule was relaxed.
+
+
+## macOS 27 source and concrete trial reviews — 2026-09-29
+
+Fresh Sol/High review checked the exact current-host/installation-platform
+compatibility delta: historical 26.6.2 manifests remain immutable, only
+27.0.1/26A434 is newly admitted, reverse/mixed/unknown pairs refuse, and artifact,
+path, ownership, mode, ACL, operator and privilege checks remain intact. Default
+and candidate deterministic Go verification and exact-head CI passed before the
+attended trial. This was a source review, not runtime qualification.
+
+A fresh Sol/High reviewer checked concrete read-only SSH transport and lifecycle
+locks, then the exact two-file clone-only stage after guest identities existed,
+and the network/clipboard procedures after public restarts. The stage used only
+approved bytes and fixed paths, with unused root-owned temporary names and
+verified individual atomic replacements. Pairwise replacement is not
+transactional; uncertain partial results require containment rather than replay.
+Both stages and restarts succeeded in this window.
+
+Before live probes, the requested classifier provenance correction bound its
+exact reviewed digest, executed those same bytes and checked the post-execution
+digest. The reviewer found no false-PASS path in the concrete positive-control
+procedure. Clipboard wrapper exit alone was explicitly rejected as a verdict.
+
+Independent receipt disposition confirmed network compatibility/gateway denial
+PASS, stock clipboard PASS, candidate acknowledged copy/failed readback
+UNQUALIFIED, and cross-guest errno 113 UNQUALIFIED with working positives.
+FAILED neighbor metadata is consistent with peer ARP denial, not causal proof.
+Matching live write workers/later desktops do not establish clipboard delivery
+or identify its failure. One candidate timeout per gateway protocol and scripted
+DNS fallback were reported precisely. No failed live attempt was rerun.
+
+Final cleanup and protected-inventory checks are recorded in the dated matrix.
+The retired-config doctor refusal and premature private report were preserved;
+the corrected report separately names the final healthy host-global doctor using
+a diagnostic-only config. This is evidence correction, not requalification or a
+host repair. Candidate clipboard and cross-guest TCP remain unresolved; no new
+architecture or broader runtime claim was approved.

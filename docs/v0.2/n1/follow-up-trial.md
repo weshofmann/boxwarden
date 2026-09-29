@@ -1,14 +1,21 @@
 # N1 narrow follow-up trial: clipboard and cross-guest TCP
 
-This is a request design, **not authorization**. The 2026-09-28 attended
-candidate installation and two-guest window ended with exact candidate removal.
-Keep the PR Draft and the working stock installation unchanged. A new attended
-window must bind the exact host artifacts, guest-helper bytes, private config,
-task-owned guest names and cleanup procedure before privileged admission. Bind
-the generated guest IDs and generations before any clone-only stage or clipboard
-write.
+The original request design below is preserved as history. The 2026-09-28
+window ended with exact candidate removal; its later read-only follow-up refused
+the upgraded host before admission. A separately reviewed macOS 27 package and
+explicit owner approval enabled the bounded 2026-09-29 window. That window is
+now closed, with the temporary candidate, both fresh guests and trial state
+removed. It exercised this two-guest sequence: stock clipboard passed; candidate
+copy was acknowledged but readback failed, and cross-guest TCP returned errno
+113 despite working host positives. Both candidate rows remain **UNQUALIFIED**.
+See the [matrix](matrix.md); no old result was overwritten or live attempt retried.
 
-## Reusable inputs and preflight
+The historical inputs and sequence are references, not executable commands for
+another run. The previous configs refer to retired state, and the completed
+authorization is not indefinite installation permission. Stock remains the
+working default.
+
+## Historical request inputs and preflight
 
 - Reuse the reviewed explicit `n1candidate` source commit `e703453a`, Boxwarden
   executable SHA-256 `da42e38f3c256e4bffb46ec2bb7ffce56d7b1ee77082a3acdcb3c25a00a2e441`,
@@ -51,7 +58,7 @@ write.
   host filesystem share, guest firewall adjustment or host network change is
   part of this trial.
 
-## One fresh two-guest sequence
+## Historical authorized two-guest sequence
 
 Create at most one stock-control and one explicit N1 candidate disposable guest
 from the same admitted base, with no workspace or credentials. Require both
@@ -88,6 +95,18 @@ manufacture reachability. This checks preservation of TCP session isolation in
 this topology, not N1-specific gateway denial; UDP cross-guest isolation remains
 unqualified without its own working positive control.
 
+The trial-only [`followup_tcp_verdict.py`](../../../tools/n1-qualification/followup_tcp_verdict.py)
+can classify a bounded JSON interval receipt from a separately reviewed exact
+probe (`python3 tools/n1-qualification/followup_tcp_verdict.py < interval.json`).
+It exits zero only for a timeout with both same-generation host positives and
+healthy candidate management, gateway DNS and public HTTPS controls. A completed
+connect fails even without a banner; a missing positive is invalid; any other
+candidate socket error is unqualified. This offline check does not perform SSH
+or authenticate the receipt's provenance. Retain the exact SSH argv, pin and
+runtime receipts from the live probe; its verdict alone is not qualification.
+The archived first-trial cross-guest script accepts generic no-payload errors
+and targets a different listener; do not replay it.
+
 Stop and reap both owned guests through public lifecycle commands, preserve
 bounded receipts, then use a **newly approved** exact-path attended cleanup to
 remove only the temporary candidate digest after consumer/tree checks. Verify
@@ -95,3 +114,37 @@ candidate absence, original stock hashes/metadata and stock doctor, the prior
 Tart/workspace inventory, and task-only state retirement. If an unexpected
 condition appears, stop the affected operation and retain its evidence rather
 than restarting the completed 2026-09-28 experiment.
+
+## Smallest remaining qualification request
+
+Do not install or rerun this trial at closeout. First prepare a narrow,
+source-only diagnostic design for the candidate's acknowledged copy/failed read
+path. The generic `clipboard text unavailable` error does not identify whether
+session validation, adapter status, framing or transport failed. A live write
+worker is not proof of clipboard ownership. Preserve the existing receipt; do
+not assume a network-policy defect or replay unchanged transfers to seek a pass.
+
+For cross-guest TCP, the existing stock SSH endpoint supplied both required host
+positives. Candidate on-link routing and FAILED neighbor metadata are consistent
+with N1's peer-ARP restriction, but are not causal proof. A future procedure must
+identify how its bounded observations distinguish that denial from another
+socket failure before changing verdict rules. Do not add routes, neighbors,
+guest listeners or firewall allowances to manufacture a timeout or connection.
+
+Once those concrete diagnostic observations are reviewed, the smallest live
+request is one renewed window with at most the same two kinds of **new** disposable
+clones: a stock positive-control round trip, one candidate synthetic CLI
+copy/readback with bounded read-path evidence, and one candidate-to-stock SSH22
+interval with strict same-generation host positives and passive route/neighbor
+evidence. No general capability framework or Ubuntu rebuild is needed. Reuse
+the verified base and exact approved helper bytes; bind actual installed
+capability before any write and restart/reverify after clone-only staging.
+
+That future executable request must freshly bind the exact CLI source/digest,
+unchanged Tart/stock/N1 identities, current exact host pair, private R1-enrolled
+config bytes and fresh state root, task-owned names/IDs/generations, fixed probe
+bytes/output paths, prerequisites and expected observations, and reviewed exact
+candidate cleanup. The retained 27 package is a template; its retired config
+paths are not runnable inputs. Changed privileged bytes require new exact
+admission approval. No renewed live package is admitted or executed by this
+closeout, and no merge enables N1 in the stock installation.

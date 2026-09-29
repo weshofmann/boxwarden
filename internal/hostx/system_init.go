@@ -28,7 +28,7 @@ func (s SystemInitializer) Init(ctx context.Context, request Request) (InitResul
 		inspector = NewOSDoctorInspector()
 	}
 	platform := inspector.Platform()
-	if !qualifiedPlatformFact(platform) {
+	if !admittedPlatformFact(platform) {
 		return InitResult{}, ErrUnsupportedPlatform
 	}
 	if !canonicalAbsolute(request.TartPath) || !canonicalAbsolute(request.TartHome) || !canonicalAbsolute(request.SoftnetPath) {

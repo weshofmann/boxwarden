@@ -153,6 +153,62 @@ func TestDoctorReportsUnqualifiedBuildAndUnsupportedManifestSchema(t *testing.T)
 	}
 }
 
+func TestDoctorInspectsHistorical26InstallationOnExact27HostWithoutRelabeling(t *testing.T) {
+	inspector, request := healthyDoctorFixture(t)
+	inspector.platform.Release = "27.0.1"
+	inspector.platform.Build = "26A434"
+	manifestPath := filepath.Join(filepath.Dir(QualifiedSoftnetPath), "manifest.json")
+	original := append([]byte(nil), inspector.paths[manifestPath].Data...)
+	doctor := SystemDoctor{inspector: inspector}
+	if report := doctor.Doctor(t.Context(), request); report.Status != Healthy {
+		t.Fatalf("Doctor() on exact 27 host with historical manifest = %#v", report)
+	}
+	if _, err := doctor.CheckRuntime(t.Context(), request); err != nil {
+		t.Fatalf("CheckRuntime() on exact 27 host with historical manifest: %v", err)
+	}
+	if !bytes.Equal(inspector.paths[manifestPath].Data, original) || inspector.mutations != 0 {
+		t.Fatal("doctor changed the 26 installation record")
+	}
+
+	softnet := inspector.paths[QualifiedSoftnetPath]
+	softnet.SHA256 = strings.Repeat("0", 64)
+	inspector.paths[QualifiedSoftnetPath] = softnet
+	if report := doctor.Doctor(t.Context(), request); report.Status != Drifted || !hasFinding(report, "softnet.digest") {
+		t.Fatalf("Doctor() admitted artifact drift on 27: %#v", report)
+	}
+}
+
+func TestDoctorRejectsUnknown27BuildAndReverseManifestHistory(t *testing.T) {
+	inspector, request := healthyDoctorFixture(t)
+	inspector.platform.Release, inspector.platform.Build = "27.0.1", "26A435"
+	if report := (SystemDoctor{inspector: inspector}).Doctor(t.Context(), request); report.Status != Unsupported || !hasFinding(report, "platform.build") {
+		t.Fatalf("Doctor() admitted unknown 27 build: %#v", report)
+	}
+
+	inspector, request = healthyDoctorFixture(t)
+	manifestPath := filepath.Join(filepath.Dir(QualifiedSoftnetPath), "manifest.json")
+	fact := inspector.paths[manifestPath]
+	fact.Data = bytes.Replace(bytes.Replace(fact.Data, []byte(`"macos":"26.6.2"`), []byte(`"macos":"27.0.1"`), 1),
+		[]byte(`"macos_build":"25G83"`), []byte(`"macos_build":"26A434"`), 1)
+	inspector.paths[manifestPath] = fact
+	if report := (SystemDoctor{inspector: inspector}).Doctor(t.Context(), request); report.Status != Unsupported || !hasFinding(report, "manifest.platform") {
+		t.Fatalf("Doctor() admitted 27-installed manifest on older 26 host: %#v", report)
+	}
+}
+
+func TestDoctorAcceptsExact27InstallationRecordOnExact27Host(t *testing.T) {
+	inspector, request := healthyDoctorFixture(t)
+	inspector.platform.Release, inspector.platform.Build = TrialMacOS, TrialMacOSBuild
+	manifestPath := filepath.Join(filepath.Dir(QualifiedSoftnetPath), "manifest.json")
+	fact := inspector.paths[manifestPath]
+	fact.Data = bytes.Replace(bytes.Replace(fact.Data, []byte(`"macos":"26.6.2"`), []byte(`"macos":"27.0.1"`), 1),
+		[]byte(`"macos_build":"25G83"`), []byte(`"macos_build":"26A434"`), 1)
+	inspector.paths[manifestPath] = fact
+	if report := (SystemDoctor{inspector: inspector}).Doctor(t.Context(), request); report.Status != Healthy {
+		t.Fatalf("Doctor() with exact 27 installation = %#v", report)
+	}
+}
+
 func TestCheckRuntimeRequiresCompleteHealthyDoctorReport(t *testing.T) {
 	inspector, request := healthyDoctorFixture(t)
 	doctor := SystemDoctor{inspector: inspector}

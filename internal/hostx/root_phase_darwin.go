@@ -22,7 +22,7 @@ const newGroupVisibilityBudget = time.Second
 // bounded stdin/stdout verbatim.
 func RunRootHostInstall(ctx context.Context, input []byte) ([]byte, error) {
 	platform := NewOSDoctorInspector().Platform()
-	if !qualifiedPlatformFact(platform) {
+	if !admittedPlatformFact(platform) {
 		return nil, ErrUnsupportedPlatform
 	}
 	request, err := DecodeInstallRequest(input)
@@ -35,6 +35,7 @@ func RunRootHostInstall(ctx context.Context, input []byte) ([]byte, error) {
 		Groups:   darwinGroupManager{runner: runner},
 		Publisher: RootedPublisher{
 			Root: productionToolchainRoot, ACL: OSACLInspector{},
+			platform: platform,
 		},
 	}).Install(ctx, request)
 	if err != nil {

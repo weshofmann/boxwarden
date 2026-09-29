@@ -29,6 +29,7 @@ type RootedPublisher struct {
 	Now  func() time.Time
 	ACL  ACLInspector
 
+	platform         PlatformFact
 	rootUID, rootGID int
 	softnetDigest    string
 	tartDigest       string
@@ -104,6 +105,9 @@ func (p RootedPublisher) observed(step string) {
 }
 
 func (p RootedPublisher) State(_ context.Context, r InstallRequest, c Caller, g Group) (publicationState, error) {
+	if !admittedPlatformFact(p.platform) {
+		return publicationUnexpected, ErrUnsupportedPlatform
+	}
 	if err := p.validateRootParent(); err != nil {
 		return publicationUnexpected, err
 	}
@@ -127,6 +131,9 @@ func (p RootedPublisher) State(_ context.Context, r InstallRequest, c Caller, g 
 }
 
 func (p RootedPublisher) Preflight(_ context.Context, r InstallRequest, c Caller) (publicationState, error) {
+	if !admittedPlatformFact(p.platform) {
+		return publicationUnexpected, ErrUnsupportedPlatform
+	}
 	if err := p.validatePreflightInputs(r, c); err != nil {
 		return publicationUnexpected, err
 	}
@@ -157,7 +164,7 @@ func (p RootedPublisher) Preflight(_ context.Context, r InstallRequest, c Caller
 		return publicationUnexpected, nil
 	}
 	manifest, err := ParseManifest(data)
-	if err != nil || manifest.Operator != (Operator{UID: c.UID, Name: c.Name, Home: c.Home}) {
+	if err != nil || !compatibleInstallationPlatform(p.platform, manifest) || manifest.Operator != (Operator{UID: c.UID, Name: c.Name, Home: c.Home}) {
 		return publicationUnexpected, nil
 	}
 	if err := p.validateCompleteTree(r, c, manifest.Group); err != nil {
@@ -167,6 +174,9 @@ func (p RootedPublisher) Preflight(_ context.Context, r InstallRequest, c Caller
 }
 
 func (p RootedPublisher) Publish(ctx context.Context, r InstallRequest, c Caller, g Group) error {
+	if !admittedPlatformFact(p.platform) {
+		return ErrUnsupportedPlatform
+	}
 	if err := r.Validate(); err != nil {
 		return err
 	}
@@ -314,7 +324,7 @@ func (p RootedPublisher) publishManifest(r InstallRequest, c Caller, g Group, to
 		now = p.Now().UTC()
 	}
 	m := Manifest{
-		Version: ManifestVersion, Platform: QualifiedPlatform, MacOS: QualifiedMacOS, MacOSBuild: QualifiedMacOSBuild, Tart: r.Tart,
+		Version: ManifestVersion, Platform: p.platform.OS, MacOS: p.platform.Release, MacOSBuild: p.platform.Build, Tart: r.Tart,
 		Softnet: ToolIdentity{Path: QualifiedSoftnetPath, Version: SoftnetVersion, ExecutableSHA256: SoftnetExecutableSHA256, ArchiveSHA256: SoftnetArchiveSHA256},
 		RootUID: 0, Group: g, Operator: Operator{UID: c.UID, Name: c.Name, Home: c.Home},
 		TartHome: r.TartHome, SoftnetMode: SoftnetMode, InstalledAt: now,
@@ -409,6 +419,9 @@ func (p RootedPublisher) validateCompleteTree(r InstallRequest, c Caller, g Grou
 	m, err := ParseManifest(data)
 	if err != nil {
 		return err
+	}
+	if !compatibleInstallationPlatform(p.platform, m) {
+		return fmt.Errorf("manifest installation platform is incompatible with current host")
 	}
 	if m.Tart != r.Tart || m.TartHome != r.TartHome || m.Operator != (Operator{UID: c.UID, Name: c.Name, Home: c.Home}) || m.Group.ID != g.ID || m.Group.Name != g.Name || fmt.Sprint(m.Group.Members) != fmt.Sprint(g.Members) {
 		return fmt.Errorf("manifest does not bind requested caller, group, and Tart identity")
