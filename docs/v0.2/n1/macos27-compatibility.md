@@ -1,14 +1,17 @@
 # macOS 27.0.1 N1 compatibility qualification design
 
 This records the bounded source policy and attended-trial design for the
-intentionally upgraded macOS 27.0.1 (build 26A434) host. Source admission on
-this branch has passed source review and deterministic verification. **Live
-qualification remains pending.** Source verification is not a runtime result
-or authorization to install the N1 candidate.
+intentionally upgraded macOS 27.0.1 (build 26A434) host. Source admission passed
+independent review and deterministic verification. The
+separately approved bounded live window is now closed: network compatibility
+and positive-controlled gateway denial passed, while candidate clipboard
+readback and cross-guest TCP remain unqualified. The exact temporary candidate,
+both fresh guests and their trial state were removed. See the dated
+[matrix](matrix.md) for observations and limits.
 The 2026-09-28 macOS 26.6.2 results remain historical evidence in the
 [matrix](matrix.md). The stock toolchain remains the installed default.
 
-## Separate the boundaries
+## Historical pretrial observations: separate the boundaries
 
 The previously staged executable refuses 27 before a VM is launched: its
 `hostx` pins 26.6.2/25G83 in public init, the root install entry, read-only
@@ -49,9 +52,10 @@ Protected inventory checks preceded creation of only the fresh trial root.
 Both public enrollment commands produced new R1 configs byte-identical to the
 reviewed preparations, outside the backing filesystem. The staged stock CLI
 reported healthy on the current exact 27 host while preserving the original
-stock manifest bytes. Candidate publication and live runtime qualification
-remain separate pending gates; these checks do not establish enforcement or
-desktop compatibility on 27.
+stock manifest bytes. At that checkpoint candidate publication and live runtime
+qualification were
+separate pending gates; those prerequisite checks alone did not establish
+enforcement or desktop compatibility on 27.
 
 ## Exact source policy
 
@@ -101,3 +105,30 @@ synthetic CLI clipboard, and positive-controlled cross-guest TCP. Preserve
 unknown or failed intervals and 26 evidence. Unavailable VPN, DNS64 and IPv6
 environments remain unexercised. Finish with exact candidate cleanup and
 current-host stock validation; stock remains the default.
+
+## Closed attended window, 2026-09-29
+
+The owner approved the refreshed exact package and executed the public initializer.
+The candidate manifest recorded root-observed 27.0.1/26A434; stock retained its
+byte-identical 26.6.2/25G83 manifest. The rebuilt N1 CLI SHA-256 was
+`8ef3c3307609c79a0668246de8088fb77eee406b520f4b0fa803647faf8a27fb`.
+
+Both disposable clones lacked the exact clipboard capability. Their actual
+identities/generations were bound before fresh Sol/High review of the concrete
+guest-only staging command. Only the approved bootstrap and adapter bytes were
+installed as root-owned `0755` files in these clones. Public stop/start produced
+new READY generations, and installed bytes plus actual desktops were reverified
+after restart and before each guest's first synthetic transfer.
+
+The [matrix](matrix.md) records the live network passes, stock clipboard pass,
+acknowledged candidate copy/failed readback and cross-guest errno 113 with working
+positives. No transfer or connection attempt was repeated. These unresolved rows
+prevent a claim of complete N1 clipboard/cross-guest qualification on 27; they do
+not erase the observed gateway-denial result or qualify unavailable environments.
+
+After both guests were deleted and consumers reaped, the owner executed the
+reviewed exact cleanup. Candidate absence, stock health and protected inventory
+preservation were verified; only fresh trial state was retired. Both normal
+storage mounts remain mounted. No privileged artifact identity changed, and no
+stock installation record was rewritten. A possible PR #16 merge retains the
+explicit candidate build and stock default; it does not install or enable N1.

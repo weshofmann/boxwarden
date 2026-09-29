@@ -1,10 +1,12 @@
 # N1 acceptance matrix
 
-The source and host-only evidence below was recorded before the 2026-09-28
-attended trial. The live results from that trial appear separately below. The
-candidate was temporarily admitted for two disposable guests and then removed;
-the default installation still uses stock Softnet and retains ADR 015 gateway
-exposure.
+Current status: both bounded attended windows are closed. The 2026-09-29
+macOS 27.0.1/26A434 trial results and cleanup appear below, separately from the
+preserved macOS 26 history. Live gateway TCP/UDP denial and the tested network
+compatibility passed on 27; candidate clipboard readback and cross-guest TCP
+remain **UNQUALIFIED**. The temporary candidate and fresh guests/state were
+removed. The working installation uses stock Softnet and retains ADR 015 gateway
+exposure; a possible PR #16 merge does not change that default.
 
 | Case | Deterministic boundary tests | Planned host-only / isolated guest gate |
 |---|---|---|
@@ -108,7 +110,7 @@ The [preflight record](follow-up-preflight.md) names the exact admission and
 cleanup blockers. Do not treat a platform-constant edit or a remount alone as
 qualification of the new host build.
 
-## 2026-09-29 macOS 27 source checkpoint — pending live qualification
+## Historical 2026-09-29 macOS 27 source checkpoint — before admission
 
 The follow-up branch now carries an exact 27.0.1/26A434 source admission path
 and preserves the installed stock manifest's 26.6.2/25G83 facts. This is code
@@ -119,7 +121,7 @@ current inventory. The candidate remains removed. Gateway and compatibility
 results on 27, synthetic clipboard, and positive-controlled cross-guest TCP
 remain **NOT EXERCISED** in the new window. The 26 results above are unchanged.
 
-## 2026-09-29 qualification storage remount — runtime still pending
+## Historical 2026-09-29 qualification storage remount — before runtime
 
 The retained qualification sparsebundle was present on mounted DevelData and
 unattached. Its normal remount succeeded with the recorded inner APFS UUID
@@ -130,7 +132,7 @@ At that checkpoint native Tart remained locked/unmounted and R1 config
 validation and renewed admission were pending. This storage result did not
 change any runtime verdict above.
 
-## 2026-09-29 native remount and R1 admission — live window pending
+## Historical 2026-09-29 native remount and R1 enrollment — before admission
 
 After explicit owner authorization, the reviewed normal helper unlocked and
 mounted native Tart volume `568EE3B5-885B-4278-BD0E-5FE77C5D01A8` at its
@@ -153,3 +155,47 @@ Candidate publication and every macOS 27 guest/network/clipboard row remain
 **NOT EXERCISED** pending the refreshed attended window. No existing VM or
 workspace was operated on. These prerequisite results do not change the
 2026-09-28 runtime verdicts or enable N1 in the installed default.
+
+## Attended live results, 2026-09-29 — macOS 27.0.1 / 26A434
+
+The renewed approval covered at most two new disposable quarantine guests using
+the same retained, stopped generic base. The CLI was rebuilt from `086dd79e`;
+Tart, stock Softnet and the N1 Softnet identities were unchanged. No Ubuntu
+rebuild, base modification, pre-existing VM/workspace operation, real Mac
+clipboard use or host network/security change occurred.
+
+| Case | Live result | Evidence and limit |
+|---|---|---|
+| Stock desktop/start-stop and candidate restart | **PASS for tested path** | Both first starts reached READY. Both public stop/start cycles completed with guest-accepted, unforced stops and fresh READY generations. Actual bound Wayland/Xwayland/GTK3 desktops were responsive before and after helper staging/restart. No rebuild was tested. |
+| DHCP and pinned management | **PASS for tested path** | Distinct dynamic leased IPv4 addresses and DHCP routes after start/restart; exact-generation certificates and host pins used for management. This window did not separately exercise lease expiry or a timed renewal interval. |
+| Gateway DNS and public HTTPS | **PASS for tested path** | Both guests completed explicit UDP/TCP gateway DNS and direct HTTPS 200. A truncated UDP `org` DNSKEY response was followed by the probe's successful complete TCP query; this is scripted fallback evidence, not independent proof of automatic OS-resolver fallback. No public DNS resolver was hard-coded. |
+| Ordinary service on vmnet gateway, TCP and UDP | **PASS: N1 denied** | One 45-second owned fixture interval after restart. Host and stock positives bracketed one four-second candidate timeout per protocol. Each reaped listener counted four exact positive responses per protocol; these counts are not four candidate attempts. |
+| Synthetic CLI clipboard, stock control | **PASS** | Actual installed helper/adapter digests, root ownership/mode and responsive desktop were verified before the first write. One acknowledged copy and exact 31-byte synthetic readback; no Mac pasteboard access. |
+| Synthetic CLI clipboard, N1 candidate | **ATTEMPTED / UNQUALIFIED** | The same actual capability preflight passed. Copy was acknowledged with exit 0; the first paste returned exit 1, “clipboard text unavailable,” with no output. No repeated write or read. A later responsive desktop and matching live write worker do not prove native ownership/content/delivery or identify the failed layer. |
+| Cross-guest TCP to stock management listener | **UNQUALIFIED** | Both same-generation strict host positives to the existing stock SSH endpoint passed, and candidate READY/DNS/HTTPS/management controls passed. The single candidate attempt did not connect and returned `EHOSTUNREACH` (errno 113), rather than a timeout. The on-link route and FAILED neighbor are consistent with peer ARP denial, but do not prove causation or justify upgrading the original verdict. |
+| UDP cross-guest, guest-root route/firewall bypass, live parser/metadata failures | **NOT EXERCISED live** | No isolation weakening, added guest listener or hostile real-host probe. Deterministic evidence remains separate. |
+| Scoped/split DNS, VPN transitions, DNS64, IPv6-only upstream | **NOT EXERCISED** | No representative authorized environment. Native guest IPv6 and effectively IPv6-only upstream remain unsupported/unqualified. |
+
+The private qualification report r2 and digest manifest retain exact argv,
+generation/pin bindings, bounded observations, unqualified results and independent
+review. Report SHA-256:
+`ee52e014f6fc4c4748047ccdc6bb4c30447768d60c82d8c3177853f8614b7375`.
+The 26 clipboard unknown-write and invalid cross-guest results above were not
+overwritten. No failed live interval was rerun to obtain a pass.
+
+Both fresh guests were publicly stopped/deleted, the fixture reaped, and process
+and open-file prechecks passed. The owner executed the approved exact candidate
+removal; absence was verified. Only the fresh trial state, including its private
+CA, was retired without reading or archiving key bytes. Stock artifacts and the
+original 26.6.2 manifest were unchanged. Final stock doctor was healthy using a
+diagnostic config after the retired trial config correctly refused its missing
+state root. That configuration refusal was retained, not relabeled a host failure
+or silently repaired by recreating trial state.
+
+Small-file hashes and disk metadata for twelve protected Tart objects, plus
+record hashes and raw metadata for four existing workspaces, matched current
+pretrial baselines. VM disk
+and workspace raw contents were not hashed; this is not a full historical
+byte-equality claim. Address-refresh races and public NAT hairpin aliases remain
+design limits. Further live work requires a new exact bounded request after a
+specific diagnostic design; see [remaining follow-up](follow-up-trial.md).

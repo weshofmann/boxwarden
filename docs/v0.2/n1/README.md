@@ -5,15 +5,27 @@ into vmnet. It denies ordinary host-service destinations while retaining narrow
 DHCP, DHCP-advertised gateway DNS, and responses to host-initiated SSH. Stock
 Tart, its viewer, and the controlled clipboard protocol are unchanged.
 
-**This is a reviewed explicit candidate with bounded Mac qualification, not a
-change to the working installation.** On 2026-09-28, two disposable guests
-completed three positive-controlled live gateway-denial intervals and the tested
-DHCP, DNS, HTTPS, pinned-management and restart paths. The temporary candidate
-was removed after the trial. The default Boxwarden build still selects stock
-Softnet and reports its ADR 015 gateway exposure. A separate `n1candidate`
-build admits only the exact candidate artifact and requires its containment
-selector in normal and installer launch paths. Neither build accepts the
-other's Softnet identity; there is no runtime override.
+**This is a reviewed explicit candidate with bounded Mac qualification.** The
+2026-09-28 macOS 26 trial and the separately approved 2026-09-29 macOS 27.0.1
+(26A434) trial both exercised live gateway TCP/UDP denial with working host and
+stock controls, plus the tested DHCP, gateway DNS, HTTPS, pinned-management and
+restart paths. Both windows are closed; their temporary candidate installations
+and task-owned guests were removed. The working installation uses stock Softnet
+and retains ADR 015 gateway exposure.
+
+The macOS 27 trial verified actual installed clipboard helpers and responsive
+desktops before synthetic transfers. Stock copy/readback passed. The candidate
+acknowledged its copy, but its first readback failed: **UNQUALIFIED**. The fresh
+cross-guest TCP interval had both strict host positives and a healthy candidate,
+but returned `EHOSTUNREACH`, rather than the required timeout: **UNQUALIFIED**.
+Neither transfer nor connection attempt was repeated. Earlier failed/invalid
+results remain dated history in the [matrix](matrix.md).
+
+A separate `n1candidate` build admits only the exact candidate artifact and
+requires its containment selector in normal and installer launch paths. Default
+and candidate builds reject each other's Softnet identities; there is no runtime
+override. A possible PR #16 merge preserves this explicit candidate build and
+the stock default; it does not enable N1 in the working installation.
 
 - [Decision and limits](design.md)
 - [Observed acceptance matrix](matrix.md)
@@ -21,7 +33,7 @@ other's Softnet identity; there is no runtime override.
 - [Attended deployment, positive controls and rollback](attended-qualification.md)
 - [Bounded follow-up trial and renewed admission gate](follow-up-trial.md)
 - [Dated read-only follow-up preflight](follow-up-preflight.md)
-- [Exact macOS 27 source policy and pending qualification](macos27-compatibility.md)
+- [Exact macOS 27 source policy and bounded qualification](macos27-compatibility.md)
 - [Exact source and artifact identity](../../../tools/n1-softnet/artifact.json)
 - [Pinned build and licensing instructions](../../../tools/n1-softnet/README.md)
 
@@ -40,25 +52,18 @@ source tests never use upstream's privileged Cargo test runner. `build.py`
 requires separately verified source/compiler inputs and a populated locked
 Cargo cache; it refuses any output digest different from the staged identity.
 
-The original attended window is closed. The separately authorized narrow
-follow-up has not reached live admission on this host. The [matrix](matrix.md)
-separates passed live gateway denial and compatibility from
-attempted/unqualified clipboard, an
-invalid cross-guest listener interval, and unexercised environments. The
-approved narrow follow-up has not reached admission: a 2026-09-28 read-only
-preflight found this Mac on macOS 27.0.1, outside the then-current exact
-26.6.2 executable and cleanup binding. The source on this branch now admits
-the exact 27.0.1/26A434 pair for a new attended qualification, while retaining
-the stock manifest's 26.6.2 installation record. No new CLI has been
-published. On 2026-09-29 both retained storage mounts were restored through
-the reviewed normal paths and their exact APFS identities were verified. Public
-R1 enrollment produced new config files byte-identical to the reviewed
-preparations, and the staged stock CLI reported healthy on the current host
-without rewriting the stock installation record. These are prerequisite checks;
-renewed candidate admission and every macOS 27 guest/network/clipboard test
-remain pending. No second clipboard or cross-guest test has run. The previous
-trial showed the necessary DNS endpoint reachable in its tested topology. Scoped/VPN/DNS64 behavior, native
-and effectively IPv6-only upstream, address-refresh races and public NAT
-hairpin aliases remain outside the demonstrated claim. The merged N1
-implementation retains the explicit candidate build and stock default; N1 is
-not currently installed or enabled on this Mac.
+The [macOS 27 record](macos27-compatibility.md) distinguishes the exact source
+admission policy, historical installation facts, restored storage prerequisites,
+live results and cleanup. Stock doctor remained healthy and the stock manifest
+retained its original 26.6.2 installation record. Small-file hashes and disk
+metadata for twelve protected Tart objects, plus record hashes and raw metadata
+for four existing workspaces, matched pretrial baselines. Large disk contents
+were not hashed.
+
+The retained DNS endpoint was reachable in the tested topology. Scoped/split DNS,
+VPN transitions, DNS64, native and effectively IPv6-only upstream remain outside
+the demonstrated claim. Address-refresh races and public NAT hairpin aliases
+remain design limits. Candidate clipboard delivery and positive-controlled
+cross-guest TCP are unresolved qualification rows, not supported behavior. Any
+further live trial needs a fresh exact admission/test/cleanup package; the closed
+windows are not indefinite installation authorization.
