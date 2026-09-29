@@ -33,6 +33,15 @@ normal action. Qualification volume
 inventory; it cannot safely be mounted by path alone. Neither volume was
 unlocked, mounted, recreated, or modified during this design review.
 
+A later 2026-09-29 provenance check found the retained qualification
+sparsebundle already present on mounted DevelData. Its authorized normal
+attachment succeeded at the established mountpoint with the exact inner UUID,
+writable APFS and ownership enabled. This resolves the qualification-storage
+attachment blocker. Native Tart remains locked, so the exact R1 configs still
+cannot complete their private Tart-home directory check. Preserve the bare
+`0000` mountpoint; native access, renewed admission and runtime qualification
+remain separate pending gates.
+
 ## Exact source policy
 
 Admit only `darwin/arm64` with these current release/build pairs:

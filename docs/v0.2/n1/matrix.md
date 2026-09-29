@@ -118,3 +118,14 @@ present but locked/unmounted; the qualification APFS UUID was absent from the
 current inventory. The candidate remains removed. Gateway and compatibility
 results on 27, synthetic clipboard, and positive-controlled cross-guest TCP
 remain **NOT EXERCISED** in the new window. The 26 results above are unchanged.
+
+## 2026-09-29 qualification storage remount — runtime still pending
+
+The retained qualification sparsebundle was present on mounted DevelData and
+unattached. Its normal remount succeeded with the recorded inner APFS UUID
+`A178510A-D5EC-4495-828B-BD5445E2B66D`, writable state and ownership enabled.
+The reviewed wrapper passed read-only preflight and a regression proving
+that a nested filesystem cannot impersonate the recorded backing image.
+Native Tart remains locked/unmounted; R1 config validation, renewed candidate
+admission and every macOS 27 guest/network/clipboard row remain pending.
+This storage result does not change any runtime verdict above.
