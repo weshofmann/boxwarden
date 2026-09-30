@@ -1,0 +1,179 @@
+# N1 two-gap diagnostic design
+
+Status: source-only diagnostic package, based on fetched main
+`99b3a8c04c56ddc4292a9dd515c3e2abcb77d5c6`. Neither a live authorization
+nor qualification of an instrumented artifact. The completed macOS 27 trial
+remains closed. [Historical matrix](matrix.md), [follow-up](follow-up-trial.md),
+[evidence inventory](diagnostic-evidence.md), [implementation plan](diagnostic-plan.md).
+
+## Evidence and model
+
+Stock synthetic clipboard passed. Candidate capability preflight passed, copy
+acknowledged, and the **first** read failed with text unavailable; no retry.
+A later live write worker and responsive desktop do not prove native ownership
+or delivery. Candidate TCP to stock SSH22 returned errno 113, with an on-link
+route and FAILED neighbor; strict same-generation host positives bracketed it,
+and candidate management/DNS/HTTPS stayed healthy. These are **UNQUALIFIED**
+results, not hidden PASS results. The macOS 26 unknown/invalid trial is separate.
+
+There are two independent paths. Clipboard runs over host-initiated pinned
+management SSH, which remained healthy; no source evidence couples its failure
+to peer ARP. Network peer discovery precedes candidate-to-stock TCP establishment;
+a failed neighbor can prevent SYN emission, even when host-to-stock SSH works.
+
+## Clipboard path and ranked hypotheses
+
+The path is CLI -> session service -> private supervisor control -> exact READY
+runtime -> pinned SSH -> bootstrap clipboard mode -> fixed Python adapter ->
+GTK3 X11 backend -> Xwayland beneath the admitted Wayland compositor.
+
+The [canonical adapter](../../../guest/ubuntu-24.04-arm64/clipboard.py) discovers
+one local active Wayland user login, derives DISPLAY/XAUTHORITY from the user
+manager, checks their metadata, then twice binds compositor/controller and
+Xwayland executable/PID/starttime/parent/display/authority. Each read validates
+before and after one `UTF8_STRING` request. A write forks a detached child,
+claims exactly that target with `gtk_clipboard_set_with_data`, disarms its
+precommit timer, validates again, acknowledges, then pumps GTK until selection
+loss or session validation fails. The child can exit **after** acknowledgement.
+
+GTK claim success means callback-based ownership was accepted; the content is
+provided later on demand. The clear callback reports replacement, and a negative
+selection length reports retrieval failure, without identifying its cause.
+See [GTK claim](https://docs.gtk.org/gtk3/method.Clipboard.set_with_data.html),
+[read](https://docs.gtk.org/gtk3/method.Clipboard.request_contents.html) and
+[target metadata](https://docs.gtk.org/gtk3/method.Clipboard.request_targets.html).
+
+The Python error frame contains only version/status/length. The executor
+suppresses stderr. Bootstrap combines executor, decode, deadline and binding
+failures; its command reports target unavailable. SSH, runtime and supervisor
+then map multiple transport/protocol/READY/status failures to a generic read
+error. Thus the historic message identifies no failing layer.
+
+| Hypothesis | Rank and evidence | Discriminating future observation |
+|---|---|---|
+| Owner exits after acknowledgement | Plausible: retain can fail independently; later process presence weakens immediate death, but lacks birth/owner correlation | Exact owner PID **and starttime**, claim/ack/retain events and read-time liveness; exit or changed birth identity identifies loss of that process |
+| Selection replaced or cleared | Plausible: ownership is transient, and child only tracks its clear callback | Clear callback plus native owner XID at post-acknowledgement retain and immediately before first read on the same Xwayland binding; zero/different owner indicates loss/replacement |
+| Different desktop/Xwayland/session | Lower source prior because validation is strict; each operation nevertheless discovers separately | Compare operation binding digests including login, compositor and Xwayland birth identity, DISPLAY and authority metadata; changed binding separates this branch |
+| UTF8 target absent or representation rejected | Plausible: owner advertises only UTF8_STRING; read rejects negative length, wrong type/format, oversized or invalid UTF-8 | One bounded target-metadata query (presence of UTF8 only), native callback classification and representation checks, without logging target names or text |
+| Session/helper validation rejected | Plausible: repeated validation intentionally fails closed | Allowlisted stage/error codes before/after request and claim; check failure distinct from native retrieval failure |
+| Guest error collapsed, or framing/transport failed | Established information loss, unproven original cause | Guest adapter error code vs successful frame emission plus trusted-host stage codes; absence of a trace alone establishes nothing |
+
+Equal binding and owner observations are point-in-time evidence, not an atomic
+proof across the interval. Native owner XID can be reused, and the Wayland bridge
+can own a proxy selection. A get callback proves service was requested, not that
+the host received the bytes. Exact synthetic readback remains the delivery check.
+
+## Minimal diagnostic source changes
+
+See the [clipboard source report](clipboard-source-diagnostic-report.md) for
+the implemented overlay, exact bounds and red/green record. Keep the canonical
+guest definition, locked bootstrap, public clipboard protocol and ordinary
+installation unchanged. A **trial-only adapter overlay** wraps the
+exact preserved production adapter in fresh disposable clones. Its fixed trace
+is opened before privilege drop; the detached owner retains only the diagnostic
+fd plus its normal GTK state. Fixed slots/codes and hard byte/event/time bounds
+prevent indefinite owner lifetime from creating unbounded records. Trace failure
+must never authorize a write, retry a transfer or yield a PASS.
+
+Record adapter entry, session construction/check result, native claim, native
+owner/target metadata, get/clear/retain state and read callback classification;
+never exception strings, payload, authority contents, arbitrary argv/env or
+process listings. Collect via a separate reviewed pinned SSH metadata read;
+collection never invokes another text read. Use original output framing.
+
+If the adapter reports successful read/frame emission but the CLI fails, the
+future diagnostic host build must capture **codes only** at these existing seams:
+
+- `guestproto.Bootstrapper.Clipboard`: request/binding admission, executor result,
+  desktop decode, deadline, postbinding and response encode;
+- `sshx.Client.Clipboard`: admitted, child exit, truncation, deadline,
+  response decode and status;
+- `sessionruntime.ReadClipboard`: still-ready and response-status classification;
+- `supervisor` read control: reply decode, length/EOF and validation result.
+
+One operation ID and generation bind all stages. At most one fixed code per
+stage, <= 32 records / 16 KiB, elapsed monotonic offsets only, no stdout/stderr
+capture. Emit the receipt from the trusted host after the operation; the detached
+supervisor owns its bounded in-memory stages. Unknown exceptions become a fixed
+`internal_error`, never their message. These **host hooks are a preparation
+requirement**, not implemented production telemetry or admitted executable bytes
+in this package. They are needed only to separate downstream sublayers; adapter
+traces alone can distinguish a specific guest error from downstream failure.
+
+## Network path and ranked hypotheses
+
+Tart 2.32.1 connects the guest NIC through an `AF_UNIX/SOCK_DGRAM`
+socketpair. Softnet `lib/vm.rs` receives one Ethernet frame per datagram; patched
+`Proxy::process_frame_from_vm`
+calls `Policy::forward_with_refresh`. Fresh host-local/broadcast metadata is
+obtained before evaluation. Only Allow or accepted stock-global fallback reaches
+`Host::write` -> `vmnet::Interface::write` -> `vmnet_write`. The vmnet shared
+interface retains isolation. Host-side receive retains its ARP/IPv4 allowlist before `VM::write` back to
+the guest; `Policy::host` observes DHCP/management state, and its returned
+boolean is not the sole inbound admission gate. Canonical N1 source is
+[policy.rs](../../../tools/n1-softnet/policy.rs) and
+[exact patch](../../../tools/n1-softnet/softnet.patch), against upstream
+Softnet `df84a30016e3d6acc0d30acc660cf3a726f42a9b`.
+
+`guest_arp` requires Ethernet/ARP sender consistency and the current leased
+source (or zero before lease). Its target must be the gateway or a fresh
+host-local address. The stock peer lease is neither. Source therefore predicts
+peer-ARP suppression, **conditional on the frame actually reaching that policy
+with that lease and host metadata**. Stock also uses vmnet isolation and its
+private-destination rule; host management positives do not establish peer ARP
+reachability. If peer resolution succeeds, TCP may still be denied independently.
+
+| Hypothesis | Rank and evidence | Required passive observation |
+|---|---|---|
+| N1 suppresses peer ARP | Strongest source hypothesis; live arrival/decision absent | Exact peer ARP emitted by candidate, received by Softnet, actual Deny and no vmnet write; validate source/lease/target and fresh host-local exclusion |
+| API write returns but no reply is observed | Plausible alternative, vmnet isolation retained | Full-length API return and no IP-matching reply at host ingress under complete expected/unexpected-MAC, broadcast and header coverage; enqueue and internal cause remain unknown |
+| Kernel route/neighbor failure before emission | Plausible, route snapshot alone insufficient | Single-target route and neighbor before/after; complete candidate AF_PACKET transmit coverage with neither matching ARP nor relevant TCP SYN, bounded socket phase/errno; a cached neighbor can send SYN without ARP, and absence without loss-free coverage is inconclusive |
+| Reply/guest delivery or other socket failure | Remains possible | Matching reply at Softnet ingress and guest delivery observation; write success/error/ENOBUFS; SYN/connect phase, errno and monotonic timing |
+
+Use one exact candidate/stock tuple, never whole-network capture. In each guest,
+a finite AF_PACKET/BPF metadata counter watches only that tuple's ARP and TCP
+flags, no promiscuous mode or payload/file capture. Count receive drops/truncation
+and observer start/stop completeness. Route query is `ip -j route get <peer>`;
+neighbor query is `ip -j neigh show to <peer>` on the selected interface. These
+queries neither create static entries nor flush state. Do not run ping/arping,
+add routes or neighbors, change firewall state or add a listener.
+
+The trial-only forwarding observer reports actual ingress, decision and write
+result at the N1 seam. **It cannot be retrofitted by offline policy replay or
+by a guest-only packet counter.** The [pure observer and source integration contract](arp-observer-contract.md)
+in this package are preparation for a separately built reviewed
+variant. Its future version/source/executable/archive digests, closed launch
+binding, fd sink metadata and manifest must be independently admitted. No
+runtime debug flag, ambient environment or same-digest substitution is allowed.
+Observation must not replace the policy decision or bypass refresh/write errors.
+A full-length successful vmnet API return proves only that API outcome. The
+locked `vmnet` 0.5.1 wrapper checks status and returned packet size, but not the
+returned packet count; it does not prove enqueue, vmnet processing or peer
+delivery. Downstream silence cannot name an internal vmnet failure cause.
+
+## Privacy, trust and adjudication
+
+Guest-root trace is cooperative diagnostic evidence, never host authority.
+Synthetic text exists only in memory and transfer/readback buffers; publish only
+its equality result and length/hash receipt. No real Mac clipboard or credentials
+enter these guests. Root-owned fixed guest paths, no symlinks/hardlinks, finite
+slot writes and read-time strict schema checks constrain accidental leakage;
+they do not make a hostile guest truthful.
+
+Network observers retain only counters/codes for a reviewed fixed pair. Host
+local addresses are examined by the policy but not dumped; record target-local
+boolean and snapshot freshness. Keep raw private bindings/paths/receipts outside
+Git in a durable owner-approved archive, validate readable hashes and provenance.
+Retained historical evidence is read-only. Any observer loss/overflow, ambiguous
+binding, missing native metadata or unverified source hook makes attribution
+incomplete. An incomplete diagnostic never grants PASS.
+
+The historical [TCP verdict tool](../../../tools/n1-qualification/followup_tcp_verdict.py)
+is unchanged: connect fails isolation; timeout with working positives/controls
+can PASS that bounded check; errno113 remains UNQUALIFIED. A new attributed
+ARP-denial receipt may close the **diagnostic question**, with a separately
+reviewed future matrix entry; it does not rewrite old receipts or automatically
+change acceptance rules. No UDP/VPN/IPv6 or general host-isolation claim.
+
+[Future attended-request template](diagnostic-attended-request.md) lists the
+smallest combined window and the remaining exact-byte preparation gates.

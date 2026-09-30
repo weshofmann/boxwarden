@@ -148,3 +148,10 @@ candidate cleanup. The retained 27 package is a template; its retired config
 paths are not runnable inputs. Changed privileged bytes require new exact
 admission approval. No renewed live package is admitted or executed by this
 closeout, and no merge enables N1 in the stock installation.
+
+## Source-only diagnostic package
+
+The [two-gap diagnostic design](two-gap-diagnostic-design.md) and
+[draft attended request](diagnostic-attended-request.md) specify the next
+observations and exact-byte preparation gates. They authorize no live action
+and do not alter any historical result above.
