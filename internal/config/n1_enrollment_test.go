@@ -11,9 +11,9 @@ import (
 )
 
 func TestDiagnosticEnrollmentExactBytesAndMetadata(t *testing.T) {
-	for _, mode := range []string{"good", "bytes", "symlink", "hardlink", "mode", "size"} {
+	for _, mode := range []string{"good", "bytes", "symlink", "ancestor symlink", "hardlink", "mode", "size"} {
 		t.Run(mode, func(t *testing.T) {
-			p := filepath.Join(t.TempDir(), "config.json")
+			p := filepath.Join(canonicalTempDir(t), "config.json")
 			raw := []byte("synthetic nonsecret enrollment\n")
 			sum := sha256.Sum256(raw)
 			digest := hex.EncodeToString(sum[:])
@@ -22,16 +22,34 @@ func TestDiagnosticEnrollmentExactBytesAndMetadata(t *testing.T) {
 			}
 			switch mode {
 			case "bytes":
-				os.WriteFile(p, []byte("changed"), 0600)
+				if err := os.WriteFile(p, []byte("changed"), 0600); err != nil {
+					t.Fatal(err)
+				}
 			case "symlink":
-				os.Rename(p, p+".target")
-				os.Symlink(p+".target", p)
+				if err := os.Rename(p, p+".target"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(p+".target", p); err != nil {
+					t.Fatal(err)
+				}
+			case "ancestor symlink":
+				alias := filepath.Join(filepath.Dir(p), "alias")
+				if err := os.Symlink(filepath.Dir(p), alias); err != nil {
+					t.Fatal(err)
+				}
+				p = filepath.Join(alias, "config.json")
 			case "hardlink":
-				os.Link(p, p+".alias")
+				if err := os.Link(p, p+".alias"); err != nil {
+					t.Fatal(err)
+				}
 			case "mode":
-				os.Chmod(p, 0644)
+				if err := os.Chmod(p, 0644); err != nil {
+					t.Fatal(err)
+				}
 			case "size":
-				os.WriteFile(p, make([]byte, 4097), 0600)
+				if err := os.WriteFile(p, make([]byte, 4097), 0600); err != nil {
+					t.Fatal(err)
+				}
 			}
 			got, err := readN1EnrollmentBytes(p, digest)
 			if mode == "good" {

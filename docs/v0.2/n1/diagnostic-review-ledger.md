@@ -463,3 +463,36 @@ Go artifact graphs, full verification and four fresh final reviews remain.
 The two carried Minor limitations above remain explicit. Private evidence is
 outside Git. Nothing has been installed or exercised against a VM, guest,
 real clipboard or host network state.
+
+
+## Task3c hosted fixture correction closure
+
+Published Task3c run 36779931013 passed three Rust/packet jobs and earlier
+default/race/candidate/clipboard steps, then failed the expanded diagnostic
+step. Its restrictive umask 077 exposed synthetic 0644 certificates and an
+advertised world-readable temporary actually created 0600. Credential cleanup
+correctly pre-admitted the whole set and refused before removal. Separately,
+enrollment's positive fixture used macOS /var symlink ancestry, which the
+production reader deliberately refuses. The first alias experiment retained
+GOTMPDIR and passed; a separately compiled unchanged binary with GOTMPDIR
+absent reproduced the actual ancestry refusal. Failed evidence is immutable.
+
+Only four test files change: explicit checked fixture chmod 0644, existing
+canonicalTempDir for valid enrollment, explicit ancestor-symlink rejection and
+checked negative setup. Production and workflow bytes remain identical; no
+umask relaxation or new hosted test filter/skip is introduced. Focused
+RED/GREEN, direct alias GREEN, affected five-composition regressions/vet and
+native CGO/race controls for all five failures pass. CGO0 wider checks retain
+the explicit pre-existing APFS exclusion. Native evidence includes 68 actual
+compiler calls, with Go/runtime environment additions disclosed; it does not
+attest a whole SDK, nested Go tools or full-suite local race coverage.
+
+Fresh independent scoped review approves spec/quality with zero new findings,
+retaining the two carried Minor limitations. Review SHA256:
+`a21c792a909ebdd6f7af069e47df71b5b5651a76ff6bf66df97decb8c5525329`.
+Root independently read the source/report and verified 777 baseline/current/
+retained files, 1625 evidence entries, 18 command/result bindings and 68 native
+records. Corrective publication and a new full current-head hosted run remain
+required; the failed historical run cannot certify the corrected source.
+Task4b, Task5, final artifact/static closure and four fresh final reviews remain.
+Private evidence stays outside Git. No live or privileged effect occurred.

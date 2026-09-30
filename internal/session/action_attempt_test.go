@@ -121,7 +121,13 @@ func TestActionAttemptTemporaryRejectsForeignShapeAndUnsafeType(t *testing.T) {
 	}{
 		{"wrong nonce", func(path string) error { return os.WriteFile(path+"x", []byte("partial"), 0o600) }},
 		{"symlink", func(path string) error { return os.Symlink("elsewhere", path) }},
-		{"world readable", func(path string) error { return os.WriteFile(path, []byte("partial"), 0o644) }},
+		{"world readable", func(path string) error {
+			if err := os.WriteFile(path, []byte("partial"), 0o600); err != nil {
+				return err
+			}
+			// Creation permissions are filtered by the caller's umask.
+			return os.Chmod(path, 0o644)
+		}},
 		{"oversized", func(path string) error { return os.WriteFile(path, make([]byte, maxActionAttemptBytes+1), 0o600) }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
