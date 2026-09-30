@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestOSRunnerCapturesBoundedOutput(t *testing.T) {
@@ -50,5 +52,62 @@ func TestOSRunnerRejectsOversizedStdinWithoutLeakingBytes(t *testing.T) {
 	}
 	if got := err.Error(); strings.Contains(got, secret) {
 		t.Fatalf("Run() error leaked stdin: %q", got)
+	}
+}
+
+func TestBoundedBufferDiagnosticRetentionCapacity(t *testing.T) {
+	for _, limit := range []int{4096, 32768} {
+		buffer := newBoundedBuffer(limit)
+		for i := 0; i < limit/333+2; i++ {
+			buffer.Write([]byte(strings.Repeat("m", 333)))
+			if len(buffer.contents) > limit || cap(buffer.contents) > limit {
+				t.Fatal("drain allocation exceeded fixed retention", limit, len(buffer.contents), cap(buffer.contents))
+			}
+		}
+		if len(buffer.String()) != limit || !buffer.Truncated() {
+			t.Fatal("overrun retention/truncation")
+		}
+	}
+}
+
+func TestOSRunnerDiagnosticStreamChild(t *testing.T) {
+	if len(os.Args) != 4 || os.Args[2] != "--" {
+		return
+	}
+	fmt.Fprint(os.Stdout, "abcdef")
+	fmt.Fprint(os.Stderr, "uvwxyz")
+	os.Exit(0)
+}
+func TestOSRunnerDiagnosticCapsPreserveOutputFallback(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		runner    OSRunner
+		out, err  string
+		truncated bool
+	}{{"default", OSRunner{}, "abcdef", "uvwxyz", false}, {"legacy", OSRunner{MaxOutputBytes: 3}, "abc", "uvw", true}, {"distinct", OSRunner{MaxOutputBytes: 3, MaxStdoutBytes: 4, MaxStderrBytes: 2}, "abcd", "uv", true}} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := test.runner.Run(t.Context(), Command{Path: os.Args[0], Args: []string{"-test.run=^TestOSRunnerDiagnosticStreamChild$", "--", "fixed"}, Env: []string{"LANG=C"}})
+			if err != nil || result.Stdout != test.out || result.Stderr != test.err || result.Truncated != test.truncated {
+				t.Fatal("per-stream cap/fallback changed", err)
+			}
+		})
+	}
+}
+
+func TestOSRunnerDiagnosticStrictStderrObservedEOF(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	runner := OSRunner{MaxStdoutBytes: 512, MaxStderrBytes: 512}
+	value := reflect.ValueOf(&runner).Elem().FieldByName("StrictStderr")
+	if value.IsValid() {
+		value.SetBool(true)
+	}
+	result, err := runner.Run(ctx, Command{Path: os.Args[0], Args: []string{"-test.run=^TestOSRunnerDiagnosticStreamChild$", "--", "fixed"}, Env: []string{"LANG=C", "GORACE=atexit_sleep_ms=0"}})
+	if err != nil || result.Stdout != "abcdef" || result.Stderr != "uvwxyz" {
+		t.Fatal("original child exchange changed", err)
+	}
+	complete := reflect.ValueOf(result).FieldByName("StderrComplete")
+	if !complete.IsValid() || !complete.Bool() {
+		t.Fatal("actual stderr EOF/read-close observation unavailable")
 	}
 }

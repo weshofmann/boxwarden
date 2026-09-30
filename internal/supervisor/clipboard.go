@@ -45,7 +45,19 @@ func sendClipboardReply(c net.Conn, b Binding, status string, outcome clipboardx
 
 func handleClipboardControl(parent context.Context, c net.Conn, b Binding, owner RuntimeOwner, request controlRequest, accepted time.Time) {
 	deadline := accepted.Add(clipboardx.TransferTimeout)
-	if request.ExpiresAt.IsZero() || !request.ExpiresAt.After(time.Now()) || request.ExpiresAt.After(deadline) {
+	if request.ExpiresAt.IsZero() {
+		clipboardStage(parent, "control_expiry_missing", "refused")
+		clipboardControlLoss(parent)
+		return
+	}
+	if !request.ExpiresAt.After(time.Now()) {
+		clipboardStage(parent, "control_expiry_elapsed", "refused")
+		clipboardControlLoss(parent)
+		return
+	}
+	if request.ExpiresAt.After(deadline) {
+		clipboardStage(parent, "control_expiry_bound", "refused")
+		clipboardControlLoss(parent)
 		return
 	}
 	deadline = request.ExpiresAt
@@ -53,54 +65,117 @@ func handleClipboardControl(parent context.Context, c net.Conn, b Binding, owner
 		deadline = d
 	}
 	if c.SetDeadline(deadline) != nil {
+		clipboardStage(parent, "control_deadline", "refused")
+		clipboardControlLoss(parent)
 		return
 	}
 	ctx, cancel := context.WithDeadline(parent, deadline)
 	defer cancel()
 	stopIO := context.AfterFunc(ctx, func() { c.SetDeadline(time.Now()) })
 	defer stopIO()
+	reply := func(status string, outcome clipboardx.Outcome, text []byte, stage string) error {
+		clipboardDiagnosticOutcome(ctx, outcome)
+		err := sendClipboardReply(c, b, status, outcome, text)
+		if err != nil {
+			clipboardStage(ctx, stage, "incomplete")
+			clipboardControlLoss(ctx)
+		} else {
+			clipboardStage(ctx, stage, "ok")
+		}
+		return err
+	}
 	capability, ok := owner.(ClipboardOwner)
 	before := owner.Snapshot(ctx)
-	if !ok || ctx.Err() != nil || before.Binding != b || !snapshotReady(before) {
-		sendClipboardReply(c, b, "error", clipboardx.Unchanged, nil)
+	if !ok {
+		clipboardStage(ctx, "control_capability", "refused")
+		reply("error", clipboardx.Unchanged, nil, "control_final_error_frame")
 		return
 	}
-	if sendClipboardReply(c, b, "ready", clipboardx.Unchanged, nil) != nil {
+	if ctx.Err() != nil {
+		clipboardStage(ctx, "control_context", "cancelled")
+		reply("error", clipboardx.Unchanged, nil, "control_final_error_frame")
+		return
+	}
+	if before.Binding != b {
+		clipboardStage(ctx, "control_binding", "refused")
+		reply("error", clipboardx.Unchanged, nil, "control_final_error_frame")
+		return
+	}
+	if !snapshotReady(before) {
+		clipboardStage(ctx, "control_ready", "refused")
+		reply("error", clipboardx.Unchanged, nil, "control_final_error_frame")
+		return
+	}
+	if reply("ready", clipboardx.Unchanged, nil, "control_ready_frame") != nil {
 		return
 	}
 	var text []byte
 	if request.Action == "clipboard_write" {
 		var n uint32
-		if binary.Read(c, binary.BigEndian, &n) != nil || n > clipboardx.MaxTextBytes {
+		if binary.Read(c, binary.BigEndian, &n) != nil {
+			clipboardStage(ctx, "control_length", "unavailable")
+			clipboardControlLoss(ctx)
+			return
+		}
+		if n > clipboardx.MaxTextBytes {
+			clipboardStage(ctx, "control_length", "refused")
+			clipboardControlLoss(ctx)
 			return
 		}
 		text = make([]byte, int(n))
-		if _, err := io.ReadFull(c, text); err != nil || clipboardx.Validate(text) != nil {
+		if _, err := io.ReadFull(c, text); err != nil {
+			clipboardStage(ctx, "control_source", "unavailable")
+			clipboardControlLoss(ctx)
+			return
+		}
+		if clipboardx.Validate(text) != nil {
+			clipboardStage(ctx, "control_source", "refused")
+			clipboardControlLoss(ctx)
 			return
 		}
 	}
-	// An explicit terminator completes source capture without half-closing the
-	// connection. Full client disconnect can now cancel the guest operation.
 	var terminator [1]byte
-	if _, err := io.ReadFull(c, terminator[:]); err != nil || terminator[0] != 0 {
+	if _, err := io.ReadFull(c, terminator[:]); err != nil {
+		clipboardStage(ctx, "control_terminator", "unavailable")
+		clipboardControlLoss(ctx)
+		return
+	}
+	if terminator[0] != 0 {
+		clipboardStage(ctx, "control_terminator", "refused")
+		clipboardControlLoss(ctx)
 		return
 	}
 	if ctx.Err() != nil {
+		clipboardStage(ctx, "control_redispatch_context", "cancelled")
+		clipboardControlLoss(ctx)
 		return
 	}
 	disconnected := make(chan struct{})
 	go func() { var extra [1]byte; _, _ = c.Read(extra[:]); cancel(); close(disconnected) }()
 	defer func() { c.Close(); <-disconnected }()
 	before = owner.Snapshot(ctx)
-	if ctx.Err() != nil || before.Binding != b || !snapshotReady(before) {
-		sendClipboardReply(c, b, "error", clipboardx.Unchanged, nil)
+	if ctx.Err() != nil {
+		clipboardStage(ctx, "control_redispatch_context", "cancelled")
+		reply("error", clipboardx.Unchanged, nil, "control_final_error_frame")
+		return
+	}
+	if before.Binding != b {
+		clipboardStage(ctx, "control_redispatch_binding", "refused")
+		reply("error", clipboardx.Unchanged, nil, "control_final_error_frame")
+		return
+	}
+	if !snapshotReady(before) {
+		clipboardStage(ctx, "control_redispatch_ready", "refused")
+		reply("error", clipboardx.Unchanged, nil, "control_final_error_frame")
 		return
 	}
 	outcome := clipboardx.Unchanged
 	var err error
+	clipboardStage(ctx, "control_dispatch", "ok")
 	if request.Action == "clipboard_write" {
 		outcome, err = capability.WriteClipboard(ctx, text)
 		if outcome != clipboardx.Unchanged && outcome != clipboardx.Committed && outcome != clipboardx.Unknown {
+			clipboardStage(ctx, "control_outcome", "unknown")
 			outcome = clipboardx.Unknown
 			err = clipboardx.ErrUnknown
 		}
@@ -108,23 +183,35 @@ func handleClipboardControl(parent context.Context, c net.Conn, b Binding, owner
 		text, err = capability.ReadClipboard(ctx)
 		if err == nil {
 			err = clipboardx.Validate(text)
+			if err != nil {
+				clipboardStage(ctx, "control_read_validation", "unavailable")
+			}
 		}
 	}
 	after := owner.Snapshot(ctx)
-	if ctx.Err() != nil || after.Binding != b || !snapshotReady(after) {
+	drift := ""
+	if ctx.Err() != nil {
+		drift = "control_post_context"
+	} else if after.Binding != b {
+		drift = "control_post_binding"
+	} else if !snapshotReady(after) {
+		drift = "control_post_ready"
+	}
+	if drift != "" {
+		clipboardStage(ctx, drift, "unavailable")
 		if request.Action == "clipboard_write" && outcome != clipboardx.Unchanged {
 			outcome = clipboardx.Unknown
 		}
 		err = clipboardx.ErrAdmission
 	}
 	if err != nil || outcome == clipboardx.Unknown {
-		sendClipboardReply(c, b, "error", outcome, nil)
+		reply("error", outcome, nil, "control_final_error_frame")
 		return
 	}
 	if request.Action == "clipboard_write" {
 		text = nil
 	}
-	sendClipboardReply(c, b, "ok", outcome, text)
+	reply("ok", outcome, text, "control_final_ok_frame")
 }
 
 // ExactClipboardController admits only an existing live generation. Begin sends
@@ -183,7 +270,11 @@ func (c *Client) beginClipboard(parent context.Context, b Binding, direction cli
 		handshake = deadline
 	}
 	conn.SetDeadline(handshake)
-	data, _ := json.Marshal(controlRequest{Version: 1, Binding: b, Action: action, ExpiresAt: deadline.UTC()})
+	data, requestErr := clipboardBeginRequest(ctx, b, action, deadline.UTC())
+	if requestErr != nil {
+		t.Close()
+		return nil, clipboardx.ErrAdmission
+	}
 	if err = writeFrame(conn, data); err != nil {
 		t.Close()
 		return nil, clipboardx.ErrAdmission

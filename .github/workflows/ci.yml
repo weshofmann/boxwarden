@@ -119,6 +119,25 @@ jobs:
           go vet -tags n1candidate ./...
           go build -tags n1candidate -o "$RUNNER_TEMP/boxwarden-n1" ./cmd/boxwarden
 
+      - name: Verify clipboard diagnostic tags with synthetic fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=(./internal/execx ./internal/clipboarddiag ./internal/guestproto ./internal/sshx
+            ./internal/sessionruntime ./internal/supervisor ./internal/session
+            ./internal/architecture ./cmd/boxwarden ./cmd/boxwarden-n1-clipboard-diagnostic)
+          pattern='Clipboard|Diagnostic|Recorder|Operation|StrictReceipt|HostCLI|FrozenPython|Maximal|IncompleteCollection|PublicationRejects|PublicationWitness|StrictStderr|Slice'
+          for tags in n1clipboarddiagnostic n1diagnostic,n1clipboarddiagnostic; do
+            go test -race -tags "$tags" "${packages[@]}" -run "$pattern" -count=1
+            go vet -tags "$tags" "${packages[@]}"
+            go build -tags "$tags" -o "$RUNNER_TEMP/boxwarden-clipboard-${tags}" ./cmd/boxwarden
+            CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags "$tags" \
+              -trimpath -buildvcs=false -ldflags=-buildid= \
+              -o "$RUNNER_TEMP/boxwarden-clipboard-helper-${tags}" ./cmd/boxwarden-n1-clipboard-diagnostic
+          done
+          go test -tags n1candidate,n1clipboarddiagnostic ./cmd/boxwarden \
+            -run '^TestN1ClipboardDiagnosticForbiddenInDefaultAndCanonical$' -count=1
+
       - name: Vet
         if: ${{ hashFiles('go.mod') != '' }}
         run: go vet ./...

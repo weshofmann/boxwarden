@@ -219,6 +219,7 @@ func listenSocket(path string) (*controlListener, error) {
 	return owned, nil
 }
 func serveControl(ctx context.Context, listener *controlListener, binding Binding, owner RuntimeOwner, stop func() error) error {
+	ctx = clipboardDiagnosticScope(ctx, binding)
 	for {
 		connection, err := listener.AcceptUnix()
 		if err != nil {
@@ -240,6 +241,9 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 	}
 	data, err := readBounded(connection)
 	if err != nil {
+		return
+	}
+	if handleClipboardDiagnosticControl(ctx, connection, binding, owner, data, acceptedAt) {
 		return
 	}
 	var request controlRequest

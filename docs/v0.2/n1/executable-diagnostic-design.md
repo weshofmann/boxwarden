@@ -86,6 +86,24 @@ and owner concurrency remains valid. Task 2 implements and independently reviews
 the Python corrective interfaces. The actual Go producer remains a separate
 unimplemented integration gate, rather than an implicit synthetic certification.
 
+The Go integration is assigned these fixed additional namespace entries:
+`generation.binding`, `read.bootstrap`, `write.bootstrap`, `read.collect` and
+`write.collect`. They remain root-owned, finite and exclusive; no runtime path
+selector or namespace repair is permitted. A tagged internal `invoke|collect`
+capability uses the actual ClipboardService lock and admission path. Its stock
+and candidate config paths are compile-time package roles, and absence refuses
+rather than falling back to ambient state.
+
+The combined host/CLI fragment is limited to 32 records and 16 KiB. The guest
+bootstrap fragment has the same independent limits; the frozen overlay has
+64 slots and a maximal compact receipt of 14260 bytes. A separate diagnostic
+collection aggregate is capped at 32768 bytes including newline, with explicit
+origin/source fragments and full binding. Ordinary text framing and other
+16 KiB worker quotas remain unchanged. The Go implementation must prove the
+schema maximum and reject missing, duplicate, malformed or overflowing fragments
+without promoting an operation outcome. These integration interfaces remain
+pending source implementation and independent review.
+
 ## Private Softnet watch boundary
 
 The diagnostic build creates an unnamed AF_UNIX SOCK_STREAM socketpair owned by
@@ -209,3 +227,85 @@ libproc behavior and teardown must be checked read-only within the later
 approved attended window before installation; deterministic tests do not claim
 that host qualification. These are minimum consumer-race/provenance safeguards,
 not a generalized production uninstall surface.
+
+
+The finite window coordinator must drain and reap its retained workers, verify
+exact lifecycle teardown, close further dispatch and archive bounded evidence
+before publishing a private, immutable precleanup handoff and actually exiting.
+Enrolled config/state roots remain available for cleanup's independent inventory.
+A handoff records that planned boundary; it is neither a cleanup receipt nor
+consumer absence, runtime ownership or qualification success. Cleanup admits and
+observes independently and makes no exemption for a live diagnostic controller.
+
+The attended cleanup helper publishes its bounded receipt only after the exact
+removal and parent fsync. Partial mutation or lost publication remains unknown;
+absence cannot manufacture success. A separately pinned closeout executable then
+validates the receipt and archive, freshly checks candidate absence and stock
+state, and performs only the planned final archive and exact namespace retirement.
+It has no launch, lifecycle, clipboard, ARM, connect, install or cleanup capability.
+This process boundary is part of the single approved finite sequence and retains
+its original deadline. It provides no resumption of failed/unknown qualification
+or deadline extension. Source-complete commands, schemas, artifact hashes and
+synthetic process-exit/refusal tests remain required before the package closes.
+
+
+## Clipboard evidence completeness and transfer outcome
+
+`CollectionReceipt.Complete` reports admitted bounded metadata from the required
+origins and the native progression prefix with its actual closure proof. It is
+independent of `InvocationReceipt.Outcome`: a malformed final transport ACK can
+leave the invocation unknown while the diagnostic collection is complete.
+Missing terminal metadata, absent fragments, recording loss or invalid closure
+still prevents complete collection. The finite driver adjudicates the original
+invocation outcome together with the fixed synthetic result; completeness alone
+never proves transfer success or promotes equality. Synthetic write length is
+zero before source capture and 31 only after the fixed source was consumed.
+
+Task3a R1 publication ruling (source preparation, review pending): the existing fixed pending name is a provisional same-inode hardlink guard. Data write/sync/actual close, exclusive seal, directory sync and actual directory close must succeed while pending exists and the sealed artifact has two links. Collection refuses either condition. After exact pending/final inode validation, one actual local atomic unlink of the pending link commits the checked artifact; admission requires pending absent and the final artifact one-link. No fallible postcommit rewrite/sync/close, retry, new marker, foreign cleanup or general removal authority is introduced. Precommit or actual unlink errors remain incomplete and preserve one-use consumption and the original ACK/outcome; never infer commit from absence following a reported failure. Crash retention/reappearance of the guard is conservatively incomplete. Actual syscall error/effect ambiguity must be documented; a synthetic after-effect error does not prove known commit. Required controls cover close-then-error before commit, failed unlink retaining the guard, provisional concurrent-collector refusal and success only after all finalization. This publication guard is not the later privileged cleanup authority.
+
+Task3a R1 corrective review disposition: I1 producer attribution, I2 terminal finalization and I4 actual finite drain are closed. I3 publication remains Important; both spec and quality need fixes (0 Critical,1 Important,0 Minor). The conditional hardlink/unlink ruling above is insufficient as a completion contract: pending absence plus final nlink1 records namespace effect, not acknowledgement of a successful unlink return. Linux v6.8 ext4 __ext4_unlink removes the direntry/drops nlink before a possible later inode-dirty error (https://raw.githubusercontent.com/torvalds/linux/v6.8/fs/ext4/namei.c); unlink(2) documents EIO without rollback guarantee (https://man7.org/linux/man-pages/man2/unlink.2.html). This is an authoritative contract counterexample, not a reproduced or pinned future guest fault. Precommit data/directory checks and provisional refusal remain required, but successful-return evidence must reach exact-operation private collection admission; limitation comments or best-effort rollback cannot close I3. Original source/evidence/review records remain immutable. Final R1 review report SHAedb644088c52478d4390cd02951c64ecfb421a152532c7858d5734c09f6ac7c5, provenance813b379c1c5fb30911e06cee7ed523ae3c7d94aa6a899ce0098bb8f814d6fb5a. No severity lowering, publication, live trial or installation. A bounded R2 acknowledgement design is pending; canonical ACK/outcome/one-use and Unknown-with-complete must remain intact.
+
+R2 source-only architecture decision: reserve trial-helper stderr for one fixed publication-return witness (maximum512bytes including LF), parsed privately and never exposed as raw stderr/stdout or logged. Its exact fields are v,phase,header,generation,created,bootstrap,closure,collect; hashes cover only fixed typed metadata and the original complete operation header, never payload/credentials. Emit only after required publication/finalization calls actually return nil. Namespace guards remain supplemental; their visible state cannot reconstruct acknowledgement. The existing live host owner retains exact-operation/generation witnesses and requires matching collected metadata for complete admission; a reused generation needs a previously observed successful creation witness in that scope. No new guest filename, host journal, listener, share, caller selector or rollback/retry. A fixed tagged invoke runner retains stderr512 and the existing payload stdout quota; collect retains stdout32768/stderr4096. A narrow opt-in strict-stderr receiver records actual EOF and checked actual read-close within the original deadline, without changing ordinary runner behavior or the original clipboard ACK/outcome. Capture the witness before ACK parsing; a malformed ACK with valid evidence remains Unknown and may have complete metadata. Missing/truncated/mismatched/no-EOF/close-error proof cannot become complete. All eight-field canonical schema, maximum serialization, actual descriptor ownership/drain ordering and after-effect-error controls remain implementation/independent-review gates. No live or installation authorization is granted by this source decision.
+
+
+### Task3a corrective source gate closed
+
+The independent R2 component review closes I3 without lowering severity; I1,
+I2 and I4 retain their R1 closure. Spec compliance and quality are approved
+for the correction, with zero open or new Critical/Important/Minor findings.
+The earlier pending dispositions above are preserved review history.
+
+The host now retains a bounded canonical publication-return witness before
+ACK parsing and requires matching operation, original expiry, generation,
+bootstrap and closure metadata for complete collection. Generation reuse
+requires prior acknowledged creation in the live owner scope. Actual unlink
+then reported-error controls demonstrate that complete-looking files alone
+are insufficient. The opt-in receiver requires actual EOF and checked actual
+read-close before the original deadline, joins cancellation, and preserves
+the original process result and clipboard ACK/outcome. Helper stderr is
+reserved for one eight-field metadata frame; child stderr uses /dev/null.
+Measured invoke/collect maxima are 368/307 bytes including LF, below 512.
+
+Root read the full 1055-word worker report and 997-word independent review,
+verified 63 source/archive identities, 140 retained evidence files and all
+28 command records, and reconciled 105 unique named passing controls. The
+19 final gates cover affected default/canonical and stock/combined race/vet,
+actual host and fixed trial-helper builds, tag rejection, schema and the
+unchanged generic-artifact test. Two fresh actual nested compiler records
+preserve all eight argument elements; the fixed launcher retains six.
+The generic artifact remains 33b12b9e293bcbdf7d6c91f933b42003ca394e7a678ac83b8d80df714d27c57e.
+The canonical prefix remains 377 lines/13866 bytes and the generic method
+27 lines. Supplementary generic-command builds are distinguished from the
+actual separately named trial command.
+
+Frozen R1-to-R2 diff SHA256: f8fa752648b4d90b66de9821f42233d4653da42226f6321f8d37e230f85f314e.
+Worker report SHA256: 6f95e5c47129b5f818676ce3ca91639d6c69486b36a1810f6e42e6ae0d9e62fe.
+Independent R2 report SHA256: 5000104dcd118ec829f82eb22dfecfaca7c8817099e65b433eab23956ffc1212.
+Independent provenance SHA256: 945e5a5a93e999bb7298c9bdb63f01b79bd38851e5f562c4c03d2e43ceb1b121.
+
+This is deterministic component evidence. It does not qualify installed
+root producers, a guest kernel/filesystem, real SSH or native clipboard
+timing. Rust hooks, exact artifact reproduction/admission/launch/cleanup,
+the finite driver/static package and four fresh final reviews remain gates.
+Nothing has been installed or run against a VM, guest, the real clipboard or
+host network state. Private evidence remains outside Git.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
@@ -27,6 +28,9 @@ type Result struct {
 	Stdout    string
 	Stderr    string
 	Truncated bool
+	// StderrComplete is opt-in actual EOF/read-close evidence, never exit status.
+	StderrComplete                   bool
+	StdoutTruncated, StderrTruncated bool
 }
 
 type Runner interface {
@@ -35,7 +39,12 @@ type Runner interface {
 
 type OSRunner struct {
 	MaxOutputBytes int
+	// Positive per-stream retention overrides; otherwise each stream uses the
+	// existing MaxOutputBytes/default fallback. Commands cannot choose limits.
+	MaxStdoutBytes int
+	MaxStderrBytes int
 	MaxStdinBytes  int
+	StrictStderr   bool
 }
 
 func (r OSRunner) Run(ctx context.Context, command Command) (Result, error) {
@@ -64,13 +73,25 @@ func (r OSRunner) Run(ctx context.Context, command Command) (Result, error) {
 	if limit <= 0 {
 		limit = defaultMaxOutputBytes
 	}
-	stdout := newBoundedBuffer(limit)
-	stderr := newBoundedBuffer(limit)
+	stdoutLimit, stderrLimit := r.MaxStdoutBytes, r.MaxStderrBytes
+	if stdoutLimit <= 0 {
+		stdoutLimit = limit
+	}
+	if stderrLimit <= 0 {
+		stderrLimit = limit
+	}
+	stdout := newBoundedBuffer(stdoutLimit)
+	stderr := newBoundedBuffer(stderrLimit)
 	process.Stdout = stdout
 	process.Stderr = stderr
-
-	err := process.Run()
-	result := Result{Stdout: stdout.String(), Stderr: stderr.String(), Truncated: stdout.Truncated() || stderr.Truncated()}
+	var err error
+	observed := false
+	if r.StrictStderr {
+		err, observed = runStrictStderr(ctx, process, stderr, func(f *os.File) error { return f.Close() })
+	} else {
+		err = process.Run()
+	}
+	result := Result{Stdout: stdout.String(), Stderr: stderr.String(), Truncated: stdout.Truncated() || stderr.Truncated(), StderrComplete: observed, StdoutTruncated: stdout.Truncated(), StderrTruncated: stderr.Truncated()}
 	if err != nil {
 		return result, fmt.Errorf("run %q: %w", command.Path, err)
 	}
@@ -105,12 +126,25 @@ func (b *boundedBuffer) Write(input []byte) (int, error) {
 		b.truncated = true
 		return len(input), nil
 	}
-	if len(input) > remaining {
-		b.contents = append(b.contents, input[:remaining]...)
+	retained := input
+	if len(retained) > remaining {
+		retained = retained[:remaining]
 		b.truncated = true
-		return len(input), nil
 	}
-	b.contents = append(b.contents, input...)
+	needed := len(b.contents) + len(retained)
+	if needed > cap(b.contents) {
+		capacity := cap(b.contents) * 2
+		if capacity < needed {
+			capacity = needed
+		}
+		if capacity > b.limit {
+			capacity = b.limit
+		}
+		grown := make([]byte, len(b.contents), capacity)
+		copy(grown, b.contents)
+		b.contents = grown
+	}
+	b.contents = append(b.contents, retained...)
 	return len(input), nil
 }
 

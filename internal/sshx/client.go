@@ -34,10 +34,12 @@ type Connection struct {
 	KnownHostsFile   string
 }
 
-type Client struct{ runner, clipboardRunner Runner }
+type Client struct{ runner, clipboardRunner, clipboardDiagnosticRunner Runner }
 
 func NewClient(runner Runner) *Client {
-	return NewClientWithClipboardRunner(runner, NewClipboardExecRunner())
+	client := NewClientWithClipboardRunner(runner, NewClipboardExecRunner())
+	configureClipboardDiagnosticClient(client)
+	return client
 }
 
 type WorkspaceMount struct {

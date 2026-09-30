@@ -165,3 +165,113 @@ publication remain explicit Task 3a integration gates; without the fixed closure
 record the collector is incomplete. These tests and this scoped source review
 do not certify those Go hooks, native GTK timing, final artifacts, installation,
 the complete package or live qualification. No historical verdict changes.
+
+Published clipboard commit `10f8a76ab477e9c0fc398326066d65ce0afbd326` has
+green [CI run 36673956382](https://github.com/weshofmann/boxwarden/actions/runs/36673956382).
+Decoded Mac job logs show all 48 clipboard controls pass; hosted Ubuntu runs
+all 31 guest-observer tests without skips. Default/candidate Go tests, race,
+vet and builds pass for that published head. This does not cover subsequent
+uncommitted Go integration.
+
+
+Root semantics ruling (2026-09-30, Kindex87c3ac896e80): diagnostic collection
+completeness is independent of invocation outcome. Unknown final ACK may coexist
+with complete metadata; missing terminal/fragment, loss, invalid prefix or closure
+cannot. Driver uses original outcome plus fixed synthetic equality/consumed length,
+never metadata completeness as success. Worker requested a focused regression;
+source/report freeze and fresh review remain pending.
+
+
+Nested Go test boundary learned in Task3a: Go1.27 cmd/go/internal/test/test.go92
+and1676 deliberately prepend GOROOT/bin to actual test process PATH. An outer
+PATH go-wrapper therefore does not prove nested artifact compiler checks ran.
+Use a fixed unprivileged -exec test launcher to restore exact closed PATH before
+exec of the unchanged actual test binary, preserve actual argv and retain two
+nested compiler checks/records. No source/test/tool mutation or runtime override.
+Earlier unchanged named artifact pass proves locked bytes but cannot substitute
+for missing nested validation. Propagate to every remaining Go test with nested
+compiler boundaries (Kindex46bf54f42581).
+
+
+Root verified corrected nested compiler provenance before Task3a review:
+unchanged named generic-helper artifact test passed with fixed -exec launcher,
+two real compiler argv/count8 records plus launcher read in full, exact Go SHA
+and encrypted mount association recorded per boundary, all three archive/original
+pairs equal and SHA verified. Root durable verification SHA
+81e0d3ad5f74f91f781b6485a8d5495badf7ef694f24382fa4dbd72c9db1f741.
+Earlier pass and setup typo retained. Task3a worker reports final affected stock
+and combined race/vet/host build/static Linuxarm64 helper and canonical rejection
+green, CI shell syntax and43 Go files formatted; full freeze/report and fresh
+scoped review remain the publication gate. This is deterministic source evidence,
+not live clipboard/native timing or whole-package qualification.
+
+
+Task3a fresh independent component review completed on frozen46 changed/new files
+(diff d4de2465416f30623213b5bdb44458ac6075dd1646bbc51c3901c34122d06f5d).
+Final report SHAa5cb9e8195d77830bdd6907b8c0e06e80875461ba61920245abf26c70b88353a,
+provenance22fea730a6930f1c03444acd490198708698f20067da33a9e7afb06d9a2a1a6e:
+0Critical,4Important,0Minor; needs fixes. Initial3finding report retained and
+explicitly superseded after focused real collection-runner quota check.
+I1 producer/stage crossproduct missing; I2 incomplete or conflicting final frames
+admitted; I3 bootstrap and actual directory-close failure can remain complete;
+I4 actual collection buffers ordinary1,052,673bytes per stream before rejecting
+metadata limits32768stdout/4096stderr. Ordinary intake is finite and cannot promote
+oversize; it still violates the diagnostic drain quota.
+
+Root read full report/provenance and independently checked mechanisms before
+returning all4 to original requestedSolHigh implementer with boundedR1brief.
+No severity lowered or issue parked. Statusok for terminal frame means actual
+successful frame-write/finalization, including an error payload/Unknown invocation;
+it does not imply transfer success. Earlier Root acceptance of regardlessStatus
+was too broad and is corrected. Initial source/evidence/review remain immutable.
+R1 fixes/scoped same-reviewer closure, publication and hostedCI remain pending.
+This is the component gate; final4fresh package review seats remain required.
+
+Task3a R1 publication ruling (source preparation, review pending): the existing fixed pending name is a provisional same-inode hardlink guard. Data write/sync/actual close, exclusive seal, directory sync and actual directory close must succeed while pending exists and the sealed artifact has two links. Collection refuses either condition. After exact pending/final inode validation, one actual local atomic unlink of the pending link commits the checked artifact; admission requires pending absent and the final artifact one-link. No fallible postcommit rewrite/sync/close, retry, new marker, foreign cleanup or general removal authority is introduced. Precommit or actual unlink errors remain incomplete and preserve one-use consumption and the original ACK/outcome; never infer commit from absence following a reported failure. Crash retention/reappearance of the guard is conservatively incomplete. Actual syscall error/effect ambiguity must be documented; a synthetic after-effect error does not prove known commit. Required controls cover close-then-error before commit, failed unlink retaining the guard, provisional concurrent-collector refusal and success only after all finalization. This publication guard is not the later privileged cleanup authority.
+
+Task3a R1 corrective review disposition: I1 producer attribution, I2 terminal finalization and I4 actual finite drain are closed. I3 publication remains Important; both spec and quality need fixes (0 Critical,1 Important,0 Minor). The conditional hardlink/unlink ruling above is insufficient as a completion contract: pending absence plus final nlink1 records namespace effect, not acknowledgement of a successful unlink return. Linux v6.8 ext4 __ext4_unlink removes the direntry/drops nlink before a possible later inode-dirty error (https://raw.githubusercontent.com/torvalds/linux/v6.8/fs/ext4/namei.c); unlink(2) documents EIO without rollback guarantee (https://man7.org/linux/man-pages/man2/unlink.2.html). This is an authoritative contract counterexample, not a reproduced or pinned future guest fault. Precommit data/directory checks and provisional refusal remain required, but successful-return evidence must reach exact-operation private collection admission; limitation comments or best-effort rollback cannot close I3. Original source/evidence/review records remain immutable. Final R1 review report SHAedb644088c52478d4390cd02951c64ecfb421a152532c7858d5734c09f6ac7c5, provenance813b379c1c5fb30911e06cee7ed523ae3c7d94aa6a899ce0098bb8f814d6fb5a. No severity lowering, publication, live trial or installation. A bounded R2 acknowledgement design is pending; canonical ACK/outcome/one-use and Unknown-with-complete must remain intact.
+
+R2 source-only architecture decision: reserve trial-helper stderr for one fixed publication-return witness (maximum512bytes including LF), parsed privately and never exposed as raw stderr/stdout or logged. Its exact fields are v,phase,header,generation,created,bootstrap,closure,collect; hashes cover only fixed typed metadata and the original complete operation header, never payload/credentials. Emit only after required publication/finalization calls actually return nil. Namespace guards remain supplemental; their visible state cannot reconstruct acknowledgement. The existing live host owner retains exact-operation/generation witnesses and requires matching collected metadata for complete admission; a reused generation needs a previously observed successful creation witness in that scope. No new guest filename, host journal, listener, share, caller selector or rollback/retry. A fixed tagged invoke runner retains stderr512 and the existing payload stdout quota; collect retains stdout32768/stderr4096. A narrow opt-in strict-stderr receiver records actual EOF and checked actual read-close within the original deadline, without changing ordinary runner behavior or the original clipboard ACK/outcome. Capture the witness before ACK parsing; a malformed ACK with valid evidence remains Unknown and may have complete metadata. Missing/truncated/mismatched/no-EOF/close-error proof cannot become complete. All eight-field canonical schema, maximum serialization, actual descriptor ownership/drain ordering and after-effect-error controls remain implementation/independent-review gates. No live or installation authorization is granted by this source decision.
+
+
+### Task3a corrective source gate closed
+
+The independent R2 component review closes I3 without lowering severity; I1,
+I2 and I4 retain their R1 closure. Spec compliance and quality are approved
+for the correction, with zero open or new Critical/Important/Minor findings.
+The earlier pending dispositions above are preserved review history.
+
+The host now retains a bounded canonical publication-return witness before
+ACK parsing and requires matching operation, original expiry, generation,
+bootstrap and closure metadata for complete collection. Generation reuse
+requires prior acknowledged creation in the live owner scope. Actual unlink
+then reported-error controls demonstrate that complete-looking files alone
+are insufficient. The opt-in receiver requires actual EOF and checked actual
+read-close before the original deadline, joins cancellation, and preserves
+the original process result and clipboard ACK/outcome. Helper stderr is
+reserved for one eight-field metadata frame; child stderr uses /dev/null.
+Measured invoke/collect maxima are 368/307 bytes including LF, below 512.
+
+Root read the full 1055-word worker report and 997-word independent review,
+verified 63 source/archive identities, 140 retained evidence files and all
+28 command records, and reconciled 105 unique named passing controls. The
+19 final gates cover affected default/canonical and stock/combined race/vet,
+actual host and fixed trial-helper builds, tag rejection, schema and the
+unchanged generic-artifact test. Two fresh actual nested compiler records
+preserve all eight argument elements; the fixed launcher retains six.
+The generic artifact remains 33b12b9e293bcbdf7d6c91f933b42003ca394e7a678ac83b8d80df714d27c57e.
+The canonical prefix remains 377 lines/13866 bytes and the generic method
+27 lines. Supplementary generic-command builds are distinguished from the
+actual separately named trial command.
+
+Frozen R1-to-R2 diff SHA256: f8fa752648b4d90b66de9821f42233d4653da42226f6321f8d37e230f85f314e.
+Worker report SHA256: 6f95e5c47129b5f818676ce3ca91639d6c69486b36a1810f6e42e6ae0d9e62fe.
+Independent R2 report SHA256: 5000104dcd118ec829f82eb22dfecfaca7c8817099e65b433eab23956ffc1212.
+Independent provenance SHA256: 945e5a5a93e999bb7298c9bdb63f01b79bd38851e5f562c4c03d2e43ceb1b121.
+
+This is deterministic component evidence. It does not qualify installed
+root producers, a guest kernel/filesystem, real SSH or native clipboard
+timing. Rust hooks, exact artifact reproduction/admission/launch/cleanup,
+the finite driver/static package and four fresh final reviews remain gates.
+Nothing has been installed or run against a VM, guest, the real clipboard or
+host network state. Private evidence remains outside Git.
