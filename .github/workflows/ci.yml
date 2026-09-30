@@ -50,6 +50,7 @@ jobs:
           python3 tools/n1-qualification/listener_test.py
           python3 tools/n1-qualification/followup_tcp_verdict_test.py
           python3 tools/n1-qualification/clipboard_diagnostic_test.py
+          PYTHONDONTWRITEBYTECODE=1 python3 tools/n1-qualification/guest_metadata_observer_test.py
           python3 tools/n1-softnet/test_verify_cli.py tools/n1-softnet/verify_cli.py
 
       - name: Set up Node for synthetic demo checks
@@ -133,6 +134,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check exact guest metadata filter with the Linux kernel
+        run: PYTHONDONTWRITEBYTECODE=1 python3 tools/n1-qualification/guest_metadata_observer_test.py
       - name: Select pinned Rust compiler
         run: rustup toolchain install 1.98.1 --profile minimal
       - name: Test pure packet policy without vmnet or privilege

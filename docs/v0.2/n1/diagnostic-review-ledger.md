@@ -64,3 +64,67 @@ This ledger closeout changes only review documentation. Exact final-head hosted
 CI results are maintained in [Draft PR #17](https://github.com/weshofmann/boxwarden/pull/17)
 after they complete, rather than asserting a future run passed. Keep the PR
 Draft; no merge or live deployment belongs to this task.
+
+## Executable package preparation after merged PR17
+
+The historical reviews above cover PR17 only. Executable preparation starts
+from merged `bbcfaac3f3e21b7094b2db4476c54115eb43722e` on
+`weshofmann/feat/n1-diagnostic-package`. Its scope is runnable unprivileged
+source/artifacts and an uninvoked future attended package. Installation, guest
+operations, actual clipboard/network capture and qualification remain excluded.
+The [implementation plan](../../superpowers/plans/2026-09-29-n1-diagnostic-package.md)
+and [interface addendum](executable-diagnostic-design.md) distinguish proposed
+later interfaces from verified coverage.
+
+Task 1's first independent GPT-6.1 Sol/XHigh review found five Important issues:
+packet tap direction was ignored; identifiable TCP22 truncation could disappear
+at the kernel filter; late readiness/packets could yield a complete interval;
+conditional candidate pre-emission inference required by the merged design was
+missing; and Python 3.11+ integer-limit ValueError could escape the fixed parser
+error schema. No finding was downgraded. Two scoped fix/review rounds followed;
+their results are recorded below.
+The earlier 20-test green is not evidence that those five issues were closed.
+
+The controller's initial unconditional restriction on zero-count inference was
+too broad. The corrected contract permits only a conditional absence claim for
+supported well-formed outgoing candidate ARP/SYN at the guest tap after all
+capture and driver controls pass. It leaves precise kernel cause, global absence,
+downstream absence, enqueue and delivery unproved.
+
+An earlier inherited fixture interpreter incorrectly modeled cBPF indirect byte
+load opcode 0x50 as a word load. Independent opcode fixtures exposed the false
+green; the interpreter and actual emitted program were corrected before review.
+Actual kernel execution is assigned to the hosted Linux AF_UNIX fixture; Darwin
+synthetic execution cannot certify that check or future guest-kernel coverage.
+
+Until changed by the owner, Luna is prohibited: all formerly Luna/Terra tasks
+route to GPT-6.1 Sol. Required independent reviews retain High/XHigh as specified.
+Requested spawn routing is inspectable; actual backend routing metadata is not
+exposed by the delegation tool. No Astra is used.
+
+The first scoped re-review closed packet direction, truncated-header accounting,
+conditional inference and modern-Python parsing. It kept the timing finding
+Important: final statistics and socket close were still outside the measured
+closing phase. It also recorded a Minor extreme-clock conversion overflow.
+The second fix measures through actual capture close before separately bounded
+post-observation queries and validates derived deltas before integer conversion.
+Scoped GPT-6.1 Sol/XHigh re-review closed both remaining findings with zero
+Critical, Important or Minor findings for this component. No severity was lowered.
+
+The controller independently ran the final owned suite on Python 3.9.6 and
+Python 3.14.7: **31 tests, 30 passed, 1 Linux-only skip**, exit 0 on each. Python AST,
+local documentation links/fences and whitespace checks passed. Canonical adapter
+and generic helper bytes still match their historical locked hashes. The exact
+observer source is SHA256
+`1a52c58c2143f3f2876bdde829fba6dca35a99f23843a8bb0af61aa4a018c455`;
+its tests are
+`c788ba33a54f0ef3e3f6a8c4e85af674e8e67013109e1638d391310d42164bb8`.
+Complete synthetic red/green and scoped-review records are retained outside Git.
+
+Hosted Linux CI is configured to execute the actual cBPF filter on unnamed
+AF_UNIX datagrams, including truncation boundaries. That non-skipped result is
+pending first publication; synthetic Darwin execution is not substituted for it.
+Guest AF_PACKET/offload qualification, driver controls, actual Softnet hooks,
+clipboard integration, artifact/admission/cleanup closure and cumulative reviews
+remain later tasks. This component's source review does not certify those tasks
+or claim live attribution/N1 qualification.
