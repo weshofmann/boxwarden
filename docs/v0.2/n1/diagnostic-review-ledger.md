@@ -275,3 +275,60 @@ timing. Rust hooks, exact artifact reproduction/admission/launch/cleanup,
 the finite driver/static package and four fresh final reviews remain gates.
 Nothing has been installed or run against a VM, guest, the real clipboard or
 host network state. Private evidence remains outside Git.
+
+
+### Task3b diagnostic forwarding source gate closed
+
+The distinct diagnostic Rust source calls the tested shared dispatch functions
+from the actual VM and host forwarding paths. It preserves the refresh and
+timestamp order, policy state transitions, fallback, raw write results and the
+single write, including short successful writes, the ignored host policy boolean
+and ENOBUFS suppression. Diagnostic lease inspection is read-only. Bounded
+metadata identifies only the selected pair; vmnet packet count remains
+unobserved, and API success makes no enqueue or delivery claim.
+
+The fixed HELLO/ARM/ARMED/SUMMARY protocol admits one finite interval over an
+anonymous nonblocking fd1 stream. Complete and partial ARM arriving after the
+original HELLO wait deadline are refused before activation. Mandatory self-tree
+admission validates the full manifest, descriptor digest, protected ancestry,
+operator/group membership, ACL/link/mode and read-only SH lock; the guard remains
+held through actual resource construction and teardown. Timestamp offset fields
+require decimal digits before range and zero-instant validation.
+
+The first fresh independent source review found two Important issues and one
+Minor issue: late ARM could bypass the HELLO timeout; signed offset components
+could pass timestamp admission; and the serialization fixture omitted widest
+valid binding spellings. All were corrected and independently closed at their
+original severity, with no new findings. The original review and measured
+results remain preserved. Spec and quality pass this bounded source-component
+gate; it is not a final package review.
+
+Retained targeted RED reproduced four assertion failures with two passing
+controls. Targeted GREEN passes six controls; a fresh 14-file patch replay and
+actual library/main metadata-only Cargo check pass. The corrected conservative
+serialization bound is 3166 bytes for SUMMARY and 4469 framed child bytes,
+including the three length prefixes, within 4096/16384 quotas. It overapproximates
+jointly reachable counter/flag states; original 3132/4387 remain fixture-specific
+measurements. No full 79-test pass is claimed by the targeted run.
+
+Source patch SHA256: 2e8dbbffdbf5869dc5280ef260e9f455cd31af43d8519844be8f95440416f2f6.
+Source manifest SHA256: 555d710d92432b7d64621c07719332a37881b5e33efa0776aa3b1683e7050333.
+Initial independent review SHA256: 6f7e938f363569cbecb9e0e161e9a8cef6d87521eb1e4ddd2ff22110dd1057d4.
+Independent corrective closure SHA256: 325d28c9ef206367f81961fb45bf87071b74ab915396450313c8616ecba2958c.
+
+Native ACL/socket controls are local synthetic evidence. Same-process socket
+flags and the earlier small Foundation fd1 round trip do not qualify actual
+Go-to-Foundation inheritance. Compiler records identify clang/ar shims, not
+historical resolved SDK children or every nested image boundary. Exact artifact
+reproduction and admission, Go owner/watch/lock integration, cleanup, finite
+driver/static lock, current increment CI and four fresh final reviews remain
+gates. No diagnostic executable was built or launched, and nothing was installed
+or run against a VM, guest, clipboard or host network state.
+
+A separate deterministic CI matrix now selects only the locked synthetic fixture
+on Ubuntu 24.04 and macOS 26. Fresh private neutral working directories, explicit
+nonprivileged runner overrides and a closed submitted environment keep upstream
+sudo test runners out of that execution. Locked fetch precedes offline tests;
+fetch or configuration refusal prevents test execution. Local syntax and
+command-spy controls pass, but spies do not establish native compiler identity
+or exact native child environment. Hosted execution remains pending publication.

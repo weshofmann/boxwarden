@@ -95,3 +95,16 @@ Task 2 is closed for the frozen Python source after two Important findings and o
 - [ ] Request fresh independent clipboard Sol/High, network/vmnet/ARP Sol/XHigh, admission/cleanup/artifact Sol/High or justified XHigh, and cumulative-delta Sol/XHigh reviews. Preserve disagreements; resolve all Critical/Important findings.
 - [ ] Inspect cumulative diff against freshly fetched actual base, private-data scope and whitespace. Commit detailed coherent verified increments and push immediately; create/attach/maintain Draft PR after first meaningful push. Wait for green current-head CI and fix branch-caused failures.
 - [ ] Record exact final artifact-source commit separately from later hash/documentation closeout commits to avoid a self-referential source-commit/hash cycle. Stop uninstalled with one concise fully concrete owner request; make no live qualification claim.
+
+
+## Task 3b source checkpoint
+
+The actual forwarding hooks, finite wire/watch and mandatory self-admission/SH
+lifetime source are implemented. The initial independent source review found
+two Important and one Minor findings; all were corrected and independently
+closed at their original severity. Targeted RED/GREEN and fresh metadata-only
+source checks are retained; a dedicated Ubuntu/macOS synthetic CI matrix is
+prepared with hosted execution pending publication. This closes the bounded
+source component, not the full Task 3 or final package. Task 4a exact reproduction
+and publisher/admission API precede Task 3c owner/launcher integration. Historical
+Task 3a and canonical artifact evidence remain intact.

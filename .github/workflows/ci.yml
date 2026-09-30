@@ -179,3 +179,90 @@ jobs:
             --cfg 'feature="pinned_fallback_test"' --extern "ip_network=$RUNNER_TEMP/libip_network.rlib" \
             -o "$RUNNER_TEMP/n1-policy-fallback-tests"
           "$RUNNER_TEMP/n1-policy-fallback-tests"
+
+  n1-diagnostic-synthetic:
+    name: N1 diagnostic synthetic (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test locked diagnostic fixture in a neutral private workspace
+        shell: bash
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          umask 077
+          rustup toolchain install 1.98.1 --profile minimal
+          cargo="$(rustup which --toolchain 1.98.1 cargo)"
+          rustc="$(rustup which --toolchain 1.98.1 rustc)"
+          rustdoc="$(rustup which --toolchain 1.98.1 rustdoc)"
+          python3 - "$GITHUB_WORKSPACE" "$RUNNER_TEMP" "$cargo" "$rustc" "$rustdoc" <<'PYTHON'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import tempfile
+
+          workspace, runner_temp, cargo, rustc, rustdoc = [
+              Path(value).resolve(strict=True) for value in sys.argv[1:]
+          ]
+          if any(not Path(value).is_absolute() for value in sys.argv[1:]):
+              raise SystemExit("absolute workspace and tool paths required")
+          if cargo.parent != rustc.parent or cargo.parent != rustdoc.parent:
+              raise SystemExit("Rust tools must belong to one selected toolchain")
+          manifest = workspace / "tools/n1-diagnostic-softnet/synthetic/Cargo.toml"
+          if not manifest.is_file() or not manifest.with_name("Cargo.lock").is_file():
+              raise SystemExit("locked synthetic manifest required")
+          root = Path(tempfile.mkdtemp(prefix="n1-diagnostic-", dir=runner_temp))
+          os.chmod(root, 0o700)
+          for name in ("home", "cargo-home", "target", "temp", "cwd"):
+              (root / name).mkdir(mode=0o700)
+          cwd = root / "cwd"
+          if cwd == workspace or workspace in cwd.parents:
+              raise SystemExit("neutral working directory required")
+          for directory in (cwd, *cwd.parents):
+              if any((directory / ".cargo" / name).exists()
+                     for name in ("config", "config.toml")):
+                  raise SystemExit("ambient Cargo configuration refused")
+          environment = {
+              "HOME": str(root / "home"),
+              "CARGO_HOME": str(root / "cargo-home"),
+              "CARGO_TARGET_DIR": str(root / "target"),
+              "TMPDIR": str(root / "temp"),
+              "PATH": str(cargo.parent) + os.pathsep + "/usr/bin:/bin",
+              "RUSTC": str(rustc), "RUSTDOC": str(rustdoc),
+              "LANG": "C", "LC_ALL": "C", "CARGO_BUILD_JOBS": "4",
+              "CARGO_HTTP_TIMEOUT": "60", "CARGO_NET_RETRY": "2",
+          }
+          for tool, version in ((cargo, "cargo 1.98.1 "), (rustc, "rustc 1.98.1 ")):
+              result = subprocess.run([str(tool), "--version"], cwd=cwd,
+                                      env=environment, check=True, timeout=20,
+                                      stdout=subprocess.PIPE, text=True)
+              if not result.stdout.startswith(version):
+                  raise SystemExit("selected Rust tool version mismatch")
+              print(result.stdout.strip(), flush=True)
+          common = [str(cargo), "--config",
+                    'target.aarch64-apple-darwin.runner="/usr/bin/env"', "--config",
+                    'target.x86_64-unknown-linux-gnu.runner="/usr/bin/env"']
+          for arguments, offline, deadline in (
+              (["fetch", "--locked", "--manifest-path", str(manifest)], "false", 240),
+              (["test", "--locked", "--offline", "--manifest-path", str(manifest),
+                "--lib"], "true", 300),
+          ):
+              argv = common + arguments
+              child_environment = dict(environment, CARGO_NET_OFFLINE=offline)
+              print(json.dumps({"argv_count": len(argv), "argv": argv,
+                                "argv_hex": [os.fsencode(value).hex() for value in argv],
+                                "cwd": str(cwd), "environment": child_environment,
+                                "timeout_seconds": deadline}, sort_keys=True), flush=True)
+              subprocess.run(argv, cwd=cwd, env=child_environment,
+                             check=True, timeout=deadline)
+          PYTHON

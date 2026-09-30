@@ -1,0 +1,30 @@
+{
+  "baseline": "8d145f5bd35f509fd7e26b269a756b17dbab66e2",
+  "canonical_patch_sha256": "f91669592f2231c29d159d753d772dcbe9d08c3446832eadb7c731ba226b80ef",
+  "canonical_policy_sha256": "37491b19e58bc0aaed1d3730b40d52e2cad53c74b8337df96fd8c6c145331ddf",
+  "cargo_sha256": "6e17e865f3a20dd55a1d212f849f58b77124179f0de7c52973096d84ba34118d",
+  "files": {
+    "Cargo.lock": "29d227e43053b202a291963b8a8c5237efb324540aa9b7258a33f2cff24bdce1",
+    "Cargo.toml": "5c726cd6c49e45c66c879438c5a2239911a59eb5f3c35fab894102d294ad16db",
+    "LICENSE": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+    "NOTICE.md": "f2b6546a8b68006489ed854717d01eab776884d2d8c9600a7f0bfdbaaaa29da5",
+    "README.md": "312d099efc0aa69d6652282ac200462d2380f4548db06befaf6c272977bde832",
+    "admission.rs": "140900e237ea99697b9522ed86c27b73b8c0fe440ccf689fc44cb7b0f9f2e9bf",
+    "args.rs": "4d7214c45dfd08e411a6dd81453f0431832a26e54a519afe631326d628ebb5f1",
+    "diagnostic.patch": "2e8dbbffdbf5869dc5280ef260e9f455cd31af43d8519844be8f95440416f2f6",
+    "dispatch.rs": "71ae88c403b2b3782caf3dda413484128fb725e4193fb49084887f37ff2100ca",
+    "policy.rs": "ae08e804b0215792a7faf8a31f8a157d4f786b01b8edb51281f344494f3b2043",
+    "synthetic/Cargo.lock": "85d78056af479720e644b5d5da8d847135963fc5435920262ba27ee11ef44e5b",
+    "synthetic/Cargo.toml": "6cca70c439d2d1005e8c01cfcac14283f20cf33bb808ef8c625a96602efc9404",
+    "synthetic/lib.rs": "0515ceae278e87b2f73b5df4d905ba3e79862a85f5567e5edc2ac4c6881e5931",
+    "tests.rs": "ce8dbf8917aafd6fb765ebd2bb28e822d7cb24de5636a0d566fcac8e35e71273",
+    "watch.rs": "959958b9253c0707a27b3eada5658b154b83798b039d7218b0b7f2c685f2519c",
+    "wire-schema.json": "daa514f532a73d5a01885c8232cb34de44b7be3be9004f303c9b6e963ec8d189",
+    "wire.rs": "818107ade1e17bab87d465fee635430819a60a532f5846dbe3376515aa2aaf50"
+  },
+  "kind": "diagnostic-source-only",
+  "rustc_sha256": "766eda9d8f53afd6fc7f27b3cd2e444dd22afacb5afa710a5625fc8e45b8c941",
+  "upstream_commit": "df84a30016e3d6acc0d30acc660cf3a726f42a9b",
+  "version": "0.19.0-boxwarden-n1-diagnostic.1",
+  "wire_schema_sha256": "daa514f532a73d5a01885c8232cb34de44b7be3be9004f303c9b6e963ec8d189"
+}

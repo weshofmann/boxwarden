@@ -1,0 +1,281 @@
+{
+  "status": "PROPOSED R1; ROOT MUST FREEZE BEFORE IMPLEMENTATION",
+  "diagnostic_version": "0.19.0-boxwarden-n1-diagnostic.1",
+  "selector": "@boxwarden-n1-diagnostic:<generation>:<nonce>; one exact --block argv value",
+  "transport": "inherited fd1 unnamed AF_UNIX SOCK_STREAM; nonblocking; no arbitrary fd/path",
+  "framing": {
+    "prefix": "u32 big-endian payload length",
+    "min_payload_bytes": 1,
+    "max_payload_bytes": 4096,
+    "max_child_output_bytes_including_prefixes": 16384,
+    "exchange": [
+      "child HELLO",
+      "host ARM",
+      "child ARMED",
+      "child SUMMARY"
+    ],
+    "rearm": false,
+    "invalid": "sticky terminal; extra/reordered/duplicate frame, EOF, overflow, backpressure or deadline fails completeness"
+  },
+  "types": {
+    "uuid": {
+      "type": "string",
+      "length": 36,
+      "grammar": "lowercase nonzero canonical UUID; hyphens at8,13,18,23"
+    },
+    "SessionBinding": {
+      "domain": "literal n1qualification",
+      "session_id": "uuid",
+      "generation": "uuid",
+      "backend_kind": "literal tart",
+      "backend_object": "ASCII [A-Za-z0-9_-]{1,128}",
+      "address": "u8[4]; RFC1918 private, distinct pair/gateway",
+      "mac": "u8[6]; nonzero unicast, distinct pair"
+    },
+    "Counters": {
+      "vm_dispatch_started": "u16<=4096",
+      "vm_dispatch_completed": "u16<=4096",
+      "host_dispatch_started": "u16<=4096",
+      "host_dispatch_completed": "u16<=4096",
+      "vm_identified": "u16[3]",
+      "vm_outcomes": "u16[3][6]",
+      "vm_policy_decisions": "u16[3]",
+      "vm_arp_evaluation": "u16[5]",
+      "vm_fallback_results": "u16[2]",
+      "vm_write_attempts": "u16[3]",
+      "vm_write_bytes": "u64[3][2]",
+      "vm_write_errors": "u16[15]",
+      "host_reply_class": "u16[6]",
+      "host_class_outcomes": "u16[6][6]",
+      "host_write_attempts": "u16[6]",
+      "host_write_bytes": "u64[6][2]",
+      "host_write_errors": "u16[15]",
+      "recognized_unsupported_pair": "u16[2]",
+      "recognized_truncated_pair": "u16[2]",
+      "refresh_results": "u16[2][3]",
+      "vm_lease_state": "u16[3][5]",
+      "vm_target_predicates": "u16[3][2][3]",
+      "host_pair_arp_request": "u16<=4096"
+    }
+  },
+  "frames": {
+    "HELLO": {
+      "version": "literal integer1",
+      "kind": "per-frame uppercase literal",
+      "generation": "selector generation uuid",
+      "nonce": "selector nonce uuid",
+      "candidate_mac": "u8[6]; equals admitted child argv MAC",
+      "gateway": "u8[4]"
+    },
+    "ARM": {
+      "version": "literal integer1",
+      "kind": "per-frame uppercase literal",
+      "generation": "selector generation uuid",
+      "nonce": "selector nonce uuid",
+      "operation_id": "uuid",
+      "candidate": "SessionBinding",
+      "control": "SessionBinding",
+      "gateway": "u8[4]",
+      "duration_ms": "u32 1000..30000",
+      "control_provenance": "literal host_backend_pinned_owner"
+    },
+    "ARMED": {
+      "version": "literal integer1",
+      "kind": "per-frame uppercase literal",
+      "generation": "selector generation uuid",
+      "nonce": "selector nonce uuid",
+      "operation_id": "uuid",
+      "candidate": "SessionBinding",
+      "control": "SessionBinding",
+      "gateway": "u8[4]",
+      "duration_ms": "u32 1000..30000",
+      "control_provenance": "literal host_backend_pinned_owner",
+      "armed_offset_ns": "u64; child-local epoch",
+      "candidate_lease_valid": true
+    },
+    "SUMMARY": {
+      "version": "literal integer1",
+      "kind": "per-frame uppercase literal",
+      "generation": "selector generation uuid",
+      "nonce": "selector nonce uuid",
+      "operation_id": "uuid",
+      "candidate": "SessionBinding",
+      "control": "SessionBinding",
+      "gateway": "u8[4]",
+      "duration_ms": "u32 1000..30000",
+      "control_provenance": "literal host_backend_pinned_owner",
+      "armed_offset_ns": "u64",
+      "end_offset_ns": "u64",
+      "candidate_lease_valid": "boolean",
+      "coverage_scope": "literal identified_pair_headers",
+      "zero_count_attribution": false,
+      "packet_count_unobserved": true,
+      "complete": "boolean",
+      "overflow": "boolean",
+      "loss": "boolean",
+      "invalid_flags": "bool[14]",
+      "counters": "Counters"
+    }
+  },
+  "enums": {
+    "vm_rows": [
+      "arp_request",
+      "arp_reply",
+      "tcp22_syn"
+    ],
+    "vm_outcomes": [
+      "peer_target_denied",
+      "other_denied",
+      "refresh_error",
+      "api_full",
+      "api_length_mismatch",
+      "api_error"
+    ],
+    "policy_decisions": [
+      "allow",
+      "deny",
+      "fallback"
+    ],
+    "arp_evaluation": [
+      "not_arp",
+      "malformed",
+      "mac_sender_lease_failed",
+      "permitted_target",
+      "denied_target"
+    ],
+    "fallback_results": [
+      "deny",
+      "allow"
+    ],
+    "host_rows": [
+      "expected_sender_candidate_dest",
+      "expected_sender_broadcast_dest",
+      "expected_sender_other_dest",
+      "unexpected_sender_candidate_dest",
+      "unexpected_sender_broadcast_dest",
+      "unexpected_sender_other_dest"
+    ],
+    "host_outcomes": [
+      "allowlist_denied",
+      "refresh_error",
+      "api_full",
+      "api_length_mismatch",
+      "ordinary_error",
+      "enobufs"
+    ],
+    "write_byte_columns": [
+      "requested_total",
+      "returned_success_total"
+    ],
+    "write_errors": [
+      "none",
+      "vmnet_failure",
+      "vmnet_mem_failure",
+      "vmnet_invalid_argument",
+      "vmnet_setup_incomplete",
+      "vmnet_invalid_access",
+      "vmnet_packet_too_big",
+      "vmnet_buffer_exhausted",
+      "vmnet_too_many_packets",
+      "vmnet_sharing_service_busy",
+      "vmnet_unknown_status",
+      "io_enobufs",
+      "io_would_block",
+      "io_interrupted",
+      "io_other"
+    ],
+    "direction": [
+      "vm",
+      "host"
+    ],
+    "invalid_flags": [
+      "observer_missing",
+      "unfinished_ticket",
+      "ticket_mismatch",
+      "malformed_outer",
+      "unidentified_malformed_tuple",
+      "unsupported_pair",
+      "truncated_pair",
+      "read_error",
+      "short_write",
+      "clock_regression",
+      "deadline_late",
+      "candidate_lease_drift",
+      "transport_failure",
+      "order_or_binding_failure"
+    ],
+    "refresh_results": [
+      "not_attempted",
+      "success",
+      "failure"
+    ],
+    "vm_lease_state": [
+      "not_evaluated",
+      "missing",
+      "expired_cleared",
+      "live_match",
+      "live_mismatch"
+    ],
+    "vm_target_predicate_columns": [
+      "gateway_equal",
+      "current_host_local_contains"
+    ],
+    "predicate_result": [
+      "not_evaluated",
+      "false",
+      "true"
+    ]
+  },
+  "strictness": [
+    "Every key required; reject unknown/duplicates at every nesting depth",
+    "No Option/default/flatten/Value in Rust decoding",
+    "Integers reject negative, fractional, exponent, overflow; arrays exact length; booleans exact",
+    "Canonical ASCII strings; no escaped/control/noncanonical identity spelling",
+    "JSON order-independent on input; compact deterministic struct ordering on output",
+    "No payload/header/key/path/arbitrary error string in receipts",
+    "ARM generation must equal candidate generation and selector; both bindings distinct; echo exact operation/pair/interval",
+    "Child candidate lease getter verifies address, MAC, gateway, now<expiry without policy mutation; no peer Policy lease exists",
+    "Because admitted strings need no escapes, a narrow raw ASCII/no-backslash precheck may enforce spelling before serde; it must not become a bespoke JSON parser."
+  ],
+  "accounting": [
+    "All counters saturate/refuse at4096, set overflow permanently; no reset at window close",
+    "Identified vm row count equals sum corresponding six terminal outcomes",
+    "Host row count equals sum corresponding six outcomes",
+    "Started equals completed for complete receipt; no pending tickets",
+    "Write attempts equal full+length_mismatch+error outcomes; each actual attempted dispatch attempts once",
+    "Full/length_mismatch determined from actual raw returned length vs requested, not replay; any length mismatch sets incomplete",
+    "Host expected/candidate row is exact peer-MAC reply subset; unexpected sender includes Ethernet/ARP sender mismatch, never confirmed proxy provenance",
+    "Byte totals aggregate ephemeral per-dispatch observed lengths, not individual packet histories",
+    "Recognized unsupported/truncated pair headers prevent completeness; unidentifiable malformed frames cannot support global absence",
+    "complete requires loss=false, overflow=false, invalid_flags all false, candidate lease still valid, exact clock/deadline/pair and arithmetic",
+    "Raw API status category captured before original error conversion; packet count unobserved always true",
+    "Refresh failure sets loss=true regardless of completed terminal ticket. Any successful returned length unequal to requested is api_length_mismatch and incomplete; preserve canonical Ok.",
+    "For each direction sum refresh_results equals dispatch_started, including not_attempted outer/filter exits; any attempted failure sets loss.",
+    "For each vm row sum vm_lease_state equals vm_identified; each of the two target predicate bucket sums independently equals vm_identified, including not_evaluated.",
+    "expired_cleared captures actual current dispatch expiry transition, never an expired lease still present after Policy.refresh; earlier-cleared lease is missing.",
+    "The gateway/local predicate counts are actual evaluation operands; no relation requires both to have been evaluated.",
+    "host_pair_arp_request cannot contribute to host_reply_class or host_class_outcomes; unsupported/truncated counters invalidate completeness, never masquerade as supported replies."
+  ],
+  "unresolved_required_gates": [
+    "Root approval/freezing of exact array catalogue and strict lexical canonical JSON behavior",
+    "hostx.Manifest parser/validation parity; self-image descriptor path identity and Darwin ACL/group checks",
+    "Actual child fd1 flags and full-duplex inheritance through Tart/Foundation; no live execution authorized",
+    "Shared dispatch imports used by Proxy and independent canonical oracle fixture; no upstream privileged runner"
+  ],
+  "actual_decision_metadata": {
+    "local_type": "DecisionMetadata{refresh:RefreshResult,lease:LeaseState,gateway_equal:PredicateResult,current_host_local_contains:PredicateResult}; no addresses/frames retained",
+    "refresh_results": "rows vm/host; count actual refresh closure return, or existing path that never attempts it; no second refresh",
+    "vm_lease_state": "rows arp_request/arp_reply/tcp22_syn. Refresh failure =>not_evaluated. On actual successful Policy.refresh, reuse its existing expiry branch: expired_cleared means that branch cleared the lease and the choosing state is now None; missing means already None. Otherwise compare that same live lease address to immutable candidate bound address. This observation never selects policy or refreshes again. MAC/gateway are already launch-bound; packet sender comparison remains actual arp_reason.",
+    "vm_target_predicates": "rows vm_rows, columns gateway_equal/current_host_local_contains, buckets not_evaluated/false/true. Capture only predicates executed in the actual choosing ARP/IPv4 branch. Preserve short circuit: malformed/source rejection skips target predicates; gateway true skips local contains; no lease skips local contains. A skipped predicate is never false.",
+    "lease_getter": "ARM/end read-only current lease admission remains separate; per-decision metadata must not come from ARM/end getters or later re-evaluation."
+  },
+  "host_reply_row_admission": {
+    "required": "validated Ethernet/IPv4 ARP hardware/protocol lengths and fixed sender/target IPv4 tuple control->candidate AND opcode exactly2; classify BEFORE allowlist/refresh/MAC filter",
+    "sender_expected": "Ethernet src and ARP sender hardware both equal bound control MAC; mismatch =>unexpected",
+    "destination": "Ethernet dest candidate MAC/broadcast/other; ARP target protocol address already equals candidate IPv4",
+    "opcode1": "identified well-formed pair ARP request increments host_pair_arp_request only; excluded from six reply rows/outcomes; no claim it is a reply",
+    "other_opcode": "identified fixed-layout pair opcode other than1/2 increments recognized_unsupported_pair[host], sets incomplete; excluded from reply rows",
+    "unsupported_or_truncated": "existing recognized_unsupported_pair/recognized_truncated_pair count identifiable classes; unidentifiable malformed tuple remains explicit incomplete coverage, never zero-reply evidence",
+    "coverage": "six rows cover supported validated same-IP replies only; do not imply all ARP or global absence"
+  }
+}
