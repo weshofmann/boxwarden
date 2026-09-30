@@ -49,6 +49,7 @@ jobs:
           bash host/clipboard-menu/test.sh
           python3 tools/n1-qualification/listener_test.py
           python3 tools/n1-qualification/followup_tcp_verdict_test.py
+          python3 tools/n1-qualification/clipboard_diagnostic_test.py
           python3 tools/n1-softnet/test_verify_cli.py tools/n1-softnet/verify_cli.py
 
       - name: Set up Node for synthetic demo checks
@@ -138,6 +139,10 @@ jobs:
         run: |
           rustup run 1.98.1 rustc --edition=2024 --test tools/n1-softnet/policy.rs -o "$RUNNER_TEMP/n1-policy-tests"
           "$RUNNER_TEMP/n1-policy-tests"
+      - name: Test trial-only ARP observation without vmnet or privilege
+        run: |
+          rustup run 1.98.1 rustc --edition=2024 --test tools/n1-qualification/arp_observer.rs -o "$RUNNER_TEMP/n1-arp-observer-tests"
+          "$RUNNER_TEMP/n1-arp-observer-tests"
       - name: Test exact upstream public/private classification
         shell: bash
         run: |
