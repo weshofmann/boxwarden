@@ -502,3 +502,32 @@ func sudoCommandMatchesTarget(specification, target string) (bool, error) {
 	}
 	return false, nil
 }
+
+// DirectoryEntries is a bounded read-only direct-directory inventory for the
+// diagnostic exact-tree hook. Ordinary doctor behavior does not call it.
+func (i *osDoctorInspector) DirectoryEntries(path string) ([]string, error) {
+	before, err := snapshotPath(path)
+	if err != nil {
+		return nil, err
+	}
+	f, err := openNoFollow(path)
+	if err != nil {
+		return nil, err
+	}
+	info, statErr := f.Stat()
+	if statErr != nil || !info.IsDir() || !sameIdentity(before[len(before)-1], info) {
+		f.Close()
+		return nil, fmt.Errorf("directory changed before inventory")
+	}
+	names, readErr := f.Readdirnames(4)
+	if readErr != nil && readErr != io.EOF {
+		f.Close()
+		return nil, readErr
+	}
+	after, snapErr := snapshotPath(path)
+	closeErr := f.Close()
+	if snapErr != nil || closeErr != nil || !sameSnapshots(before, after) {
+		return nil, fmt.Errorf("directory changed during inventory")
+	}
+	return names, nil
+}

@@ -332,3 +332,90 @@ sudo test runners out of that execution. Locked fetch precedes offline tests;
 fetch or configuration refusal prevents test execution. Local syntax and
 command-spy controls pass, but spies do not establish native compiler identity
 or exact native child environment. Hosted execution remains pending publication.
+
+
+### Task4a exact artifact and admission prerequisite closed
+
+The diagnostic Rust source remains published commit
+`ecae4b745ef52cdd2b3c5ede6a76db732a38c57e`, upstream
+`df84a30016e3d6acc0d30acc660cf3a726f42a9b`. Two fresh, independent offline
+release builds produce version `0.19.0-boxwarden-n1-diagnostic.1`, executable
+SHA256 `e567d610fb2a854755bd7786031ed00c28fc3a970213606f21350c6e1f754f61`
+and deterministic single-file USTAR SHA256
+`9f696a25549b324138f17242b5e4169a64664de3638f3e9417af24b534fa4aac`.
+The recipe/result records are separate later source, avoiding a self-hash cycle.
+No privileged artifact was published or installed.
+
+The first build compiled but failed cross-volume stage retention with EXDEV.
+Two later fully retained builds differed in target-path OSO debug strings and
+archive-index timestamps. These failed/nonmatching runs and recipes remain
+immutable investigation evidence. A corrected same-device retention preflight,
+actual ld `-oso_prefix` argv pair and ZERO_AR_DATE=1 on every ar invocation were
+applied before two new empty-target builds. No failed output was adopted,
+stripped, normalized or substituted. Cross-volume archival uses separate exact
+copy/fsync/hash/readback. Both successful legs match all 25 native objects,
+three native archives and 101 OSO records. All 449 actual child invocations per
+leg retain element counts/bytes, environments and direct selected tool hashes;
+all 53 ld calls and six ar calls per leg enforce the corrected contracts.
+
+Rust/Cargo 1.98.1 and selected direct Xcode clang/ar/ld identities are recorded in
+`tools/n1-diagnostic-softnet/artifact.json` with the source and recipe hashes.
+Selected SDK metadata pins are not a whole-SDK attestation. Both release logs
+retain unused canonical-library method warnings and the pinned block 0.1.6
+future-Rust-incompatibility warning. Current pinned builds succeeded; this does
+not claim compatibility with future compiler/dependency upgrades. Actual child
+environments are retained; no equality with the submitted top-level environment
+or historical whole-SDK attestation is asserted.
+
+The tagged Go identity admits only these exact bytes/version/path and rejects
+stock/canonical/relocated substitutions; dual candidate+diagnostic build tags
+fail. Clipboard-only diagnostic keeps stock. Diagnostic publication stages a
+zero-byte root/operator 0440 one-link/noACL launch.lock before tree visibility,
+then publishes the root/wheel 0444 manifest last. Doctor/init require exactly
+softnet,manifest.json,launch.lock while ordinary/canonical two-entry admission,
+artifact identities and manifest history remain unchanged.
+
+`SystemDoctor.AcquireDiagnosticLaunch` takes fixed-tree read-only, close-on-exec
+independent descriptors and nonblocking SH, repeats full current host and
+held inode/ancestor admission, and exposes only Revalidate/Release. Cancellation
+never releases SH; Release closes each descriptor once, lock last, and retains
+actual close errors. Cancellation inside full CheckRuntime currently reports
+ErrDiagnosticLaunchDrift; direct/tree cancellation preserves context errors.
+Callers must refuse either and must not use error classification as release or
+readiness authority. This documented minor remains visible to final review.
+Ordinary diagnostic RootedUninstaller refuses before inventory/mutation;
+qualification-only exact EX/census/unlink cleanup remains a separate gate.
+
+Fresh independent Sol/High component review is spec compliant and quality
+Approved, with 0 Critical / 0 Important / 2 Minor findings. Both minor handoff qualifications are
+recorded above. The independent review SHA256 is
+`0b1c479b9d3d40b8d43de07a7482449d70970aad0e6b70294e5ed07351c7efdc`.
+Root independently checked all 738 source entries, 19 changed/new snapshots,
+18 unchanged published Rust files, 321 sealed evidence files, both actual
+binary/archive pairs and all 449 child record per leg. Retained synthetic
+RED/GREEN proves archive/device/argv/environment controls, exact admission,
+SH/EX exclusion and inode drift, descriptor flags, staging failure before
+visibility, retained close failures and legacy cleanup refusal. Diagnostic,
+stock, canonical, stock clipboard and combined affected Go tests pass locally;
+CGO_ENABLED=0 local checks make no race claim. Private evidence stays outside Git.
+
+Task3b current-source CI run 36737771516 is green: hosted 79 Darwin / 78 Linux
+actual synthetic Rust tests plus the existing Go/default/race/candidate/tagged
+clipboard, guest observer and packet policy checks. Historical pending CI
+statements above remain preserved chronology. Additional Task4a tagged guard
+race/vet/build and pure recipe-contract coverage receives a separate workflow
+review/current-head CI gate before integration.
+
+This closes only the artifact/admission prerequisite. Task3c actual owner/watch
+launch and independent lock lifetimes, Task4b exact cleanup and final Go/helper
+reproduction, finite driver/static package, full current CI and four fresh final
+reviews remain. No VM, guest, real clipboard, host network mutation or live
+qualification occurred.
+
+The separate CI workflow continuation is independently spec/quality approved
+with zero new findings. Review SHA256:
+`8b89ee043b5a075e962d583a44dcc210576fe5b868248aa11b31b91c7ecbfa91`.
+It adds unfiltered diagnostic/combined guard races, vet and unexecuted CLI
+builds, eight pure recipe controls, and intentional dual-tag rejection. Existing
+workflow blocks remain unchanged. Actual current-head hosted execution is
+pending publication; the original two minor limitations remain documented.

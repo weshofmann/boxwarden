@@ -309,3 +309,36 @@ timing. Rust hooks, exact artifact reproduction/admission/launch/cleanup,
 the finite driver/static package and four fresh final reviews remain gates.
 Nothing has been installed or run against a VM, guest, the real clipboard or
 host network state. Private evidence remains outside Git.
+
+
+## Task4a artifact/admission component closure (2026-09-30)
+
+The diagnostic Rust source at ecae4b745ef52cdd2b3c5ede6a76db732a38c57e was
+reproduced twice from independent empty targets. Version 0.19.0-boxwarden-n1-diagnostic.1
+has executable SHA256 e567d610fb2a854755bd7786031ed00c28fc3a970213606f21350c6e1f754f61
+and deterministic USTAR SHA256 9f696a25549b324138f17242b5e4169a64664de3638f3e9417af24b534fa4aac.
+The artifact record binds source/patch/recipe and exact selected compiler tools.
+Failed retention/nonmatching builds remain immutable; successful reproduction
+uses preflighted same-volume staging plus exact ld OSO-prefix and all-ar date
+binding, with separate verified cross-volume archival. Selected SDK metadata
+is not a whole-SDK attestation. Pinned unused-code/block 0.1.6 future-Rust
+warnings remain disclosed rather than altering historical source/dependencies.
+
+Only n1diagnostic selects this exact identity and three-entry protected tree.
+Publication stages zero-byte root/operator 0440 launch.lock before visibility;
+doctor/init require exactly softnet,manifest.json,launch.lock. Stock/canonical
+identity, manifest history and two-entry behavior remain unchanged. The typed
+fixed-tree AcquireDiagnosticLaunch guard independently owns read-only, close-on-exec
+SH descriptors, repeats full current-host/tree/inode admission, and closes the
+lock last with actual close errors retained. No cancellation releases it.
+Cancellation inside full CheckRuntime is currently classified as drift;
+callers must refuse either cancellation/drift without release/readiness
+inference. Ordinary diagnostic recursive uninstall is refused before inventory
+or mutation; separate qualification-only EX/census/exact-unlink remains pending.
+
+Fresh component review approves spec/quality with 0 Critical / 0 Important findings and two
+minor handoff qualifications documented in the ledger. This is a prerequisite,
+not final lifecycle/cleanup/package/live certification. Task3c must integrate
+independent parent-before-intent and Owner-through-actual-teardown lifetimes;
+Task4b/Task5 and four fresh final reviews remain. Nothing was installed or run
+against a VM, guest, real clipboard or host network state.

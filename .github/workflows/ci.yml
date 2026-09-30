@@ -138,6 +138,32 @@ jobs:
           go test -tags n1candidate,n1clipboarddiagnostic ./cmd/boxwarden \
             -run '^TestN1ClipboardDiagnosticForbiddenInDefaultAndCanonical$' -count=1
 
+      - name: Verify diagnostic artifact admission and shared lifetime
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          scratch="$(mktemp -d "${RUNNER_TEMP:?}/boxwarden-n1-diagnostic-ci.XXXXXX")"
+          trap 'rm -rf -- "$scratch"' EXIT
+          python3 -B tools/n1-diagnostic-softnet/test_build.py
+          packages=(./internal/hostx ./internal/backend/tart ./internal/architecture ./cmd/boxwarden)
+          for tags in n1diagnostic n1diagnostic,n1clipboarddiagnostic; do
+            go test -race -tags "$tags" -count=1 "${packages[@]}"
+            go vet -tags "$tags" "${packages[@]}"
+            go build -tags "$tags" -trimpath -buildvcs=false \
+              -o "$scratch/boxwarden-${tags}" ./cmd/boxwarden
+          done
+          if go build -tags n1candidate,n1diagnostic -o "$scratch/forbidden" ./cmd/boxwarden \
+              >"$scratch/forbidden.log" 2>&1; then
+            echo 'mutually exclusive diagnostic/candidate tags unexpectedly compiled' >&2
+            exit 1
+          fi
+          if ! grep -Fq 'undefined: N1CandidateAndN1DiagnosticBuildTagsAreMutuallyExclusive' "$scratch/forbidden.log"; then
+            cat "$scratch/forbidden.log" >&2
+            echo 'forbidden-tag build did not reach the intentional mutual-exclusion sentinel' >&2
+            exit 1
+          fi
+
       - name: Vet
         if: ${{ hashFiles('go.mod') != '' }}
         run: go vet ./...

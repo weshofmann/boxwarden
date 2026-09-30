@@ -264,6 +264,9 @@ func (p RootedPublisher) Publish(ctx context.Context, r InstallRequest, c Caller
 	if err := p.validateFile(softnetStage, p.expectedRootUID(), g.ID, os.FileMode(p.expectedSoftnetMode()), p.expectedDigest()); err != nil {
 		return fmt.Errorf("validate staged Softnet: %w", err)
 	}
+	if err := p.stageLaunchLock(stage, g); err != nil {
+		return fmt.Errorf("stage diagnostic launch lock: %w", err)
+	}
 	if err := os.Chmod(stage, trustedDirectoryMode); err != nil {
 		return err
 	}
@@ -271,7 +274,7 @@ func (p RootedPublisher) Publish(ctx context.Context, r InstallRequest, c Caller
 		return fmt.Errorf("validate staging directory: %w", err)
 	}
 	entries, err := os.ReadDir(stage)
-	if err != nil || len(entries) != 1 || entries[0].Name() != "softnet" {
+	if err != nil || fmt.Sprint(entryNames(entries)) != stagedToolchainEntries() {
 		return fmt.Errorf("staging directory contains unexpected entries")
 	}
 	if err := syncDirectory(stage); err != nil {
@@ -394,13 +397,16 @@ func (p RootedPublisher) validateCompleteTree(r InstallRequest, c Caller, g Grou
 		names = append(names, entry.Name())
 	}
 	sort.Strings(names)
-	if fmt.Sprint(names) != "[manifest.json softnet]" {
+	if fmt.Sprint(names) != completeToolchainEntries() {
 		return fmt.Errorf("digest directory contains unexpected entries")
 	}
 	if err := p.validateDirectory(p.finalDir(), trustedDirectoryMode); err != nil {
 		return err
 	}
 	if err := p.validateFile(filepath.Join(p.finalDir(), "softnet"), p.expectedRootUID(), g.ID, os.FileMode(p.expectedSoftnetMode()), p.expectedDigest()); err != nil {
+		return err
+	}
+	if err := p.validateLaunchLock(p.finalDir(), g); err != nil {
 		return err
 	}
 	manifestPath := filepath.Join(p.finalDir(), "manifest.json")
@@ -640,3 +646,12 @@ func pathWithin(root, candidate string) bool {
 }
 
 func pathsOverlap(a, b string) bool { return pathWithin(a, b) || pathWithin(b, a) }
+
+func entryNames(entries []os.DirEntry) []string {
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	return names
+}

@@ -1,4 +1,4 @@
-//go:build n1candidate
+//go:build n1candidate && !n1diagnostic
 
 package hostx
 

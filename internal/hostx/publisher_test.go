@@ -33,8 +33,12 @@ func TestRootedPublisherPublishesManifestLastAndValidatesExactTree(t *testing.T)
 		t.Fatalf("State(complete) = %v, %v", state, err)
 	}
 	entries, err := os.ReadDir(p.finalDir())
-	if err != nil || len(entries) != 2 {
-		t.Fatalf("final entries = %v, %v; want softnet and manifest only", entries, err)
+	wantEntries := "[manifest.json softnet]"
+	if SoftnetVersion == "0.19.0-boxwarden-n1-diagnostic.1" {
+		wantEntries = "[launch.lock manifest.json softnet]"
+	}
+	if err != nil || fmt.Sprint(entryNames(entries)) != wantEntries {
+		t.Fatalf("final entries = %v, %v; want %s", entries, err, wantEntries)
 	}
 	for path, mode := range map[string]uint32{
 		filepath.Join(p.finalDir(), "softnet"):       0o550,

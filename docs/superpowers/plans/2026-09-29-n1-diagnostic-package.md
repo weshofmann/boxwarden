@@ -108,3 +108,26 @@ prepared with hosted execution pending publication. This closes the bounded
 source component, not the full Task 3 or final package. Task 4a exact reproduction
 and publisher/admission API precede Task 3c owner/launcher integration. Historical
 Task 3a and canonical artifact evidence remain intact.
+
+
+## Task 4a prerequisite checkpoint
+
+Two independent offline Rust releases reproduce executable e567d610fb2a854755bd7786031ed00c28fc3a970213606f21350c6e1f754f61
+and deterministic USTAR 9f696a25549b324138f17242b5e4169a64664de3638f3e9417af24b534fa4aac
+from published Rust source ecae4b745ef52cdd2b3c5ede6a76db732a38c57e. The exact
+tagged identity, three-file publisher/doctor and typed nonblocking SH guard are
+implemented and independently approved for this bounded component (0C/0I/2M).
+Minor cancellation-classification and pinned compiler-warning limitations are
+explicit in the additive ledger; no historical evidence was rewritten.
+Ordinary diagnostic recursive uninstall refuses before inventory/mutation.
+Local affected-tag checks pass; added unfiltered tagged race/vet/build coverage
+has a separate workflow/current-head-CI gate. Task3b CI run 36737771516 is green,
+including actual 79 Darwin / 78 Linux Rust synthetic controls.
+
+Task3c actual launch/watch/independent SH composition follows this prerequisite;
+Task4b exact cleanup and Task5 finite/static closure remain. Before expensive
+final Go reproduction, inspect each artifact's actual complete compile graph.
+If later driver source enters a graph, finish/review/publish it first, then
+reproduce from its immutable artifact-source commit. Later static result records
+remain separate to avoid self-hash cycles. No provisional identity admits a
+runnable package. Full current CI and four fresh final reviews remain required.
