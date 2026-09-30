@@ -24,7 +24,11 @@ func TestProductionStartDependenciesUseExactAdmissionAndCheckOnlyCA(t *testing.T
 		t.Fatal(err)
 	}
 	selected, _ := loaded.Domain("work")
-	if starter, err := NewStarter(loaded, selected, f.request.HostConfigPath); err != nil || starter == nil {
+	starter, err := NewStarter(loaded, selected, f.request.HostConfigPath)
+	if checkDiagnosticStarterForTest(t, starter, err) {
+		return
+	}
+	if err != nil || starter == nil {
 		t.Fatalf("production starter = %v, %v", starter, err)
 	}
 	deps, err := startDependencies(loaded, selected, f.request.HostConfigPath)

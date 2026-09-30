@@ -246,6 +246,9 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 	if handleClipboardDiagnosticControl(ctx, connection, binding, owner, data, acceptedAt) {
 		return
 	}
+	if handleNetworkDiagnosticControl(ctx, connection, binding, owner, data, acceptedAt) {
+		return
+	}
 	var request controlRequest
 	if err := decodeExact(data, &request); err != nil {
 		return

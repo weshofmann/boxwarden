@@ -342,3 +342,53 @@ not final lifecycle/cleanup/package/live certification. Task3c must integrate
 independent parent-before-intent and Owner-through-actual-teardown lifetimes;
 Task4b/Task5 and four fresh final reviews remain. Nothing was installed or run
 against a VM, guest, real clipboard or host network state.
+
+
+## Task3c implemented composition (2026-09-30)
+
+The host-only optional LaunchGuard seam acquires independent SH and revalidates
+before start or rebuild persists intent, repeats admission before detached
+handoff, and joins release failures on every scoped error. The detached
+Owner reloads exact enrollment, session and RuntimeAdmission and takes its
+own independent SH before serial/Tart setup. It retains that guard through
+actual wait/reap, maintenance join, credential cleanup and serial close.
+Unproven runtime cleanup retains SH and residue; Stop or a canceled Wait never
+serves as release authority. Ordinary CloseUnclaimed errors remain joined.
+
+Fixed enrollment uses the sole N1 domain, exact public configuration digest,
+operator identity, private package/config modes, one-link/noACL/no-follow
+checks and the encrypted storage UUID. There is no caller-supplied production
+root, digest or descriptor override. The diagnostic Tart selector is typed
+and exact. An unnamed AF_UNIX stream pair is created with close-on-exec and
+nonblocking flags before wrapping descriptors; child fd1 owns the duplex
+channel and fd0/fd2 are null. A failed post-spawn HELLO retains the actual
+handle for stop/wait and bounded scratch cleanup.
+
+READY inspection uses the existing Owner Snapshot/probe, certificate/zone,
+captured public pin and connection, exact durable running record, stable
+qualified Tart config MAC/digest and DHCP address. A final Snapshot is followed
+by equality of the full captured connection and authority; changed endpoint,
+identity or pin refuses. Same-connection certificate renewal remains valid.
+Candidate and peer exact-generation checks bracket ARM and SUMMARY. There is
+no rearm, rebinding or continuous peer lease claim. Stock clipboard retains
+inspection; ARM/Collect exist only in diagnostic builds. Separate typed
+request schemas preserve the ordinary envelope and listener.
+
+The frozen four-message wire uses numeric arrays and bounded u32 big-endian
+frames, rejects duplicate/unknown/missing/noncanonical fields, validates
+arithmetic and producer failure-column implications for Complete summaries.
+ARM is consumed before the sole nonretrying write; cancellation or a partial
+write becomes sticky. The independent reader/collector retains the original
+finite deadlines for queued complete frames, partial final frames and late
+ARM waiters. Maximum-width SUMMARY is 3166 bytes, framed child aggregate
+4469, and full private control 3510, within the respective 4096/16384 bounds.
+These conservative maxima need not be jointly reachable. The existing shared
+control outer frame remains 80 KiB; strict payload/client limits are separate.
+
+Architecture guards keep generic guest compilation and ordinary network
+behavior unchanged. Diagnostic serial close uncertainty is retained while
+ordinary cleanup behavior is preserved. Ordinary diagnostic recursive
+uninstall still refuses before mutation; qualification-only EX/census/exact
+unlink belongs to Task4b. Fresh R1 component review approves the corrected
+source with 0C/0I/2 carried Minor findings. Publication/current CI, Task4b,
+Task5, final Go reproduction and four fresh final reviews remain gates.

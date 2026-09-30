@@ -131,3 +131,25 @@ If later driver source enters a graph, finish/review/publish it first, then
 reproduce from its immutable artifact-source commit. Later static result records
 remain separate to avoid self-hash cycles. No provisional identity admits a
 runnable package. Full current CI and four fresh final reviews remain required.
+
+
+## Task3c source checkpoint and sequence
+
+The 49-file owner/watch/launch source delta and six-file R1 correction have
+passed scoped checks and fresh independent spec/quality review. Both original
+Important findings are independently closed at their original severity;
+0C/0I/2 carried Minor remain. Review SHA256 is
+c000b918c636d7ad83dc5d2bba79160948451f74535a2cdc69b076abb35af46d.
+Task4a current published-head CI run 36751386544 is green. Task3c source
+publication and its current-head CI remain pending at this checkpoint.
+
+After that gate, finish/review/publish Task4b qualification-only exact cleanup
+SOURCE, then Task5 finite coordinator and separate closeout SOURCE. Inspect
+and freeze every final CLI/helper/driver/closeout compile graph before twin
+Go reproduction from the actual immutable artifact-source commit. Later
+artifact-table/static-lock records are separate; no provisional placeholders
+or self-referential source-commit/hash cycles admit a runnable package.
+Full verification, green final current-head CI and four fresh final reviews
+still precede the single concrete future owner gate. No live installation,
+qualification, privileged mutation, VM/guest/clipboard/network effect or
+current-host process census is authorized during preparation.

@@ -26,6 +26,11 @@ func TestSliceCPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
 	tests := []struct {
 		name, path, source, want string
 	}{
+		{"ordinary moved Probe", "internal/sessionruntime/owner_network_other.go", `package sessionruntime; func f(){ client.Probe(nil,nil,nil) }`, "unauthorized Slice C call"},
+		{"ordinary moved Resolve", "internal/sessionruntime/owner_network_other.go", `package sessionruntime; func f(){ resolver.Resolve(nil,"object") }`, "unauthorized Slice C call"},
+		{"diagnostic moved Probe", "internal/sessionruntime/owner_network_diagnostic.go", "//go:build (n1diagnostic || n1clipboarddiagnostic) && !n1candidate\npackage sessionruntime; func f(){ client.Probe(nil,nil,nil) }", "unauthorized Slice C call"},
+		{"diagnostic moved pin admission", "internal/sessionruntime/owner_network_diagnostic.go", "//go:build (n1diagnostic || n1clipboarddiagnostic) && !n1candidate\npackage sessionruntime; func f(){ pins.Admit(nil,nil,nil) }", "unauthorized Slice C call"},
+		{"untagged network Resolve", "internal/sessionruntime/owner_network_diagnostic.go", `package sessionruntime; func f(){ resolver.Resolve(nil,"object") }`, "unauthorized Slice C call"},
 		{"moved deferred import", "internal/lifecycle/start.go", `package lifecycle; import _ "github.com/weshofmann/boxwarden/internal/timezonex"`, "deferred Slice D import"},
 		{"moved bootstrap call", "internal/backend/start.go", `package backend; func f(r interface{ Bootstrap() }) { r.Bootstrap() }`, "unauthorized Slice C call"},
 		{"workspace promotion cannot admit SSH pin", "internal/workspacex/promotion.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
@@ -339,7 +344,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 				p.add(path, "process reconstruction", "os.FindProcess or equivalent name")
 			}
 			qualifiedWorkspaceAdmit := allowedWorkspaceFormatterAdmitPath(path) && name == "Admit" && workspaceFormatterAlias != "" && calledReceiver(value.Fun) == workspaceFormatterAlias
-			if composition && isDeferredCall(name) && !allowedLifecycleCall(path, name) && !qualifiedWorkspaceAdmit {
+			if composition && isDeferredCall(name) && !allowedLifecycleCall(path, name, source) && !qualifiedWorkspaceAdmit {
 				p.add(path, "unauthorized Slice C call", name)
 			}
 		case *ast.AssignStmt:
@@ -581,7 +586,10 @@ func allowedFoundationSelector(path, foundation, selector string) bool {
 	return allowed[foundation][selector]
 }
 
-func allowedLifecycleCall(path, name string) bool {
+func allowedLifecycleCall(path, name string, source []byte) bool {
+	if path == "internal/sessionruntime/owner_network_diagnostic.go" && name == "Resolve" && strings.HasPrefix(string(source), "//go:build (n1diagnostic || n1clipboarddiagnostic) && !n1candidate\n") {
+		return true
+	}
 	switch name {
 	case "Bootstrap":
 		return path == "internal/sessionruntime/owner.go" || path == "internal/supervisor/control.go" || path == "internal/supervisor/exact.go"

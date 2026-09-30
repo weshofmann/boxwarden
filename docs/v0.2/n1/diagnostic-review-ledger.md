@@ -419,3 +419,47 @@ It adds unfiltered diagnostic/combined guard races, vet and unexecuted CLI
 builds, eight pure recipe controls, and intentional dual-tag rejection. Existing
 workflow blocks remain unchanged. Actual current-head hosted execution is
 pending publication; the original two minor limitations remain documented.
+
+
+## Task3c owner/watch integration and R1 closure (2026-09-30)
+
+Task4a published-head CI run 36751386544 passed all four jobs and 41 steps,
+including actual 79 Darwin / 78 Linux Rust controls and the added tagged
+admission race/vet/build and eight recipe-contract controls. Task3c now adds
+independent parent-before-intent and detached Owner launch guards, the bounded
+private watch, fixed enrollment and live-generation inspection. Its 49-file
+source delta has been read against the retained source and evidence inventory.
+
+The initial independent review found two Important issues: complete summaries
+could contain refresh/mismatch counters contradicting completeness, and a
+READY inspection could return an earlier connection after actual readiness
+replaced it. The six-file R1 correction checks the actual producer's failure
+columns when Complete is true and compares the full captured connection and
+authority after Snapshot. Meaningful original RED/GREEN, expanded transport/
+owner controls and scoped diagnostic, stock-inspection, combined and vet
+checks pass; 74 focused PASS lines contain no SKIP. Fresh independent R1
+review approves spec and quality, closing both issues at their original
+Important severity without downgrade. Review SHA256:
+`c000b918c636d7ad83dc5d2bba79160948451f74535a2cdc69b076abb35af46d`.
+Open findings are 0 Critical / 0 Important / 2 carried Minor / 0 new Minor.
+
+Local wider checks preserve the explicit pre-existing CGO-disabled APFS test
+exclusion. The ordinary detachment fixture skips under diagnostic enrollment;
+a separate supported diagnostic detached-handoff fixture proves independent
+SH ownership. Local checks make no race claim. Fresh current-head hosted CI
+is the publication gate and is pending for this source checkpoint. The generic
+helper still hashes to 33b12b9e293bcbdf7d6c91f933b42003ca394e7a678ac83b8d80df714d27c57e.
+A native synthetic Go/Foundation/Swift chain proves exact argv, unnamed
+full-duplex descriptors and actual reap within its recorded bounds; it does
+not qualify real Tart/Softnet, a VM, kernel delivery or native clipboard.
+Failed evidence remains immutable, including the superseded incorrect
+ordinary CloseUnclaimed result fixture; final source preserves errors.Join.
+
+Shared private control retains its existing 80 KiB outer frame bound; strict
+diagnostic payloads and client reads have a 4096-byte bound. Peer inspection
+checks bracket the watch but do not claim an atomic continuous peer lease.
+Task4b qualification-only exact cleanup, Task5 finite/static closure, complete
+Go artifact graphs, full verification and four fresh final reviews remain.
+The two carried Minor limitations above remain explicit. Private evidence is
+outside Git. Nothing has been installed or exercised against a VM, guest,
+real clipboard or host network state.

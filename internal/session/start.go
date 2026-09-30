@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -55,17 +56,26 @@ type RebuildWorkspaceLifecycle interface {
 }
 
 type StartDependencies struct {
-	Observer          backend.Observer
-	Host              RuntimeChecker
-	HostRequest       hostx.Request
-	CA                CAValidator
-	ConfiguredDomains []sshx.Domain
-	Supervisor        SupervisorControl
-	Workspaces        WorkspaceLifecycle
-	RuntimeRoot       string
-	ConfigPath        string
-	NewGeneration     func() (string, error)
-	Now               func() time.Time
+	AdmitLaunchRecord  func(Record) error
+	AcquireLaunchGuard func(context.Context, RuntimeAdmission) (LaunchGuard, error)
+	Observer           backend.Observer
+	Host               RuntimeChecker
+	HostRequest        hostx.Request
+	CA                 CAValidator
+	ConfiguredDomains  []sshx.Domain
+	Supervisor         SupervisorControl
+	Workspaces         WorkspaceLifecycle
+	RuntimeRoot        string
+	ConfigPath         string
+	NewGeneration      func() (string, error)
+	Now                func() time.Time
+}
+
+// LaunchGuard is host quiescence retained by the parent across detached handoff.
+// It carries no descriptor, path, process authority or guest protocol fields.
+type LaunchGuard interface {
+	Revalidate(context.Context) error
+	Release() error
 }
 
 // NewStartService composes the narrow dependencies needed for start without
@@ -135,9 +145,31 @@ func (s *Service) startSession(ctx context.Context, rawName string, rebuild *Reb
 			return Record{}, fmt.Errorf("starting session lacks exact candidate rebuild journal: %v", loadErr)
 		}
 	}
-	_, _, err = s.admitStartPrerequisites(ctx)
+	admitted, _, err := s.admitStartPrerequisites(ctx)
 	if err != nil {
 		return Record{}, err
+	}
+	if s.start.AdmitLaunchRecord != nil {
+		if err := s.start.AdmitLaunchRecord(record); err != nil {
+			return Record{}, err
+		}
+	}
+	var guard LaunchGuard
+	if s.start.AcquireLaunchGuard != nil {
+		var acquireErr error
+		guard, acquireErr = s.start.AcquireLaunchGuard(ctx, admitted)
+		if guard != nil {
+			defer func() { err = errors.Join(err, guard.Release()) }()
+		}
+		if acquireErr != nil {
+			return Record{}, acquireErr
+		}
+		if guard == nil {
+			return Record{}, fmt.Errorf("launch guard unavailable")
+		}
+		if err := guard.Revalidate(ctx); err != nil {
+			return Record{}, err
+		}
 	}
 	if record.Backend.Kind != "tart" || record.Backend.ObjectID == "" {
 		return Record{}, fmt.Errorf("session backend binding is unsupported")
@@ -190,6 +222,11 @@ func (s *Service) startSession(ctx context.Context, rawName string, rebuild *Reb
 		}
 		var started Record
 		var prepareErr error
+		if guard != nil {
+			if err := guard.Revalidate(ctx); err != nil {
+				return Record{}, err
+			}
+		}
 		if rebuild == nil {
 			started, prepareErr = s.start.Workspaces.PrepareStart(ctx, s.domain.StateRoot, domainID, record, generation, s.observer)
 		} else {
@@ -297,6 +334,11 @@ func (s *Service) startSession(ctx context.Context, rawName string, rebuild *Reb
 	// leases. Durable starting intent carries authority across this handoff.
 	if err := held.Release(); err != nil {
 		return Record{}, fmt.Errorf("release session lock before supervisor launch: %w", err)
+	}
+	if guard != nil {
+		if err := guard.Revalidate(ctx); err != nil {
+			return Record{}, err
+		}
 	}
 	snapshot, err := s.start.Supervisor.StartExact(ctx, request)
 	if err != nil {

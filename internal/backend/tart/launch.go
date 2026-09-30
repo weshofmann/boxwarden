@@ -359,7 +359,7 @@ func (h *osProcessHandle) reap() {
 			release = h.process.Release
 		}
 		if releaseErr := release(); releaseErr != nil {
-			h.waitErr = errors.Join(h.waitErr, fmt.Errorf("release owned Tart process %d: %w", childID, releaseErr))
+			h.waitErr = errors.Join(h.waitErr, processReleaseFailure(childID, releaseErr))
 		}
 		h.reaped = true
 		close(h.done)
