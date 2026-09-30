@@ -121,10 +121,47 @@ its tests are
 `c788ba33a54f0ef3e3f6a8c4e85af674e8e67013109e1638d391310d42164bb8`.
 Complete synthetic red/green and scoped-review records are retained outside Git.
 
-Hosted Linux CI is configured to execute the actual cBPF filter on unnamed
-AF_UNIX datagrams, including truncation boundaries. That non-skipped result is
-pending first publication; synthetic Darwin execution is not substituted for it.
+Published observer commit `1fdacd34b928ec9bd0156a0010c3f9db10313970` is
+covered by green [CI run 36663134689](https://github.com/weshofmann/boxwarden/actions/runs/36663134689)
+on Draft PR18. Hosted Ubuntu executes all 31 observer tests without skips,
+including the actual cBPF filter on unnamed AF_UNIX datagrams and truncation
+boundaries. Default/candidate tests, race, vet and build also pass for this head.
+These results cover this published component, not later uncommitted integration.
 Guest AF_PACKET/offload qualification, driver controls, actual Softnet hooks,
 clipboard integration, artifact/admission/cleanup closure and cumulative reviews
 remain later tasks. This component's source review does not certify those tasks
 or claim live attribution/N1 qualification.
+
+
+Task 2's fresh GPT-6.1 Sol/High source/security review returned **two Important
+findings, changes required**. Actual descriptor closure was outside the measured
+collection/finalization bounds and close-then-error could leave a valid durable
+end. Presence-only progression also admitted wrong order, missing claim stages,
+conflicting outcomes, duplicate acknowledgements and misattributed owner
+checkpoints. Eight focused real-slot synthetic reproductions confirmed these
+on Python 3.9.6 and 3.14.7. Earlier 33-test green does not close the findings.
+The first corrective freeze and scoped GPT-6.1 Sol/High re-review closed both
+original Important findings, with no new Critical, Important or Minor finding
+within Task 2. No severity was lowered. Real-slot positive baselines precede
+malformed-progression rejection, and byte-bound replay preserves the original
+32 failing subcases and close-error escape. Actual trace/collector closes,
+post-close clock checks, fixed parent-only fd4 proof, derived physical lanes,
+exact stage multiplicity and native checkpoint position are covered.
+
+The controller independently ran **48 controls on Python 3.9.6 and 3.14.7**,
+exit 0; each also runs all 59 canonical fixtures with the overlay installed.
+The reviewer personally ran all 15 focused repair controls on both versions
+and inspected the complete retained red/green evidence. All 43 frozen worker
+artifacts and four scoped-review artifacts were hash/readback verified. Final
+overlay SHA256 is
+`57a04ad9d3155e0e9b5d4e4fd718fd7cba5a467f87d7cac60b593e78df546f6f`;
+tests are
+`fc7c982af2afcd48e16fc648d7320704efcff6b43df26be12cddb6033a3c4a7c`.
+Canonical adapter and locked generic helper remain byte-identical.
+
+The post-close private pipe interface is documented in the addendum. Its actual
+root Go helper producer, EOF/reader-close adjudication and fixed no-overwrite
+publication remain explicit Task 3a integration gates; without the fixed closure
+record the collector is incomplete. These tests and this scoped source review
+do not certify those Go hooks, native GTK timing, final artifacts, installation,
+the complete package or live qualification. No historical verdict changes.

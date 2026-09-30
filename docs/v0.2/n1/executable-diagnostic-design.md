@@ -54,6 +54,38 @@ failure before transfer refuses that diagnostic invocation. Failure after a writ
 cannot undo it or fabricate failure-before-write: preserve the actual transfer
 outcome and mark its receipt incomplete/unknown as appropriate.
 
+The overlay metadata header has exactly version, operation_id, direction, domain,
+session_id, backend_kind, backend_object, generation and expires_at. Original
+RFC3339Nano expiry maps exactly to the adapter UnixNano argv; it never extends
+the deadline. A complete collector receipt covers a finite observed progression
+prefix. A live owner requires parent operation completion, original ack observed
+before retain_begin, and a stable exact PID/birth/UID/native-owner checkpoint.
+It does not require retain_return while the owner is still serving. Missing,
+partial, concurrent, malformed or saturated slots and collection/finalization
+loss prevent completeness; future retention remains unproved. Task 2 implements
+this Python interface with a clean scoped repair review; the actual outer Go
+helper and combined integration remain pending as recorded in the ledger.
+
+The Task 2 post-close witness uses fixed fd4, an output-only nonblocking
+unnamed pipe supplied by the trial helper. The adapter parent emits one strict
+record only after its actual trace descriptor closes and the recording clock
+still passes. Its retained owner child closes its inherited fd4 before claim so
+it cannot hold the metadata transport open. The record has exactly version 1,
+header_digest, direction and elapsed_ms (integer 0–59999), canonical compact
+sorted-key ASCII JSON plus one newline, at most 512 bytes. It witnesses parent
+trace closure; it does not claim the live owner's future descriptor or retention
+lifetime has ended. The original fd3 header stays unchanged.
+
+The root trial helper must independently bound the record through EOF and actual
+reader close, compare the exact admitted binding, and publish only the fixed
+root-owned direction.closure file after its pending file closes successfully.
+The collector requires that proof, ordered parent completion and exact owner
+lane progression. It rejects duplicates, conflicting outcomes, misattributed
+lanes or native metadata preceding the actual owner checkpoint. Genuine parent
+and owner concurrency remains valid. Task 2 implements and independently reviews
+the Python corrective interfaces. The actual Go producer remains a separate
+unimplemented integration gate, rather than an implicit synthetic certification.
+
 ## Private Softnet watch boundary
 
 The diagnostic build creates an unnamed AF_UNIX SOCK_STREAM socketpair owned by

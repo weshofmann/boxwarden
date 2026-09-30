@@ -31,6 +31,10 @@
 4. Generation, process birth, lease or pair changes invalidate receipts; zero counters without ready/stop/drop coverage cannot attribute absence (Tasks 1–4).
 5. Build/source/manifest/cleanup identities cannot silently adopt stock/canonical N1, stale runtime state or a sibling digest (Tasks 4–6).
 
+## Execution dependencies
+
+Task3 is divided into clipboard Go/helper integration (3a), actual Rust hooks/protocol/self-lock (3b), and Go owner/launcher watch and lock lifetime (3c). After3b, perform Task4a: reproduce Rust artifacts, bind the resulting exact digest, and implement tag-selected three-file publication/shared SH admission. Those are prerequisites for3c; no placeholder identity may pass admission. Task4b then completes cleanup and integrated Go/helper reproduction. The final artifact-source commit is separate from later static-lock documentation closeout. This split preserves the original task scope and final independent reviews.
+
 ## Task 1: Finite clone-only guest metadata observer
 
 **Files:** Create `tools/n1-qualification/guest_metadata_observer.py` and `guest_metadata_observer_test.py`.
@@ -39,7 +43,7 @@
 
 - [x] Write red tests proving strict schema/duplicate/type/size rejection; exact ARP and TCP22 tuple filter/header-only capture; cached-neighbor SYN; expected/unexpected peer MAC and broadcast replies; ICMP unreachable quoted tuple; unrelated-address exclusion; overflow/drop/truncation/start-stop incompleteness; privacy and fixed read-only route/neighbor argv. Use hand-built headers and a small cBPF interpreter to test the actual filter, not textual source assertions. No AF_PACKET socket is opened by tests; one hosted-Linux-only AF_UNIX fixture checks the real cBPF verifier/execution.
 - [x] Observe the intended red failures, then implement a standard-library Linux AF_PACKET/SOCK_RAW observer with an attached exact cBPF filter, no membership/promiscuous option, only protocol-header snap lengths, monotonic finite deadline and bounded counters. Attach filter before binding the selected interface. Read PACKET_STATISTICS drops, detect MSG_TRUNC/unsupported matching headers, and require ready, stop and loss-free accounting before complete=true. Use only `ip -j route get <peer>` and `ip -j neigh show to <peer> dev <interface>` before/after, closed environment, timeout, output bounds and schema sanitization. No ping/arping, connect, listener, route/neighbor write or packet/file capture.
-- [x] Run `PYTHONDONTWRITEBYTECODE=1 python3 tools/n1-qualification/guest_metadata_observer_test.py`; Darwin runs pass 30 tests with one Linux-only skip on both Python 3.9.6 and 3.14.7. Fresh scoped Sol/XHigh source review is clean; hosted Linux kernel-filter execution and future guest capture qualification remain pending.
+- [x] Run `PYTHONDONTWRITEBYTECODE=1 python3 tools/n1-qualification/guest_metadata_observer_test.py`; Darwin runs pass 30 tests with one Linux-only skip on both Python 3.9.6 and 3.14.7. Fresh scoped Sol/XHigh source review is clean. Published commit1fdacd34 has green CI36663134689; hosted Ubuntu executes all31tests without skips, including actual AF_UNIX cBPF kernel execution. Future guest AF_PACKET/offload capture qualification remains pending.
 
 ## Task 2: Bound clipboard overlay and exact owner collector
 
@@ -47,9 +51,11 @@
 
 **Interfaces:** Strict clone-only operation binding supplies operation UUID + exact domain/session/backend/generation externally, verified before input or destination mutation. Trace slots bind that identity with bounded monotonic offsets. Collector reads only exact owner PID/stat/UID/starttime, validates birth identity and fixed trace schemas, never requests text.
 
-- [ ] Add red tests for wrong/stale operation bindings, generation mismatch, owner PID reuse/UID/zombie/missing stat, malformed/overflow/failed sink, acknowledgement/retain progression and no payload/error leakage.
-- [ ] Implement minimal fixed overlay/collector hooks preserving native claim-before-ack-before-retain and first read only. Diagnostic failure yields incomplete/refusal, never transfer success or retry. Do not change production bytes or public text frames.
-- [ ] Run overlay and canonical tests, including canonical fixtures with the overlay installed; review separately with fresh Sol/High.
+- [x] Add red tests for wrong/stale operation bindings, generation mismatch, owner PID reuse/UID/zombie/missing stat, malformed/overflow/failed sink, acknowledgement/retain progression and no payload/error leakage.
+- [x] Implement minimal fixed overlay/collector hooks preserving native claim-before-ack-before-retain and first read only. Diagnostic failure yields incomplete/refusal, never transfer success or retry. Do not change production bytes or public text frames.
+- [x] Run overlay and canonical tests, including canonical fixtures with the overlay installed; review separately with fresh Sol/High.
+
+Task 2 is closed for the frozen Python source after two Important findings and one scoped fix/re-review round. The controller runs48controls on both Python versions; each includes59canonical fixtures. The actual Go closure producer and complete package reviews remain later gates.
 
 ## Task 3: Trusted-host and actual Softnet forwarding integration
 
