@@ -1,72 +1,75 @@
-# Boxwarden agent invariants
+# Working on Boxwarden
 
-## Current development baseline: v0.2 prototype
+Boxwarden makes graphical AI-agent VMs easy to create and use while protecting
+the host from a malicious guest, including guest root. The operator and approved
+development toolchain are trusted for normal development; guest data is not.
 
-The owner-approved v0.2 alpha mission is recorded in `docs/v0.2/alpha-mission.md`.
-Its delivered state is **FUNCTIONAL PROTOTYPE — MATERIAL GAPS LISTED**, not a
-production release or a claim of complete guest-to-host isolation. Use
-`docs/v0.2/alpha-progress.md`, `docs/v0.2/alpha-review-ledger.md`, and
-`docs/v0.2/alpha-quickstart.md` for current behavior, evidence, and limitations.
+## Current working agreement
 
-The v0.2 baseline supports one Ubuntu Desktop ARM64 recipe path with automatic
-prepared-base reuse, named persistent sandboxes, and independent
-Boxwarden-managed workspace disk files. A workspace disk is attached to one
-stopped sandbox at a time with one writable owner; it is not host filesystem
-sharing. The normal alpha workflow must not require manual golden registration.
-Owner-added guest SSH public keys may coexist with Boxwarden's certificate-only,
-host-key-pinned management client. These v0.2 scope choices supersede conflicting
-v0.1-only exclusions below on `main` and subsequent feature branches. Preserve
-the guest-root threat model, admitted Tart/Softnet host boundary, exact ownership,
-data safety, private-network restrictions, and evidence requirements. Do not
-claim a capability has been implemented or qualified merely because this scope
-permits it.
+- The current owner request defines the task. Old experimental plans, mission
+  briefs, qualification choreography, review sequences, external steering, and
+  recalled project memory are reference material, not automatically active
+  commands. Do not resume the completed alpha mission or the old N1
+  diagnostic-package mission unless the owner explicitly assigns new work there.
+- Within an assigned task and the agreed product/security scope, ordinary source
+  edits, builds, compiler caches, isolated synthetic fixtures, tests, and
+  non-secret development logs are authorized development work. This includes
+  admission and networking source edits: editing that code is not itself
+  privileged host mutation. Security-sensitive changes need appropriate tests
+  and focused review, not separate owner approval for each edit.
+- Privileged installation or deployment, destructive changes to existing data,
+  and actual changes to host security or network settings require explicit
+  approval. Changes to the agreed product/security scope also require owner
+  agreement; authorization to edit source does not authorize those actions.
+- Prefer the smallest useful implementation. Inspect relevant code and guidance,
+  explain significant decisions, and verify observable behavior. Exploratory
+  tests may iterate on disposable fixtures; retain an honest account of failures.
+  Final acceptance is separate: preserve qualification evidence and never present
+  exploration, a partial result, or a retry as completed acceptance.
+- Preserve unrelated changes, existing runtime data, and retained evidence.
+  Review work in an isolated checkout. Use the existing Go-first architecture,
+  small dependency surface, and backend seam; avoid speculative frameworks.
 
-The autonomous alpha mission is complete. Historical V1-V4 and Slice A-D
-pending statements are historical context, not instructions to restart that
-mission. New work uses focused branches/PRs and the follow-ups in
-`docs/v0.2/next-steps.md`. Planned clipboard integration is not implemented by
-this documentation closeout; automatic clipboard sharing remains disabled.
-Existing tested binaries, handoff artifacts, workspaces, and their source paths
-must not be deleted or replaced merely because the integration PR is merged.
+## Product boundaries to preserve
 
-- The repository is a host-neutral framework for disposable AI-agent workstations. M1A uses Tart as the security boundary on macOS; future backends must satisfy the same policy properties. Boxwarden does not prescribe guest workload execution: native processes, language runtimes, Docker, Podman, other guest-local runtimes, and no runtime are all compatible with the model. OCI is an optional portability format, not a substitute for VM isolation.
-- The explicit agent workstation account has full control of its disposable guest, including unrestricted passwordless sudo. Backend containment must hold against a malicious guest root; do not treat sudoers restrictions, guest firewall state, routes, or other guest-enforced policy as a host security boundary.
-- MVP uses one private supervisor-owned Tart serial PTY for a fixed bootstrap exchange followed by continuous bounded draining. Guest `hvc0` automatically logs in the workstation account so the fixed guest helper can run with passwordless sudo. ADR 017 is amended: retained recovery-console UX, GNU Screen, a second/operator PTY, console leases, and generalized console arbitration are deferred. `serialx` exclusively creates and cleans `<generation>/serial/`; never pre-create or adopt that subtree. Restrict the slave to mode `0600` and runtime directories to `0700`; never expose this channel over a network or share it with another guest.
-- The M1A golden uses Canonical's full `ubuntu-desktop` source. Task 0 measured the full source at only about 1.5 GiB and 148 Debian packages above the minimal source; integrated document/productivity tooling and consistent offline-ready sessions outweigh that footprint. Do not revert to the minimal source or a hand-curated desktop without revisiting ADR 018 and requalification.
-- Every guest must use the trusted host's current IANA time zone. Detect and validate the host zone without a fallback, render it into Task 0 installation inputs, and have the common lifecycle reapply and verify it whenever a transition actually boots or resumes the guest before reporting the session ready. V2 create leaves a stopped clone and therefore does not perform guest time-zone convergence. This is workstation configuration, not clock synchronization or a Tart backend concern; guest time still synchronizes through the normal virtual clock/NTP path.
-- Keep the backend seam small. The common `boxwarden` control plane owns identity, state/reconciliation, locks, golden selection, profiles/encryption, project durability, quarantine, credentials, provider scope, validation, and destructive safety. A backend owns only VM mechanics and observation.
-- Never expose a trusted-host Docker socket/context, display server, credential store, filesystem tree, or equivalent host control to a guest. V0.1 does not accept, implement, or rely on host filesystem sharing. The next planned data movement surface is an exact, explicit `session cp` operation over pinned management SSH; it is transfer, not a live share. ADR 021 remains a separate proposed future design and is neither accepted nor changed by the V0.1 plan.
-- Normal sessions use a Task-0-qualified Tart + Softnet shared/NAT policy with clipboard and audio sharing disabled. The default policy denies private/link-local networks and session-to-session traffic while preserving required host-to-guest SSH, public Internet access, host/VPN-provided DNS, and the network environments explicitly qualified in the Task 0 matrix. Effectively IPv6-only upstream behavior and its dependent destination cases remain unqualified under ADR 020 and must not be claimed as supported. M1A accepts and must report that default Softnet permits guest-initiated traffic to services on the vmnet gateway; do not claim guest-to-host network isolation. Do not hard-code a public DNS resolver. V4 implements default policy only and rejects every Softnet allow flag, including `--net-softnet-allow=0.0.0.0/0`. Future ADR 015 opt-in support must first add exact persisted/reported session-record and CLI semantics; it may never weaken session isolation or create broad/implicit LAN access. Do not add filesystem sharing, extra disks, X11 forwarding, VNC, bridged/host networking, port exposure, nested virtualization, agent forwarding, or other host integration without explicit architecture review and documentation. V0.1 does not accept or implement ADR 021; the future V5 `session cp` transfer surface must not become a live host-tree attachment.
-- Golden artifacts are generic and never contain a Boxwarden security-domain identity, domain management CA anchor, fixed domain principal, or guest binding. They contain pinned software, a statically built and digest-locked generic bootstrap helper, generic strict-sshd policy pointing at `/etc/ssh/boxwarden/active/...`, the root-owned `/etc/ssh/boxwarden` parent without `active`, and other non-secret system configuration only. Domain-scoped trusted-host registration and selection records are policy metadata: the same exact generic artifact may be admitted independently by multiple domains. Registration records explicit operator admission of one exact existing stopped backend object, but does not claim provenance, clone-readiness, or qualification evidence that Boxwarden has not recorded. The attended V2 gate requires an artifact built or rebuilt from the corrected generic guest definition and qualified accordingly; an unchanged older Task 0 artifact containing domain trust is not grandfathered by prior qualification. Rebuild and accept a new golden deliberately; do not let it update itself.
-- Every clone receives a unique MAC address, machine ID, SSH host keys, DHCP identity, and other machine-specific seed material. The golden ends in a clone-ready state and never lends its identity to a session.
-- Lifecycle state is reconciled against backend-observed state rather than trusted optimistically; M1A obtains that state from Tart. Persist intent before mutation, lock conflicting operations, and make retries and recovery idempotent. Durable identity is the exact domain, session UUID, backend object, and intended state; a PID is only ephemeral correlation. Boxwarden never adopts an orphaned running VM: intended-running plus backend-running with absent, stale, or unverifiable supervisor ownership/readiness is drift and non-ready, requiring an explicit stop/restart. Cleanup may affect only runtime state whose ownership it can prove.
-- Backend process state and session readiness are different observations. The trusted host and cooperating host processes use an ordinary generation lock and private bounded typed control socket. The detached supervisor retains the actual Tart handle in memory and owns one stop/wait/reap path, serial transport, and later generation SSH credentials/health maintenance. No same-UID cryptographic control authentication, supervisor ownership manifest, persisted PID/inode authority, or process reconstruction is required. READY requires fresh exact-generation live evidence: running backend, healthy serial drain, a domain/session/backend-bound host-key pin, current no-extension certificate, strict SSH probe, and guest time-zone agreement. Status reads observations only; backend-running or a stored success bit never imply READY. Slice A provides foundations only; actual launch/bootstrap/READY composition and controlled host checks remain later slices.
-- Commands that operate on domain-owned state require an explicit security domain and never use cross-domain fallback. Host-global commands operate outside the security-domain namespace and do not require a domain.
-- `boxwarden init` is the explicit, one-time trusted-host initialization. It establishes host-wide Boxwarden prerequisites, including the selected qualified host-toolchain privilege binding, once for the Mac rather than once per domain. `boxwarden doctor` is the host-global, read-only diagnostic for those prerequisites and security-sensitive drift; it never silently repairs or rebinds them. Neither command accepts domain ownership semantics, and their CLI implementations must reject an explicitly supplied `--domain` rather than ignore it.
-- `boxwarden --domain <domain> domain init` explicitly initializes only that domain's sole host-only SSH management user CA. It does not install or modify host-global prerequisites, and session start never creates the CA lazily.
-- Routine session destruction is expected. Normal destruction refuses when the configured project durability policy cannot be established, but this is a safety control against accidental loss rather than a security control against a hostile guest. Compromised destruction does not trust guest reports and prioritizes containment. Important project data must not depend on a disposable VM disk.
-- Persistent data is not safe merely because it is in private Git. Git is versioning/distribution, not confidentiality. Encrypt sensitive persistent artifacts before they leave the trusted environment.
-- age private identities remain on the trusted host and never enter a disposable session. Every structural and semantic profile-admission check is re-performed by trusted-host code over the exact received bytes. Profile writes from a session require a terminal-safe explicit review bound to the exact manifest and ciphertext digests; never automatically synchronize them back.
-- M1A profile persistence supports only named, declarative adapters with fixed paths, schemas, limits, staged restore, validation, and rollback. It does not accept arbitrary archives or opaque application state. Safe to disclose never means safe to restore or execute.
-- Provider authentication and Git credentials are session state. A compromised session can access every credential and sensitive artifact intentionally exposed to that session. Prefer one provider per sandbox session for high-isolation work.
-- Markdown is canonical project memory. Non-sensitive reviewed memory is Git-versioned Markdown; sensitive Markdown uses age. Any search/index database is disposable derived state rebuildable from Markdown.
-- kin export is never a full Kindex backup. M1A never captures or restores Kindex state and rejects known Kindex state paths. Kindex may be installed only as an optional session-local development tool.
-- Repository-owned control-plane software is Go-first, with a deliberately small dependency surface. Node/npm is available for third-party tools and workloads, not as the default implementation platform.
-- Treat npm installs, package scripts, build scripts, hostile repositories, and third-party executable configuration as potentially hostile code execution. Quarantine sessions contain no reusable provider or GitHub credentials.
-- Every session belongs to one explicit security domain such as `personal` or `work`. Golden selection, profiles, age recipients/identities, credentials, memory, projects, session registry, and runtime paths are domain-scoped; never search or fall back across domains implicitly.
-- Quarantine blocks `boxwarden` profile and credential injection, but cannot prevent a human from logging in manually. Use public source or narrowly scoped short-lived read-only ingress credentials; never reusable write credentials.
-- Treat portable guest definitions and host/backend-specific golden artifacts as different objects. Autoinstall, provisioning, manifests, identity initialization, firewall/guest-runtime/SSH policy, profile adapters, memory conventions, and guest acceptance tests remain portable; Tart images are M1A build artifacts.
-- Workloads we build remain independent of Tart. OCI is a portable option, not a required execution model.
-- Prefer first-party official AI-tool distributions; do not replace them with community wrappers.
-- Qualify every golden artifact before installation. Do not execute mutable piped installers; an optional tool without an immutable, verifiable artifact is unavailable for that golden revision.
-- For expensive, attended, privileged, destructive, or evidence-producing boundaries, perform a bounded attempt-minimization pass first: review the planned sibling phases, apply known constraints, and spend effort in proportion to the risk and cost of the boundary. When a new failure class is learned, propagate it across every unexecuted phase before rerunning; do not repeat a predictable failure. External-command contracts include the child-observed argv element count and bytes, not merely a rendered command string; preserve element boundaries through every wrapper. False-pass and evidence-integrity defects take priority over throughput. Supervisors adjudicate bounded worker output, preserve explicit human gates, and keep `VERIFIED` growing faster than `PENDING`; implementation and release planning should retain a lifecycle bias toward shipping verified coverage.
-- Failed qualification runs are immutable evidence, not normal checkpoints: resume only to investigate, understand, or safely contain; after correction, preserve the evidence and qualify from a fresh baseline and fresh disposable runtime. Exceptions require explicit qualification design and architecture review.
-- Treat Tart and Softnet as one security-critical host toolchain. M1A's selected pair is Tart 2.32.1 executable SHA-256 `05b65d5c14e8b41e8e44b6d9fd1278de4bedbc8b735d9b99f3c748f76f75862d` (archive `8554ab4f7fc12afe52f9b7e3093a935673cbac737a83973d2db7a0683c814529`) and Softnet 0.19.0 executable SHA-256 `ab333619fc8bd7277837545e49a771baa994c01c3e8c14904ae4cc4c1f37269e` (archive `1612e1296834aae0b6389650c7c5190add1ee8d71474e328691e67679ecda53c`). Host-global `boxwarden init` stages only an unprivileged exact-digest Softnet source into a root-owned, digest-specific `/Library/Boxwarden` path as the sole allowed `04550` copy; any setuid/setgid/passwordless-root Softnet under mutable Homebrew state is drifted/unsafe, blocks init/start, and requires attended manual remediation that Boxwarden never performs. The installed host-toolchain manifest is a regular one-link `root:wheel 0444` file with no ACL. It is intentionally non-secret local host metadata: it binds qualified platform release/build, exact tool paths/versions/digests, root and dedicated operator-group identity, the trusted operator UID/name/home, canonical `TART_HOME`, Softnet mode, and installation time. It must not contain a security-domain identity, CA material, credentials, provider data, session state, private keys, tokens, or other secrets. Its integrity depends on root ownership, zero write bits, exact metadata/content validation, and protected root-owned non-writable ancestry, not confidentiality. The manifest binds the exact single trusted operator UID/name/home and dedicated group ID/name/membership. Start requires membership in the current process and uses an absolute qualified Tart with PATH exactly the Softnet digest directory and a closed validated environment—never sudo or ambient proxy, telemetry, language-runtime, or loader variables. Host-global `boxwarden doctor` reads, hashes, and strictly parses that manifest without privilege, verifies the complete path, ACL/link/digest/ownership/mode/group/manifest/macOS/toolchain/operator state, and fails nonzero on unsafe Homebrew state. Normal init and doctor reject the legacy exact `0400` manifest as drift without chmod, repair, adoption, or mutation; only the separately attended exact-path migration described in the V3 host-manifest readability design may change it to `0444`. Do not auto-upgrade, overwrite, or silently repair either component.
-- Changes to trust boundaries, credentials, persistence, networking, host integration, or provider data scope require explicit documentation and review.
-- When publishing a branch directly to the upstream repository, use one focused `<owner>/<type>/<topic>` branch per integration unit. The owner identifies the accountable repository identity, not the AI tool performing individual edits. See `docs/development-workflow.md` for the complete policy. Never work directly on or push directly to `main`.
-- Before each substantive commit and push, inspect scope and run verification appropriate to the change. Commits must be detailed engineering records: state the meaningful scope, observable behavior, and rationale for non-trivial design choices; do not use opaque messages such as "update" or "WIP".
-- Push every verified commit immediately. First publication is `git push -u origin <branch>`; later verified commits use `git push`. Do not push a known failing commit or prohibited data such as credentials, private host evidence, generated VM state, or runtime state.
-- Create and maintain a Draft PR for each agent-owned feature branch after its first meaningful verified push. Before marking Ready, review the entire cumulative diff against the actual base, record the result and verification in the PR body, and fix branch-caused CI failures.
-- Agents may create/update their own Draft PRs and mark them Ready after review and green CI. Agents never merge, enable auto-merge, bypass checks, close a human-created PR, direct-push `main`, or force-update `main`.
-- After publication, do not amend, rebase, force-push, or otherwise rewrite branch history without explicit human approval; make a new verified corrective commit instead. Before first publication, preserve an explicit safety ref before any local branch packaging change.
-- GitHub-hosted CI is deterministic only. Tart/Softnet, real-host, provider, credential, GUI, and destructive lifecycle qualification remain outside CI; never add the trusted host as a self-hosted runner. See `docs/development-workflow.md` for the complete workflow and main-protection staging.
+- Containment must hold against malicious guest root. Guest-side checks, sudo
+  restrictions, and guest firewall state are not host security boundaries.
+  Validate guest-originated bytes on the host. Trust in the development operator
+  does not relax product path, ownership, ancestry, or admission checks.
+- Preserve the admitted Tart/Softnet toolchain, strict pinned management SSH,
+  private serial transport, exact domain/session/generation ownership, intent
+  recording, locking, and reconciliation. Backend-running alone is not READY.
+  Never silently install, upgrade, repair, or rebind privileged host components.
+- Preserve default private/link-local and session-to-session network restrictions.
+  The current vmnet-gateway exposure remains a documented limitation; do not claim
+  complete guest-to-host network isolation or unqualified network support.
+- Keep data transfer explicit and bounded. No live host filesystem sharing,
+  host runtime sockets, credential-store access, SSH-agent forwarding, or implicit
+  host integration. Automatic Tart clipboard and audio sharing remain disabled;
+  the implemented controlled clipboard transfer is an explicit operator action.
+- Keep important work independent of disposable system disks. V0.2 supports
+  Boxwarden-managed workspace disks with one writable owner and stopped-sandbox
+  attachment rules; those disks are not host filesystem shares. Preserve
+  durability checks, exact-target destructive safety, and recovery behavior.
+- Preserve domain isolation, generic prepared bases, unique clone identity,
+  host-only private CA/age keys, scoped credentials, and credential-free
+  quarantine. Credentials deliberately placed in a guest are exposed to its root.
+  Sensitive persistence requires encryption and reviewed admission; private Git
+  alone provides no confidentiality. Never commit secrets or private runtime data.
+
+## Guidance and verification
+
+V0.2 is an experimental functional prototype with material gaps. Read the
+relevant implementation, tests, and topic-specific design/ADR when changing a
+subsystem; check document status and scope before relying on old milestone text.
+[Security model](docs/security-model.md) and [architecture](docs/architecture.md)
+retain detailed product requirements. Changes to trust boundaries, credentials,
+persistence, networking, host integration, or provider scope require explicit
+documentation and focused review; this agreement changes no implemented policy.
+
+[Development workflow](docs/development-workflow.md) governs branches, commits,
+publication, and human merge authority. Verify proportionately to the change;
+GitHub CI stays deterministic and never operates the trusted host or real VMs.
+Historical plans and evidence are consulted when relevant, not a startup reading
+list or a prerequisite work queue. Kindex is contextual memory under the approved
+non-secret project scope, not authorization to reactivate a mission.
