@@ -785,3 +785,23 @@ These are component/source closures, not any of the four fresh final package
 review seats. Final Go artifacts/compile graphs, complete static lock, current
 integrated CI, fresh reviews and the concrete future owner gate remain pending.
 No actor, current process census, privileged install or live trial was executed.
+
+## CI444 private-fixture portability correction
+
+Actor source826adaf passed the hosted default, candidate and clipboard checks,
+packet policy and both Rust-platform jobs. The diagnostic/cleanup step failed
+one private ACL fixture: its literal `devel allow list` principal could not be
+resolved on the hosted runner. Verification stopped there; no green CI or
+remaining command-build success is claimed for that head. All four full decoded
+logs and exact completed run/job records are retained. Historical proof SHA256
+e3f190aba5533efd99c7611eb99241f0e8b37a3a2cb4cf6d24159687ae681dc1.
+
+The correction changes only the tagged worker test. It resolves the current
+fixture UID, requires a matching nonempty account, and passes one `user:`
+principal argument to chmod on the private fixture. The exact mutation/refusal
+assertion remains. A synthetic runner account plus four invalid resolver results
+and the actual private ancestor-ACL negative/ordinary-sibling positive controls
+pass focused native race; worker vet passes. The sibling fixture scan found the
+existing pathmeta test already uses this account-resolution pattern. Production
+admission, fixed operator/domain identity and compiled actor source inputs are
+unchanged. Fresh current-head CI and final package review remain required.

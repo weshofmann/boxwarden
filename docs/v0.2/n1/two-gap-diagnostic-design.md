@@ -414,3 +414,10 @@ graphs, independent final Go twins, the instantiated static package/current CI
 and four fresh final reviews remain required. Retained component compiler/SDK
 metadata is functional evidence, not full SDK attestation or final artifact
 identity. No production actor, current census, installation or live trial ran.
+
+CI444 later stopped at a test portability defect: a private worker ACL fixture
+used the literal host account `devel`, absent on the hosted runner. The corrected
+fixture resolves and validates the current fixture UID and retains the same
+actual ACL mutation/refusal check. This changes no compiled actor or admission
+policy. Default/candidate/clipboard and the three sibling jobs passed before
+the failure; the remaining diagnostic builds need a fresh current-head CI run.

@@ -11,9 +11,12 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -313,12 +316,56 @@ type ancestorACLMutation struct {
 
 func (a ancestorACLMutation) HasExtendedACL(p string) (bool, error) {
 	*a.called = true
-	cmd := exec.Command("/bin/chmod", "+a", "devel allow list", filepath.Dir(p))
+	principal, e := workerACLFixturePrincipal(os.Getuid(), user.LookupId)
+	if e != nil {
+		a.t.Fatal("current private fixture account", e)
+	}
+	cmd := exec.Command("/bin/chmod", "+a", principal+" allow list", filepath.Dir(p))
 	cmd.Env = []string{"LANG=C", "LC_ALL=C"}
 	if raw, e := cmd.CombinedOutput(); e != nil {
 		a.t.Fatal("private fixture ACL mutation", e, string(raw))
 	}
 	return false, nil
+}
+
+func workerACLFixturePrincipal(uid int, lookup func(string) (*user.User, error)) (string, error) {
+	id := strconv.Itoa(uid)
+	u, e := lookup(id)
+	if e != nil || u == nil || u.Uid != id || u.Username == "" {
+		return "", errors.New("fixture account refused")
+	}
+	return "user:" + u.Username, nil
+}
+
+func TestWorkerACLFixtureUsesCurrentAccount(t *testing.T) {
+	got, e := workerACLFixturePrincipal(1001, func(id string) (*user.User, error) {
+		if id != "1001" {
+			t.Fatal("foreign lookup uid", id)
+		}
+		return &user.User{Uid: id, Username: "runner"}, nil
+	})
+	if e != nil || got != "user:runner" {
+		t.Fatal("fixture selected foreign account", got, e)
+	}
+	for _, kind := range []string{"error", "nil", "foreign-uid", "empty-name"} {
+		t.Run(kind, func(t *testing.T) {
+			_, e := workerACLFixturePrincipal(1001, func(id string) (*user.User, error) {
+				switch kind {
+				case "error":
+					return nil, errors.New("lookup")
+				case "nil":
+					return nil, nil
+				case "foreign-uid":
+					return &user.User{Uid: "501", Username: "devel"}, nil
+				default:
+					return &user.User{Uid: id}, nil
+				}
+			})
+			if e == nil {
+				t.Fatal("invalid fixture identity admitted")
+			}
+		})
+	}
 }
 func TestWorkerFinalAncestorACLMutationRefuses(t *testing.T) {
 	p := t.TempDir() + "/key"
