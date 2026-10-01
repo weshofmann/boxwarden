@@ -557,3 +557,25 @@ changed between r2 and r3. The two carried Task4a Minor limitations remain.
 Verified publication/current hosted CI, Task5/system-image static closure,
 final twins/full checks and four fresh final reviews remain gates. Native
 qualification, installation and live effects remain unperformed.
+
+
+## Task4b CI435 architecture integration correction
+
+Published cleanup/attendance source `faf512de46b5a0ed6eba14105887dad6a1bfec6a` reached [CI435](https://github.com/weshofmann/boxwarden/actions/runs/36798455212). Both Rust jobs and packet-policy checks passed. The default Go architecture guard failed because its source walker rejected the four new qualification composition files despite their production-excluding build constraints. Go race and tagged cleanup checks did not execute in that run. The failed logs remain immutable; earlier component passes do not imply current-head CI success.
+
+The focused correction retains the whole-tree import scanner and admits only four exact paths after parsed, bounded exhaustive build-constraint proof. Fresh independent review found 0 Critical, 0 Important and one Minor: alternate Go-recognized legacy `+build` spellings escaped the stated legacy rejection. Modern diagnostic/candidate exclusion remained sound. The finding remains at its original severity until independently closed. Initial review SHA256: `a6edc8d0ed05df9ebd574d155bbcf9432b4eed5c7040dc36227d42d8d6181cf7`.
+
+Attempt minimization also found the previous green Go job took 14 minutes 24 seconds under a 15-minute timeout. Adding cleanup checks leaves insufficient margin. The correction raises only that job's bound to 20 minutes; all checks remain. Corrective publication and current-head CI are separate gates.
+
+## Prospective static protected-sudo identity resolution
+
+Bounded independent requested Sol/XHigh analysis accepts one explicit structural `/usr/bin/sudo` identity alongside byte-qualified readable system images under the trusted-host premises. Report SHA256: `710c3ce2cae813343c47931a5d786522863aa729be5ae7bade1e1e54ca24707a`. Operator byte/signature inspection cannot read sudo; no executable digest or signature was invented. Current protected ancestry/leaf stat identity and absence of ACLs were checked read-only.
+
+Task5 must implement the mandatory distinct structural kind, exact platform/path/security/stat brackets, verified canonical qualification records, exact artifact paths and a finite readable-image catalogue before lock. A fixed helper-only read-only preinstall census must reject unknown/changing images before coordinator or guest effects. Original wall/continuous anchors precede authentication and survive without reset. This recommendation certifies neither source, catalogue completeness, native census runnability nor a final package; those gates remain pending. No PID/parent/controller, arbitrary unreadable image or general OS-directory exemption is accepted.
+
+
+### CI435 correction closure before publication
+
+The guard now uses Go's own `constraint.IsPlusBuild` recognizer and three alternate-spelling negative controls. All three failed before correction; full default architecture tests, native race and vet pass after it. Fresh independent narrow re-review closes M1 at its original Minor severity and accepts the sole timeout scalar change: 0 Critical, 0 Important, 0 Minor open in this correction scope. Review SHA256: `a2210fcd8bed1841cf2f585dcd7ccfdda494eabe3aca478ed2ba765ada4f2e50`. The prior finding and failed CI remain historical evidence; two carried Task4a Minor findings remain outside this closure.
+
+Root and reviewer independently verified all 296 additive correction evidence files, the exact three source files, actual RED/GREEN invocation/result bindings, all twenty unchanged workflow scripts and prior-run timing. The final report is bound by an additive closure record; earlier indices retain their earlier report bindings. These observations establish the correction's source/evidence closure, not current-head hosted CI or final package qualification.
