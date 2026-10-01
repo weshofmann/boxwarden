@@ -26,6 +26,11 @@ func TestSliceCPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
 	tests := []struct {
 		name, path, source, want string
 	}{
+		{"ordinary moved Probe", "internal/sessionruntime/owner_network_other.go", `package sessionruntime; func f(){ client.Probe(nil,nil,nil) }`, "unauthorized Slice C call"},
+		{"ordinary moved Resolve", "internal/sessionruntime/owner_network_other.go", `package sessionruntime; func f(){ resolver.Resolve(nil,"object") }`, "unauthorized Slice C call"},
+		{"diagnostic moved Probe", "internal/sessionruntime/owner_network_diagnostic.go", "//go:build (n1diagnostic || n1clipboarddiagnostic) && !n1candidate\npackage sessionruntime; func f(){ client.Probe(nil,nil,nil) }", "unauthorized Slice C call"},
+		{"diagnostic moved pin admission", "internal/sessionruntime/owner_network_diagnostic.go", "//go:build (n1diagnostic || n1clipboarddiagnostic) && !n1candidate\npackage sessionruntime; func f(){ pins.Admit(nil,nil,nil) }", "unauthorized Slice C call"},
+		{"untagged network Resolve", "internal/sessionruntime/owner_network_diagnostic.go", `package sessionruntime; func f(){ resolver.Resolve(nil,"object") }`, "unauthorized Slice C call"},
 		{"moved deferred import", "internal/lifecycle/start.go", `package lifecycle; import _ "github.com/weshofmann/boxwarden/internal/timezonex"`, "deferred Slice D import"},
 		{"moved bootstrap call", "internal/backend/start.go", `package backend; func f(r interface{ Bootstrap() }) { r.Bootstrap() }`, "unauthorized Slice C call"},
 		{"workspace promotion cannot admit SSH pin", "internal/workspacex/promotion.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
@@ -47,6 +52,12 @@ func TestSliceCPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
 		{"workspace mount binding outside runtime owner", "internal/backend/start.go", `package backend; import trust "github.com/weshofmann/boxwarden/internal/sshx"; var _ trust.WorkspaceMount`, "unapproved foundation selector"},
 		{"renamed bootstrap wrapper", "internal/lifecycle/start.go", `package lifecycle; import serialtransport "github.com/weshofmann/boxwarden/internal/serialx"; func f() { serialtransport.RunBootstrap() }`, "unapproved foundation selector"},
 		{"clipboard protocol outside retained owner", "internal/backend/start.go", `package backend; import protocol "github.com/weshofmann/boxwarden/internal/guestproto"; var _ protocol.ClipboardRequest`, "unauthorized Slice C import"},
+		{"diagnostic owner cannot admit pin", "internal/sessionruntime/clipboard_diagnostic_enabled.go", `package sessionruntime; import trust "github.com/weshofmann/boxwarden/internal/sshx"; var _ = trust.NewPinStore`, "unapproved foundation selector"},
+		{"diagnostic helper cannot bootstrap", "cmd/boxwarden-n1-clipboard-diagnostic/main.go", `package main; import protocol "github.com/weshofmann/boxwarden/internal/guestproto"; var _ = protocol.EncodeSerialFrame`, "unapproved foundation selector"},
+		{"moved diagnostic helper not admitted", "cmd/boxwarden-n1-clipboard-other/main.go", `package main; import protocol "github.com/weshofmann/boxwarden/internal/guestproto"; var _ = protocol.RunClipboardDiagnostic`, "unauthorized Slice C import"},
+		{"diagnostic prefix not exemption", "internal/sessionruntime/clipboard_diagnostic_other.go", `package sessionruntime; import trust "github.com/weshofmann/boxwarden/internal/sshx"; var _ = trust.Connection`, "unapproved foundation selector"},
+		{"other PID type in receipt not admitted", "internal/clipboarddiag/receipt.go", `package clipboarddiag; type Other struct{ PID uint32 }`, "persisted process authority"},
+		{"moved NativeOwner not admitted", "internal/other/receipt.go", `package other; type NativeOwner struct{ PID uint32 }`, "persisted process authority"},
 		{"clipboard owner cannot publish generic bootstrap", "internal/sessionruntime/clipboard_owner.go", `package sessionruntime; import protocol "github.com/weshofmann/boxwarden/internal/guestproto"; var _ protocol.EncodeSerialFrame`, "unapproved foundation selector"},
 		{"action protocol outside session boundary", "internal/backend/start.go", `package backend; import protocol "github.com/weshofmann/boxwarden/internal/guestproto"; var _ protocol.ActionRequest`, "unauthorized Slice C import"},
 		{"installer serial outside builder", "internal/backend/start.go", `package backend; import serialtransport "github.com/weshofmann/boxwarden/internal/serialx"; func f() { serialtransport.CreateInstallerRuntime() }`, "unapproved foundation selector"},
@@ -227,7 +238,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 	foundationImports := make(map[string]string)
 	workspaceFormatterAlias := ""
 
-	if libprocSourcePattern.Match(source) {
+	if libprocSourcePattern.Match(source) && !diagnosticRetainedNativeAllowed(path, source) {
 		p.add(path, "discarded libproc", "libproc header, linker flag, or token")
 	}
 	if ofdSourcePattern.Match(source) {
@@ -281,11 +292,34 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 		if composition && !serialFoundation && strings.HasSuffix(importPath, "/internal/guestproto") &&
 			path != "internal/sessionruntime/owner.go" && path != "internal/session/action_service.go" &&
 			path != "internal/sessionruntime/action_owner.go" && path != "internal/sessionruntime/clipboard_owner.go" && path != "internal/supervisor/control.go" &&
-			path != "internal/supervisor/action_exact.go" {
+			path != "internal/supervisor/action_exact.go" && path != "cmd/boxwarden-n1-clipboard-diagnostic/main.go" {
 			p.add(path, "unauthorized Slice C import", importPath)
 		}
 	}
 
+	// Only the exact four-field cooperative native clipboard observation may
+	// contain pid metadata. It is not supervisor process ownership authority.
+	nativeOwnerTypes := map[*ast.StructType]bool{}
+	if path == "internal/clipboarddiag/receipt.go" {
+		ast.Inspect(file, func(node ast.Node) bool {
+			if spec, ok := node.(*ast.TypeSpec); ok && spec.Name.Name == "NativeOwner" {
+				if st, ok := spec.Type.(*ast.StructType); ok && exactDiagnosticNativeOwner(st) {
+					nativeOwnerTypes[st] = true
+				}
+			}
+			return true
+		})
+	}
+	if path == "internal/networkdiag/launch.go" && sourceImpliesTags(path, source, []string{"n1diagnostic"}, []string{"n1candidate"}) {
+		ast.Inspect(file, func(node ast.Node) bool {
+			if spec, ok := node.(*ast.TypeSpec); ok && spec.Name.Name == "ProcessCorrelation" {
+				if st, ok := spec.Type.(*ast.StructType); ok && exactRetainedProcessCorrelation(st) {
+					nativeOwnerTypes[st] = true
+				}
+			}
+			return true
+		})
+	}
 	ast.Inspect(file, func(node ast.Node) bool {
 		switch value := node.(type) {
 		case *ast.CallExpr:
@@ -320,7 +354,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 				p.add(path, "process reconstruction", "os.FindProcess or equivalent name")
 			}
 			qualifiedWorkspaceAdmit := allowedWorkspaceFormatterAdmitPath(path) && name == "Admit" && workspaceFormatterAlias != "" && calledReceiver(value.Fun) == workspaceFormatterAlias
-			if composition && isDeferredCall(name) && !allowedLifecycleCall(path, name) && !qualifiedWorkspaceAdmit {
+			if composition && isDeferredCall(name) && !allowedLifecycleCall(path, name, source) && !qualifiedWorkspaceAdmit {
 				p.add(path, "unauthorized Slice C call", name)
 			}
 		case *ast.AssignStmt:
@@ -350,7 +384,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 		case *ast.StructType:
 			for _, field := range value.Fields.List {
 				for _, name := range field.Names {
-					if isPersistedProcessName(name.Name) || isOwnershipMetadataName(name.Name) {
+					if (isPersistedProcessName(name.Name) || isOwnershipMetadataName(name.Name)) && !(nativeOwnerTypes[value] && name.Name == "PID") {
 						p.add(path, "persisted process authority", name.Name)
 					}
 				}
@@ -358,7 +392,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 					tag, err := strconv.Unquote(field.Tag.Value)
 					if err == nil {
 						jsonName := strings.Split(reflect.StructTag(tag).Get("json"), ",")[0]
-						if isPersistedProcessName(jsonName) || isOwnershipMetadataName(jsonName) {
+						if (isPersistedProcessName(jsonName) || isOwnershipMetadataName(jsonName)) && !(nativeOwnerTypes[value] && jsonName == "pid") {
 							p.add(path, "persisted process authority", jsonName)
 						}
 					}
@@ -461,6 +495,8 @@ func sliceBFoundation(importPath string) (string, bool) {
 func allowedFoundationSelector(path, foundation, selector string) bool {
 	if foundation == "guestproto" {
 		switch path {
+		case "cmd/boxwarden-n1-clipboard-diagnostic/main.go":
+			return selector == "RunClipboardDiagnostic"
 		case "internal/session/action_service.go":
 			switch selector {
 			case "ActionRequest", "ActionReceipt", "Association", "Version", "EncodeActionRequest", "EncodeActionReceipt":
@@ -537,7 +573,7 @@ func allowedFoundationSelector(path, foundation, selector string) bool {
 	if path == "internal/sessionruntime/import_owner.go" && foundation == "sshx" && selector == "WorkspaceMount" {
 		return true // Retained owner compares only its already admitted launch mounts.
 	}
-	if (path == "internal/sessionruntime/action_owner.go" || path == "internal/sessionruntime/clipboard_owner.go") && foundation == "sshx" && selector == "Connection" {
+	if (path == "internal/sessionruntime/action_owner.go" || path == "internal/sessionruntime/clipboard_owner.go" || path == "internal/sessionruntime/clipboard_diagnostic_enabled.go") && foundation == "sshx" && selector == "Connection" {
 		return true // The retained owner uses its existing pinned connection for one admitted action.
 	}
 	if path != "internal/sessionruntime/owner.go" {
@@ -560,7 +596,10 @@ func allowedFoundationSelector(path, foundation, selector string) bool {
 	return allowed[foundation][selector]
 }
 
-func allowedLifecycleCall(path, name string) bool {
+func allowedLifecycleCall(path, name string, source []byte) bool {
+	if path == "internal/sessionruntime/owner_network_diagnostic.go" && name == "Resolve" && strings.HasPrefix(string(source), "//go:build (n1diagnostic || n1clipboarddiagnostic) && !n1candidate\n") {
+		return true
+	}
 	switch name {
 	case "Bootstrap":
 		return path == "internal/sessionruntime/owner.go" || path == "internal/supervisor/control.go" || path == "internal/supervisor/exact.go"
@@ -702,4 +741,92 @@ func isOwnershipFile(value string) bool {
 		return true
 	}
 	return strings.Contains(base, "supervisor-manifest") || strings.Contains(base, "ownership_record") || strings.Contains(base, "ownership-record")
+}
+
+func exactDiagnosticNativeOwner(st *ast.StructType) bool {
+	names := []string{"PID", "StartTicks", "UID", "State"}
+	types := []string{"uint32", "uint64", "uint32", "string"}
+	tags := []string{"pid", "start_ticks", "uid", "state"}
+	if len(st.Fields.List) != 4 {
+		return false
+	}
+	for i, f := range st.Fields.List {
+		if len(f.Names) != 1 || f.Names[0].Name != names[i] || f.Tag == nil {
+			return false
+		}
+		typ, ok := f.Type.(*ast.Ident)
+		if !ok || typ.Name != types[i] {
+			return false
+		}
+		tag, err := strconv.Unquote(f.Tag.Value)
+		if err != nil || string(reflect.StructTag(tag).Get("json")) != tags[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestDiagnosticRetainedCorrelationHasExactTaggedException(t *testing.T) {
+	nativeBody := "package tart\n/* #include <libproc.h> */\nimport \"C\"\n"
+	nativeTag := "n1diagnostic && !n1candidate && darwin && cgo"
+	for _, path := range []string{"internal/backend/tart/process_identity_diagnostic_darwin.go", "internal/networkdiag/process_darwin.go"} {
+		for _, tag := range []string{nativeTag, "n1diagnostic && !n1candidate", "n1diagnostic || darwin || cgo", "n1diagnostic && darwin && cgo", "n1diagnostic && !n1candidate && darwin", "n1diagnostic && !n1candidate && cgo", nativeTag + " && !n1diagnostic", nativeTag + " && a && b && c && d"} {
+			source := []byte("//go:build " + tag + "\n\n" + nativeBody)
+			issues := strings.Join(inspectSliceBSource(path, source), "\n")
+			if (tag == nativeTag) != (issues == "") {
+				t.Fatal(path, tag, issues)
+			}
+		}
+		for _, source := range []string{nativeBody, "// +build n1diagnostic,darwin,cgo\n" + nativeBody, "package tart\n//go:build " + nativeTag + "\n/* #include <libproc.h> */", "//go:build " + nativeTag + "\n//go:build " + nativeTag + "\n" + nativeBody} {
+			if len(inspectSliceBSource(path, []byte(source))) == 0 {
+				t.Fatal("legacy/missing/late/duplicate native exemption", path)
+			}
+		}
+	}
+	if len(inspectSliceBSource("internal/backend/tart/process_identity_diagnostic_sibling.go", []byte("//go:build "+nativeTag+"\n"+nativeBody))) == 0 {
+		t.Fatal("moved libproc admitted")
+	}
+	pid := "package networkdiag;type ProcessCorrelation struct { PID uint32 `json:\"pid\"`; BirthUS uint64 `json:\"birth_us\"`; UniqueID uint64 `json:\"unique_id\"` }"
+	tag := "//go:build n1diagnostic && !n1candidate\n\n"
+	path := "internal/networkdiag/launch.go"
+	if issues := inspectSliceBSource(path, []byte(tag+pid)); len(issues) != 0 {
+		t.Fatal("exact typed correlation refused", issues)
+	}
+	for _, bad := range []string{pid, strings.Replace(tag+pid, "ProcessCorrelation", "Other", 1), strings.Replace(tag+pid, "PID uint32", "PID uint64", 1), strings.Replace(tag+pid, "UniqueID uint64 `json:\"unique_id\"`", "Extra uint64 `json:\"extra\"`", 1), strings.Replace(tag+pid, "UniqueID uint64 `json:\"unique_id\"`", "UniqueID uint64 `json:\"unique_id\"`; Extra uint64", 1), strings.Replace(tag+pid, "!n1candidate", "n1candidate", 1), strings.Replace(tag+pid, "n1diagnostic && !n1candidate", "n1diagnostic || n1candidate", 1), tag + pid + "; var _ = map[string]any{\"pid\":1}"} {
+		if len(inspectSliceBSource(path, []byte(bad))) == 0 {
+			t.Fatal("wrong process metadata admitted", bad)
+		}
+	}
+	if len(inspectSliceBSource("internal/networkdiag/launch_other.go", []byte(tag+pid))) == 0 {
+		t.Fatal("moved correlation struct admitted")
+	}
+}
+
+func diagnosticRetainedNativeAllowed(path string, source []byte) bool {
+	if path != "internal/backend/tart/process_identity_diagnostic_darwin.go" && path != "internal/networkdiag/process_darwin.go" {
+		return false
+	}
+	return sourceImpliesTags(path, source, []string{"n1diagnostic", "darwin", "cgo"}, []string{"n1candidate"})
+}
+func exactRetainedProcessCorrelation(st *ast.StructType) bool {
+	names := []string{"PID", "BirthUS", "UniqueID"}
+	types := []string{"uint32", "uint64", "uint64"}
+	tags := []string{"pid", "birth_us", "unique_id"}
+	if len(st.Fields.List) != 3 {
+		return false
+	}
+	for i, f := range st.Fields.List {
+		if len(f.Names) != 1 || f.Names[0].Name != names[i] || f.Tag == nil {
+			return false
+		}
+		typ, ok := f.Type.(*ast.Ident)
+		if !ok || typ.Name != types[i] {
+			return false
+		}
+		tag, e := strconv.Unquote(f.Tag.Value)
+		if e != nil || tag != "json:\""+tags[i]+"\"" {
+			return false
+		}
+	}
+	return true
 }

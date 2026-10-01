@@ -48,6 +48,9 @@ type Manifest struct {
 }
 
 func ParseManifest(data []byte) (Manifest, error) {
+	return parseManifestSoftnet(data, qualifiedSoftnet)
+}
+func parseManifestSoftnet(data []byte, accept func(ToolIdentity) bool) (Manifest, error) {
 	if len(data) == 0 || len(data) > maxManifestBytes {
 		return Manifest{}, fmt.Errorf("manifest must be between 1 and %d bytes", maxManifestBytes)
 	}
@@ -67,7 +70,7 @@ func ParseManifest(data []byte) (Manifest, error) {
 	if err := decoder.Decode(&extra); err == nil {
 		return Manifest{}, fmt.Errorf("manifest has trailing content")
 	}
-	if err := manifest.Validate(); err != nil {
+	if err := manifest.validateSoftnet(accept); err != nil {
 		return Manifest{}, err
 	}
 	return manifest, nil
@@ -131,7 +134,8 @@ func consumeJSONValue(decoder *json.Decoder) error {
 	}
 }
 
-func (m Manifest) Validate() error {
+func (m Manifest) Validate() error { return m.validateSoftnet(qualifiedSoftnet) }
+func (m Manifest) validateSoftnet(accept func(ToolIdentity) bool) error {
 	if m.Version != ManifestVersion {
 		return fmt.Errorf("%w %d", ErrUnsupportedManifestVersion, m.Version)
 	}
@@ -141,7 +145,7 @@ func (m Manifest) Validate() error {
 	if !qualifiedTart(m.Tart) || !canonicalAbsolute(m.Tart.Path) {
 		return fmt.Errorf("manifest has unqualified Tart identity")
 	}
-	if !qualifiedSoftnet(m.Softnet) {
+	if !accept(m.Softnet) {
 		return fmt.Errorf("manifest has unqualified Softnet identity")
 	}
 	if m.RootUID != 0 || m.SoftnetMode != SoftnetMode {

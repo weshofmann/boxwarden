@@ -42,6 +42,9 @@ type RootedUninstaller struct {
 }
 
 func (u RootedUninstaller) Uninstall(ctx context.Context, digest string, caller Caller, group Group) error {
+	if err := refuseSelectedLegacyUninstall(); err != nil {
+		return err
+	}
 	if digest != SoftnetExecutableSHA256 {
 		return fmt.Errorf("uninstall requires the exact full manifested Softnet digest")
 	}

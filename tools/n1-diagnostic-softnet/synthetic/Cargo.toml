@@ -1,0 +1,16 @@
+[package]
+name="n1-diagnostic-synthetic"
+version="0.1.0"
+edition="2024"
+[dependencies]
+libc="=0.2.186"
+serde={version="=1.0.228",features=["derive"]}
+serde_json={version="=1.0.128",default-features=false,features=["std"]}
+ring="=0.17.14"
+
+clap={version="=4.6.1",features=["derive"]}
+[features]
+pinned_fallback_test=[]
+
+[lib]
+path="lib.rs"

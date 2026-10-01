@@ -39,6 +39,7 @@ type Runtime struct {
 	ready, loginReady, pumpDone     chan struct{}
 	stopOnce, closeOnce             sync.Once
 	closeErr                        error
+	diagnosticClose                 diagnosticCloseState
 }
 
 // CreateRuntime admits an existing supervisor-owned generation, exclusively
@@ -152,7 +153,7 @@ func (r *Runtime) fail(err error) {
 		close(r.ready)
 	}
 	r.mu.Unlock()
-	r.stopOnce.Do(func() { _ = r.stream.Close() })
+	r.stopOnce.Do(func() { r.captureDiagnosticStreamClose(r.stream.Close()) })
 }
 
 func (r *Runtime) pump() {
@@ -217,7 +218,7 @@ func (r *Runtime) Close() error {
 			r.closeErr = errors.Join(r.closeErr, os.Remove(r.directory))
 		}
 	})
-	return r.closeErr
+	return r.finishDiagnosticStreamClose(r.closeErr)
 }
 
 func ownedByCurrentUser(info os.FileInfo) bool {

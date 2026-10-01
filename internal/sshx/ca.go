@@ -33,9 +33,11 @@ type Command struct {
 	Stdin []byte
 }
 type Result struct {
-	Stdout    string
-	Stderr    string
-	Truncated bool
+	Stdout                           string
+	Stderr                           string
+	Truncated                        bool
+	StderrComplete                   bool
+	StdoutTruncated, StderrTruncated bool
 }
 type Runner interface {
 	Run(context.Context, Command) (Result, error)

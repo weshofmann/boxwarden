@@ -140,6 +140,21 @@ func (s SystemDoctor) Doctor(ctx context.Context, request Request) Report {
 }
 
 func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspection {
+	return s.inspectPolicy(ctx, request, true)
+}
+
+// Cleanup policy is private; ordinary doctor always checks process membership.
+func (s SystemDoctor) inspectPolicy(ctx context.Context, request Request, requireEffectiveMembership bool) doctorInspection {
+	return s.inspectSoftnetPolicy(ctx, request, requireEffectiveMembership, softnetInspectionPolicy{QualifiedSoftnetPath, SoftnetExecutableSHA256, ParseManifest, inspectSelectedTree})
+}
+
+type softnetInspectionPolicy struct {
+	path, digest string
+	parse        func([]byte) (Manifest, error)
+	tree         func(DoctorInspector, Manifest, *Report)
+}
+
+func (s SystemDoctor) inspectSoftnetPolicy(ctx context.Context, request Request, requireEffectiveMembership bool, policy softnetInspectionPolicy) doctorInspection {
 	if ctx.Err() != nil {
 		return doctorInspection{report: Report{Status: Drifted, Findings: []Finding{{
 			Code: "inspection.canceled", Category: Drifted,
@@ -177,11 +192,11 @@ func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspec
 		}
 	}
 
-	manifestPath := filepath.Join(filepath.Dir(QualifiedSoftnetPath), "manifest.json")
+	manifestPath := filepath.Join(filepath.Dir(policy.path), "manifest.json")
 	manifestFact, manifestOK := checkTool(inspector, &report, "manifest", manifestPath, "", manifestMode, 0, 0)
 	var manifest Manifest
 	if manifestOK {
-		parsed, err := ParseManifest(manifestFact.Data)
+		parsed, err := policy.parse(manifestFact.Data)
 		if err != nil {
 			if errors.Is(err, ErrUnsupportedManifestVersion) {
 				add("manifest.unsupported", Unsupported, "unsupported manifest schema", "manifest schema v2", "perform attended reinitialization; do not migrate the installed manifest")
@@ -208,7 +223,7 @@ func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspec
 		}
 	}
 
-	for _, directory := range trustedSoftnetDirectories() {
+	for _, directory := range softnetDirectories(policy.path) {
 		fact, err := inspector.InspectPath(directory)
 		if err != nil {
 			add("softnet.ancestor."+stablePathCode(directory), Drifted, "existing path safety inspection failed", "root-owned direct directory", "inspect the installed tree manually")
@@ -230,7 +245,7 @@ func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspec
 	} else if fact.Exists {
 		add("softnet.current", Drifted, "mutable current pointer exists", "no mutable current pointer", "remove only after attended manual inspection")
 	}
-	softnetFact, softnetOK := checkTool(inspector, &report, "softnet", QualifiedSoftnetPath, SoftnetExecutableSHA256, SoftnetMode, 0, -1)
+	softnetFact, softnetOK := checkTool(inspector, &report, "softnet", policy.path, policy.digest, SoftnetMode, 0, -1)
 	if softnetOK && manifest.Version == ManifestVersion {
 		if softnetFact.GID != manifest.Group.ID {
 			add("softnet.group", Drifted, fmt.Sprintf("gid %d", softnetFact.GID), fmt.Sprintf("manifested gid %d", manifest.Group.ID), "inspect the installed tree manually")
@@ -246,8 +261,11 @@ func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspec
 		if groupErr != nil || group.ID != manifest.Group.ID || group.Name != manifest.Group.Name || fmt.Sprint(group.Members) != fmt.Sprint(manifest.Group.Members) {
 			add("group.identity", Drifted, "directory group mismatch", "exact manifested group ID/name/membership", "inspect directory-service state manually")
 		}
-		effective, err := inspector.EffectiveGroups()
-		if err != nil || !containsInt(effective, manifest.Group.ID) {
+		effective, err := []int(nil), error(nil)
+		if requireEffectiveMembership {
+			effective, err = inspector.EffectiveGroups()
+		}
+		if requireEffectiveMembership && (err != nil || !containsInt(effective, manifest.Group.ID)) {
 			add("group.not-effective", Drifted, "group absent from current process", fmt.Sprintf("supplementary gid %d", manifest.Group.ID), "refresh the login session, then rerun doctor")
 		}
 	}
@@ -276,6 +294,7 @@ func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspec
 			}
 		}
 	}
+	policy.tree(inspector, manifest, &report)
 	if ctx.Err() != nil {
 		add("inspection.canceled", Drifted, "host inspection canceled", "complete host inspection", "retry the read-only host inspection")
 	}
@@ -326,8 +345,11 @@ func qualifiedTartFact(fact PathFact) bool {
 }
 
 func trustedSoftnetDirectories() []string {
-	digest := filepath.Dir(QualifiedSoftnetPath)
-	return []string{"/Library", "/Library/Boxwarden", "/Library/Boxwarden/toolchains", "/Library/Boxwarden/toolchains/softnet", "/Library/Boxwarden/toolchains/softnet/" + SoftnetVersion, digest}
+	return softnetDirectories(QualifiedSoftnetPath)
+}
+func softnetDirectories(p string) []string {
+	digest := filepath.Dir(p)
+	return []string{"/Library", "/Library/Boxwarden", "/Library/Boxwarden/toolchains", "/Library/Boxwarden/toolchains/softnet", filepath.Dir(digest), digest}
 }
 func stablePathCode(path string) string {
 	return strings.ReplaceAll(strings.Trim(path, "/"), "/", ".")

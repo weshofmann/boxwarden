@@ -54,14 +54,18 @@ func startDependencies(loaded config.Config, selected config.Domain, path string
 		domains = append(domains, sshx.Domain{ID: d.ID, StateRoot: d.StateRoot})
 	}
 	ca := sshx.NewCAStore(sshx.CAStoreOptions{Runner: sshx.NewExecRunner(), Identity: sshx.OSIdentity{}})
-	return session.StartDependencies{
+	deps := session.StartDependencies{
 		Observer:    tart.NewQualifiedObserver(execx.OSRunner{MaxOutputBytes: 1 << 20}, host.Host.TartExecutable, host.Host.TartHome),
 		Host:        hostx.NewSystemDoctor(),
 		HostRequest: hostx.Request{ConfiguredStateRoots: host.ConfiguredStateRoots, TartPath: host.Host.TartExecutable, TartHome: host.Host.TartHome, SoftnetPath: host.Host.SoftnetSource},
 		CA:          caCheckOnly{check: ca.Check}, ConfiguredDomains: domains,
 		Supervisor: controller, Workspaces: workspaceStartCoordinator{}, RuntimeRoot: runtimeRoot, ConfigPath: path,
 		NewGeneration: sshx.RandomUUID, Now: time.Now,
-	}, nil
+	}
+	if err := configureDiagnosticStart(&deps, loaded, selected, path); err != nil {
+		return session.StartDependencies{}, err
+	}
+	return deps, nil
 }
 
 type workspaceStartCoordinator struct{}

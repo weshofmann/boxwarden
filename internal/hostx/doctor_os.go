@@ -21,9 +21,10 @@ import (
 )
 
 type osDoctorInspector struct {
-	acl     ACLInspector
-	runner  execx.Runner
-	timeout time.Duration
+	acl            ACLInspector
+	runner         execx.Runner
+	timeout        time.Duration
+	policyOperator string // qualification root listing only; ordinary empty
 }
 
 func NewOSDoctorInspector() DoctorInspector {
@@ -220,10 +221,29 @@ func (i *osDoctorInspector) HomebrewSoftnet() ([]HomebrewSoftnet, error) {
 func (i *osDoctorInspector) passwordlessRoot(target string) (bool, error) {
 	ctx, cancel := i.commandContext()
 	defer cancel()
+	args, argumentErr := sudoPolicyArguments(i.policyOperator, os.Geteuid())
+	if argumentErr != nil {
+		return false, argumentErr
+	}
 	result, err := i.runner.Run(ctx, execx.Command{
-		Path: "/usr/bin/sudo", Args: []string{"-n", "-ll"},
+		Path: "/usr/bin/sudo", Args: args,
 		Env: []string{"LC_ALL=C", "LANG=C", "PATH=/usr/bin:/bin:/usr/sbin:/sbin"},
 	})
+	return sudoPolicyResult(result, err, i.policyOperator != "", target)
+}
+func sudoPolicyArguments(operator string, euid int) ([]string, error) {
+	if operator == "" {
+		return []string{"-n", "-ll"}, nil
+	}
+	if operator != "devel" || euid != 0 {
+		return nil, fmt.Errorf("qualification policy caller refused")
+	}
+	return []string{"-U", "devel", "-ll"}, nil
+}
+func sudoPolicyResult(result execx.Result, err error, qualification bool, target string) (bool, error) {
+	if qualification && (err != nil || result.Truncated || !result.StderrComplete) {
+		return false, fmt.Errorf("qualification operator policy inspection failed")
+	}
 	combined := result.Stdout + result.Stderr
 	if result.Truncated {
 		return false, fmt.Errorf("bounded sudo policy inspection was truncated")
@@ -501,4 +521,33 @@ func sudoCommandMatchesTarget(specification, target string) (bool, error) {
 		return pathpkg.Dir(target) == strings.TrimSuffix(command, "/"), nil
 	}
 	return false, nil
+}
+
+// DirectoryEntries is a bounded read-only direct-directory inventory for the
+// diagnostic exact-tree hook. Ordinary doctor behavior does not call it.
+func (i *osDoctorInspector) DirectoryEntries(path string) ([]string, error) {
+	before, err := snapshotPath(path)
+	if err != nil {
+		return nil, err
+	}
+	f, err := openNoFollow(path)
+	if err != nil {
+		return nil, err
+	}
+	info, statErr := f.Stat()
+	if statErr != nil || !info.IsDir() || !sameIdentity(before[len(before)-1], info) {
+		f.Close()
+		return nil, fmt.Errorf("directory changed before inventory")
+	}
+	names, readErr := f.Readdirnames(4)
+	if readErr != nil && readErr != io.EOF {
+		f.Close()
+		return nil, readErr
+	}
+	after, snapErr := snapshotPath(path)
+	closeErr := f.Close()
+	if snapErr != nil || closeErr != nil || !sameSnapshots(before, after) {
+		return nil, fmt.Errorf("directory changed during inventory")
+	}
+	return names, nil
 }

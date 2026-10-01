@@ -96,6 +96,7 @@ func runProcessOwner(path string) error {
 	handle := &fakeHandle{trace: trace, done: make(chan struct{}), waiting: make(chan struct{})}
 	var running atomic.Bool
 	owner := NewOwner()
+	configureDiagnosticProcessOwnerForTest(owner, request)
 	owner.deps.storageCheck = func(hostidentity.StorageExpectation) error { return nil }
 	owner.deps.host, owner.deps.ca = processHost(), processCA()
 	owner.deps.observer = func(string, string) backend.Observer {
@@ -138,6 +139,10 @@ func runProcessOwner(path string) error {
 			if err := os.WriteFile(path, []byte("test-certificate"), 0o644); err != nil {
 				return sshx.Certificate{}, err
 			}
+			// Match the real issuer's exact public-file mode under any umask.
+			if err := os.Chmod(path, 0o644); err != nil {
+				return sshx.Certificate{}, err
+			}
 			return sshx.Certificate{Path: path, Identity: binding.CertificateIdentity(), Principal: binding.Principal(), NotAfter: time.Now().Add(15 * time.Minute)}, nil
 		})
 	}
@@ -163,6 +168,9 @@ func runProcessOwner(path string) error {
 }
 
 func TestInitiatingProcessReturnsWhileDetachedSupervisorRetainsRuntime(t *testing.T) {
+	if diagnosticEnrollmentEnforcedForTest() {
+		t.Skip("ordinary detached fixture has no fixed diagnostic enrollment; tagged constructor refusal and independent guard lifetime have separate controls")
+	}
 	f := newFixture(t)
 	f.record.IntendedState = session.StateStopped
 	f.record.StartGeneration = ""

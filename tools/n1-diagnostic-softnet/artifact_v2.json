@@ -1,0 +1,18 @@
+{
+  "applied_source_manifest_sha256": "92cb92f7baa5fd17910d8206b153b295fefaaaeb22da2d83498a89d8fbc434c8",
+  "archive_format": "ustar, softnet regular 0755 uid=0 gid=0 mtime=0",
+  "archive_sha256": "76704f05eba242cb649ab49db28028556c338a4daeefe9327fdfe37f874808ac",
+  "cargo_sha256": "6e17e865f3a20dd55a1d212f849f58b77124179f0de7c52973096d84ba34118d",
+  "compiler": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "compiler_sha256": "766eda9d8f53afd6fc7f27b3cd2e444dd22afacb5afa710a5625fc8e45b8c941",
+  "diagnostic_patch_sha256": "f8f739348cf6680064d824a0ea98acb948fbb24f73e63424d92c9b0edb6a259f",
+  "executable_sha256": "1bb12bec8821835ada8c036426c2c03061be6cebdf4a1b658249d268fc8bde05",
+  "native_input_sha256": "73cc3b2f38d978b9ab63046c89eea610ff26ab467f2353e064bdcfa18465f36e",
+  "recipe_publication_commit": "02c4b6227bd6b5ce47e4de23228e1febf4860b2e",
+  "recipe_sha256": "1fd9341f40b1e1dc37baa34d9e47711461a59b26628fb294aa9bf9f8d5bc22f6",
+  "reproduction_proof_sha256": "e18ba1980e82bd32d5d8b987d5c551d271cbbf5a000f0593ca1d94b3be73f277",
+  "source_commit": "85bcb9aebffcc4a8c98b1bec111df2db8c18e81f",
+  "source_manifest_sha256": "c820aad5292d0a8cda78d57a3a87072b0e7cac67a1499d13436eb6c7854346c5",
+  "upstream_commit": "df84a30016e3d6acc0d30acc660cf3a726f42a9b",
+  "version": "0.19.0-boxwarden-n1-diagnostic.2"
+}

@@ -46,6 +46,18 @@ func TestRootedUninstallerRemovesOnlyExactInactiveTreeAndFsyncsParent(t *testing
 		},
 	}
 
+	if refusal := refuseSelectedLegacyUninstall(); refusal != nil {
+		if err := uninstaller.Uninstall(t.Context(), SoftnetExecutableSHA256, caller, group); !errors.Is(err, refusal) {
+			t.Fatalf("selected legacy refusal = %v", err)
+		}
+		if checker.calls != 0 || synced != "" {
+			t.Fatal("legacy refusal passed inventory or mutation")
+		}
+		if _, err := os.Lstat(publisher.finalDir()); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
 	if err := uninstaller.Uninstall(t.Context(), SoftnetExecutableSHA256, caller, group); err != nil {
 		t.Fatalf("Uninstall() error = %v", err)
 	}

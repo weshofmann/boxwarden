@@ -64,6 +64,8 @@ type importClient interface {
 }
 
 type dependencies struct {
+	network        ownerNetworkDependencies
+	diagnostic     ownerDiagnosticDependencies
 	storageCheck   func(hostidentity.StorageExpectation) error
 	host           session.RuntimeChecker
 	ca             session.CAValidator
@@ -87,6 +89,7 @@ type dependencies struct {
 // Owner is a single-use runtime owner. Only the exact returned backend handle
 // and the serialx runtime confer lifetime authority; neither is reconstructed.
 type Owner struct {
+	diagnostic                      ownerDiagnosticState
 	deps                            dependencies
 	mu                              sync.Mutex
 	observationMu                   sync.Mutex
@@ -125,7 +128,7 @@ type Owner struct {
 // NewOwner constructs the production detached-child composition. LaunchRequest
 // carries no admitted objects: Start reads the configuration and record again.
 func NewOwner() *Owner {
-	return &Owner{deps: dependencies{
+	o := &Owner{deps: dependencies{
 		storageCheck: hostidentity.CheckStorage,
 		host:         hostx.NewSystemDoctor(),
 		ca:           sshx.NewCAStore(sshx.CAStoreOptions{Runner: sshx.NewExecRunner(), Identity: sshx.OSIdentity{}}),
@@ -151,6 +154,8 @@ func NewOwner() *Owner {
 		newNonce:     sshx.RandomUUID,
 		pollInterval: 100 * time.Millisecond, startupTimeout: 30 * time.Second, renewInterval: time.Minute,
 	}}
+	initializeOwnerDiagnostic(o)
+	return o
 }
 
 func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) (result error) {
@@ -220,6 +225,10 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) (re
 	if err != nil {
 		return fmt.Errorf("admit current host runtime: %w", err)
 	}
+	if err := o.acquireDiagnosticGuard(ctx, loaded, selected, request, expectation); err != nil {
+		return err
+	}
+	defer func() { result = o.finishDiagnosticPrechild(result) }()
 	var domains []sshx.Domain
 	for _, d := range loaded.Domains() {
 		domains = append(domains, sshx.Domain{ID: d.ID, StateRoot: d.StateRoot})
@@ -267,7 +276,7 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) (re
 	if err != nil {
 		return fmt.Errorf("admit exact workspace disks: %w", err)
 	}
-	defer func() { result = errors.Join(result, managedDisks.CloseUnclaimed()) }()
+	defer func() { result = o.finishUnclaimedDiagnosticDisks(result, managedDisks.CloseUnclaimed()) }()
 	attachments, err := workspacex.ListSessionAttachments(ctx, selected.StateRoot, selected.ID, record.ID, string(record.Name))
 	if err != nil {
 		return fmt.Errorf("capture exact workspace mount bindings: %w", err)
@@ -285,13 +294,13 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) (re
 	}
 	serial, err := o.deps.serial(ctx, directory)
 	if err != nil {
-		return fmt.Errorf("create serial runtime: %w", err)
+		return o.classifyDiagnosticCleanup(fmt.Errorf("create serial runtime: %w", err))
 	}
 	if serial == nil {
 		return fmt.Errorf("serial runtime is unavailable")
 	}
 	if err := serial.Err(); err != nil {
-		return errors.Join(err, serial.Close())
+		return errors.Join(err, o.classifyDiagnosticCleanup(serial.Close()))
 	}
 	launchConfig := tart.LaunchConfig{
 		TartPath: admission.Host.TartExecutable, TartHome: admission.Host.TartHome,
@@ -300,14 +309,15 @@ func (o *Owner) Start(ctx context.Context, request supervisor.LaunchRequest) (re
 	}
 	launcher := o.deps.launcher(launchConfig)
 	if launcher == nil {
-		return errors.Join(fmt.Errorf("Tart launcher is unavailable"), serial.Close())
+		return errors.Join(fmt.Errorf("Tart launcher is unavailable"), o.classifyDiagnosticCleanup(serial.Close()))
 	}
-	handle, err := launcher.Start(ctx, backend.StartRequest{ObjectID: record.Backend.ObjectID, SerialDevice: serial.TartSlave(), GenerationDirectory: directory, ManagedDisks: managedDisks})
+	handle, err := o.startDiagnosticOrOrdinary(ctx, launcher, launchConfig, backend.StartRequest{ObjectID: record.Backend.ObjectID, SerialDevice: serial.TartSlave(), GenerationDirectory: directory, ManagedDisks: managedDisks}, binding)
+	err = o.classifyDiagnosticLaunchError(err)
 	if handle == nil {
 		if err == nil {
 			err = fmt.Errorf("Tart returned no retained handle")
 		}
-		return errors.Join(err, serial.Close())
+		return errors.Join(o.classifyDiagnosticLaunchError(err), o.classifyDiagnosticCleanup(serial.Close()))
 	}
 	sshBinding := sshx.Binding{Domain: record.Domain, SessionID: record.ID, BackendKind: record.Backend.Kind, BackendObject: record.Backend.ObjectID}
 	o.mu.Lock()
@@ -820,6 +830,7 @@ func (o *Owner) Wait(context.Context) error {
 	}
 	o.waitOnce.Do(func() {
 		err := handle.Wait(context.Background())
+		err = o.classifyDiagnosticLaunchError(err)
 		if errors.Is(err, tart.ErrScratchCleanupUnproven) || errors.Is(err, tart.ErrReapUnproven) {
 			err = fmt.Errorf("%w: %w", supervisor.ErrRuntimeCleanupUnproven, err)
 		}
@@ -846,7 +857,7 @@ func (o *Owner) Wait(context.Context) error {
 		if credentialErr != nil {
 			credentialErr = fmt.Errorf("%w: clean exact generation credentials: %w", supervisor.ErrRuntimeCleanupUnproven, credentialErr)
 		}
-		o.waitErr = errors.Join(err, credentialErr, serial.Close())
+		o.waitErr = o.finishDiagnosticWait(errors.Join(err, credentialErr, o.classifyDiagnosticCleanup(serial.Close())))
 	})
 	return o.waitErr
 }

@@ -234,6 +234,9 @@ func runInternal(ctx context.Context, args []string, stdin io.Reader, stdout io.
 	if len(args) == 0 || args[0] != "internal" {
 		return false, nil
 	}
+	if handled, err := runClipboardDiagnosticInternal(ctx, args, stdin, stdout); handled {
+		return true, err
+	}
 	if len(args) == 4 && args[1] == "clipboard-pasteboard" {
 		return true, clipboardhost.RunPasteboardHelper(ctx, args[2], args[3], stdin, stdout)
 	}

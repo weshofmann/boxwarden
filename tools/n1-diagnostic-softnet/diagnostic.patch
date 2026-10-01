@@ -1,0 +1,3155 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "softnet"
+-version = "0.1.0"
++version = "0.19.0-boxwarden-n1-diagnostic.2"
+ publish = false
+ edition = "2024"
+ 
+@@ -25,15 +25,20 @@
+ uzers = "0"
+ system-configuration = "0"
+ num_enum = "0"
+-sentry = { version = "0", features = ["debug-images"] }
+-sentry-anyhow = { version = "0", features = ["backtrace"] }
+ nix = { version = "0", features = ["signal", "socket"] }
+ prefix-trie = "0"
+ ipnet = "2"
+ oslog = "0.2.0"
+ log = "0.4.29"
++sentry = { version = "0", features = ["debug-images"] }
++sentry-anyhow = { version = "0", features = ["backtrace"] }
+ serial_test = "3"
+ coarsetime = "0.1.37"
+ 
++
++serde = { version = "=1.0.228", features = ["derive"] }
++serde_json = { version = "=1.0.128", default-features = false, features = ["std"] }
++ring = "=0.17.14"
++
+ [profile.release]
+ debug = true
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2560,7 +2560,7 @@
+ 
+ [[package]]
+ name = "softnet"
+-version = "0.1.0"
++version = "0.19.0-boxwarden-n1-diagnostic.2"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -2577,6 +2577,9 @@
+  "polling",
+  "prefix-trie",
+  "privdrop",
++ "ring",
++ "serde",
++ "serde_json",
+  "sentry",
+  "sentry-anyhow",
+  "serial_test",
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,266 +1,89 @@
+-use anyhow::{Context, anyhow};
++use anyhow::{
++    anyhow,Context
++};
+ use clap::Parser;
+-use log::LevelFilter;
+-use nix::sys::signal::{SigHandler, Signal, signal};
+-use oslog::OsLogger;
++use nix::sys::signal::{
++    SigHandler,Signal,signal
++};
+ use privdrop::PrivDrop;
+-use softnet::NetType;
+-use softnet::proxy::ExposedPort;
+-use softnet::proxy::Proxy;
+-use softnet::proxy::Target;
+-use std::borrow::Cow;
+-use std::env;
+-use std::os::raw::c_int;
+-use std::os::unix::io::RawFd;
+-use std::os::unix::process::CommandExt;
+-use std::process::{Command, ExitCode};
+-use system_configuration::core_foundation::base::TCFType;
+-use system_configuration::core_foundation::dictionary::CFDictionary;
+-use system_configuration::core_foundation::number::CFNumber;
+-use system_configuration::core_foundation::string::CFString;
+-use system_configuration::preferences::SCPreferences;
+-use system_configuration::sys::preferences::{SCPreferencesCommitChanges, SCPreferencesSetValue};
+-use uzers::{get_current_groupname, get_current_username, get_effective_uid};
+-
+-#[derive(Parser, Debug)]
+-#[command(version = "0.19.0-boxwarden-n1.1")]
+-struct Args {
+-    #[clap(
+-        long,
+-        help = "FD number to use for communicating with the VM's networking stack"
+-    )]
+-    vm_fd: c_int,
+-
+-    #[clap(long, help = "MAC address to enforce for the VM")]
+-    vm_mac_address: mac_address::MacAddress,
+-
+-    #[clap(long, value_enum, help = "type of network to use for the VM", default_value_t=NetType::Nat)]
+-    vm_net_type: NetType,
+-
+-    #[clap(
+-        long,
+-        help = "set bootpd(8) lease time to this value (in seconds) before starting the VM",
+-        default_value_t = 600
+-    )]
+-    bootpd_lease_time: u32,
+-
+-    #[clap(long, help = "user name to drop privileges to")]
+-    user: Option<String>,
+-
+-    #[clap(long, help = "group name to drop privileges to")]
+-    group: Option<String>,
+-
+-    #[clap(
+-        long,
+-        help = "Comma-separated list of CIDRs to allow the traffic to \
+-        (e.g. --allow=192.168.0.0/24 may be used to allow a LAN access for a VM), \
+-        plus supported @-aliases. Currently the only supported @-alias is @host, \
+-        which matches the vmnet bridge gateway IP. \
+-        When used with --block, the longest prefix match always wins. \
+-        In case an identical prefix is both --allow'ed and --block'ed, \
+-        blocking will take precedence. --allow=0.0.0.0/0 is a special case, \
+-        it additionally disables bridge isolation (even when --block=0.0.0.0/0 is specified).",
+-        value_name = "comma-separated CIDRs or @-alias",
+-        use_value_delimiter = true,
+-        action = clap::ArgAction::Set
+-    )]
+-    allow: Vec<Target>,
+-
+-    #[clap(
+-        long,
+-        help = "Comma-separated list of CIDRs to block the traffic to \
+-        (e.g. --block=0.0.0.0/0 may be used to establish a default deny policy \
+-        that is further relaxed with --allow), plus supported @-aliases. \
+-        Currently the only supported @-alias is @host, which matches the vmnet bridge gateway IP. \
+-        When used with --allow, the longest prefix match always wins. \
+-        In case an identical prefix is both --allow'ed and --block'ed, \
+-        blocking will take precedence.",
+-        value_name = "comma-separated CIDRs or @-alias",
+-        use_value_delimiter = true,
+-        action = clap::ArgAction::Set
+-    )]
+-    block: Vec<Target>,
+-
+-    #[clap(
+-        long,
+-        help = "comma-separated list of TCP ports to expose (e.g. --expose 2222:22,8080:80)",
+-        value_name = "comma-separated port specifications",
+-        use_value_delimiter = true,
+-        action = clap::ArgAction::Set
+-    )]
+-    expose: Vec<ExposedPort>,
+-
+-    #[clap(long, hide = true)]
+-    sudo_escalation_probing: bool,
+-
+-    #[clap(long, hide = true)]
+-    sudo_escalation_done: bool,
+-}
+-
+-fn main() -> ExitCode {
+-    // Enable backtraces by default
+-    if env::var("RUST_BACKTRACE").is_err() {
+-        unsafe {
+-            env::set_var("RUST_BACKTRACE", "full");
++use softnet::{
++    NetType,proxy::{
++        Proxy,Target,admission::{
++            LaunchGuard,held_scope
+         }
+     }
+-
+-    // Initialize Sentry
+-    let _sentry = sentry::init(sentry::ClientOptions {
+-        release: option_env!("CIRRUS_TAG").map(|tag| Cow::from(format!("softnet@{tag}"))),
+-        ..Default::default()
+-    });
+-
+-    // Enrich future events with Cirrus CI-specific tags
+-    if let Ok(tags) = env::var("CIRRUS_SENTRY_TAGS") {
+-        sentry::configure_scope(|scope| {
+-            for (key, value) in tags.split(',').filter_map(|tag| tag.split_once('=')) {
+-                scope.set_tag(key, value);
++};
++use std::process::ExitCode;
++use system_configuration::core_foundation::{
++    base::TCFType,dictionary::CFDictionary,number::CFNumber,string::CFString
++};
++use system_configuration::preferences::SCPreferences;
++use system_configuration::sys::preferences::{
++    SCPreferencesCommitChanges,SCPreferencesSetValue
++};
++use uzers::{
++    get_current_groupname,get_current_username
++};
++use softnet::proxy::args::Args;
++fn main()->ExitCode {
++    std::panic::set_hook(Box::new(|_|eprintln!("diagnostic internal failure")));
++    let args=match Args::try_parse(){
++        Ok(a)=>a,Err(e)=>{
++            if matches!(e.kind(),clap::error::ErrorKind::DisplayHelp|clap::error::ErrorKind::DisplayVersion){
++                let _=e.print();
++                return ExitCode::SUCCESS;
+             }
+-        });
+-    }
+-
+-    match try_main() {
+-        Ok(_) => ExitCode::SUCCESS,
+-        Err(err) => {
+-            // Print the error into stderr
+-            let causes: Vec<String> = err.chain().map(|x| x.to_string()).collect();
+-            eprintln!("{}", causes.join(": "));
+-
+-            // Capture the error into Sentry
+-            sentry_anyhow::capture_anyhow(&err);
+-
++            eprintln!("diagnostic argument admission failed");
++            return ExitCode::FAILURE;
++        }
++    };
++    match try_main(args){
++        Ok(())=>ExitCode::SUCCESS,Err(_)=>{
++            eprintln!("diagnostic admission or forwarding failed");
+             ExitCode::FAILURE
+         }
+     }
+ }
+-
+-fn try_main() -> anyhow::Result<()> {
+-    // Initialize logger
+-    OsLogger::new("org.cirruslabs.softnet")
+-        .level_filter(LevelFilter::Info)
+-        .init()?;
+-
+-    // The default signal(3)[1] action for SIGINT is to interrupt program,
+-    // but we want to handle SIGINT ourselves, so we ignore it. The kqueue(2)'s[2]
+-    // EVFILT_SIGNAL will receive it anyways, because it has lower precedence.
+-    //
+-    // [1]: https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/signal.3.html
+-    // [2]: https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/kqueue.2.html
+-    unsafe { signal(Signal::SIGINT, SigHandler::SigIgn) }?;
+-
+-    let args: Args = Args::parse();
+-
+-    // Reject absent or incompatible policy before privilege escalation or host mutation.
+-    if args.block != [Target::BoxwardenHostContainment]
+-        || !args.allow.is_empty()
+-        || !args.expose.is_empty()
+-        || !matches!(args.vm_net_type, NetType::Nat)
+-    {
+-        return Err(anyhow!(
+-            "N1 requires exact containment selector, NAT, and no allow/expose overrides"
+-        ));
++fn try_main(args:Args)->anyhow::Result<()> {
++    let (selector,mac)=args.admit().ok_or_else(||anyhow!("diagnostic argument admission failed"))?;
++    let user=get_current_username().ok_or_else(||anyhow!("operator unavailable"))?.to_string_lossy().into_owned();
++    let group=get_current_groupname().ok_or_else(||anyhow!("operator unavailable"))?.to_string_lossy().into_owned();
++    if args.user.as_ref().is_some_and(|s|s!=&user)||args.group.as_ref().is_some_and(|s|s!=&group){
++        return Err(anyhow!("operator override refused"));
+     }
+-
+-    // No need to run anything, just return
+-    // so that the invoker process knows we
+-    // can be invoked in Sudo as root
+-    if args.sudo_escalation_probing {
+-        return Ok(());
+-    }
+-
+-    // Retrieve real (not effective) user and group names
+-    let current_user_name = get_current_username()
+-        .ok_or(anyhow!("failed to resolve real user name"))?
+-        .to_string_lossy()
+-        .to_string();
+-    let current_group_name = get_current_groupname()
+-        .ok_or(anyhow!("failed to resolve real group name"))?
+-        .to_string_lossy()
+-        .to_string();
+-
+-    // Ensure we are running as root
+-    if get_effective_uid() != 0 {
+-        if sudo_escalation_works() && !args.sudo_escalation_done {
+-            let exe = std::env::current_exe().unwrap();
+-            let args = std::env::args().skip(1);
+-
+-            let _ = Command::new("sudo")
+-                .arg("--non-interactive")
+-                .arg("--preserve-env=SENTRY_DSN,CIRRUS_SENTRY_TAGS")
+-                .arg(&exe)
+-                .args(args)
+-                .arg("--sudo-escalation-done")
+-                .arg("--user")
+-                .arg(current_user_name)
+-                .arg("--group")
+-                .arg(current_group_name)
+-                .exec();
+-        }
+-
+-        return Err(anyhow!(
+-            "root privileges are required to run and passwordless sudo was not available"
+-        ));
+-    }
+-
+-    // Set bootpd(8) min/max lease time while still having the root privileges
+-    set_bootpd_lease_time(args.bootpd_lease_time);
+-
+-    // Initialize the proxy while still having the root privileges
+-    let mut proxy = Proxy::new(
+-        args.vm_fd as RawFd,
+-        args.vm_mac_address,
+-        args.vm_net_type,
+-        args.allow,
+-        args.block,
+-        args.expose,
+-    )
+-    .context("failed to initialize proxy")?;
+-
+-    // Drop effective privileges to the user
+-    // and group which have had invoked us
+-    PrivDrop::default()
+-        .user(args.user.unwrap_or(current_user_name))
+-        .group(args.group.unwrap_or(current_group_name))
+-        .apply()
+-        .context("failed to drop privileges")?;
+-
+-    // Run proxy
+-    proxy.run()
++    // This local is constructed first and therefore outlives all partially or fully constructed resources.
++    held_scope(LaunchGuard::acquire()?, |guard| {
++        // Descriptor roles are admitted before bootpd effects and again in Proxy.
++        let channel=softnet::proxy::validate_diagnostic_channel(selector.clone(),mac)?;
++        drop(channel);
++        unsafe{
++            signal(Signal::SIGINT,SigHandler::SigIgn)
++        }?;
++        guard.revalidate()?;
++        set_bootpd_lease_time(args.bootpd_lease_time);
++        let mut proxy=Proxy::new(guard,args.vm_fd,mac_address::MacAddress::new(mac),NetType::Nat,vec![],vec![Target::BoxwardenDiagnostic(selector)],vec![]).context("failed to initialize proxy")?;
++        let result=(||{
++            PrivDrop::default().user(user).group(group).apply().context("failed to drop privileges")?;
++            guard.revalidate()?;
++            proxy.hello_after_privdrop();
++            proxy.run()
++        })();
++        drop(proxy); // Host/Interface synchronous finalization and retrying Drops run under SH.
++        result
++    })
+ }
+-
+-fn sudo_escalation_works() -> bool {
+-    let exe = std::env::current_exe().unwrap();
+-    let args = std::env::args().skip(1);
+-
+-    Command::new("sudo")
+-        .arg("-n")
+-        .arg(&exe)
+-        .args(args)
+-        .arg("--sudo-escalation-probing")
+-        .output()
+-        .map(|output| output.status.success())
+-        .unwrap_or(false)
+-}
+-
+ fn set_bootpd_lease_time(lease_time: u32) {
+     let prefs = SCPreferences::group(
+-        &CFString::new("softnet"),
+-        &CFString::new("com.apple.InternetSharing.default.plist"),
++    &CFString::new("softnet"),
++    &CFString::new("com.apple.InternetSharing.default.plist"),
+     );
+-
+-    let bootpd_dict = CFDictionary::from_CFType_pairs(&[(
+-        CFString::new("DHCPLeaseTimeSecs"),
+-        CFNumber::from(lease_time as i32),
+-    )]);
+-
++    let bootpd_dict = CFDictionary::from_CFType_pairs(&[(     CFString::new("DHCPLeaseTimeSecs"),     CFNumber::from(lease_time as i32),     )]);
+     unsafe {
+         SCPreferencesSetValue(
+-            prefs.as_concrete_TypeRef(),
+-            CFString::new("bootpd").as_concrete_TypeRef(),
+-            bootpd_dict.as_concrete_TypeRef().cast(),
++        prefs.as_concrete_TypeRef(),
++        CFString::new("bootpd").as_concrete_TypeRef(),
++        bootpd_dict.as_concrete_TypeRef().cast(),
+         );
+-
+         SCPreferencesCommitChanges(prefs.as_concrete_TypeRef());
+     }
+ }
+--- a/lib/proxy/mod.rs
++++ b/lib/proxy/mod.rs
+@@ -1,14 +1,20 @@
+ mod boxwarden_policy;
++pub mod wire;
++pub mod args;
++mod dispatch;
++mod watch;
++pub mod admission;
+ mod exposed_port;
+ mod host;
+ mod vm;
+-
+ use crate::host::Host;
+ use crate::host::NetType;
+ use crate::poller::Poller;
+ use crate::vm::VM;
+ use anyhow::Result;
+-use anyhow::{Context, anyhow};
++use anyhow::{
++    Context, anyhow
++};
+ use boxwarden_policy::Policy;
+ pub use exposed_port::ExposedPort;
+ use ipnet::Ipv4Net;
+@@ -16,12 +22,13 @@
+ use smoltcp::wire::EthernetFrame;
+ use std::io::ErrorKind;
+ use std::net::Ipv4Addr;
+-use std::os::unix::io::{AsRawFd, RawFd};
++use std::os::unix::io::{
++    AsRawFd, RawFd
++};
+ use std::str::FromStr;
+ use std::time::Duration;
+ use std::time::Instant;
+ use vmnet::Batch;
+-
+ pub struct Proxy<'proxy> {
+     vm: VM,
+     host: Host,
+@@ -29,53 +36,55 @@
+     enobufs_encountered: bool,
+     policy: Policy,
+     started: Instant,
+-}
+-
++    diagnostic: watch::WatchChannel,
++    _launch_guard: &'proxy admission::LaunchGuard,
++}
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub enum Target {
+     Prefix(Ipv4Net),
+     Host,
+-    BoxwardenHostContainment,
+-}
+-
++    BoxwardenDiagnostic(wire::Selector),
++}
+ impl FromStr for Target {
+     type Err = ipnet::AddrParseError;
+-
+     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+-        if s == "@boxwarden-host-containment" {
+-            return Ok(Target::BoxwardenHostContainment);
++        if let Some(selector) = wire::Selector::parse(s) {
++            return Ok(Target::BoxwardenDiagnostic(selector));
+         }
+         if s == "@host" {
+             return Ok(Target::Host);
+         }
+-
+         Ipv4Net::from_str(s).map(Target::Prefix)
+     }
+ }
+-
+ impl Proxy<'_> {
+     pub fn new<'proxy>(
+-        vm_fd: RawFd,
+-        vm_mac_address: MacAddress,
+-        vm_net_type: NetType,
+-        allow: Vec<Target>,
+-        block: Vec<Target>,
+-        exposed_ports: Vec<ExposedPort>,
++    launch_guard: &'proxy admission::LaunchGuard,
++    vm_fd: RawFd,
++    vm_mac_address: MacAddress,
++    vm_net_type: NetType,
++    allow: Vec<Target>,
++    block: Vec<Target>,
++    exposed_ports: Vec<ExposedPort>,
+     ) -> Result<Proxy<'proxy>> {
+-        if block != [Target::BoxwardenHostContainment]
+-            || !allow.is_empty()
+-            || !exposed_ports.is_empty()
+-            || !matches!(vm_net_type, NetType::Nat)
++        if !matches!(block.as_slice(), [Target::BoxwardenDiagnostic(_)])
++        || !allow.is_empty()
++        || !exposed_ports.is_empty()
++        || !matches!(vm_net_type, NetType::Nat)
+         {
+             return Err(anyhow!(
+-                "N1 requires exact containment selector, NAT, and no allow/expose overrides"
++            "N1 requires exact containment selector, NAT, and no allow/expose overrides"
+             ));
+         }
++        launch_guard.revalidate()?;
++        let selector = match &block[0] {
++            Target::BoxwardenDiagnostic(s) => s.clone(), _ => unreachable!()
++        };
++        let diagnostic = watch::WatchChannel::admit(selector, vm_mac_address.bytes())?;
+         let vm = VM::new(vm_fd)?;
+         let host = Host::new(vm_net_type, true)?;
+         let poller_timeout = Duration::from_millis(100);
+         let poller = Poller::new(vm.as_raw_fd(), host.as_raw_fd(), poller_timeout)?;
+-
+         let gateway = host.gateway_ip;
+         Ok(Proxy {
+             vm,
+@@ -84,86 +93,100 @@
+             enobufs_encountered: false,
+             policy: Policy::new(vm_mac_address.bytes(), gateway),
+             started: Instant::now(),
++            diagnostic,
++            _launch_guard: launch_guard,
+         })
+     }
+-
++    pub fn hello_after_privdrop(&mut self) {
++        self.diagnostic.hello_after_privdrop(self.host.gateway_ip.octets());
++    }
++    fn service_diagnostic(&mut self) {
++        self.diagnostic.service(&mut self.policy, self.started.elapsed().as_secs());
++    }
+     pub fn run(&mut self) -> Result<()> {
+         // Create a single buffer from reading from the VM
+-        let mut buf: Vec<u8> = vec![0; self.host.max_packet_size as usize];
+-
++        let mut buf: Vec<u8> = vec![0;         self.host.max_packet_size as usize];
+         // Create multiple buffers and a batch for reading from the host
+-        let mut bufs = vec![
+-            vec![0u8; self.host.max_packet_size as usize];
+-            self.host.read_max_packets as usize
+-        ];
++        let mut bufs = vec![         vec![0u8;         self.host.max_packet_size as usize];         self.host.read_max_packets as usize         ];
+         let mut batch = Batch::preallocate(bufs.len());
+-
+         self.poller.arm()?;
+-
+         loop {
+-            let (vm_readable, host_readable, interrupt) = self.poller.wait()?;
+-
++            let observed = self.poller.wait();
++            self.service_diagnostic();
++            let (vm_readable, host_readable, interrupt) = observed?;
+             if vm_readable {
+                 self.read_from_vm(buf.as_mut_slice())?;
+             }
+-
+             if host_readable {
+                 self.read_from_host(&mut batch, &mut bufs)?;
+             }
+-
+             // Graceful termination
+             if interrupt {
++                self.diagnostic.shutdown();
+                 return Ok(());
+             }
+-
+             self.poller.rearm();
+         }
+     }
+-
+     fn read_from_vm(&mut self, buf: &mut [u8]) -> Result<()> {
+         loop {
+             match self.vm.read(buf) {
+                 Ok(n) => {
++                    self.service_diagnostic();
+                     if let Ok(frame) = EthernetFrame::new_checked(&buf[..n]) {
+-                        self.process_frame_from_vm(frame)?;
+-                    }
++                        let result = self.process_frame_from_vm(frame);
++                        self.service_diagnostic();
++                        result?;
++                    } else {
++                        self.diagnostic.observer.dropped_outer(0, &buf[..n]);
++                    }
++                    self.service_diagnostic();
+                 }
+                 Err(err) => {
+                     if err.kind() == ErrorKind::WouldBlock {
+                         return Ok(());
+                     }
+-
++                    self.diagnostic.failed_read();
++                    self.service_diagnostic();
+                     return Err(err.into());
+                 }
+             }
+         }
+     }
+-
+     fn read_from_host(&mut self, batch: &mut Batch, bufs: &mut [Vec<u8>]) -> Result<()> {
+         loop {
+             match self.host.read(batch, bufs) {
+                 Ok(pktcnt) => {
++                    self.service_diagnostic();
+                     for buf in batch.packet_sized_bufs(bufs).take(pktcnt) {
++                        self.service_diagnostic();
+                         if let Ok(pkt) = EthernetFrame::new_checked(buf) {
+-                            self.process_frame_from_host(&pkt)?;
++                            let result = self.process_frame_from_host(&pkt);
++                            self.service_diagnostic();
++                            result?;
++                        } else {
++                            self.diagnostic.observer.dropped_outer(1, buf);
+                         }
++                        self.service_diagnostic();
+                     }
+                 }
+                 Err(err) => {
+                     if let vmnet::Error::VmnetReadNothing = err {
+                         return Ok(());
+                     }
+-
++                    self.diagnostic.failed_read();
++                    self.service_diagnostic();
+                     return Err(err.into());
+                 }
+             }
+         }
+     }
+ }
+-
+ fn local_ipv4() -> Result<(Vec<Ipv4Addr>, Vec<Ipv4Addr>)> {
+     let mut head: *mut libc::ifaddrs = std::ptr::null_mut();
+-    if unsafe { libc::getifaddrs(&mut head) } != 0 {
++    if unsafe {
++        libc::getifaddrs(&mut head)
++    } != 0 {
+         return Err(std::io::Error::last_os_error()).context("N1 host address refresh failed");
+     }
+     let mut out = Vec::new();
+@@ -171,17 +194,31 @@
+     let mut invalid_broadcast_metadata = false;
+     let mut item = head;
+     while !item.is_null() {
+-        let addr = unsafe { (*item).ifa_addr };
+-        if !addr.is_null() && unsafe { (*addr).sa_family as i32 } == libc::AF_INET {
+-            let ipv4 = unsafe { &*(addr as *const libc::sockaddr_in) };
++        let addr = unsafe {
++            (*item).ifa_addr
++        };
++        if !addr.is_null() && unsafe {
++            (*addr).sa_family as i32
++        } == libc::AF_INET {
++            let ipv4 = unsafe {
++                &*(addr as *const libc::sockaddr_in)
++            };
+             let assigned = Ipv4Addr::from(ipv4.sin_addr.s_addr.to_ne_bytes());
+             out.push(assigned);
+-            if unsafe { (*item).ifa_flags } & (libc::IFF_BROADCAST as u32) != 0 {
+-                let mask_ptr = unsafe { (*item).ifa_netmask };
+-                if mask_ptr.is_null() || unsafe { (*mask_ptr).sa_family as i32 } != libc::AF_INET {
++            if unsafe {
++                (*item).ifa_flags
++            } & (libc::IFF_BROADCAST as u32) != 0 {
++                let mask_ptr = unsafe {
++                    (*item).ifa_netmask
++                };
++                if mask_ptr.is_null() || unsafe {
++                    (*mask_ptr).sa_family as i32
++                } != libc::AF_INET {
+                     invalid_broadcast_metadata = true;
+                 } else {
+-                    let mask = unsafe { &*(mask_ptr as *const libc::sockaddr_in) };
++                    let mask = unsafe {
++                        &*(mask_ptr as *const libc::sockaddr_in)
++                    };
+                     let bits = u32::from_be_bytes(assigned.octets());
+                     let mask_bits = u32::from_be_bytes(mask.sin_addr.s_addr.to_ne_bytes());
+                     if mask_bits == 0 || (mask_bits | mask_bits.wrapping_sub(1)) != u32::MAX {
+@@ -192,18 +229,25 @@
+                 }
+             }
+         }
+-        item = unsafe { (*item).ifa_next };
+-    }
+-    unsafe { libc::freeifaddrs(head) };
++        item = unsafe {
++            (*item).ifa_next
++        };
++    }
++    unsafe {
++        libc::freeifaddrs(head)
++    };
+     if invalid_broadcast_metadata {
+         return Err(anyhow!(
+-            "N1 host address refresh found invalid broadcast metadata"
++        "N1 host address refresh found invalid broadcast metadata"
+         ));
+     }
+     if out.is_empty() {
+         return Err(anyhow!(
+-            "N1 host address refresh returned no IPv4 addresses"
++        "N1 host address refresh returned no IPv4 addresses"
+         ));
+     }
+     Ok((out, broadcasts))
+ }
++pub fn validate_diagnostic_channel(selector:wire::Selector,mac:[u8;6])->Result<impl Sized>{
++    Ok(watch::WatchChannel::admit(selector,mac)?)
++}
+--- a/lib/proxy/vm.rs
++++ b/lib/proxy/vm.rs
+@@ -1,28 +1,32 @@
+-use crate::proxy::{Proxy, local_ipv4};
+-use anyhow::Context;
+-use anyhow::Result;
++use crate::proxy::{
++    Proxy,local_ipv4,dispatch::{
++        dispatch_guest,DispatchError,WriteError
++    }
++};
++use anyhow::{
++    Context,Result
++};
+ use smoltcp::wire::EthernetFrame;
+ use std::net::Ipv4Addr;
+-
+ impl Proxy<'_> {
+-    pub(crate) fn process_frame_from_vm(&mut self, frame: EthernetFrame<&[u8]>) -> Result<()> {
+-        self.policy.forward_with_refresh(
+-            frame.as_ref(),
+-            self.started.elapsed().as_secs(),
+-            local_ipv4,
+-            |bytes| {
+-                // Fallback is reached only after the pure parser has validated
+-                // the frame and denied host-local and special destinations.
+-                let dst = Ipv4Addr::new(bytes[30], bytes[31], bytes[32], bytes[33]);
+-                ip_network::IpNetwork::from(dst).is_global()
+-            },
+-            |bytes| {
+-                self.host
+-                    .write(bytes)
+-                    .map(|_| ())
+-                    .context("failed to write to the host")
+-            },
+-        )?;
+-        Ok(())
++    pub(crate) fn process_frame_from_vm(&mut self, frame:EthernetFrame<&[u8]>) -> Result<()> {
++        let result = dispatch_guest(&mut self.policy,frame.as_ref(),self.started.elapsed().as_secs(),&mut self.diagnostic.observer,
++        local_ipv4,
++        |bytes| ip_network::IpNetwork::from(Ipv4Addr::new(bytes[30],bytes[31],bytes[32],bytes[33])).is_global(),
++        |bytes| self.host.write(bytes), vmnet_category);
++        match result {
++            Ok(_) => Ok(()), Err(DispatchError::Refresh(e)) => Err(e), Err(DispatchError::Write(e)) => Err(e).context("failed to write to the host")
++        }
+     }
+ }
++fn vmnet_category(e:&vmnet::Error)->WriteError {
++    match e {
++        vmnet::Error::VmnetErrorStatus(s) => match s {
++            vmnet::Status::Failure=>WriteError::VmnetFailure,vmnet::Status::MemFailure=>WriteError::VmnetMemFailure,
++            vmnet::Status::InvalidArgument=>WriteError::VmnetInvalidArgument,vmnet::Status::SetupIncomplete=>WriteError::VmnetSetupIncomplete,
++            vmnet::Status::InvalidAccess=>WriteError::VmnetInvalidAccess,vmnet::Status::PacketTooBig=>WriteError::VmnetPacketTooBig,
++            vmnet::Status::BufferExhausted=>WriteError::VmnetBufferExhausted,vmnet::Status::TooManyPackets=>WriteError::VmnetTooManyPackets,
++            vmnet::Status::SharingServiceBusy=>WriteError::VmnetSharingServiceBusy,vmnet::Status::Success=>WriteError::None
++        }, _=>WriteError::VmnetUnknownStatus
++    }
++}
+--- a/lib/proxy/host.rs
++++ b/lib/proxy/host.rs
+@@ -1,45 +1,28 @@
+-use crate::proxy::{Proxy, local_ipv4};
+-use anyhow::{Context, Result};
+-use smoltcp::wire::{EthernetFrame, EthernetProtocol};
+-
++use crate::proxy::{
++    Proxy,local_ipv4,dispatch::{
++        dispatch_host,DispatchError,WriteError
++    }
++};
++use anyhow::{
++    Context,Result
++};
++use smoltcp::wire::EthernetFrame;
+ impl Proxy<'_> {
+-    pub(crate) fn process_frame_from_host(&mut self, frame: &EthernetFrame<&[u8]>) -> Result<()> {
+-        if self.allowed_from_host(frame).is_none() {
+-            // Block packet by not forwarding it to the VM
+-            return Ok(());
+-        }
+-
+-        // Trusted host-side observation updates only the N1 policy state.
+-        // Refresh is fail-closed before any exception or management flow decision.
+-        let locals = local_ipv4()?;
+-        self.policy
+-            .host(frame.as_ref(), &locals.0, self.started.elapsed().as_secs());
+-
+-        match self.vm.write(frame.as_ref()) {
+-            Ok(_) => Ok(()),
+-            Err(err) => {
+-                if let Some(libc::ENOBUFS) = err.raw_os_error() {
+-                    if !self.enobufs_encountered {
+-                        sentry::capture_message(
+-                            "No buffer space available in VM's socket",
+-                            sentry::Level::Warning,
+-                        );
+-                        self.enobufs_encountered = true;
+-                    }
+-
+-                    return Ok(());
+-                }
+-
+-                Err(err).context("failed to write to the VM")
+-            }
+-        }
+-    }
+-
+-    fn allowed_from_host(&mut self, frame: &EthernetFrame<&[u8]>) -> Option<()> {
+-        match frame.ethertype() {
+-            EthernetProtocol::Arp => Some(()),
+-            EthernetProtocol::Ipv4 => Some(()),
+-            _ => None,
++    pub(crate) fn process_frame_from_host(&mut self,frame:&EthernetFrame<&[u8]>) -> Result<()> {
++        let result=dispatch_host(&mut self.policy,frame.as_ref(),&mut self.diagnostic.observer,
++        |f|matches!(&f[12..14],[8,6]|[8,0]),local_ipv4,||self.started.elapsed().as_secs(),
++        |bytes|self.vm.write(bytes),io_category,&mut self.enobufs_encountered);
++        match result {
++            Ok(())=>Ok(()),Err(DispatchError::Refresh(e))=>Err(e),Err(DispatchError::Write(e))=>Err(e).context("failed to write to the VM")
+         }
+     }
+ }
++fn io_category(e:&std::io::Error)->WriteError {
++    if e.raw_os_error()==Some(libc::ENOBUFS){
++        WriteError::IoEnobufs
++    }else{
++        match e.kind(){
++            std::io::ErrorKind::WouldBlock=>WriteError::IoWouldBlock,std::io::ErrorKind::Interrupted=>WriteError::IoInterrupted,_=>WriteError::IoOther
++        }
++    }
++}
+--- a/lib/host.rs
++++ b/lib/host.rs
+@@ -1,6 +1,5 @@
+ use anyhow::{Context, Result, anyhow};
+ use clap::ValueEnum;
+-use log::info;
+ use std::net::Ipv4Addr;
+ use std::os::unix::io::{AsRawFd, RawFd};
+ use std::os::unix::net::UnixDatagram;
+@@ -131,7 +130,7 @@
+                 internal_addr.into(),
+                 internal_port,
+             )
+-            .map(|_| info!("added port forwarding rule {details}"))
++            .map(|_| ())
+             .map_err(|err| anyhow!("failed to add port forwarding rule {details}: {err}"))
+     }
+ 
+@@ -140,7 +139,7 @@
+ 
+         self.interface
+             .port_forwarding_rule_remove(AddressFamily::Ipv4, Protocol::Tcp, external_port)
+-            .map(|_| info!("removed port forwarding rule {details}"))
++            .map(|_| ())
+             .map_err(|err| anyhow!("failed to remove port forwarding rule {details}: {err}"))
+     }
+ 
+--- a/lib/proxy/port_forwarder.rs
++++ b/lib/proxy/port_forwarder.rs
+@@ -2,7 +2,6 @@
+ use crate::host::Host;
+ use crate::proxy::exposed_port::ExposedPort;
+ use anyhow::Result;
+-use log::error;
+ use std::net::Ipv4Addr;
+ 
+ #[derive(Default)]
+@@ -38,8 +37,7 @@
+             return;
+         }
+ 
+-        if let Err(err) = self.tick_inner(host, lease) {
+-            error!("port-forwarding failed: {}", err);
++        if self.tick_inner(host, lease).is_err() {
+ 
+             self.failed = true;
+         }
+--- a/lib/proxy/boxwarden_policy.rs
++++ b/lib/proxy/boxwarden_policy.rs
+@@ -37,11 +37,21 @@
+     closing_at: Option<u64>,
+ }
+ 
++/// Only fixed choosing-branch metadata. No packet or local-address list is retained.
++#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
++pub struct DecisionMetadata {
++    pub lease: usize, // not_evaluated/missing/expired_cleared/live_match/live_mismatch
++    pub gateway_equal: usize, // not_evaluated/false/true
++    pub local_contains: usize,
++    pub arp_reason: usize, // frozen five-element catalogue
++}
+ pub struct Policy {
+     guest_mac: [u8; 6],
+     gateway: Ipv4Addr,
+     lease: Option<Lease>,
+     flows: Vec<Flow>,
++    candidate: Option<Ipv4Addr>,
++    observed: DecisionMetadata,
+ }
+ impl Policy {
+     pub fn new(guest_mac: [u8; 6], gateway: Ipv4Addr) -> Self {
+@@ -50,9 +60,18 @@
+             gateway,
+             lease: None,
+             flows: Vec::new(),
+-        }
+-    }
+-    fn refresh(&mut self, locals: &[Ipv4Addr], now: u64) {
++            candidate: None,
++            observed: DecisionMetadata::default(),
++        }
++    }
++    pub fn bind_candidate(&mut self, address: Ipv4Addr) { self.candidate = Some(address); }
++    pub fn candidate_lease_valid(&self, address: [u8;4], mac: [u8;6], gateway: [u8;4], now: u64) -> bool {
++        self.guest_mac == mac && self.gateway.octets() == gateway
++            && self.lease.is_some_and(|l| l.address.octets() == address && now < l.expires)
++    }
++    pub fn metadata(&self) -> DecisionMetadata { self.observed }
++    fn refresh(&mut self, locals: &[Ipv4Addr], now: u64) -> bool {
++        let expired = self.lease.is_some_and(|l| now >= l.expires);
+         if self.lease.is_some_and(|l| now >= l.expires) {
+             self.lease = None;
+             self.flows.clear();
+@@ -69,6 +88,7 @@
+                     }
+                 }
+         });
++        expired
+     }
+     pub fn forward_with_refresh<E, R, F, W>(
+         &mut self,
+@@ -105,11 +125,18 @@
+         broadcasts: &[Ipv4Addr],
+         now: u64,
+     ) -> Decision {
+-        self.refresh(locals, now);
++        self.observed = DecisionMetadata::default();
++        let expired = self.refresh(locals, now);
++        self.observed.lease = if expired { 2 } else { match self.lease {
++            None => 1,
++            Some(l) if self.candidate.is_some_and(|a| a == l.address) => 3,
++            Some(_) => 4,
++        }};
+         let Some(eth) = Ethernet::parse(frame) else {
+             return Decision::Deny;
+         };
+         if eth.src != self.guest_mac {
++            if eth.kind == 0x0806 { self.observed.arp_reason = 2; }
+             return Decision::Deny;
+         }
+         match eth.kind {
+@@ -150,7 +177,9 @@
+         if ip.dst.is_multicast() || ip.dst == Ipv4Addr::BROADCAST || broadcasts.contains(&ip.dst) {
+             return Decision::Deny;
+         };
+-        if ip.dst == self.gateway && lease.gateway_dns {
++        let gateway_equal = ip.dst == self.gateway;
++        self.observed.gateway_equal = 1 + usize::from(gateway_equal);
++        if gateway_equal && lease.gateway_dns {
+             if matches!(
+                 transport,
+                 Transport::Udp { dst: 53, .. } | Transport::Tcp { dst: 53, .. }
+@@ -205,9 +234,10 @@
+                 }
+             }
+         }
+-        if ip.dst == self.gateway || locals.contains(&ip.dst) {
+-            return Decision::Deny;
+-        }
++        if gateway_equal { return Decision::Deny; }
++        let local = locals.contains(&ip.dst);
++        self.observed.local_contains = 1 + usize::from(local);
++        if local { return Decision::Deny; }
+         Decision::Fallback
+     }
+     pub fn host(&mut self, frame: &[u8], locals: &[Ipv4Addr], now: u64) -> bool {
+@@ -301,22 +331,32 @@
+         }
+         true
+     }
+-    fn guest_arp(&self, p: &[u8], locals: &[Ipv4Addr]) -> bool {
++    fn guest_arp(&mut self, p: &[u8], locals: &[Ipv4Addr]) -> bool {
+         if (p.len() != 28 && p.len() != 46)
+             || p[0..6] != [0, 1, 8, 0, 6, 4]
+             || !matches!(p[7], 1 | 2)
+             || p[6] != 0
+-            || p[8..14] != self.guest_mac
+         {
++            self.observed.arp_reason = 1;
+             return false;
+         }
++        if p[8..14] != self.guest_mac { self.observed.arp_reason = 2; return false; }
+         let src = Ipv4Addr::new(p[14], p[15], p[16], p[17]);
+         let dst = Ipv4Addr::new(p[24], p[25], p[26], p[27]);
+         let valid_src = match self.lease {
+             Some(l) => src == l.address,
+             None => src.is_unspecified(),
+         };
+-        valid_src && (dst == self.gateway || self.lease.is_some() && locals.contains(&dst))
++        if !valid_src { self.observed.arp_reason = 2; return false; }
++        let gateway_equal = dst == self.gateway;
++        self.observed.gateway_equal = 1 + usize::from(gateway_equal);
++        let allowed = if gateway_equal { true } else if self.lease.is_some() {
++            let local = locals.contains(&dst);
++            self.observed.local_contains = 1 + usize::from(local);
++            local
++        } else { false };
++        self.observed.arp_reason = if allowed { 3 } else { 4 };
++        allowed
+     }
+     fn dhcp_request(&self, ip: &Ipv4<'_>, data: &[u8]) -> bool {
+         if data.len() < 240
+--- /dev/null
++++ b/lib/proxy/dispatch.rs
+@@ -0,0 +1,409 @@
++//! Actual forwarding seam; injected closures preserve canonical ordering/results.
++use super::boxwarden_policy::{
++    Policy, Decision, DecisionMetadata
++};
++use super::wire::{
++    Arm, Counters, Summary
++};
++use std::net::Ipv4Addr;
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum WriteError {
++    None, VmnetFailure, VmnetMemFailure, VmnetInvalidArgument, VmnetSetupIncomplete, VmnetInvalidAccess, VmnetPacketTooBig, VmnetBufferExhausted, VmnetTooManyPackets, VmnetSharingServiceBusy, VmnetUnknownStatus, IoEnobufs, IoWouldBlock, IoInterrupted, IoOther
++}
++#[derive(Debug)]
++pub enum DispatchError<R,W> {
++    Refresh(R), Write(W)
++}
++#[derive(Clone, Copy, Debug)]
++struct Ticket {
++    id: u16, dir: usize, row: Option<usize>
++}
++#[derive(Default)]
++pub struct Observer {
++    pub arm: Option<Arm>, pub counters: Counters, pub invalid: [bool;     14],
++    pub overflow: bool, pub loss: bool, pending: [Option<Ticket>;     2],
++}
++fn inc(v: &mut u16, overflow: &mut bool) {
++    if *v >= 4096 {
++        *overflow = true;
++    } else {
++        *v += 1;
++    }
++}
++fn bytes_add(v: &mut u64, n: usize, overflow: &mut bool) {
++    match v.checked_add(n as u64) {
++        Some(n) => *v=n, None => *overflow=true
++    }
++}
++impl Observer {
++    pub fn activate(&mut self, arm: Arm) {
++        self.arm=Some(arm);
++    }
++    pub fn fail(&mut self, flag: usize) {
++        self.invalid[flag]=true;
++        self.loss=true;
++    }
++    fn begin(&mut self, dir: usize, frame: &[u8]) -> Option<Ticket> {
++        if self.arm.is_none() {
++            return None;
++        }
++        if self.pending[dir].is_some() {
++            self.fail(1);
++        }
++        let n=if dir==0 {
++            &mut self.counters.vm_dispatch_started
++        } else {
++            &mut self.counters.host_dispatch_started
++        };
++        if *n>=4096 {
++            self.overflow=true;
++            self.loss=true;
++            return None;
++        } *n+=1;
++        let id=*n;
++        let row=self.classify(dir,frame);
++        if let Some(r)=row {
++            if dir==0 {
++                inc(&mut self.counters.vm_identified[r],&mut self.overflow);
++            } else {
++                inc(&mut self.counters.host_reply_class[r],&mut self.overflow);
++            }
++        }
++        let t=Ticket{
++            id,dir,row
++        };
++        self.pending[dir]=Some(t);
++        Some(t)
++    }
++    fn classify(&mut self, dir: usize, f: &[u8]) -> Option<usize> {
++        let a=self.arm.as_ref()?;
++        if f.len()<14 {
++            self.fail(3);
++            return None;
++        }
++        let (src,dst)=if dir==0 {
++            (a.candidate.address,a.control.address)
++        }else{
++            (a.control.address,a.candidate.address)
++        };
++        let typ=u16::from_be_bytes([f[12],f[13]]);
++        let p=&f[14..];
++        if typ==0x0806 {
++            if p.len()<28 {
++                self.fail(4);
++                return None;
++            }
++            if p[14..18]!=src || p[24..28]!=dst {
++                return None;
++            }
++            if p[..6]!=[0,1,8,0,6,4] || !matches!(p.len(),28|46) {
++                inc(&mut self.counters.recognized_unsupported_pair[dir],&mut self.overflow);
++                self.fail(5);
++                return None;
++            }
++            let opcode=u16::from_be_bytes([p[6],p[7]]);
++            if !matches!(opcode,1|2) {
++                inc(&mut self.counters.recognized_unsupported_pair[dir],&mut self.overflow);
++                self.fail(5);
++                return None;
++            }
++            if dir==0 {
++                return Some(if opcode==1 {
++                    0
++                }else{
++                    1
++                });
++            }
++            if opcode==1 {
++                inc(&mut self.counters.host_pair_arp_request,&mut self.overflow);
++                return None;
++            }
++            let expected=f[6..12]==a.control.mac && p[8..14]==a.control.mac;
++            let dest=if f[..6]==a.candidate.mac {
++                0
++            }else if f[..6]==[255;             6] {
++                1
++            }else{
++                2
++            };
++            return Some(dest+if expected {
++                0
++            }else{
++                3
++            });
++        }
++        if typ==0x0800 {
++            if p.len()<20 {
++                self.fail(4);
++                return None;
++            }
++            if p[12..16]!=src || p[16..20]!=dst {
++                return None;
++            }
++            let ihl=(p[0]&15) as usize*4;
++            let len=u16::from_be_bytes([p[2],p[3]])as usize;
++            if ihl<20 || len<ihl || p.len()<len {
++                inc(&mut self.counters.recognized_truncated_pair[dir],&mut self.overflow);
++                self.fail(6);
++                return None;
++            }
++            if p[0]!=0x45 || p[6]&0xbf!=0 || p[7]!=0 {
++                inc(&mut self.counters.recognized_unsupported_pair[dir],&mut self.overflow);
++                self.fail(5);
++                return None;
++            }
++            if dir==0 && p[9]==6 {
++                if len<40 {
++                    inc(&mut self.counters.recognized_truncated_pair[0],&mut self.overflow);
++                    self.fail(6);
++                    return None;
++                }
++                let t=&p[20..len];
++                if t[2..4]==[0,22] && t[13]&0x12==2 {
++                    return Some(2);
++                }
++            }
++        }
++        None
++    }
++    fn refresh(&mut self, ticket: Option<Ticket>, result: usize) {
++        if let Some(t)=ticket {
++            inc(&mut self.counters.refresh_results[t.dir][result],&mut self.overflow);
++            if result==2 {
++                self.loss=true;
++            }
++        }
++    }
++    fn decision(&mut self, ticket: Option<Ticket>, d: Decision, m: DecisionMetadata, fallback: Option<bool>) {
++        if let Some(t)=ticket {
++            inc(&mut self.counters.vm_policy_decisions[match d {
++                Decision::Allow=>0,Decision::Deny=>1,Decision::Fallback=>2
++            }],&mut self.overflow);
++            inc(&mut self.counters.vm_arp_evaluation[m.arp_reason],&mut self.overflow);
++            if let Some(f)=fallback {
++                inc(&mut self.counters.vm_fallback_results[usize::from(f)],&mut self.overflow);
++            }
++            if let Some(r)=t.row {
++                inc(&mut self.counters.vm_lease_state[r][m.lease],&mut self.overflow);
++                inc(&mut self.counters.vm_target_predicates[r][0][m.gateway_equal],&mut self.overflow);
++                inc(&mut self.counters.vm_target_predicates[r][1][m.local_contains],&mut self.overflow);
++            }
++        }
++    }
++    fn unevaluated(&mut self,t:Option<Ticket>) {
++        if let Some(Ticket{
++            dir:0,row:Some(r),..
++        })=t {
++            inc(&mut self.counters.vm_lease_state[r][0],&mut self.overflow);
++            for c in 0..2 {
++                inc(&mut self.counters.vm_target_predicates[r][c][0],&mut self.overflow);
++            }
++        }
++    }
++    fn end(&mut self, t: Option<Ticket>, outcome: usize, write: Option<(usize,Option<usize>,WriteError)>) {
++        let Some(t)=t else {
++            return;
++        };
++        if !self.pending[t.dir].is_some_and(|p|p.id==t.id) {
++            self.fail(2);
++            return;
++        }
++        self.pending[t.dir]=None;
++        inc(if t.dir==0 {
++            &mut self.counters.vm_dispatch_completed
++        }else{
++            &mut self.counters.host_dispatch_completed
++        },&mut self.overflow);
++        if let Some(r)=t.row {
++            if t.dir==0 {
++                inc(&mut self.counters.vm_outcomes[r][outcome],&mut self.overflow);
++            }else{
++                inc(&mut self.counters.host_class_outcomes[r][outcome],&mut self.overflow);
++            }
++            if let Some((requested,returned,error))=write {
++                let (attempts,bytes,errors)=if t.dir==0 {
++                    (&mut self.counters.vm_write_attempts[r],&mut self.counters.vm_write_bytes[r],&mut self.counters.vm_write_errors)
++                }else{
++                    (&mut self.counters.host_write_attempts[r],&mut self.counters.host_write_bytes[r],&mut self.counters.host_write_errors)
++                };
++                inc(attempts,&mut self.overflow);
++                bytes_add(&mut bytes[0],requested,&mut self.overflow);
++                if let Some(n)=returned {
++                    bytes_add(&mut bytes[1],n,&mut self.overflow);
++                }
++                inc(&mut errors[error as usize],&mut self.overflow);
++            }
++        }
++        if let Some((requested,Some(returned),_))=write {
++            if requested!=returned {
++                self.fail(8);
++            }
++        }
++    }
++    pub fn dropped_outer(&mut self, dir: usize, frame: &[u8]) {
++        let t=self.begin(dir,frame);
++        self.refresh(t,0);
++        if dir==0 {
++            self.unevaluated(t);
++        }self.fail(3);
++        self.end(t,if dir==0 {
++            1
++        }else{
++            0
++        },None);
++    }
++    pub fn accounting(&self) -> bool {
++        let c=&self.counters;
++        let sum=|a:&[u16]|a.iter().map(|n|*n as u32).sum::<u32>();
++        if self.pending.iter().any(Option::is_some) || c.vm_dispatch_started!=c.vm_dispatch_completed || c.host_dispatch_started!=c.host_dispatch_completed {
++            return false;
++        }
++        if sum(&c.refresh_results[0])!=c.vm_dispatch_started as u32 || sum(&c.refresh_results[1])!=c.host_dispatch_started as u32 {
++            return false;
++        }
++        for r in 0..3 {
++            if sum(&c.vm_outcomes[r])!=c.vm_identified[r] as u32 || sum(&c.vm_lease_state[r])!=c.vm_identified[r] as u32 {
++                return false;
++            }
++            for col in 0..2 {
++                if sum(&c.vm_target_predicates[r][col])!=c.vm_identified[r] as u32 {
++                    return false;
++                }
++            }
++            if c.vm_write_attempts[r] as u32!=sum(&c.vm_outcomes[r][3..6]) {
++                return false;
++            }
++        }
++        for r in 0..6 {
++            if sum(&c.host_class_outcomes[r])!=c.host_reply_class[r] as u32 || c.host_write_attempts[r] as u32!=sum(&c.host_class_outcomes[r][2..6]) {
++                return false;
++            }
++        }
++        true
++    }
++    pub fn summary(&mut self, start:u64,end:u64,lease_valid:bool) -> Option<Summary> {
++        if self.pending.iter().any(Option::is_some) {
++            self.fail(1);
++        }
++        if !self.accounting() {
++            self.fail(2);
++        }
++        if !lease_valid {
++            self.fail(11);
++        }
++        let a=self.arm.as_ref()?;
++        Some(Summary{
++            version:1,kind:"SUMMARY".into(),generation:a.generation.clone(),nonce:a.nonce.clone(),operation_id:a.operation_id.clone(),candidate:a.candidate.clone(),control:a.control.clone(),gateway:a.gateway,duration_ms:a.duration_ms,control_provenance:a.control_provenance.clone(),armed_offset_ns:start,end_offset_ns:end,candidate_lease_valid:lease_valid,coverage_scope:"identified_pair_headers".into(),zero_count_attribution:false,packet_count_unobserved:true,complete:lease_valid&&!self.overflow&&!self.loss&&!self.invalid.iter().any(|b|*b),overflow:self.overflow,loss:self.loss,invalid_flags:self.invalid,counters:self.counters.clone()
++        })
++    }
++}
++pub fn dispatch_guest<R,W>(policy:&mut Policy,frame:&[u8],now:u64,observer:&mut Observer,
++refresh:impl FnOnce()->Result<(Vec<Ipv4Addr>,Vec<Ipv4Addr>),R>,fallback:impl FnOnce(&[u8])->bool,
++write:impl FnOnce(&[u8])->Result<usize,W>,category:impl FnOnce(&W)->WriteError)->Result<bool,DispatchError<R,W>> {
++    let t=observer.begin(0,frame);
++    let (locals,broadcasts)=match refresh(){
++        Ok(v)=>{
++            observer.refresh(t,1);
++            v
++        },Err(e)=>{
++            observer.refresh(t,2);
++            observer.unevaluated(t);
++            observer.end(t,2,None);
++            return Err(DispatchError::Refresh(e));
++        }
++    };
++    let decision=policy.guest_with_broadcasts(frame,&locals,&broadcasts,now);
++    let m=policy.metadata();
++    let (allowed,f)=match decision {
++        Decision::Allow=>(true,None),Decision::Deny=>(false,None),Decision::Fallback=>{
++            let b=fallback(frame);
++            (b,Some(b))
++        }
++    };
++    observer.decision(t,decision,m,f);
++    if !allowed {
++        observer.end(t,if t.is_some_and(|t|matches!(t.row,Some(0|1)))&&m.arp_reason==4 {
++            0
++        }else{
++            1
++        },None);
++        return Ok(false);
++    }
++    match write(frame) {
++        Ok(n)=>{
++            observer.end(t,if n==frame.len(){
++                3
++            }else{
++                4
++            },Some((frame.len(),Some(n),WriteError::None)));
++            Ok(true)
++        },Err(e)=>{
++            let c=category(&e);
++            observer.end(t,5,Some((frame.len(),None,c)));
++            Err(DispatchError::Write(e))
++        }
++    }
++}
++pub fn dispatch_host<R,W>(policy:&mut Policy,frame:&[u8],observer:&mut Observer,
++allowlist:impl FnOnce(&[u8])->bool,refresh:impl FnOnce()->Result<(Vec<Ipv4Addr>,Vec<Ipv4Addr>),R>,now:impl FnOnce()->u64,
++write:impl FnOnce(&[u8])->Result<usize,W>,category:impl FnOnce(&W)->WriteError,enobufs:&mut bool)->Result<(),DispatchError<R,W>> {
++    let t=observer.begin(1,frame);
++    if !allowlist(frame) {
++        observer.refresh(t,0);
++        observer.end(t,0,None);
++        return Ok(());
++    }
++    let locals=match refresh(){
++        Ok(v)=>{
++            observer.refresh(t,1);
++            v
++        },Err(e)=>{
++            observer.refresh(t,2);
++            observer.end(t,1,None);
++            return Err(DispatchError::Refresh(e));
++        }
++    };
++    let _=policy.host(frame,&locals.0,now());
++    // literal canonical return is deliberately ignored
++    match write(frame) {
++        Ok(n)=>{
++            observer.end(t,if n==frame.len(){
++                2
++            }else{
++                3
++            },Some((frame.len(),Some(n),WriteError::None)));
++            Ok(())
++        },Err(e)=>{
++            let c=category(&e);
++            observer.end(t,if c==WriteError::IoEnobufs {
++                5
++            }else{
++                4
++            },Some((frame.len(),None,c)));
++            if c==WriteError::IoEnobufs {
++                *enobufs=true;
++                Ok(())
++            }else{
++                Err(DispatchError::Write(e))
++            }
++        }
++    }
++}
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]fn missing_pending_and_mismatched_tickets_cannot_complete(){
++        let mut o=Observer::default();
++        assert!(o.summary(0,1,true).is_none());
++        o.activate(crate::tests::arm());
++        let f=crate::tests::arp(crate::tests::CA,crate::tests::PA,crate::tests::CM,crate::tests::PM,1);
++        let t=o.begin(0,&f).unwrap();
++        assert!(!o.summary(0,1,true).unwrap().complete);
++        assert!(o.invalid[1]);
++        let mut wrong=t;
++        wrong.id+=1;
++        o.end(Some(wrong),1,None);
++        assert!(o.invalid[2]);
++        assert!(o.loss);
++    }
++}
+--- /dev/null
++++ b/lib/proxy/wire.rs
+@@ -0,0 +1,154 @@
++//! Frozen Task3b R1 wire catalogue. Direct exact serde structs preserve duplicates.
++use serde::{
++    Deserialize, Serialize
++};
++pub const VERSION: &str = "0.19.0-boxwarden-n1-diagnostic.2";
++pub const MAX_FRAME: usize = 4096;
++pub const MAX_OUTPUT: usize = 16384;
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct Selector {
++    pub generation: String, pub nonce: String
++}
++impl Selector {
++    pub fn parse(s: &str) -> Option<Self> {
++        let (generation, nonce) = s.strip_prefix("@boxwarden-n1-diagnostic:")?.split_once(':')?;
++        if !uuid(generation) || !uuid(nonce) {
++            return None;
++        }
++        Some(Self {
++            generation: generation.into(), nonce: nonce.into()
++        })
++    }
++}
++pub fn uuid(s: &str) -> bool {
++    s.len() == 36 && s.bytes().enumerate().all(|(i,b)| if [8,13,18,23].contains(&i) {
++        b == b'-'
++    } else {
++        b.is_ascii_digit() || (b'a'..=b'f').contains(&b)
++    })
++    && s.bytes().any(|b| b != b'0' && b != b'-')
++}
++pub fn private(a: [u8;4]) -> bool {
++    a[0] == 10 || (a[0] == 172 && (16..=31).contains(&a[1])) || (a[0] == 192 && a[1] == 168)
++}
++pub fn mac(a: [u8;6]) -> bool {
++    a != [0;     6] && a[0] & 1 == 0
++}
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct SessionBinding {
++    pub domain: String, pub session_id: String, pub generation: String,
++    pub backend_kind: String, pub backend_object: String, pub address: [u8;     4], pub mac: [u8;     6],
++}
++impl SessionBinding {
++    pub fn valid(&self) -> bool {
++        self.domain == "n1qualification" && uuid(&self.session_id) && uuid(&self.generation)
++        && self.backend_kind == "tart" && (1..=128).contains(&self.backend_object.len())
++        && self.backend_object.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
++        && private(self.address) && mac(self.mac)
++    }
++}
++#[derive(Clone, Debug, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct Hello {
++    pub version: u8, pub kind: String, pub generation: String, pub nonce: String, pub candidate_mac: [u8;     6], pub gateway: [u8;     4]
++}
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct Arm {
++    pub version: u8, pub kind: String, pub generation: String, pub nonce: String,
++    pub operation_id: String, pub candidate: SessionBinding, pub control: SessionBinding,
++    pub gateway: [u8;     4], pub duration_ms: u32, pub control_provenance: String,
++}
++impl Arm {
++    pub fn valid(&self, s: &Selector, own_mac: [u8;6], gateway: [u8;4]) -> bool {
++        self.version == 1 && self.kind == "ARM" && self.generation == s.generation && self.nonce == s.nonce
++        && uuid(&self.operation_id) && self.candidate.valid() && self.control.valid()
++        && self.candidate.generation == s.generation && self.candidate.generation != self.control.generation
++        && self.candidate.session_id != self.control.session_id && self.candidate.backend_object != self.control.backend_object
++        && self.candidate.address != self.control.address && self.candidate.mac != self.control.mac
++        && self.candidate.mac == own_mac && self.gateway == gateway && private(gateway)
++        && self.candidate.address != gateway && self.control.address != gateway
++        && (1000..=30000).contains(&self.duration_ms) && self.control_provenance == "host_backend_pinned_owner"
++    }
++}
++#[derive(Clone, Debug, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct Armed {
++    pub version: u8, pub kind: String, pub generation: String, pub nonce: String,
++    pub operation_id: String, pub candidate: SessionBinding, pub control: SessionBinding,
++    pub gateway: [u8;     4], pub duration_ms: u32, pub control_provenance: String,
++    pub armed_offset_ns: u64, pub candidate_lease_valid: bool,
++}
++#[derive(Clone, Debug, Default, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct Counters {
++    pub vm_dispatch_started: u16, pub vm_dispatch_completed: u16,
++    pub host_dispatch_started: u16, pub host_dispatch_completed: u16,
++    pub vm_identified: [u16;     3], pub vm_outcomes: [[u16;     6];     3], pub vm_policy_decisions: [u16;     3],
++    pub vm_arp_evaluation: [u16;     5], pub vm_fallback_results: [u16;     2], pub vm_write_attempts: [u16;     3],
++    pub vm_write_bytes: [[u64;     2];     3], pub vm_write_errors: [u16;     15],
++    pub host_reply_class: [u16;     6], pub host_class_outcomes: [[u16;     6];     6], pub host_write_attempts: [u16;     6],
++    pub host_write_bytes: [[u64;     2];     6], pub host_write_errors: [u16;     15],
++    pub recognized_unsupported_pair: [u16;     2], pub recognized_truncated_pair: [u16;     2],
++    pub refresh_results: [[u16;     3];     2], pub vm_lease_state: [[u16;     5];     3],
++    pub vm_target_predicates: [[[u16;     3];     2];     3], pub host_pair_arp_request: u16,
++}
++#[derive(Clone, Debug, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct Summary {
++    pub version: u8, pub kind: String, pub generation: String, pub nonce: String,
++    pub operation_id: String, pub candidate: SessionBinding, pub control: SessionBinding,
++    pub gateway: [u8;     4], pub duration_ms: u32, pub control_provenance: String,
++    pub armed_offset_ns: u64, pub end_offset_ns: u64, pub candidate_lease_valid: bool,
++    pub coverage_scope: String, pub zero_count_attribution: bool, pub packet_count_unobserved: bool,
++    pub complete: bool, pub overflow: bool, pub loss: bool, pub invalid_flags: [bool;     14], pub counters: Counters,
++}
++/// Lexical restrictions only. JSON grammar and exact-field/type decoding belong to serde.
++/// None of the admitted identities need escapes; integer spelling must be canonical.
++pub fn decode<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T, ()> {
++    if bytes.is_empty() || bytes.len() > MAX_FRAME || !bytes.is_ascii() {
++        return Err(());
++    }
++    let mut quoted = false;
++    let mut i = 0;
++    while i < bytes.len() {
++        let b = bytes[i];
++        if b == b'"' {
++            quoted = !quoted;
++            i += 1;
++            continue;
++        }
++        if b == b'\\' || (quoted && b < 32) {
++            return Err(());
++        }
++        if !quoted && b == b'-' {
++            return Err(());
++        }
++        if !quoted && b.is_ascii_digit() {
++            let start = i;
++            while i < bytes.len() && bytes[i].is_ascii_digit() {
++                i += 1;
++            }
++            if (i-start > 1 && bytes[start] == b'0') || bytes.get(i).is_some_and(|b| [b'.',b'e',b'E'].contains(b)) {
++                return Err(());
++            }
++            continue;
++        }
++        i += 1;
++    }
++    let mut d = serde_json::Deserializer::from_slice(bytes);
++    let v = T::deserialize(&mut d).map_err(|_| ())?;
++    d.end().map_err(|_| ())?;
++    Ok(v)
++}
++pub fn frame<T: Serialize>(value: &T) -> Result<Vec<u8>, ()> {
++    let p = serde_json::to_vec(value).map_err(|_| ())?;
++    if p.is_empty() || p.len() > MAX_FRAME {
++        return Err(());
++    }
++    let mut v = (p.len() as u32).to_be_bytes().to_vec();
++    v.extend(p);
++    Ok(v)
++}
+--- /dev/null
++++ b/lib/proxy/watch.rs
+@@ -0,0 +1,698 @@
++//! One private fd1 watch, nonblocking and finite. Diagnostic failures never select forwarding.
++use super::{
++    boxwarden_policy::Policy, dispatch::Observer, wire::*
++};
++use std::time::{Instant, SystemTime, UNIX_EPOCH};
++use std::io;
++// Resource cap only: trusted coordinator approval remains a separate authority.
++const PREARM_CAP_NS: u64 = 1_800_000_000_000;
++#[derive(Clone, Copy)]
++struct Reading { wall: u64, continuous: u64, offset: u64 }
++struct ClockGuard { last: Reading, wall_deadline: u64, continuous_deadline: u64, invalid: bool }
++impl ClockGuard {
++    fn new(anchor: Reading) -> io::Result<Self> {
++        Ok(Self { last: anchor,
++            wall_deadline: anchor.wall.checked_add(PREARM_CAP_NS).ok_or_else(clock_error)?,
++            continuous_deadline: anchor.continuous.checked_add(PREARM_CAP_NS).ok_or_else(clock_error)?, invalid: false })
++    }
++    fn check(&mut self, reading: io::Result<Reading>, prearm: bool) -> io::Result<Reading> {
++        let reading = reading.and_then(|r| {
++            if self.invalid || r.wall < self.last.wall || r.continuous < self.last.continuous || r.offset < self.last.offset
++                || (prearm && (r.wall >= self.wall_deadline || r.continuous >= self.continuous_deadline)) {
++                Err(clock_error())
++            } else { Ok(r) }
++        });
++        match reading {
++            Ok(r) => { self.last = r; Ok(r) },
++            Err(e) => { self.invalid = true; Err(e) },
++        }
++    }
++}
++fn clock_error() -> io::Error { io::Error::other("diagnostic clock invalid") }
++fn scale_ticks(ticks: u64, numerator: u32, denominator: u32) -> io::Result<u64> {
++    if numerator == 0 || denominator == 0 { return Err(clock_error()); }
++    let ns = u128::from(ticks).checked_mul(u128::from(numerator)).ok_or_else(clock_error)? / u128::from(denominator);
++    ns.try_into().map_err(|_| clock_error())
++}
++#[cfg(target_os="macos")]
++fn continuous_now() -> io::Result<u64> {
++    unsafe extern "C" { fn mach_continuous_time() -> u64; }
++    let mut info = libc::mach_timebase_info { numer: 0, denom: 0 };
++    if unsafe { libc::mach_timebase_info(&mut info) } != 0 { return Err(clock_error()); }
++    scale_ticks(unsafe { mach_continuous_time() }, info.numer, info.denom)
++}
++#[cfg(target_os="linux")]
++fn continuous_now() -> io::Result<u64> {
++    let mut ts: libc::timespec = unsafe { std::mem::zeroed() };
++    if unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut ts) } != 0 || ts.tv_sec < 0 || !(0..1_000_000_000).contains(&ts.tv_nsec) {
++        return Err(clock_error());
++    }
++    (ts.tv_sec as u64).checked_mul(1_000_000_000).and_then(|n| n.checked_add(ts.tv_nsec as u64)).ok_or_else(clock_error)
++}
++#[cfg(not(any(target_os="macos",target_os="linux")))]
++fn continuous_now() -> io::Result<u64> { Err(clock_error()) }
++fn native_reading(epoch: Instant) -> io::Result<Reading> {
++    let wall = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| clock_error())?.as_nanos().try_into().map_err(|_| clock_error())?;
++    let continuous = continuous_now()?;
++    let offset = epoch.elapsed().as_nanos().try_into().map_err(|_| clock_error())?;
++    Ok(Reading { wall, continuous, offset })
++}
++#[derive(Clone, Copy, PartialEq, Eq)]
++enum Phase {
++    Admitted, AwaitArm, Watching, Closed, Invalid
++}
++pub struct WatchChannel {
++    selector: Selector, mac: [u8;     6], gateway: [u8;     4], fd: i32,
++    phase: Phase, clock: Box<dyn FnMut() -> io::Result<Reading>>, guard: ClockGuard, hello_at: u64, start: u64, deadline: u64,
++    incoming: Vec<u8>, output_bytes: usize, pub observer: Observer,
++}
++impl WatchChannel {
++    pub fn admit(selector: Selector, mac: [u8;6]) -> io::Result<Self> {
++        Self::admit_socket(selector,mac,1)
++    }
++    fn admit_socket(selector: Selector, mac: [u8;6], fd: i32) -> io::Result<Self> {
++        let epoch = Instant::now();
++        Self::admit_with_clock(selector, mac, fd, Box::new(move || native_reading(epoch)))
++    }
++    fn admit_with_clock(selector: Selector, mac: [u8;6], fd: i32, mut clock: Box<dyn FnMut() -> io::Result<Reading>>) -> io::Result<Self> {
++        validate_socket(fd)?;
++        let guard = ClockGuard::new(clock()?)?;
++        Ok(Self {
++            selector,mac,gateway:[0;4],fd,phase:Phase::Admitted,clock,guard,hello_at:0,start:0,deadline:0,incoming:Vec::with_capacity(MAX_FRAME+5),output_bytes:0,observer:Observer::default()
++        })
++    }
++    pub fn hello_after_privdrop(&mut self, gateway: [u8;4]) {
++        if self.phase!=Phase::Admitted {
++            self.invalidate(13);
++            return;
++        }
++        let Some(reading) = self.read_clock() else { return; };
++        self.gateway=gateway;
++        self.hello_at=reading.offset;
++        self.phase=Phase::AwaitArm;
++        let h=Hello {
++            version:1,kind:"HELLO".into(),generation:self.selector.generation.clone(),nonce:self.selector.nonce.clone(),candidate_mac:self.mac,gateway
++        };
++        if !self.send(&h) {
++            self.invalidate(12);
++        }
++    }
++    fn read_clock(&mut self) -> Option<Reading> {
++        let prearm = matches!(self.phase, Phase::Admitted | Phase::AwaitArm);
++        match self.guard.check((self.clock)(), prearm) {
++            Ok(r) => Some(r),
++            Err(_) => {
++                self.observer.fail(9);
++                self.observer.fail(12);
++                self.observer.arm = None;
++                self.phase = Phase::Invalid;
++                None
++            }
++        }
++    }
++    fn invalidate(&mut self, flag: usize) {
++        self.observer.fail(flag);
++        if self.phase!=Phase::Watching && self.phase!=Phase::Closed {
++            self.phase=Phase::Invalid;
++        }
++    }
++    fn send<T:serde::Serialize>(&mut self, value:&T) -> bool {
++        let Ok(b)=frame(value) else {
++            return false;
++        };
++        if self.output_bytes.checked_add(b.len()).is_none_or(|n|n>MAX_OUTPUT) {
++            return false;
++        }
++        self.output_bytes+=b.len();
++        let n=unsafe {
++            libc::send(self.fd,b.as_ptr().cast(),b.len(),libc::MSG_DONTWAIT)
++        };
++        n==b.len() as isize // no queued retry after partial write/backpressure/error
++    }
++    pub fn service(&mut self, policy:&mut Policy, policy_now:u64) {
++        let Some(reading) = self.read_clock() else { return; };
++        let mut now = reading.offset;
++        if self.phase==Phase::Admitted {
++            return;
++        }
++        // read_clock checked the immutable admission cap before receiving queued bytes.
++        // Bounded one read at every boundary. Any post-ARM byte is invalid; never resynchronize.
++        if self.phase!=Phase::Invalid {
++            let mut b=[0u8;             MAX_FRAME+5];
++            let n=unsafe {
++                libc::recv(self.fd,b.as_mut_ptr().cast(),b.len(),libc::MSG_DONTWAIT)
++            };
++            if n==0 {
++                self.invalidate(12);
++            }else if n<0 {
++                if io::Error::last_os_error().kind()!=io::ErrorKind::WouldBlock {
++                    self.invalidate(12);
++                }
++            }else if self.phase!=Phase::AwaitArm {
++                self.invalidate(13);
++            }else {
++                if self.incoming.len()+n as usize>MAX_FRAME+4 {
++                    self.invalidate(12);
++                    self.incoming.clear();
++                }else{
++                    self.incoming.extend_from_slice(&b[..n as usize]);
++                    if self.incoming.len()>=4 {
++                        let len=u32::from_be_bytes(self.incoming[..4].try_into().unwrap())as usize;
++                        if len==0 || len>MAX_FRAME || self.incoming.len()>len+4 {
++                            self.invalidate(13);
++                            self.incoming.clear();
++                        }
++                        else if self.incoming.len()==len+4 {
++                            let arm=decode::<Arm>(&self.incoming[4..]);
++                            self.incoming.clear();
++                            // Decode is bounded, but cannot carry a buffered ARM across expiry.
++                            let Some(decoded_at) = self.read_clock() else { return; };
++                            now = decoded_at.offset;
++                            match arm {
++                                Ok(a) if a.valid(&self.selector,self.mac,self.gateway) && policy.candidate_lease_valid(a.candidate.address,a.candidate.mac,a.gateway,policy_now)=>{
++                                    let Some(deadline) = now.checked_add(u64::from(a.duration_ms) * 1_000_000) else {
++                                        self.observer.fail(9); self.phase = Phase::Invalid; return;
++                                    };
++                                    self.start=now;
++                                    self.deadline=deadline;
++                                    policy.bind_candidate(std::net::Ipv4Addr::from(a.candidate.address));
++                                    let armed=Armed{
++                                        version:1,kind:"ARMED".into(),generation:a.generation.clone(),nonce:a.nonce.clone(),operation_id:a.operation_id.clone(),candidate:a.candidate.clone(),control:a.control.clone(),gateway:a.gateway,duration_ms:a.duration_ms,control_provenance:a.control_provenance.clone(),armed_offset_ns:now,candidate_lease_valid:true
++                                    };
++                                    self.observer.activate(a);
++                                    self.phase=Phase::Watching;
++                                    if !self.send(&armed) {
++                                        self.invalidate(12);
++                                    }
++                                }, _=>self.invalidate(13),
++                            }
++                        }
++                    }
++                }
++            }
++        }
++        if self.phase==Phase::Watching {
++            let a=self.observer.arm.as_ref().unwrap();
++            let valid=policy.candidate_lease_valid(a.candidate.address,a.candidate.mac,a.gateway,policy_now);
++            if !valid {
++                self.invalidate(11);
++            }
++            if now>=self.deadline {
++                // Scheduling tolerance is finite; the observer has already closed before next dispatch.
++                if now.saturating_sub(self.deadline)>100_000_000 {
++                    self.invalidate(10);
++                }
++                let summary=self.observer.summary(self.start,now,valid);
++                self.phase=Phase::Closed;
++                if let Some(s)=summary {
++                    if !self.send(&s) {
++                        self.observer.fail(12);
++                    }
++                }
++                self.observer.arm=None;
++                // counters/loss survive, no more interval tickets
++            }
++        }
++    }
++    #[cfg(test)]
++    fn service_at(&mut self, policy: &mut Policy, policy_now: u64, now: u64) {
++        let original = std::mem::replace(&mut self.clock, Box::new(move || Ok(Reading { wall: now, continuous: now, offset: now })));
++        self.service(policy, policy_now);
++        self.clock = original;
++    }
++    pub fn failed_read(&mut self) {
++        self.observer.fail(7);
++    }
++    pub fn shutdown(&mut self) {
++        if self.phase==Phase::Watching {
++            self.observer.fail(10);
++        }else if self.phase!=Phase::Closed {
++            self.observer.fail(0);
++        }
++    }
++}
++fn validate_socket(fd:i32)->io::Result<()> {
++    let reject=||io::Error::other("diagnostic fd1 admission failed");
++    let flags=unsafe{
++        libc::fcntl(fd,libc::F_GETFL)
++    };
++    let fdflags=unsafe{
++        libc::fcntl(fd,libc::F_GETFD)
++    };
++    if flags<0 || flags&libc::O_NONBLOCK==0 || flags&libc::O_ACCMODE!=libc::O_RDWR || fdflags<0 || fdflags&libc::FD_CLOEXEC!=0 {
++        return Err(reject());
++    }
++    let mut typ=0i32;
++    let mut n=std::mem::size_of::<i32>()as libc::socklen_t;
++    if unsafe{
++        libc::getsockopt(fd,libc::SOL_SOCKET,libc::SO_TYPE,(&mut typ as *mut i32).cast(),&mut n)
++    }!=0 || typ!=libc::SOCK_STREAM || n as usize!=std::mem::size_of::<i32>() {
++        return Err(reject());
++    }
++    for peer in [false,true] {
++        let mut addr:libc::sockaddr_un=unsafe{
++            std::mem::zeroed()
++        };
++        let mut len=std::mem::size_of_val(&addr)as libc::socklen_t;
++        let rc=unsafe {
++            if peer {
++                libc::getpeername(fd,(&mut addr as *mut libc::sockaddr_un).cast(),&mut len)
++            }else{
++                libc::getsockname(fd,(&mut addr as *mut libc::sockaddr_un).cast(),&mut len)
++            }
++        };
++        if rc!=0 || addr.sun_family as i32!=libc::AF_UNIX || !unnamed(&addr,len as usize) {
++            return Err(reject());
++        }
++    }
++    #[cfg(target_os="macos")]
++    {
++        let one=1i32;
++        if unsafe{
++            libc::setsockopt(fd,libc::SOL_SOCKET,libc::SO_NOSIGPIPE,(&one as *const i32).cast(),std::mem::size_of::<i32>()as libc::socklen_t)
++        }!=0{
++            return Err(reject());
++        }
++    }
++    Ok(())
++}
++fn unnamed(addr:&libc::sockaddr_un,len:usize)->bool {
++    #[cfg(target_os="macos")]
++    let shape=len==16&&addr.sun_len==16;
++    #[cfg(not(target_os="macos"))]
++    let shape=len==2;
++    shape&&addr.sun_path.iter().all(|b|*b==0)
++}
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::tests::{
++        arm,leased,GA,CM
++    };
++    use std::os::fd::AsRawFd;
++    use std::os::unix::net::UnixStream;
++    use std::io::{
++        Read,Write
++    };
++    fn pair()->(WatchChannel,UnixStream,UnixStream){
++        let (child,parent)=UnixStream::pair().unwrap();
++        child.set_nonblocking(true).unwrap();
++        parent.set_nonblocking(true).unwrap();
++        unsafe{
++            assert_eq!(libc::fcntl(child.as_raw_fd(),libc::F_SETFD,0),0);
++        }
++        let a=arm();
++        let s=Selector{
++            generation:a.generation,nonce:a.nonce
++        };
++        let channel=WatchChannel::admit_with_clock(s,CM,child.as_raw_fd(),Box::new(||Ok(Reading { wall: 0, continuous: 0, offset: 0 }))).unwrap();
++        (channel,child,parent)
++    }
++    fn receipt<T:for<'de>serde::Deserialize<'de>>(parent:&mut UnixStream)->T{
++        let mut b=[0u8;         MAX_FRAME+4];
++        let n=parent.read(&mut b).unwrap();
++        assert!(n>=4);
++        let len=u32::from_be_bytes(b[..4].try_into().unwrap())as usize;
++        assert_eq!(n,len+4);
++        decode(&b[4..n]).unwrap()
++    }
++    #[test]
++    fn exact_socket_roles_reject_blocking_pipe_and_cloexec(){
++        let(a,b)=UnixStream::pair().unwrap();
++        assert!(validate_socket(a.as_raw_fd()).is_err());
++        a.set_nonblocking(true).unwrap();
++        assert!(validate_socket(a.as_raw_fd()).is_err());
++        unsafe{
++            libc::fcntl(a.as_raw_fd(),libc::F_SETFD,0);
++        }assert!(validate_socket(a.as_raw_fd()).is_ok());
++        assert!(validate_socket(-1).is_err());
++        drop(b);
++    }
++    #[test]
++    fn one_arm_idle_and_busy_boundaries_close_at_finite_deadline(){
++        for busy in [false,true]{
++            let(mut c,_child,mut p)=pair();
++            let mut policy=leased();
++            c.hello_after_privdrop(GA);
++            let h:Hello=receipt(&mut p);
++            assert_eq!(h.kind,"HELLO");
++            p.write_all(&frame(&arm()).unwrap()).unwrap();
++            c.service_at(&mut policy,1,1_000_000);
++            let r:Armed=receipt(&mut p);
++            assert_eq!(r.kind,"ARMED");
++            assert_eq!(r.armed_offset_ns,1_000_000);
++            if busy{
++                for n in 1..1000{
++                    c.service_at(&mut policy,1,1_000_000+n*1_000_000);
++                }
++            }else{
++                c.service_at(&mut policy,1,900_000_000);
++            }
++            c.service_at(&mut policy,1,1_001_000_000);
++            let s:Summary=receipt(&mut p);
++            assert!(s.complete);
++            assert_eq!(s.kind,"SUMMARY");
++            assert_eq!(s.end_offset_ns-s.armed_offset_ns,1_000_000_000);
++            assert!(matches!(c.phase,Phase::Closed));
++            assert!(c.observer.arm.is_none());
++            c.service_at(&mut policy,1,2_000_000_000);
++            assert!(p.read(&mut[0;1]).is_err());
++        }
++    }
++    #[test]
++    fn partial_arm_duplicate_rearm_bad_order_lease_and_clock_are_sticky(){
++        for failure in 0..5 {
++            let(mut c,_child,mut p)=pair();
++            let mut policy=leased();
++            c.hello_after_privdrop(GA);
++            let _:Hello=receipt(&mut p);
++            let b=frame(&arm()).unwrap();
++            p.write_all(&b[..3]).unwrap();
++            c.service_at(&mut policy,1,10);
++            assert!(matches!(c.phase,Phase::AwaitArm));
++            p.write_all(&b[3..]).unwrap();
++            c.service_at(&mut policy,1,20);
++            let _:Armed=receipt(&mut p);
++            match failure{
++                0=>{
++                    p.write_all(&b).unwrap();
++                    c.service_at(&mut policy,1,30);
++                },1=>c.service_at(&mut policy,700,30),2=>c.service_at(&mut policy,1,19),3=>c.failed_read(),_=>c.observer.fail(0)
++            }
++            c.service_at(&mut policy,1,1_000_000_020);
++            if failure == 2 {
++                assert!(matches!(c.phase,Phase::Invalid));
++                assert!(c.observer.loss && c.observer.arm.is_none());
++                assert_eq!(p.read(&mut [0;1]).unwrap_err().kind(),io::ErrorKind::WouldBlock);
++                continue;
++            }
++            let s:Summary=receipt(&mut p);
++            assert!(!s.complete);
++            assert!(s.loss);
++        }
++    }
++    #[test]
++    fn malformed_extra_eof_arm_timeout_and_oversize_never_arm(){
++        for mode in 0..5{
++            let(mut c,_child,mut p)=pair();
++            let mut policy=leased();
++            c.hello_after_privdrop(GA);
++            let _:Hello=receipt(&mut p);
++            match mode{
++                0=>p.write_all(&0u32.to_be_bytes()).unwrap(),1=>p.write_all(&4097u32.to_be_bytes()).unwrap(),2=>{
++                    let mut b=frame(&arm()).unwrap();
++                    b.push(0);
++                    p.write_all(&b).unwrap();
++                },3=>{
++                    p.shutdown(std::net::Shutdown::Write).unwrap();
++                },_=>{
++                }
++            }
++            c.service_at(&mut policy,1,if mode==4 { PREARM_CAP_NS } else { 10 });
++            assert!(matches!(c.phase,Phase::Invalid));
++            assert!(c.observer.loss);
++            assert!(c.observer.arm.is_none());
++        }
++    }
++    #[test]
++    fn queue_backpressure_never_retries_and_forwarding_remains_available(){
++        let(mut c,child,mut p)=pair();
++        let mut policy=leased();
++        c.hello_after_privdrop(GA);
++        let _:Hello=receipt(&mut p);
++        let b=frame(&arm()).unwrap();
++        p.write_all(&b).unwrap();
++        c.service_at(&mut policy,1,10);
++        let _:Armed=receipt(&mut p);
++        let fill=[0u8;         4096];
++        loop{
++            let n=unsafe{
++                libc::send(child.as_raw_fd(),fill.as_ptr().cast(),fill.len(),libc::MSG_DONTWAIT)
++            };
++            if n<0{
++                break;
++            }
++        }
++        c.service_at(&mut policy,1,1_000_000_010);
++        assert!(matches!(c.phase,Phase::Closed));
++        assert!(c.observer.invalid[12]);
++        let prior=c.output_bytes;
++        c.service_at(&mut policy,1,2_000_000_010);
++        assert_eq!(c.output_bytes,prior);
++        let mut writes=0;
++        let packet=crate::tests::arp(crate::tests::CA,GA,CM,crate::tests::GM,1);
++        super::super::dispatch::dispatch_guest(&mut policy,&packet,1,&mut c.observer,||Ok::<_,u8>((vec![GA.into()],vec![])),|_|false,|f|{
++            writes+=1;Ok::<_,u8>(f.len())
++        },|_|super::super::dispatch::WriteError::IoOther).unwrap();
++        assert_eq!(writes,1);
++    }
++    #[test]
++    fn activated_watch_and_dispatch_preserve_canonical_policy_state(){
++        let(mut c,_child,mut peer)=pair();
++        let mut policy=leased();
++        let mut oracle=crate::tests::oracle();
++        c.hello_after_privdrop(GA);
++        let _:Hello=receipt(&mut peer);
++        peer.write_all(&frame(&arm()).unwrap()).unwrap();
++        c.service_at(&mut policy,1,10);
++        let _:Armed=receipt(&mut peer);
++        for (i,target) in [GA,crate::tests::PA,GA,crate::tests::PA].into_iter().enumerate(){
++            c.service_at(&mut policy,1,20+i as u64);
++            let f=crate::tests::arp(crate::tests::CA,target,CM,crate::tests::GM,1);
++            let mut writes=0;
++            let actual=super::super::dispatch::dispatch_guest(&mut policy,&f,1,&mut c.observer,||Ok::<_,u8>((vec![GA.into()],vec![])),|_|false,|b|{
++                writes+=1;Ok::<_,u8>(b.len())
++            },|_|super::super::dispatch::WriteError::IoOther).unwrap();
++            let expected=oracle.forward_with_refresh(&f,1,||Ok::<_,u8>((vec![GA.into()],vec![])),|_|false,|_|Ok(())).unwrap();
++            assert_eq!(actual,expected);
++            assert_eq!(writes,usize::from(expected));
++        }
++        // The service observes expiry without clearing it. The next canonical
++        // choosing dispatch still performs exactly the original expiry mutation.
++        c.service_at(&mut policy,700,30);
++        let f=crate::tests::arp(crate::tests::CA,GA,CM,crate::tests::GM,1);
++        assert_eq!(policy.guest(&f,&[GA.into()],700)as u8,oracle.guest(&f,&[GA.into()],700)as u8);
++        assert_eq!(policy.metadata().lease,2);
++        c.service_at(&mut policy,700,1_000_000_010);
++        let summary:Summary=receipt(&mut peer);
++        assert!(!summary.complete);
++        assert!(summary.invalid_flags[11]);
++    }
++    fn r1_assert_timeout_is_sticky_and_forwarding_passive(c:&mut WatchChannel,peer:&mut UnixStream,policy:&mut Policy,hello_bytes:usize) {
++        assert!(matches!(c.phase,Phase::Invalid));
++        assert!(c.observer.loss&&c.observer.invalid[12]);
++        assert!(c.observer.arm.is_none());
++        assert_eq!(c.output_bytes,hello_bytes);
++        c.service_at(policy,1,PREARM_CAP_NS+1);
++        assert!(matches!(c.phase,Phase::Invalid));
++        assert!(c.observer.arm.is_none());
++        assert_eq!(c.output_bytes,hello_bytes);
++        assert_eq!(peer.read(&mut[0;1]).unwrap_err().kind(),io::ErrorKind::WouldBlock);
++        let mut oracle=crate::tests::oracle();
++        for target in [GA,crate::tests::PA] {
++            let packet=crate::tests::arp(crate::tests::CA,target,CM,crate::tests::GM,1);
++            let mut writes=0;
++            let actual=super::super::dispatch::dispatch_guest(policy,&packet,1,&mut c.observer,||Ok::<_,u8>((vec![GA.into()],vec![])),|_|false,|bytes|{
++                writes+=1;Ok::<_,u8>(bytes.len())
++            },|_|super::super::dispatch::WriteError::IoOther).unwrap();
++            let expected=oracle.forward_with_refresh(&packet,1,||Ok::<_,u8>((vec![GA.into()],vec![])),|_|false,|_|Ok(())).unwrap();
++            assert_eq!(actual,expected);
++            assert_eq!(writes,usize::from(expected));
++        }
++        let packet=crate::tests::arp(crate::tests::CA,GA,CM,crate::tests::GM,1);
++        assert_eq!(policy.guest(&packet,&[GA.into()],700)as u8,oracle.guest(&packet,&[GA.into()],700)as u8);
++        assert_eq!(policy.metadata().lease,2);
++        // watch did not clear the actual lease
++    }
++    #[test]
++    fn r1_hello_timeout_rejects_complete_arm_before_activation() {
++        let(mut c,_child,mut peer)=pair();
++        let mut policy=leased();
++        c.hello_after_privdrop(GA);
++        let _:Hello=receipt(&mut peer);
++        c.hello_at=10;
++        let hello_bytes=c.output_bytes;
++        peer.write_all(&frame(&arm()).unwrap()).unwrap();
++        c.service_at(&mut policy,1,PREARM_CAP_NS+1);
++        r1_assert_timeout_is_sticky_and_forwarding_passive(&mut c,&mut peer,&mut policy,hello_bytes);
++    }
++    #[test]
++    fn r1_hello_timeout_rejects_partial_arm_completed_after_expiry() {
++        let(mut c,_child,mut peer)=pair();
++        let mut policy=leased();
++        c.hello_after_privdrop(GA);
++        let _:Hello=receipt(&mut peer);
++        c.hello_at=10;
++        let hello_bytes=c.output_bytes;
++        let bytes=frame(&arm()).unwrap();
++        peer.write_all(&bytes[..bytes.len()-1]).unwrap();
++        c.service_at(&mut policy,1,c.hello_at+1_000_000_000);
++        assert!(matches!(c.phase,Phase::AwaitArm));
++        assert!(c.observer.arm.is_none());
++        peer.write_all(&bytes[bytes.len()-1..]).unwrap();
++        c.service_at(&mut policy,1,PREARM_CAP_NS+1);
++        r1_assert_timeout_is_sticky_and_forwarding_passive(&mut c,&mut peer,&mut policy,hello_bytes);
++    }
++    #[test]
++    fn slice0_fixed_cap_preserves_before_boundary_admission() {
++        for elapsed in [60_000_000_000,PREARM_CAP_NS-11] {
++            let(mut c,_child,mut peer)=pair();
++            let mut policy=leased();
++            c.hello_after_privdrop(GA);
++            let _:Hello=receipt(&mut peer);
++            c.hello_at=10;
++            peer.write_all(&frame(&arm()).unwrap()).unwrap();
++            c.service_at(&mut policy,1,c.hello_at+elapsed);
++            let armed:Armed=receipt(&mut peer);
++            assert_eq!(armed.armed_offset_ns,c.hello_at+elapsed);
++            assert!(matches!(c.phase,Phase::Watching));
++            assert!(c.observer.arm.is_some());
++            c.service_at(&mut policy,1,c.hello_at+elapsed+1_000_000_000);
++            let summary:Summary=receipt(&mut peer);
++            assert!(summary.complete);
++        }
++    }
++    #[test]
++    fn slice0_timely_hello_delayed_arm_over_thirty_seconds() {
++        let(mut c,_child,mut peer)=pair();
++        let mut policy=leased();
++        c.hello_after_privdrop(GA);
++        let _:Hello=receipt(&mut peer);
++        peer.write_all(&frame(&arm()).unwrap()).unwrap();
++        c.service_at(&mut policy,1,60_000_000_000);
++        assert!(matches!(c.phase,Phase::Watching),"timely HELLO must allow one ARM after 30 seconds within the fixed admission cap");
++        let armed:Armed=receipt(&mut peer);
++        assert_eq!(armed.armed_offset_ns,60_000_000_000);
++    }
++    fn reading(wall:u64,continuous:u64,offset:u64)->Reading { Reading {wall,continuous,offset} }
++    fn readings(c:&mut WatchChannel,values:Vec<io::Result<Reading>>) {
++        let mut queue:std::collections::VecDeque<_>=values.into();
++        c.clock=Box::new(move||queue.pop_front().expect("bounded clock-read contract"));
++    }
++    fn refused(c:&WatchChannel,peer:&mut UnixStream,hello_bytes:usize) {
++        assert!(matches!(c.phase,Phase::Invalid));
++        assert!(c.observer.loss && c.observer.arm.is_none());
++        assert_eq!(c.output_bytes,hello_bytes);
++        assert_eq!(peer.read(&mut [0;1]).unwrap_err().kind(),io::ErrorKind::WouldBlock);
++    }
++    #[test]
++    fn slice0_queued_complete_exact_after_and_suspend_caps_refuse_before_recv() {
++        for stamp in [reading(PREARM_CAP_NS,PREARM_CAP_NS,PREARM_CAP_NS),
++            reading(PREARM_CAP_NS+1,PREARM_CAP_NS+1,PREARM_CAP_NS+1),
++            reading(60_000_000_000,PREARM_CAP_NS,60_000_000_000),
++            reading(PREARM_CAP_NS,60_000_000_000,60_000_000_000)] {
++            let(mut c,child,mut peer)=pair();let mut policy=leased();
++            c.hello_after_privdrop(GA);let _:Hello=receipt(&mut peer);let hello_bytes=c.output_bytes;
++            let bytes=frame(&arm()).unwrap();peer.write_all(&bytes).unwrap();
++            readings(&mut c,vec![Ok(stamp)]);c.service(&mut policy,1);
++            refused(&c,&mut peer,hello_bytes);
++            // No queued byte was consumed at expired admission.
++            let mut queued=vec![0;bytes.len()];assert_eq!(unsafe {libc::recv(child.as_raw_fd(),queued.as_mut_ptr().cast(),queued.len(),libc::MSG_DONTWAIT)},bytes.len() as isize);
++            assert_eq!(queued,bytes);
++            readings(&mut c,vec![Ok(reading(PREARM_CAP_NS-1,PREARM_CAP_NS-1,PREARM_CAP_NS-1))]);c.service(&mut policy,1);
++            refused(&c,&mut peer,hello_bytes);
++        }
++    }
++    #[test]
++    fn slice0_partial_final_bytes_at_cap_do_not_renew_admission() {
++        let(mut c,_child,mut peer)=pair();let mut policy=leased();
++        c.hello_after_privdrop(GA);let _:Hello=receipt(&mut peer);let hello_bytes=c.output_bytes;
++        let bytes=frame(&arm()).unwrap();peer.write_all(&bytes[..bytes.len()-1]).unwrap();
++        c.service_at(&mut policy,1,PREARM_CAP_NS-1);assert_eq!(c.incoming.len(),bytes.len()-1);
++        peer.write_all(&bytes[bytes.len()-1..]).unwrap();c.service_at(&mut policy,1,PREARM_CAP_NS);
++        refused(&c,&mut peer,hello_bytes);assert_eq!(c.incoming.len(),bytes.len()-1);
++    }
++    #[test]
++    fn slice0_postdecode_expiry_error_regression_and_interval_overflow_never_bind() {
++        for (first,second) in [
++            (reading(PREARM_CAP_NS-1,PREARM_CAP_NS-1,100),Ok(reading(PREARM_CAP_NS,PREARM_CAP_NS,101))),
++            (reading(100,100,100),Ok(reading(99,101,101))),
++            (reading(100,100,100),Ok(reading(101,99,101))),
++            (reading(100,100,100),Ok(reading(101,101,99))),
++            (reading(100,100,100),Err(clock_error())),
++            (reading(1,1,u64::MAX-1),Ok(reading(2,2,u64::MAX-1))),
++        ] {
++            let(mut c,_child,mut peer)=pair();let mut policy=leased();
++            c.hello_after_privdrop(GA);let _:Hello=receipt(&mut peer);let hello_bytes=c.output_bytes;
++            // A foreign sentinel makes an unintended bind visible to the real choosing branch.
++            policy.bind_candidate(crate::tests::PA.into());
++            let before=policy.metadata();peer.write_all(&frame(&arm()).unwrap()).unwrap();
++            readings(&mut c,vec![Ok(first),second]);c.service(&mut policy,1);
++            refused(&c,&mut peer,hello_bytes);assert!(c.incoming.is_empty());
++            assert_eq!(policy.metadata(),before);
++            let packet=crate::tests::arp(crate::tests::CA,GA,CM,crate::tests::GM,1);
++            let mut oracle=crate::tests::oracle();
++            assert_eq!(policy.guest(&packet,&[GA.into()],1)as u8,oracle.guest(&packet,&[GA.into()],1)as u8);
++            assert_eq!(policy.metadata().lease,4,"actual choosing branch must remain unbound after refused ARM");
++        }
++    }
++    #[test]
++    fn slice0_native_and_admission_clock_failures_and_checked_scaling() {
++        let epoch=Instant::now();let a=native_reading(epoch).unwrap();let b=native_reading(epoch).unwrap();
++        assert!(b.wall>=a.wall && b.continuous>=a.continuous && b.offset>=a.offset);
++        assert_eq!(scale_ticks(10,3,2).unwrap(),15);
++        for (ticks,num,den) in [(1,0,1),(1,1,0),(u64::MAX,2,1)] { assert!(scale_ticks(ticks,num,den).is_err()); }
++        for anchor in [reading(u64::MAX,0,0),reading(0,u64::MAX,0)] { assert!(ClockGuard::new(anchor).is_err()); }
++        let(c,child,_peer)=pair();
++        assert!(WatchChannel::admit_with_clock(c.selector.clone(),CM,child.as_raw_fd(),Box::new(||Err(clock_error()))).is_err());
++        assert!(WatchChannel::admit_with_clock(c.selector.clone(),CM,child.as_raw_fd(),Box::new(||Ok(reading(u64::MAX,0,0)))).is_err());
++    }
++    #[test]
++    fn slice0_native_production_admission_service_and_local_offsets() {
++        let(c,child,mut peer)=pair();
++        let mut c=WatchChannel::admit_socket(c.selector,CM,child.as_raw_fd()).unwrap();
++        let mut policy=leased();c.hello_after_privdrop(GA);let _:Hello=receipt(&mut peer);
++        peer.write_all(&frame(&arm()).unwrap()).unwrap();c.service(&mut policy,1);
++        let armed:Armed=receipt(&mut peer);assert!(armed.armed_offset_ns>=c.hello_at);
++        assert!(matches!(c.phase,Phase::Watching));assert!(c.observer.arm.is_some());
++        c.shutdown();assert!(c.observer.loss);
++    }
++    #[test]
++    fn slice0_late_hello_and_clock_fail_then_valid_are_sticky() {
++        let(mut c,_child,mut peer)=pair();readings(&mut c,vec![Ok(reading(PREARM_CAP_NS,PREARM_CAP_NS,1))]);
++        c.hello_after_privdrop(GA);refused(&c,&mut peer,0);
++        for fault in [Err(clock_error()),Ok(reading(99,101,101)),Ok(reading(101,99,101)),Ok(reading(101,101,99))] {
++            let(mut c,_child,mut peer)=pair();let mut policy=leased();
++            c.hello_after_privdrop(GA);let _:Hello=receipt(&mut peer);let hello_bytes=c.output_bytes;
++            readings(&mut c,vec![Ok(reading(100,100,100)),fault,Ok(reading(102,102,102))]);
++            c.service(&mut policy,1);assert!(matches!(c.phase,Phase::AwaitArm));
++            c.service(&mut policy,1);refused(&c,&mut peer,hello_bytes);
++            peer.write_all(&frame(&arm()).unwrap()).unwrap();c.service(&mut policy,1);refused(&c,&mut peer,hello_bytes);
++        }
++    }
++    #[test]
++    fn slice0_delayed_hello_cannot_restart_anchor_and_one_arm_cannot_rearm() {
++        let(mut c,_child,mut peer)=pair();let mut policy=leased();
++        readings(&mut c,vec![Ok(reading(PREARM_CAP_NS-1,PREARM_CAP_NS-1,PREARM_CAP_NS-1)),Ok(reading(PREARM_CAP_NS,PREARM_CAP_NS,PREARM_CAP_NS))]);
++        c.hello_after_privdrop(GA);let _:Hello=receipt(&mut peer);let hello_bytes=c.output_bytes;
++        peer.write_all(&frame(&arm()).unwrap()).unwrap();c.service(&mut policy,1);refused(&c,&mut peer,hello_bytes);
++        let(mut c,_child,mut peer)=pair();let mut policy=leased();c.hello_after_privdrop(GA);let _:Hello=receipt(&mut peer);
++        peer.write_all(&frame(&arm()).unwrap()).unwrap();c.service_at(&mut policy,1,60_000_000_000);let _:Armed=receipt(&mut peer);
++        peer.write_all(&frame(&arm()).unwrap()).unwrap();c.service_at(&mut policy,1,60_000_000_001);
++        assert!(c.observer.invalid[13]);c.service_at(&mut policy,1,61_000_000_000);let summary:Summary=receipt(&mut peer);assert!(!summary.complete);
++        peer.write_all(&frame(&arm()).unwrap()).unwrap();c.service_at(&mut policy,1,62_000_000_000);assert!(matches!(c.phase,Phase::Closed));
++        assert!(c.observer.arm.is_none());assert_eq!(peer.read(&mut [0;1]).unwrap_err().kind(),io::ErrorKind::WouldBlock);
++    }
++    #[test]
++    fn anonymous_sockaddr_negative_shapes(){
++        let mut a:libc::sockaddr_un=unsafe{
++            std::mem::zeroed()
++        };
++        a.sun_family=libc::AF_UNIX as _;
++        #[cfg(target_os="macos")] {
++            a.sun_len=16;
++            assert!(unnamed(&a,16));
++            a.sun_len=15;
++            assert!(!unnamed(&a,16));
++            a.sun_len=16;
++            assert!(!unnamed(&a,15));
++            a.sun_path[0]=1;
++            assert!(!unnamed(&a,16));
++        }#[cfg(not(target_os="macos"))]{
++            assert!(unnamed(&a,2));
++            assert!(!unnamed(&a,3));
++            a.sun_path[0]=1;
++            assert!(!unnamed(&a,2));
++        }
++    }
++}
+--- /dev/null
++++ b/lib/proxy/admission.rs
+@@ -0,0 +1,785 @@
++//! Mandatory fixed-tree SH admission. No caller-controlled path, environment or fd.
++use super::wire::VERSION;
++use serde::Deserialize;
++use std::ffi::{
++    CString,CStr
++};
++use std::fs::File;
++use std::io::{
++    self,Read
++};
++use std::os::fd::{
++    AsRawFd,FromRawFd
++};
++use std::os::unix::fs::MetadataExt;
++use std::path::Path;
++use std::time::{
++    Duration,Instant
++};
++const PREFIX:&str="/Library/Boxwarden/toolchains/softnet";
++const TART_EXE:&str="05b65d5c14e8b41e8e44b6d9fd1278de4bedbc8b735d9b99f3c748f76f75862d";
++const TART_ARC:&str="8554ab4f7fc12afe52f9b7e3093a935673cbac737a83973d2db7a0683c814529";
++fn reject()->io::Error {
++    io::Error::other("diagnostic self-tree admission failed")
++}
++#[derive(Debug,Deserialize)]
++#[serde(deny_unknown_fields)]
++struct Tool {
++    path:String,version:String,executable_sha256:String,archive_sha256:String
++}
++#[derive(Debug,Deserialize)]
++#[serde(deny_unknown_fields)]
++struct Group {
++    id:u32,name:String,members:Vec<u32>
++}
++#[derive(Debug,Deserialize)]
++#[serde(deny_unknown_fields)]
++struct Operator {
++    uid:u32,name:String,home:String
++}
++#[derive(Debug,Deserialize)]
++#[serde(deny_unknown_fields)]
++struct Manifest {
++    version:u32,platform:String,macos:String,macos_build:String,tart:Tool,softnet:Tool,root_uid:u32,group:Group,operator:Operator,tart_home:String,softnet_mode:u32,installed_at:String
++}
++fn digest(s:&str)->bool {
++    s.len()==64 && s.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b))&&s.bytes().any(|b|b!=b'0')
++}
++fn absolute(s:&str)->bool {
++    s.starts_with('/')&&s!="/"&&!s.ends_with('/')&&!s.chars().any(char::is_control)&&s[1..].split('/').all(|x|!matches!(x,""|"."|".."))
++}
++fn name(s:&str)->bool {
++    (1..=255).contains(&s.len())&&s.bytes().all(|b|b.is_ascii_alphanumeric()||[b'.',b'_',b'-'].contains(&b))
++}
++fn platform(release:&str,build:&str)->bool {
++    (release=="26.6.2"&&build=="25G83")||(release=="27.0.1"&&build=="26A434")
++}
++fn timestamp(s:&str)->bool {
++    // Installation timestamps are Go RFC3339Nano. Reject zero/ambiguous/invalid dates.
++    let bytes=s.as_bytes();
++    if bytes.len()<20 || !bytes.is_ascii() {
++        return false;
++    }
++    if bytes[4]!=b'-'||bytes[7]!=b'-'||bytes[10]!=b'T'||bytes[13]!=b':'||bytes[16]!=b':'||!(0..19).filter(|i|![4,7,10,13,16].contains(i)).all(|i|bytes[i].is_ascii_digit()) {
++        return false;
++    }
++    let num=|r:std::ops::Range<usize>|s[r].parse::<u32>().ok();
++    let (Some(y),Some(m),Some(d),Some(h),Some(mi),Some(se))=(num(0..4),num(5..7),num(8..10),num(11..13),num(14..16),num(17..19))else{
++        return false;
++    };
++    let leap=y%4==0&&(y%100!=0||y%400==0);
++    let days=match m{
++        1|3|5|7|8|10|12=>31,4|6|9|11=>30,2=>if leap{
++            29
++        }else{
++            28
++        },_=>0
++    };
++    if y==0||d==0||d>days||h>23||mi>59||se>59{
++        return false;
++    }
++    let mut rest=&s[19..];
++    let mut nonzero_fraction=false;
++    if let Some(f)=rest.strip_prefix('.') {
++        let n=f.bytes().take_while(u8::is_ascii_digit).count();
++        if !(1..=9).contains(&n){
++            return false;
++        }
++        nonzero_fraction=f[..n].bytes().any(|b|b!=b'0');
++        rest=&f[n..];
++    }
++    let first_day=y==1&&m==1&&d==1&&!nonzero_fraction;
++    let local=(h*3600+mi*60+se)as i32;
++    if rest=="Z" {
++        return !(first_day&&local==0);
++    }
++    if rest.len()!=6||!matches!(rest.as_bytes()[0],b'+'|b'-')||rest.as_bytes()[3]!=b':'||![1,2,4,5].iter().all(|&i|rest.as_bytes()[i].is_ascii_digit()) {
++        return false;
++    }
++    let (Ok(oh),Ok(om))=(rest[1..3].parse::<i32>(),rest[4..].parse::<i32>())else{
++        return false;
++    };
++    if oh>23||om>59{
++        return false;
++    }
++    let offset=(oh*3600+om*60)*if rest.as_bytes()[0]==b'+'{
++        1
++    }else{
++        -1
++    };
++    !(first_day&&local==offset)
++}
++impl Manifest {
++    fn valid(&self,path:&str,hash:&str,uid:u32,release:&str,build:&str)->bool {
++        self.version==2&&self.platform=="darwin"&&platform(&self.macos,&self.macos_build)&&platform(release,build)
++        &&((self.macos==release&&self.macos_build==build)||(release=="27.0.1"&&build=="26A434"&&self.macos=="26.6.2"&&self.macos_build=="25G83"))
++        &&self.tart.version=="2.32.1"&&self.tart.executable_sha256==TART_EXE&&self.tart.archive_sha256==TART_ARC&&absolute(&self.tart.path)
++        &&self.softnet.path==path&&self.softnet.version==VERSION&&self.softnet.executable_sha256==hash&&digest(&self.softnet.archive_sha256)
++        &&self.root_uid==0&&self.softnet_mode==0o4550&&self.group.name=="boxwarden-operators"&&self.group.members==[uid]
++        &&self.operator.uid==uid&&uid>0&&name(&self.operator.name)&&absolute(&self.operator.home)&&absolute(&self.tart_home)&&timestamp(&self.installed_at)
++    }
++}
++#[derive(Clone,Copy,Debug,PartialEq,Eq)]
++struct Identity {
++    dev:u64,ino:u64,uid:u32,gid:u32,mode:u32,links:u64,size:u64,mtime:i64,mn:i64,ctime:i64,cn:i64
++}
++fn identity(f:&File)->io::Result<Identity> {
++    let m=f.metadata()?;
++    Ok(Identity{
++        dev:m.dev(),ino:m.ino(),uid:m.uid(),gid:m.gid(),mode:m.mode(),links:m.nlink(),size:m.size(),mtime:m.mtime(),mn:m.mtime_nsec(),ctime:m.ctime(),cn:m.ctime_nsec()
++    })
++}
++fn metadata_valid(i:Identity,mode:u32,gid:u32,zero:bool,acl:bool)->bool {
++    i.uid==0&&i.gid==gid&&i.mode&((libc::S_IFMT as u32)|0o7777)==((libc::S_IFREG as u32)|mode)&&i.links==1&&(!zero||i.size==0)&&!acl
++}
++fn tart_metadata_valid(i:Identity,acl:bool)->bool {
++    i.mode&(libc::S_IFMT as u32)==(libc::S_IFREG as u32)&&i.mode&0o6000==0&&i.mode&0o111!=0&&i.links==1&&!acl
++}
++fn meta(f:&File,mode:u32,gid:u32,zero:bool)->io::Result<Identity>{
++    let i=identity(f)?;
++    if !metadata_valid(i,mode,gid,zero,has_acl(f)?){
++        return Err(reject());
++    }Ok(i)
++}
++fn open_at(dir:&File,n:&str,directory:bool)->io::Result<File>{
++    let n=CString::new(n).map_err(|_|reject())?;
++    let fd=unsafe{
++        libc::openat(dir.as_raw_fd(),n.as_ptr(),libc::O_RDONLY|libc::O_NOFOLLOW|libc::O_CLOEXEC|libc::O_NONBLOCK|if directory{
++            libc::O_DIRECTORY
++        }else{
++            0
++        })
++    };
++    if fd<0{
++        Err(reject())
++    }else{
++        Ok(unsafe{
++            File::from_raw_fd(fd)
++        })
++    }
++}
++fn protected_dir(path:&str)->io::Result<File>{
++    let fd=unsafe{
++        libc::open(c"/".as_ptr(),libc::O_RDONLY|libc::O_DIRECTORY|libc::O_CLOEXEC|libc::O_NOFOLLOW)
++    };
++    if fd<0{
++        return Err(reject());
++    }
++    let mut dir=unsafe{
++        File::from_raw_fd(fd)
++    };
++    let check=|f:&File|->io::Result<()>{
++        let i=identity(f)?;
++        if i.uid!=0||i.gid!=0||i.mode&(libc::S_IFMT as u32)!=(libc::S_IFDIR as u32)||i.mode&0o7022!=0||has_acl(f)?{
++            return Err(reject());
++        }Ok(())
++    };
++    check(&dir)?;
++    for n in path.strip_prefix('/').ok_or_else(reject)?.split('/') {
++        if n.is_empty()||n=="."||n==".."{
++            return Err(reject());
++        }dir=open_at(&dir,n,true)?;
++        check(&dir)?;
++    }
++    Ok(dir)
++}
++fn nofollow_dir(path:&str)->io::Result<File>{
++    let fd=unsafe{
++        libc::open(c"/".as_ptr(),libc::O_RDONLY|libc::O_DIRECTORY|libc::O_CLOEXEC|libc::O_NOFOLLOW)
++    };
++    if fd<0{
++        return Err(reject());
++    }
++    let mut dir=unsafe{
++        File::from_raw_fd(fd)
++    };
++    for n in path.strip_prefix('/').ok_or_else(reject)?.split('/') {
++        if n.is_empty()||n=="."||n==".."{
++            return Err(reject());
++        }dir=open_at(&dir,n,true)?;
++    }
++    Ok(dir)
++}
++fn hash_file(f:&mut File)->io::Result<String>{
++    let mut h=ring::digest::Context::new(&ring::digest::SHA256);
++    let mut buf=[0;     65536];
++    let mut total=0usize;
++    loop{
++        let n=f.read(&mut buf)?;
++        if n==0{
++            break;
++        }total+=n;
++        if total>128*1024*1024{
++            return Err(reject());
++        }h.update(&buf[..n]);
++    }Ok(h.finish().as_ref().iter().map(|b|format!("{b:02x}")).collect())
++}
++#[cfg(target_os="macos")]
++unsafe extern "C" {
++    fn acl_get_fd_np(fd:libc::c_int,typ:libc::c_int)->*mut libc::c_void;
++    fn acl_get_entry(acl:*mut libc::c_void,entry_id:libc::c_int,entry:*mut *mut libc::c_void)->libc::c_int;
++    fn acl_free(obj:*mut libc::c_void)->libc::c_int;
++}
++#[cfg(target_os="macos")]
++fn has_acl(f:&File)->io::Result<bool>{
++    unsafe{
++        let acl=acl_get_fd_np(f.as_raw_fd(),0x100);
++        if acl.is_null(){
++            // ENOENT is Darwin's no extended ACL representation.
++            if io::Error::last_os_error().raw_os_error()==Some(libc::ENOENT){
++                return Ok(false);
++            }return Err(reject());
++        }
++        let mut entry=std::ptr::null_mut();
++        let rc=acl_get_entry(acl,0,&mut entry);
++        let error=io::Error::last_os_error().raw_os_error().unwrap_or(0);
++        let freed=acl_free(acl);
++        acl_entry_result(rc,error,freed)
++    }
++}
++// Darwin differs from Linux: success returns zero. This helper is called ONLY
++// after a successful ACL getter/allocator and fixed ACL_FIRST_ENTRY on that valid
++// object. Under those preconditions -1/EINVAL is the zero-entry case. Other
++// getter/free/check failures refuse. Capture errno before acl_free.
++// Apple Libc posix1e/acl_entry.c:108-136 and Apple's acl_get_entry(3).
++fn acl_entry_result(rc:i32,error:i32,freed:i32)->io::Result<bool>{
++    if freed!=0{
++        return Err(reject());
++    }
++    if rc==0{
++        return Ok(true);
++    }
++    if rc==-1&&error==libc::EINVAL{
++        return Ok(false);
++    }
++    Err(reject())
++}
++#[cfg(not(target_os="macos"))]
++fn has_acl(_:&File)->io::Result<bool>{
++    Err(reject())
++}
++#[cfg(target_os="macos")]
++#[allow(deprecated)] // Exact libSystem declaration; no new unpinned dependency.
++fn image_path()->io::Result<String>{
++    let mut b=[0u8;     4096];
++    let n=unsafe{
++        libc::proc_pidpath(libc::getpid(),b.as_mut_ptr().cast(),b.len()as u32)
++    };
++    if n<=0||n as usize>=b.len(){
++        return Err(reject());
++    }
++    let p=CStr::from_bytes_until_nul(&b).map_err(|_|reject())?.to_str().map_err(|_|reject())?.to_owned();
++    let mut dyld=[0u8;     4096];
++    let mut len=dyld.len()as u32;
++    if unsafe{
++        libc::_NSGetExecutablePath(dyld.as_mut_ptr().cast(),&mut len)
++    }!=0{
++        return Err(reject());
++    }
++    let q=CStr::from_bytes_until_nul(&dyld).map_err(|_|reject())?.to_str().map_err(|_|reject())?;
++    if p!=q||!absolute(&p){
++        return Err(reject());
++    }Ok(p)
++}
++#[cfg(not(target_os="macos"))]
++fn image_path()->io::Result<String>{
++    Err(reject())
++}
++#[cfg(target_os="macos")]
++fn sysctl(name:&CStr)->io::Result<String>{
++    let mut b=[0u8;     128];
++    let mut n=b.len();
++    if unsafe{
++        libc::sysctlbyname(name.as_ptr(),b.as_mut_ptr().cast(),&mut n,std::ptr::null_mut(),0)
++    }!=0||n==0||n>b.len(){
++        return Err(reject());
++    }CStr::from_bytes_with_nul(&b[..n]).map_err(|_|reject())?.to_str().map(str::to_owned).map_err(|_|reject())
++}
++#[cfg(not(target_os="macos"))]
++fn sysctl(_:&CStr)->io::Result<String>{
++    Err(reject())
++}
++/// Body-owned resources (including construction failures and unwinding) finish
++/// before the guard is released. Proxy additionally borrows the real guard.
++pub fn held_scope<G,R>(guard:G,body:impl FnOnce(&G)->R)->R {
++    let result=body(&guard);
++    drop(guard);
++    result
++}
++/// Owns the admitted inode until after actual Proxy/Host/Interface teardown.
++/// Local construction precedes Proxy; explicit `drop(proxy)` precedes `drop(guard)`.
++pub struct LaunchGuard {
++    lock:File,dir:File,dir_path:String,dir_id:Identity,lock_id:Identity, image:File,image_id:Identity,manifest:File,manifest_id:Identity
++}
++impl LaunchGuard {
++    pub fn acquire()->io::Result<Self>{
++        let path=image_path()?;
++        let dirpath=Path::new(&path).parent().and_then(Path::to_str).ok_or_else(reject)?;
++        let hash=Path::new(dirpath).file_name().and_then(|p|p.to_str()).ok_or_else(reject)?;
++        if !digest(hash)||path!=format!("{PREFIX}/{VERSION}/{hash}/softnet"){
++            return Err(reject());
++        }
++        let dir=protected_dir(dirpath)?;
++        let mut manifest=open_at(&dir,"manifest.json",false)?;
++        let manifest_id=meta(&manifest,0o444,0,false)?;
++        if manifest_id.size==0||manifest_id.size>65536{
++            return Err(reject());
++        }let mut data=Vec::new();
++        (&mut manifest).take(65537).read_to_end(&mut data)?;
++        if data.len()>65536{
++            return Err(reject());
++        }
++        let mut decoder=serde_json::Deserializer::from_slice(&data);
++        let m=Manifest::deserialize(&mut decoder).map_err(|_|reject())?;
++        decoder.end().map_err(|_|reject())?;
++        let uid=unsafe{
++            libc::getuid()
++        };
++        let release=sysctl(c"kern.osproductversion")?;
++        let build=sysctl(c"kern.osversion")?;
++        if unsafe{
++            libc::geteuid()
++        }!=0||!m.valid(&path,hash,uid,&release,&build){
++            return Err(reject());
++        }
++        current_operator(&m)?;
++        let mut image=open_at(&dir,"softnet",false)?;
++        let image_id=meta(&image,0o4550,m.group.id,false)?;
++        if hash_file(&mut image)?!=hash||identity(&image)?!=image_id||identity(&manifest)?!=manifest_id{
++            return Err(reject());
++        }
++        // Verify the immutable paired Tart without executing it or trusting a path string alone.
++        let tdir=nofollow_dir(Path::new(&m.tart.path).parent().and_then(Path::to_str).ok_or_else(reject)?)?;
++        let mut tart=open_at(&tdir,Path::new(&m.tart.path).file_name().and_then(|p|p.to_str()).ok_or_else(reject)?,false)?;
++        let ti=identity(&tart)?;
++        if !tart_metadata_valid(ti,has_acl(&tart)?)||hash_file(&mut tart)?!=TART_EXE||identity(&tart)?!=ti{
++            return Err(reject());
++        }
++        let lock=open_at(&dir,"launch.lock",false)?;
++        let lock_id=meta(&lock,0o440,m.group.id,true)?;
++        if unsafe{
++            libc::flock(lock.as_raw_fd(),libc::LOCK_SH|libc::LOCK_NB)
++        }!=0{
++            return Err(reject());
++        }
++        let dir_id=identity(&dir)?;
++        let g=Self{
++            lock,dir,dir_path:dirpath.into(),dir_id,lock_id,image,image_id,manifest,manifest_id
++        };
++        g.revalidate()?;
++        Ok(g)
++    }
++    pub fn revalidate(&self)->io::Result<()> {
++        if identity(&self.dir)?!=self.dir_id||identity(&protected_dir(&self.dir_path)?)?!=self.dir_id||image_path()?!=format!("{}/softnet",self.dir_path){
++            return Err(reject());
++        }
++        let entries=std::fs::read_dir(&self.dir_path)?.take(4).collect::<Result<Vec<_>,_>>()?;
++        if entries.len()!=3||entries.iter().any(|e|!matches!(e.file_name().to_str(),Some("softnet"|"manifest.json"|"launch.lock"))){
++            return Err(reject());
++        }
++        for (n,f,id) in [("launch.lock",&self.lock,self.lock_id),("softnet",&self.image,self.image_id),("manifest.json",&self.manifest,self.manifest_id)]{
++            if identity(f)?!=id||identity(&open_at(&self.dir,n,false)?)?!=id||has_acl(f)?{
++                return Err(reject());
++            }
++        }
++        Ok(())
++    }
++}
++/// Bounded fixed read-only DirectoryService calls; no shell, ambient env or arbitrary output.
++fn directory(args:&[&str])->io::Result<String>{
++    use std::process::{
++        Command,Stdio
++    };
++    let mut child=Command::new("/usr/bin/dscl").args(args).env_clear().env("LC_ALL","C").env("LANG","C").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()?;
++    let mut out=child.stdout.take().ok_or_else(reject)?;
++    let flags=unsafe{
++        libc::fcntl(out.as_raw_fd(),libc::F_GETFL)
++    };
++    if flags<0||unsafe{
++        libc::fcntl(out.as_raw_fd(),libc::F_SETFL,flags|libc::O_NONBLOCK)
++    }<0{
++        let _=child.kill();
++        let _=child.wait();
++        return Err(reject());
++    }
++    let started=Instant::now();
++    let mut bytes=Vec::new();
++    let mut buf=[0;     4096];
++    let mut eof=false;
++    let mut status=None;
++    loop {
++        match out.read(&mut buf){
++            Ok(0)=>eof=true,Ok(n)=>{
++                bytes.extend_from_slice(&buf[..n]);
++                if bytes.len()>16384{
++                    let _=child.kill();
++                    let _=child.wait();
++                    return Err(reject());
++                }
++            },Err(e)if e.kind()==io::ErrorKind::WouldBlock=>{
++            },Err(_)=>{
++                let _=child.kill();
++                let _=child.wait();
++                return Err(reject());
++            }
++        }
++        if status.is_none() {
++            match child.try_wait(){
++                Ok(s)=>status=s,Err(_)=>{
++                    let _=child.kill();
++                    let _=child.wait();
++                    return Err(reject());
++                }
++            }
++        }
++        if let Some(s)=status {
++            if !s.success(){
++                return Err(reject());
++            }if eof{
++                return String::from_utf8(bytes).map_err(|_|reject());
++            }
++        }
++        if started.elapsed()>Duration::from_secs(5){
++            let _=child.kill();
++            let _=child.wait();
++            return Err(reject());
++        }
++        std::thread::sleep(Duration::from_millis(1));
++    }
++}
++fn attrs(output:&str)->io::Result<std::collections::BTreeMap<String,Vec<String>>>{
++    let mut map:std::collections::BTreeMap<String,Vec<String>>=std::collections::BTreeMap::new();
++    let mut current=String::new();
++    for line in output.lines(){
++        if line.trim().is_empty(){
++            continue;
++        }if line.starts_with(char::is_whitespace){
++            if current.is_empty(){
++                return Err(reject());
++            }map.get_mut(&current).ok_or_else(reject)?.extend(line.split_whitespace().map(str::to_owned));
++        }else{
++            let(k,v)=line.split_once(':').ok_or_else(reject)?;
++            if k.is_empty()||k.chars().any(char::is_whitespace)||map.contains_key(k){
++                return Err(reject());
++            }current=k.into();
++            map.insert(current.clone(),v.split_whitespace().map(str::to_owned).collect::<Vec<_>>());
++        }
++    }
++    Ok(map)
++}
++fn exact_directory_state(m:&Manifest,user_output:&str,group_output:&str,users_output:&str,groups_output:&str)->io::Result<()> {
++    let uid=m.operator.uid;
++    let u=attrs(user_output)?;
++    let single=|a:&std::collections::BTreeMap<String,Vec<String>>,k:&str|->io::Result<String>{
++        let v=a.get(k).ok_or_else(reject)?;
++        if v.len()!=1{
++            return Err(reject());
++        }Ok(v[0].clone())
++    };
++    if single(&u,"UniqueID")?!=uid.to_string()||!u.get("RecordName").is_some_and(|v|v.contains(&m.operator.name)&&v.iter().collect::<std::collections::BTreeSet<_>>().len()==v.len()){
++        return Err(reject());
++    }
++    let guid=single(&u,"GeneratedUID")?;
++    if guid.is_empty(){
++        return Err(reject());
++    }
++    let g=attrs(group_output)?;
++    if single(&g,"RecordName")?!=m.group.name||single(&g,"PrimaryGroupID")?!=m.group.id.to_string()||g.get("NestedGroups").is_some_and(|v|!v.is_empty())||g.get("GroupMembership")!=Some(&vec![m.operator.name.clone()])||g.get("GroupMembers")!=Some(&vec![guid]){
++        return Err(reject());
++    }
++    for (kind,required,output) in [("/Users",m.operator.name.as_str(),users_output),("/Groups",m.group.name.as_str(),groups_output)]{
++        let mut seen=std::collections::BTreeSet::new();
++        let mut found=false;
++        for line in output.lines(){
++            let f=line.split_whitespace().collect::<Vec<_>>();
++            if f.is_empty(){
++                continue;
++            }if f.len()!=2||!name(f[0])||!seen.insert(f[0]){
++                return Err(reject());
++            }let gid=f[1].parse::<u32>().map_err(|_|reject())?;
++            if f[0]==required{
++                found=true;
++                if kind=="/Groups"&&gid!=m.group.id{
++                    return Err(reject());
++                }
++            }
++            if gid==m.group.id&&f[0]!=required{
++                return Err(reject());
++            }
++        }if !found{
++            return Err(reject());
++        }
++    }
++    Ok(())
++}
++fn current_operator(m:&Manifest)->io::Result<()> {
++    let uid=m.operator.uid;
++    let user=format!("/Users/{}",m.operator.name);
++    exact_directory_state(m,
++    &directory(&["/Local/Default","-read",&user,"RecordName","UniqueID","GeneratedUID"] )?,
++    &directory(&["/Local/Default","-read","/Groups/boxwarden-operators"] )?,
++    &directory(&["/Search","-list","/Users","PrimaryGroupID"] )?,
++    &directory(&["/Search","-list","/Groups","PrimaryGroupID"] )?)?;
++    let pw=unsafe{
++        libc::getpwuid(uid)
++    };
++    if pw.is_null(){
++        return Err(reject());
++    }unsafe{
++        if CStr::from_ptr((*pw).pw_name).to_str().map_err(|_|reject())?!=m.operator.name||CStr::from_ptr((*pw).pw_dir).to_str().map_err(|_|reject())?!=m.operator.home{
++            return Err(reject());
++        }
++    }
++    let mut groups=[0 as libc::gid_t;     256];
++    let n=unsafe{
++        libc::getgroups(groups.len()as i32,groups.as_mut_ptr())
++    };
++    if n<=0||n as usize>groups.len()||!groups[..n as usize].contains(&m.group.id){
++        return Err(reject());
++    }
++    let home=nofollow_dir(&m.tart_home)?;
++    let metadata=home.metadata()?;
++    if !metadata.is_dir()||metadata.uid()!=uid||metadata.mode()&0o077!=0||has_acl(&home)?{
++        return Err(reject());
++    }
++    Ok(())
++}
++#[cfg(test)]
++mod tests {
++    use super::*;
++    fn manifest()->Manifest {
++        let hash="a".repeat(64);
++        Manifest{
++            version:2,platform:"darwin".into(),macos:"27.0.1".into(),macos_build:"26A434".into(),tart:Tool{
++                path:"/Users/operator/Library/ApplicationSupport/Boxwarden/tart".into(),version:"2.32.1".into(),executable_sha256:TART_EXE.into(),archive_sha256:TART_ARC.into()
++            },softnet:Tool{
++                path:format!("{PREFIX}/{VERSION}/{hash}/softnet"),version:VERSION.into(),executable_sha256:hash,archive_sha256:"b".repeat(64)
++            },root_uid:0,group:Group{
++                id:1000,name:"boxwarden-operators".into(),members:vec![501]
++            },operator:Operator{
++                uid:501,name:"operator".into(),home:"/Users/operator".into()
++            },tart_home:"/Volumes/Private/tart".into(),softnet_mode:0o4550,installed_at:"2026-09-30T12:00:00.123456789Z".into()
++        }
++    }
++    #[test]
++    fn complete_manifest_platform_path_operator_pair_and_archive_syntax(){
++        let mut m=manifest();
++        assert!(m.valid(&m.softnet.path,&m.softnet.executable_sha256,501,"27.0.1","26A434"));
++        m.macos="26.6.2".into();
++        m.macos_build="25G83".into();
++        assert!(m.valid(&m.softnet.path,&m.softnet.executable_sha256,501,"27.0.1","26A434"));
++        assert!(!m.valid(&m.softnet.path,&m.softnet.executable_sha256,501,"26.6.2","26A434"));
++        m.softnet.archive_sha256="0".repeat(64);
++        assert!(!m.valid(&m.softnet.path,&m.softnet.executable_sha256,501,"27.0.1","26A434"));
++        for path in ["/stage/softnet","/Library/Boxwarden/toolchains/softnet/other/softnet"]{
++            assert!(!manifest().valid(path,&"a".repeat(64),501,"27.0.1","26A434"));
++        }m=manifest();
++        m.group.members.push(502);
++        assert!(!m.valid(&m.softnet.path,&m.softnet.executable_sha256,501,"27.0.1","26A434"));
++    }
++    #[test]
++    fn duplicate_unknown_missing_manifest_and_date_rejection(){
++        let text=r#"{"version":2,"version":2}"#;
++        assert!(serde_json::from_str::<Manifest>(text).is_err());
++        assert!(serde_json::from_str::<Manifest>(r#"{"unknown":1}"#).is_err());
++        for s in ["0000-01-01T00:00:00Z","0001-01-01T00:00:00+00:00","0001-01-01T01:00:00+01:00","0001-01-01T00:00:00.000-00:00","2026-02-30T00:00:00Z","2026-01-01T25:00:00Z","2026-01-01T00:00:00.1234567890Z"]{
++            assert!(!timestamp(s));
++        }assert!(timestamp("2024-02-29T00:00:00-06:00"));
++        assert!(timestamp("0001-01-01T00:00:00.000000001+00:00"));
++    }
++    fn r1_offset_assertions(bad:&[&str]) {
++        for offset in bad {
++            let date=format!("2026-09-30T12:00:00{offset}");
++            assert!(!timestamp(&date),"malformed offset admitted: {offset}");
++            let mut m=manifest();
++            m.installed_at=date;
++            assert!(!m.valid(&m.softnet.path,&m.softnet.executable_sha256,501,"27.0.1","26A434"));
++        }
++        for date in ["2026-09-30T12:00:00+01:30","2026-09-30T12:00:00-06:45","2026-09-30T12:00:00+23:59","2026-09-30T12:00:00-00:00","0001-01-01T00:00:00.000000001+00:00"] {
++            assert!(timestamp(date));
++            let mut m=manifest();
++            m.installed_at=date.into();
++            assert!(m.valid(&m.softnet.path,&m.softnet.executable_sha256,501,"27.0.1","26A434"));
++        }
++        for date in ["0001-01-01T00:00:00+00:00","0001-01-01T01:00:00+01:00","0001-01-01T00:00:00.000-00:00"] {
++            assert!(!timestamp(date));
++        }
++    }
++    #[test]
++    fn r1_offset_hour_components_require_decimal_digits() {
++        r1_offset_assertions(&["+-1:00","++1:00","--1:00","-+1:00","+24:00","-24:00","+a1:00"]);
++    }
++    #[test]
++    fn r1_offset_minute_components_require_decimal_digits() {
++        r1_offset_assertions(&["+00:-1","+00:+1","-00:-1","-00:+1","+00:60","-00:60","+00:a1"]);
++    }
++    #[test]
++    fn ordinary_fixture_shared_exclusive_lock_and_inode_replacement(){
++        let root=std::env::temp_dir().join(format!("n1-lock-fixture-{}-{:?}",std::process::id(),std::thread::current().id()));
++        std::fs::create_dir(&root).unwrap();
++        let p=root.join("launch.lock");
++        let a=std::fs::OpenOptions::new().create_new(true).read(true).write(true).open(&p).unwrap();
++        let b=File::open(&p).unwrap();
++        assert_eq!(unsafe{
++            libc::flock(a.as_raw_fd(),libc::LOCK_SH|libc::LOCK_NB)
++        },0);
++        assert_eq!(unsafe{
++            libc::flock(b.as_raw_fd(),libc::LOCK_EX|libc::LOCK_NB)
++        },-1);
++        let before=identity(&a).unwrap();
++        drop(a);
++        assert_eq!(unsafe{
++            libc::flock(b.as_raw_fd(),libc::LOCK_EX|libc::LOCK_NB)
++        },0);
++        let c=File::open(&p).unwrap();
++        assert_eq!(unsafe{
++            libc::flock(c.as_raw_fd(),libc::LOCK_SH|libc::LOCK_NB)
++        },-1);
++        std::fs::remove_file(&p).unwrap();
++        assert!(File::open(&p).is_err());
++        let new=std::fs::OpenOptions::new().create_new(true).write(true).open(&p).unwrap();
++        assert_ne!(before.ino,identity(&new).unwrap().ino);
++        drop(new);
++        drop(c);
++        drop(b);
++        std::fs::remove_file(&p).unwrap();
++        std::fs::remove_dir(root).unwrap();
++    }
++    #[test]
++    fn protected_metadata_rejects_mode_owner_gid_acl_links_and_content(){
++        let i=Identity{
++            dev:1,ino:2,uid:0,gid:1000,mode:(libc::S_IFREG as u32)|0o440,links:1,size:0,mtime:0,mn:0,ctime:0,cn:0
++        };
++        assert!(metadata_valid(i,0o440,1000,true,false));
++        for n in 0..6{
++            let mut bad=i;
++            let mut acl=false;
++            match n{
++                0=>bad.uid=501,1=>bad.gid=1,2=>bad.mode|=2,3=>bad.links=2,4=>bad.size=1,_=>acl=true
++            };
++            assert!(!metadata_valid(bad,0o440,1000,true,acl));
++        }
++    }
++    #[test]
++    fn tart_operator_owned_direct_fixture_is_admitted_without_root_rule(){
++        let i=Identity{
++            dev:1,ino:2,uid:501,gid:20,mode:(libc::S_IFREG as u32)|0o755,links:1,size:1,mtime:0,mn:0,ctime:0,cn:0
++        };
++        assert!(tart_metadata_valid(i,false));
++        let mut bad=i;
++        bad.mode|=0o4000;
++        assert!(!tart_metadata_valid(bad,false));
++        assert!(!tart_metadata_valid(i,true));
++    }
++    #[test]
++    fn darwin_acl_return_zero_means_present_and_empty_einval_is_absent(){
++        assert!(acl_entry_result(0,0,0).unwrap());
++        assert!(!acl_entry_result(-1,libc::EINVAL,0).unwrap());
++        assert!(acl_entry_result(-1,libc::EIO,0).is_err());
++        assert!(acl_entry_result(0,0,-1).is_err());
++    }
++    #[cfg(target_os="macos")]
++    #[test]
++    fn native_in_memory_acl_and_ordinary_noacl_descriptor_controls(){
++        unsafe extern "C" {
++            fn acl_init(count:libc::c_int)->*mut libc::c_void;
++            fn acl_create_entry(acl:*mut *mut libc::c_void,entry:*mut *mut libc::c_void)->libc::c_int;
++        }
++        unsafe{
++            let mut acl=acl_init(1);
++            assert!(!acl.is_null());
++            let mut entry=std::ptr::null_mut();
++            let rc=acl_get_entry(acl,0,&mut entry);
++            let e=io::Error::last_os_error().raw_os_error().unwrap_or(0);
++            assert!(!acl_entry_result(rc,e,0).unwrap());
++            assert_eq!(acl_create_entry(&mut acl,&mut entry),0);
++            assert_eq!(acl_get_entry(acl,0,&mut entry),0);
++            assert!(acl_entry_result(0,0,0).unwrap());
++            assert_eq!(acl_free(acl),0);
++        }
++        let path=std::env::temp_dir().join(format!("n1-acl-read-control-{}",std::process::id()));
++        let file=std::fs::OpenOptions::new().create_new(true).read(true).write(true).open(&path).unwrap();
++        assert!(!has_acl(&file).unwrap());
++        unsafe extern "C" {
++            fn acl_set_tag_type(entry:*mut libc::c_void,tag:libc::c_int)->libc::c_int;
++            fn acl_set_qualifier(entry:*mut libc::c_void,q:*const libc::c_void)->libc::c_int;
++            fn acl_set_fd(fd:libc::c_int,acl:*mut libc::c_void)->libc::c_int;
++        }
++        unsafe {
++            let mut acl=acl_init(1);
++            assert!(!acl.is_null());
++            let mut entry=std::ptr::null_mut();
++            assert_eq!(acl_create_entry(&mut acl,&mut entry),0);
++            assert_eq!(acl_set_tag_type(entry,1),0);
++            let id=[1u8;             16];
++            assert_eq!(acl_set_qualifier(entry,id.as_ptr().cast()),0);
++            assert_eq!(acl_set_fd(file.as_raw_fd(),acl),0);
++            assert_eq!(acl_free(acl),0);
++        }
++        assert!(has_acl(&file).unwrap());
++        drop(file);
++        std::fs::remove_file(path).unwrap();
++    }
++    #[test]
++    fn held_scope_keeps_guard_through_partial_full_error_and_unwind_resource_drop(){
++        use std::rc::Rc;
++        use std::cell::RefCell;
++        struct G(Rc<RefCell<Vec<&'static str>>>);
++        impl Drop for G{
++            fn drop(&mut self){
++                self.0.borrow_mut().push("guard");
++            }
++        }
++        struct Resource(Rc<RefCell<Vec<&'static str>>>);
++        impl Drop for Resource{
++            fn drop(&mut self){
++                assert!(!self.0.borrow().contains(&"guard"));
++                self.0.borrow_mut().push("resource");
++            }
++        }
++        for phase in 0..4 {
++            let log=Rc::new(RefCell::new(Vec::new()));
++            let outcome=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||held_scope(G(log.clone()),|guard|{
++                let _partial=Resource(guard.0.clone());if phase==0{
++                    return Err(());
++                }let _full=Resource(guard.0.clone());if phase==1{
++                    return Err(());
++                }if phase==2{
++                    panic!("synthetic unwind");
++                }Ok(())
++            })));
++            if phase==2{
++                assert!(outcome.is_err());
++            }else{
++                assert_eq!(outcome.unwrap().is_ok(),phase==3);
++            }let values=log.borrow();
++            assert_eq!(values.last(),Some(&"guard"));
++            assert_eq!(values.iter().filter(|s|**s=="resource").count(),if phase==0{
++                1
++            }else{
++                2
++            });
++        }
++    }
++    #[test]
++    fn exact_directory_service_membership_nested_primary_alias_and_incomplete_controls() {
++        let m=manifest();
++        let u="RecordName: operator alias\nUniqueID: 501\nGeneratedUID: GUID\n";
++        let g="RecordName: boxwarden-operators\nPrimaryGroupID: 1000\nGroupMembership: operator\nGroupMembers: GUID\n";
++        let users="operator 20\nother 21\n";
++        let groups="boxwarden-operators 1000\nother 20\n";
++        assert!(exact_directory_state(&m,u,g,users,groups).is_ok());
++        for bad in [g.replace("GroupMembership: operator","GroupMembership: operator other"),g.replace("GroupMembers: GUID","GroupMembers: GUID OTHER"),format!("{g}NestedGroups: NESTED\n"),g.replace("GroupMembers: GUID\n",""),g.replace("GroupMembership: operator\n",""),g.replace("RecordName: boxwarden-operators","RecordName: alias"),g.replace("PrimaryGroupID: 1000","PrimaryGroupID: 1001"),format!("{g}RecordName: boxwarden-operators\n")] {
++            assert!(exact_directory_state(&m,u,&bad,users,groups).is_err());
++        }
++        for bad in ["operator 20\nother 1000\n","other 21\n","operator 20\noperator 20\n","operator\n","operator 20 extra\n",""] {
++            assert!(exact_directory_state(&m,u,g,bad,groups).is_err());
++        }
++        for bad in ["boxwarden-operators 1000\nalias 1000\n","boxwarden-operators 20\n","other 20\n",""] {
++            assert!(exact_directory_state(&m,u,g,users,bad).is_err());
++        }
++        for bad in [u.replace("UniqueID: 501","UniqueID: 502"),u.replace("GeneratedUID: GUID\n",""),u.replace("RecordName: operator alias","RecordName: operator operator"),u.replace("RecordName: operator alias","RecordName: alias")] {
++            assert!(exact_directory_state(&m,&bad,g,users,groups).is_err());
++        }
++    }
++}
+--- /dev/null
++++ b/lib/proxy/args.rs
+@@ -0,0 +1,77 @@
++//! Exact diagnostic CLI grammar, shared by main and the neutral synthetic target.
++use clap::Parser;
++use super::wire::{
++    Selector,mac
++};
++#[derive(Parser,Debug)]
++#[command(version="0.19.0-boxwarden-n1-diagnostic.2")]
++pub struct Args {
++    #[arg(long)] pub vm_fd:i32,
++    #[arg(long)] pub vm_mac_address:String,
++    #[arg(long,default_value="nat")] pub vm_net_type:String,
++    #[arg(long,default_value_t=600)] pub bootpd_lease_time:u32,
++    #[arg(long)] pub user:Option<String>,
++    #[arg(long)] pub group:Option<String>,
++    #[arg(long,value_delimiter=',',action=clap::ArgAction::Set)] pub allow:Vec<String>,
++    #[arg(long,value_delimiter=',',action=clap::ArgAction::Set,help="One exact @boxwarden-n1-diagnostic:<generation>:<nonce> selector")] pub block:Vec<String>,
++    #[arg(long,value_delimiter=',',action=clap::ArgAction::Set)] pub expose:Vec<String>,
++    #[arg(long,hide=true)] pub sudo_escalation_probing:bool,
++    #[arg(long,hide=true)] pub sudo_escalation_done:bool,
++}
++impl Args {
++    pub fn admit(&self)->Option<(Selector,[u8;6])>{
++        if self.block.len()!=1||!self.allow.is_empty()||!self.expose.is_empty()||self.vm_net_type!="nat"||self.vm_fd!=0||self.bootpd_lease_time!=600||self.sudo_escalation_probing||self.sudo_escalation_done{
++            return None;
++        }
++        let selector=Selector::parse(&self.block[0])?;
++        let s=&self.vm_mac_address;
++        if s.len()!=17||!s.is_ascii(){
++            return None;
++        }
++        let mut out=[0u8;         6];
++        for(i,v)in out.iter_mut().enumerate(){
++            if i!=5&&s.as_bytes()[i*3+2]!=b':'{
++                return None;
++            }let p=&s[i*3..i*3+2];
++            if !p.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b)){
++                return None;
++            }*v=u8::from_str_radix(p,16).ok()?;
++        }
++        if !mac(out){
++            return None;
++        }Some((selector,out))
++    }
++}
++#[cfg(test)]
++mod tests {
++    use super::*;
++    fn base()->Vec<String>{
++        vec!["softnet".into(),"--vm-fd=0".into(),"--vm-mac-address=02:00:00:00:00:02".into(),format!("--block=@boxwarden-n1-diagnostic:{}:{}",crate::tests::arm().generation,crate::tests::arm().nonce)]
++    }
++    #[test]
++    fn exact_child_argument_grammar_no_overrides_or_duplicate_selector(){
++        let b=base();
++        assert!(Args::try_parse_from(&b).unwrap().admit().is_some());
++        for extra in ["--allow=0.0.0.0/0","--expose=2222:22","--vm-net-type=host","--vm-fd=-1","--bootpd-lease-time=601","--sudo-escalation-probing","--sudo-escalation-done"]{
++            let mut a=b.clone();
++            a.push(extra.into());
++            assert!(Args::try_parse_from(a).map_or(true,|a|a.admit().is_none()));
++        }
++        let mut a=b.clone();
++        a[3]="--block=@boxwarden-host-containment".into();
++        assert!(Args::try_parse_from(&a).unwrap().admit().is_none());
++        a[3]=format!("{},{}",b[3],b[3].strip_prefix("--block=").unwrap());
++        assert!(Args::try_parse_from(a).unwrap().admit().is_none());
++        let mut a=b.clone();
++        a.push(b[3].clone());
++        assert!(Args::try_parse_from(a).is_err());
++        for s in ["02:00:00:00:00:0A","03:00:00:00:00:02","00:00:00:00:00:00"]{
++            let mut a=b.clone();
++            a[2]=format!("--vm-mac-address={s}");
++            assert!(Args::try_parse_from(a).unwrap().admit().is_none());
++        }
++        // Exact one-element selector, no split embedded identities.
++        assert_eq!(b.len(),4);
++        assert!(!b[3].as_bytes().contains(&0));
++    }
++}

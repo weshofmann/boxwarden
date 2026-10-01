@@ -1,0 +1,283 @@
+{
+  "claim": "Read-only exact protected ancestry metadata/ACL preparation; actual home0750 and3restrictive deny-delete ACLs contradict current sourcefixture700/noACL assumptions. No ACL/mode changes, VM/Tart/state/process actions. Fulltimestamps preflight-only; postclone parentdirectory times inherently differ.",
+  "records": [
+    {
+      "acl_argv": [
+        "/bin/ls",
+        "-lde",
+        "/"
+      ],
+      "acl_argv_count": 3,
+      "acl_argv_utf8_hex": [
+        "2f62696e2f6c73",
+        "2d6c6465",
+        "2f"
+      ],
+      "acl_entries": [],
+      "acl_stdout_bytes": 47,
+      "acl_stdout_sha256": "c9bc835c785915ee471536809ce3de4c5aa349df31df50307e7a42a4fc6e1a65",
+      "bytes": 736,
+      "closed_environment": {
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+      },
+      "ctime_ns": 1790233837000000000,
+      "device": 16777230,
+      "flags": 1048576,
+      "gid": 0,
+      "inode": 2,
+      "mode": 493,
+      "mtime_ns": 1790233837000000000,
+      "nlink": 23,
+      "no_acl": true,
+      "path": "/",
+      "stat_brackets_match": true,
+      "uid": 0
+    },
+    {
+      "acl_argv": [
+        "/bin/ls",
+        "-lde",
+        "/Users"
+      ],
+      "acl_argv_count": 3,
+      "acl_argv_utf8_hex": [
+        "2f62696e2f6c73",
+        "2d6c6465",
+        "2f5573657273"
+      ],
+      "acl_entries": [],
+      "acl_stdout_bytes": 51,
+      "acl_stdout_sha256": "b78169d57b437a1b3bd7bc4e6a00ef6c99edab97aa066a6a85c0928f29f66dd1",
+      "bytes": 160,
+      "closed_environment": {
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+      },
+      "ctime_ns": 1790636475585555324,
+      "device": 16777230,
+      "flags": 1048576,
+      "gid": 80,
+      "inode": 18495,
+      "mode": 493,
+      "mtime_ns": 1790636475585555324,
+      "nlink": 5,
+      "no_acl": true,
+      "path": "/Users",
+      "stat_brackets_match": true,
+      "uid": 0
+    },
+    {
+      "acl_argv": [
+        "/bin/ls",
+        "-lde",
+        "/Users/devel"
+      ],
+      "acl_argv_count": 3,
+      "acl_argv_utf8_hex": [
+        "2f62696e2f6c73",
+        "2d6c6465",
+        "2f55736572732f646576656c"
+      ],
+      "acl_entries": [
+        " 0: group:everyone deny delete"
+      ],
+      "acl_stdout_bytes": 91,
+      "acl_stdout_sha256": "c188d6fba9e3de32df545ef5ed72d19cd8dee52f7e44f34d5d2828037a4a1949",
+      "bytes": 1472,
+      "closed_environment": {
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+      },
+      "ctime_ns": 1790791356891977195,
+      "device": 16777230,
+      "flags": 0,
+      "gid": 20,
+      "inode": 33318,
+      "mode": 488,
+      "mtime_ns": 1790791356891977195,
+      "nlink": 46,
+      "no_acl": false,
+      "path": "/Users/devel",
+      "stat_brackets_match": true,
+      "uid": 501
+    },
+    {
+      "acl_argv": [
+        "/bin/ls",
+        "-lde",
+        "/Users/devel/Library"
+      ],
+      "acl_argv_count": 3,
+      "acl_argv_utf8_hex": [
+        "2f62696e2f6c73",
+        "2d6c6465",
+        "2f55736572732f646576656c2f4c696272617279"
+      ],
+      "acl_entries": [
+        " 0: group:everyone deny delete"
+      ],
+      "acl_stdout_bytes": 99,
+      "acl_stdout_sha256": "c75b7fbc5cdf8801335fc87b599971e25fece8624184d8be0d3ace082aae2f66",
+      "bytes": 2880,
+      "closed_environment": {
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+      },
+      "ctime_ns": 1790636544202300344,
+      "device": 16777230,
+      "flags": 32768,
+      "gid": 20,
+      "inode": 33328,
+      "mode": 448,
+      "mtime_ns": 1790636544202300344,
+      "nlink": 90,
+      "no_acl": false,
+      "path": "/Users/devel/Library",
+      "stat_brackets_match": true,
+      "uid": 501
+    },
+    {
+      "acl_argv": [
+        "/bin/ls",
+        "-lde",
+        "/Users/devel/Library/Application Support"
+      ],
+      "acl_argv_count": 3,
+      "acl_argv_utf8_hex": [
+        "2f62696e2f6c73",
+        "2d6c6465",
+        "2f55736572732f646576656c2f4c6962726172792f4170706c69636174696f6e20537570706f7274"
+      ],
+      "acl_entries": [
+        " 0: group:everyone deny delete"
+      ],
+      "acl_stdout_bytes": 119,
+      "acl_stdout_sha256": "0d6ec808efaba192d6533c30ddb7d9179caf6a9ee32cc79971c3991a92650895",
+      "bytes": 2048,
+      "closed_environment": {
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+      },
+      "ctime_ns": 1790723021768099971,
+      "device": 16777230,
+      "flags": 0,
+      "gid": 20,
+      "inode": 33329,
+      "mode": 448,
+      "mtime_ns": 1790723021768099971,
+      "nlink": 64,
+      "no_acl": false,
+      "path": "/Users/devel/Library/Application Support",
+      "stat_brackets_match": true,
+      "uid": 501
+    },
+    {
+      "acl_argv": [
+        "/bin/ls",
+        "-lde",
+        "/Users/devel/Library/Application Support/boxwarden"
+      ],
+      "acl_argv_count": 3,
+      "acl_argv_utf8_hex": [
+        "2f62696e2f6c73",
+        "2d6c6465",
+        "2f55736572732f646576656c2f4c6962726172792f4170706c69636174696f6e20537570706f72742f626f7877617264656e"
+      ],
+      "acl_entries": [],
+      "acl_stdout_bytes": 97,
+      "acl_stdout_sha256": "4f361071d96b42002794516c50a364f039be1965f13c2e5806d0b97572aaac08",
+      "bytes": 384,
+      "closed_environment": {
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+      },
+      "ctime_ns": 1790621699911682870,
+      "device": 16777230,
+      "flags": 0,
+      "gid": 20,
+      "inode": 751271,
+      "mode": 448,
+      "mtime_ns": 1790621699911682870,
+      "nlink": 12,
+      "no_acl": true,
+      "path": "/Users/devel/Library/Application Support/boxwarden",
+      "stat_brackets_match": true,
+      "uid": 501
+    },
+    {
+      "acl_argv": [
+        "/bin/ls",
+        "-lde",
+        "/Users/devel/Library/Application Support/boxwarden/tart"
+      ],
+      "acl_argv_count": 3,
+      "acl_argv_utf8_hex": [
+        "2f62696e2f6c73",
+        "2d6c6465",
+        "2f55736572732f646576656c2f4c6962726172792f4170706c69636174696f6e20537570706f72742f626f7877617264656e2f74617274"
+      ],
+      "acl_entries": [],
+      "acl_stdout_bytes": 101,
+      "acl_stdout_sha256": "8551a0d311b0a71c365e3f413335a88dcf02db2f7a49e1de2002e79c7af3c6ce",
+      "bytes": 192,
+      "closed_environment": {
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+      },
+      "ctime_ns": 1790471237166947510,
+      "device": 16777245,
+      "flags": 0,
+      "gid": 20,
+      "inode": 2,
+      "mode": 448,
+      "mtime_ns": 1790471237166947510,
+      "nlink": 6,
+      "no_acl": true,
+      "path": "/Users/devel/Library/Application Support/boxwarden/tart",
+      "stat_brackets_match": true,
+      "uid": 501
+    },
+    {
+      "acl_argv": [
+        "/bin/ls",
+        "-lde",
+        "/Users/devel/Library/Application Support/boxwarden/tart/vms"
+      ],
+      "acl_argv_count": 3,
+      "acl_argv_utf8_hex": [
+        "2f62696e2f6c73",
+        "2d6c6465",
+        "2f55736572732f646576656c2f4c6962726172792f4170706c69636174696f6e20537570706f72742f626f7877617264656e2f746172742f766d73"
+      ],
+      "acl_entries": [],
+      "acl_stdout_bytes": 106,
+      "acl_stdout_sha256": "7f74aeeb1ea11b513f8f3becb8a9ea40d3840b9696ee1cc3c62a92565f86b8d4",
+      "bytes": 448,
+      "closed_environment": {
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+      },
+      "ctime_ns": 1790717663270063200,
+      "device": 16777245,
+      "flags": 0,
+      "gid": 20,
+      "inode": 20,
+      "mode": 493,
+      "mtime_ns": 1790717663270063200,
+      "nlink": 14,
+      "no_acl": true,
+      "path": "/Users/devel/Library/Application Support/boxwarden/tart/vms",
+      "stat_brackets_match": true,
+      "uid": 501
+    }
+  ]
+}

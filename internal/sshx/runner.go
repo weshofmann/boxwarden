@@ -25,5 +25,5 @@ func (r ExecRunner) Run(ctx context.Context, command Command) (Result, error) {
 		Path: command.Path, Args: append([]string(nil), command.Args...), Stdin: command.Stdin,
 		Env: []string{"LC_ALL=C", "LANG=C", "TZ=UTC"},
 	})
-	return Result{Stdout: result.Stdout, Stderr: result.Stderr, Truncated: result.Truncated}, err
+	return Result{Stdout: result.Stdout, Stderr: result.Stderr, Truncated: result.Truncated, StderrComplete: result.StderrComplete, StdoutTruncated: result.StdoutTruncated, StderrTruncated: result.StderrTruncated}, err
 }
