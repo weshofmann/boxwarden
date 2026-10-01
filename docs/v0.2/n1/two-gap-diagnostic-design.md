@@ -290,3 +290,30 @@ is unqualified. No current process census, installation or actor execution
 was performed. Launch/watch, coordinator/closeout, exact Go artifacts and
 four fresh final package reviews remain pending. Published622bdec passed
 CI440 all4jobs/41steps; the next source publication needs its own CI.
+
+
+## Trial-only guest transport component closure
+
+Five typed SSH operations now prepare fixed trial artifacts, inspect metadata,
+run fixed SSH/DNS/HTTPS controls, retain the exact peer observer child and make
+one bounded IPv4 TCP22 connect. Existing connection/pin validation and Runner
+remain the transport boundary; canonical clipboard/helper/observer bytes are
+unchanged. Configured DNS uses one fixed resolvectl A query with local cache,
+synthesis and zone lookup disabled; this does not prove upstream cache freshness.
+
+The initial fresh review found0Critical/1Important/0Minor. Its Important timing
+finding is now ADDRESSED at its original severity, with no new finding. Complete
+observer records require readiness within the matched budget and elapsed time
+within the producer-representable closing envelope before absence eligibility.
+This recognizes serialized rounding without extending the actual deadline.
+Original-reviewer closure SHA256
+26bf3b6f2f0d4cea9c1f9f8b0da30a9ebc84ef63d5dece160c0d32732ec12a2b;
+Root independently checked all205 corrective entries and current component bytes.
+
+Eleven retained corrective runs comprise one meaningful RED and ten exit-zero
+results: baseline/GREEN, stock/combined tests/race/vet, fourteen canonical producer
+controls and compiler argument control. Prior17Go/8Python controls remain retained.
+Historical initial RED before-image limitations remain explicit. This closes only
+this component; caller locks, current READY/certificate/approval, original budgets,
+one-use/two-guest gates and final four-seat review remain package requirements.
+No real guest, clipboard, network, census or privileged operation was performed.
