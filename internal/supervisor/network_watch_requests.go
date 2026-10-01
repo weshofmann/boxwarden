@@ -19,10 +19,10 @@ type networkCollectRequest struct {
 	OperationID   string  `json:"operation_id"`
 }
 type networkArmResponse struct {
-	Version uint8             `json:"version"`
-	Binding Binding           `json:"binding"`
-	OK      bool              `json:"ok"`
-	Armed   networkdiag.Armed `json:"armed"`
+	Version uint8                  `json:"version"`
+	Binding Binding                `json:"binding"`
+	OK      bool                   `json:"ok"`
+	Receipt networkdiag.ArmReceipt `json:"receipt"`
 }
 type networkCollectResponse struct {
 	Version uint8               `json:"version"`
@@ -30,3 +30,5 @@ type networkCollectResponse struct {
 	OK      bool                `json:"ok"`
 	Summary networkdiag.Summary `json:"summary"`
 }
+
+type networkObserveRequest networkInspectRequest

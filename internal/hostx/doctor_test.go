@@ -518,7 +518,7 @@ func healthyDoctorFixture(t *testing.T) (*doctorInspectorFake, Request) {
 	}
 	paths[QualifiedSoftnetPath] = PathFact{Exists: true, Regular: true, Mode: SoftnetMode, UID: 0, GID: group.ID, Links: 1, SHA256: SoftnetExecutableSHA256}
 	paths[filepath.Join(filepath.Dir(QualifiedSoftnetPath), "manifest.json")] = PathFact{Exists: true, Regular: true, Mode: 0o444, UID: 0, GID: 0, Links: 1, Data: manifestBytes}
-	if SoftnetVersion == "0.19.0-boxwarden-n1-diagnostic.1" {
+	if SoftnetVersion == "0.19.0-boxwarden-n1-diagnostic.2" {
 		paths[filepath.Join(filepath.Dir(QualifiedSoftnetPath), "launch.lock")] = PathFact{Exists: true, Regular: true, Mode: 0o440, UID: 0, GID: group.ID, Links: 1, SHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
 	}
 	paths[request.TartPath] = PathFact{Exists: true, Regular: true, Mode: 0o755, UID: 501, GID: 20, Links: 1, SHA256: TartExecutableSHA256}
@@ -599,7 +599,7 @@ func (f *doctorInspectorFake) DirectoryEntries(string) ([]string, error) {
 	if f.directoryNames != nil {
 		return append([]string(nil), f.directoryNames...), nil
 	}
-	if SoftnetVersion == "0.19.0-boxwarden-n1-diagnostic.1" {
+	if SoftnetVersion == "0.19.0-boxwarden-n1-diagnostic.2" {
 		return []string{"launch.lock", "manifest.json", "softnet"}, nil
 	}
 	return []string{"manifest.json", "softnet"}, nil

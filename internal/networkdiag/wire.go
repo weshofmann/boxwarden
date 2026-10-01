@@ -7,6 +7,7 @@ package networkdiag
 import (
 	"errors"
 	"regexp"
+	"time"
 )
 
 const MaxFrame = 4096
@@ -133,4 +134,21 @@ type Summary struct {
 	Loss                  bool     `json:"loss"`
 	InvalidFlags          [14]bool `json:"invalid_flags"`
 	Counters              Counters `json:"counters"`
+}
+
+// ArmReceipt carries the actual host send bound; receipt/RPC arrival does not
+// create another interval. Rust frames and offsets remain unchanged.
+type ArmReceipt struct {
+	Version  uint8        `json:"version"`
+	Armed    Armed        `json:"armed"`
+	Sent     ClockReading `json:"sent"`
+	Deadline ClockReading `json:"deadline"`
+}
+
+func (r ArmReceipt) Matches(a Arm) bool {
+	d, e := deadlineReading(r.Sent, time.Duration(a.DurationMS)*time.Millisecond+100*time.Millisecond)
+	return e == nil && r.Version == 1 && r.Armed.Matches(a) && r.Deadline == d
+}
+func (r ArmReceipt) Current(now ClockReading) bool {
+	return beforeReading(now, r.Deadline) && now.WallNS >= r.Sent.WallNS && now.ContinuousNS >= r.Sent.ContinuousNS
 }

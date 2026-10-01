@@ -96,6 +96,16 @@ func qualificationCompositionAllowed(relative string, source []byte) bool {
 	default:
 		return false
 	}
+	required := []string{"n1diagnostic"}
+	if cleanup {
+		required = append(required, "n1cleanup")
+	}
+	return sourceImpliesTags(relative, source, required, []string{"n1candidate"})
+}
+
+// Reuse the same finite actual-leading-comment implication proof for exact
+// diagnostic correlation files. This never grants a path exemption itself.
+func sourceImpliesTags(relative string, source []byte, required, forbidden []string) bool {
 	file, err := parser.ParseFile(token.NewFileSet(), relative, source, parser.ImportsOnly|parser.ParseComments)
 	if err != nil {
 		return false
@@ -137,6 +147,12 @@ func qualificationCompositionAllowed(relative string, source []byte) bool {
 		return false
 	}
 	tags := map[string]bool{"n1diagnostic": true, "n1candidate": true, "n1cleanup": true}
+	for _, tag := range append(append([]string(nil), required...), forbidden...) {
+		tags[tag] = true
+	}
+	if len(tags) > 8 {
+		return false
+	}
 	nodes := 0
 	var collect func(constraint.Expr) bool
 	collect = func(e constraint.Expr) bool {
@@ -181,8 +197,15 @@ func qualificationCompositionAllowed(relative string, source []byte) bool {
 			continue
 		}
 		satisfiable = true
-		if !enabled("n1diagnostic") || enabled("n1candidate") || cleanup && !enabled("n1cleanup") {
-			return false
+		for _, tag := range required {
+			if !enabled(tag) {
+				return false
+			}
+		}
+		for _, tag := range forbidden {
+			if enabled(tag) {
+				return false
+			}
 		}
 	}
 	return satisfiable

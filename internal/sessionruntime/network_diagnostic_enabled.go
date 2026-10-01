@@ -17,6 +17,7 @@ import (
 )
 
 type ownerDiagnosticDependencies struct {
+	process func() (networkdiag.ProcessCorrelation, error)
 	acquire func(context.Context, config.Config, config.Domain, supervisor.LaunchRequest, hostx.RuntimeExpectation) (session.LaunchGuard, error)
 	launch  func(context.Context, tart.LaunchConfig, backend.StartRequest, supervisor.Binding) (backend.Handle, error)
 	pair    func(context.Context, networkdiag.Arm) ([2]networkdiag.Inspection, error)

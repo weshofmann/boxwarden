@@ -262,3 +262,43 @@ func TestDiagnosticPrivateCollectCompleteCounterImplications(t *testing.T) {
 		})
 	}
 }
+
+type legacyArmOwner struct {
+	RuntimeOwner
+	call func(context.Context, networkdiag.Arm) (networkdiag.Armed, error)
+}
+
+func (o legacyArmOwner) ArmDiagnosticWatch(ctx context.Context, a networkdiag.Arm) (networkdiag.Armed, error) {
+	return o.call(ctx, a)
+}
+func TestDiagnosticARMRequiresActualHostSendReceipt(t *testing.T) {
+	b, o := watchControlFixture(t)
+	legacy := legacyArmOwner{RuntimeOwner: o, call: o.ArmDiagnosticWatch}
+	req := networkArmRequest{1, "n1_network_arm", b, uint64(time.Now().Add(time.Second).UnixNano()), o.arm}
+	raw, _ := json.Marshal(req)
+	server, client := net.Pipe()
+	done := make(chan struct{})
+	go func() { handleControl(t.Context(), server, b, legacy, func() error { return nil }); close(done) }()
+	client.SetDeadline(time.Now().Add(time.Second))
+	writeFrame(client, raw)
+	out, err := networkdiag.ReadFrame(client)
+	client.Close()
+	<-done
+	var response networkArmResponse
+	if err != nil || networkdiag.Decode(out, &response) != nil {
+		t.Fatal(err)
+	}
+	if response.OK || o.armCalls != 0 {
+		t.Fatal("ARM reached a legacy owner without retained host-send deadline")
+	}
+}
+
+func (o *watchControlOwner) ArmDiagnosticWatchReceipt(ctx context.Context, a networkdiag.Arm) (networkdiag.ArmReceipt, error) {
+	armed, e := o.ArmDiagnosticWatch(ctx, a)
+	sent, ce := networkdiag.HostClockNow()
+	if ce != nil {
+		sent = networkdiag.ClockReading{WallNS: uint64(time.Now().UnixNano()), ContinuousNS: 1}
+	}
+	d := uint64(a.DurationMS)*1000000 + 100000000
+	return networkdiag.ArmReceipt{Version: 1, Armed: armed, Sent: sent, Deadline: networkdiag.ClockReading{WallNS: sent.WallNS + d, ContinuousNS: sent.ContinuousNS + d}}, e
+}

@@ -698,3 +698,42 @@ Historical initial RED before-image limitations remain explicit. This closes onl
 this component; caller locks, current READY/certificate/approval, original budgets,
 one-use/two-guest gates and final four-seat review remain package requirements.
 No real guest, clipboard, network, census or privileged operation was performed.
+
+
+## Go launch/watch and diagnostic.2 binding closure
+
+The retained Tart launch now anchors30s HELLO admission and an independent
+30min pre-ARM resource cap before spawn. Suspend-aware wall/continuous checks,
+sticky error/regression/overflow refusal and independent polling need no collector.
+ARM remains single-use1000–30000ms with100ms close grace; typed receipts retain
+the actual immediately-pre-write host deadline. The coordinator must separately
+preserve the original approval and cumulative active/attendance budgets.
+
+Fresh launch observation brackets exact connection/pin/runtime/state/SSH binding,
+handle/watch and actual owner/retained-child correlation across the final Snapshot.
+Native queries are restricted to os.Getpid or actual retained cmd.Process.Pid;
+correlation grants no adoption, reconstruction, stop or reap authority. Stock
+inspection remains phase-independent. Narrow architecture exceptions retain the
+whole walker and parsed tag/field/type/path negative controls. Go now admits only
+diagnostic.2 executable1bb12bec... and archive76704f05..., preserving older identities.
+
+The fresh component review found0Critical/1Important/0Minor. Its Important/MediumP2
+late ARM-waiter finding is CLOSED at the original severity: armResult checks both
+original deadlines even after SUMMARY, without expiring ordinary completed
+collection. RED reproduced eight exact/after cases; affected-package GREEN,
+focused race and native vet passed. Original-reviewer closure SHA256
+4fd65076dfec2f39cc3efcfb39a4fd7efc3ccdd149811e5df0dabb0b940d0f9c.
+All35 current source bindings,8001 original and1157 corrective evidence entries
+were independently verified. Retained17 earlier failed attempts remain historical.
+
+A separate Minor patch-hash reporting defect is corrected by an immutable erratum:
+the actual final patch11b8b659... differs from prospective37ac353... only in two
+headers. Original evidence is preserved. Precise producing-directory preservation
+means21 files:20 source/build/manifest inputs plus historical artifact.json;
+separate new recipe/artifact records are additional inputs. Earlier shorthand
+“21 source files” did not distinguish that metadata file.
+
+Guest transport headf0fd8dd passed CI442 all4jobs/41steps; this new publication
+requires its own CI. This is component source/fixture closure. L/C/F, finite
+kernel/paged OS catalogue, complete static lock, final Go twins and four fresh
+final reviews remain gates. No current census, installation or live trial occurred.

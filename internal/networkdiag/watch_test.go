@@ -342,3 +342,432 @@ func TestDiagnosticWatchConsumesCompleteCounterImplications(t *testing.T) {
 		})
 	}
 }
+
+func TestTimelyHelloSurvivesReviewBeyondThirtySeconds(t *testing.T) {
+	var mu sync.Mutex
+	now := time.Now()
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	w, child := watchFixture(t, clock)
+	a := armFixture()
+	sendFixture(t, child, helloFixture(a))
+	if _, err := w.AwaitHello(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	now = now.Add(31 * time.Second)
+	mu.Unlock()
+	if _, err := w.AwaitHello(t.Context()); err != nil {
+		t.Fatal("timely retained HELLO lost during review", err)
+	}
+	done := make(chan error, 1)
+	go func() { _, e := w.Arm(t.Context(), a); done <- e }()
+	if _, err := ReadFrame(child); err != nil {
+		t.Fatal(err)
+	}
+	sendFixture(t, child, armedFixture(a))
+	if err := <-done; err != nil {
+		t.Fatal("review delay prevented one ARM", err)
+	}
+}
+func TestArmDurationBoundsRemainUnchanged(t *testing.T) {
+	for _, n := range []uint32{999, 1000, 30000, 30001} {
+		a := armFixture()
+		a.DurationMS = n
+		if a.Valid(a.Generation, a.Nonce, a.Candidate.MAC, a.Gateway) != (n >= 1000 && n <= 30000) {
+			t.Fatal("ARM range changed", n)
+		}
+	}
+}
+
+func TestPrearmCapExclusiveStickyAndNeverExtended(t *testing.T) {
+	for _, mode := range []string{"before", "exact", "after", "suspend", "wall-regression", "continuous-regression", "clock-error"} {
+		t.Run(mode, func(t *testing.T) {
+			var mu sync.Mutex
+			r := ClockReading{WallNS: 1000000000000000000, ContinuousNS: 1000000000}
+			bad := false
+			c, e := newLaunchClock(func() (ClockReading, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				if bad {
+					return ClockReading{}, ErrMetadata
+				}
+				return r, nil
+			})
+			if e != nil {
+				t.Fatal(e)
+			}
+			mu.Lock()
+			base := r
+			r.WallNS += uint64(PrearmCap)
+			r.ContinuousNS += uint64(PrearmCap)
+			switch mode {
+			case "before":
+				r.WallNS--
+				r.ContinuousNS--
+			case "after":
+				r.WallNS++
+				r.ContinuousNS++
+			case "suspend":
+				r.WallNS = base.WallNS + 1
+			case "wall-regression":
+				r.WallNS = base.WallNS - 1
+			case "continuous-regression":
+				r.ContinuousNS = base.ContinuousNS - 1
+			case "clock-error":
+				bad = true
+			}
+			mu.Unlock()
+			_, e = c.check(true)
+			if mode == "before" {
+				if e != nil {
+					t.Fatal(e)
+				}
+				if c.anchor != base {
+					t.Fatal("deadline anchor extended")
+				}
+			} else {
+				if e == nil {
+					t.Fatal("expiry/regression/error admitted")
+				}
+				mu.Lock()
+				r = base
+				bad = false
+				mu.Unlock()
+				if _, e = c.check(true); e == nil {
+					t.Fatal("invalid clock revived")
+				}
+			}
+		})
+	}
+}
+func TestLaunchClockRejectsDeadlineOverflow(t *testing.T) {
+	for _, r := range []ClockReading{{WallNS: 1<<63 - 1, ContinuousNS: 1}, {WallNS: 1, ContinuousNS: ^uint64(0)}} {
+		if _, e := newLaunchClock(func() (ClockReading, error) { return r, nil }); e == nil {
+			t.Fatal("unchecked cap overflow")
+		}
+	}
+}
+
+func TestPrearmIndependentContinuousExpiryWithoutCollector(t *testing.T) {
+	var mu sync.Mutex
+	r := ClockReading{WallNS: uint64(time.Now().UnixNano()), ContinuousNS: 1}
+	c, e := newLaunchClock(func() (ClockReading, error) { mu.Lock(); defer mu.Unlock(); return r, nil })
+	if e != nil {
+		t.Fatal(e)
+	}
+	w, child := watchFixture(t, time.Now)
+	w.Close()
+	child.Close()
+	fds, e := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, fd := range fds {
+		syscall.CloseOnExec(fd)
+		syscall.SetNonblock(fd, true)
+	}
+	a := armFixture()
+	w = NewWatchAt(os.NewFile(uintptr(fds[0]), "cap-parent"), a.Generation, a.Nonce, a.Candidate.MAC, c)
+	child = os.NewFile(uintptr(fds[1]), "cap-child")
+	t.Cleanup(func() { w.Close(); child.Close() })
+	sendFixture(t, child, helloFixture(a))
+	if _, e = w.AwaitHello(t.Context()); e != nil {
+		t.Fatal(e)
+	}
+	before, e := w.Observe()
+	if e != nil {
+		t.Fatal(e)
+	}
+	for i := 0; i < 3; i++ {
+		if got, e := w.Observe(); e != nil || got.Deadline != before.Deadline || got.Anchor != before.Anchor {
+			t.Fatal("observation reset cap", e)
+		}
+	}
+	mu.Lock()
+	r.ContinuousNS += uint64(PrearmCap)
+	mu.Unlock()
+	select {
+	case <-w.invalidDone:
+	case <-time.After(time.Second):
+		t.Fatal("no independent continuous cap wake after simulated suspend")
+	}
+	if _, e = w.ArmReceipt(t.Context(), a); e == nil {
+		t.Fatal("expired cap rearmed")
+	}
+}
+func TestHelloDecodePauseCannotAdmitLateFrame(t *testing.T) {
+	var mu sync.Mutex
+	now := time.Now()
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	w, child := watchFixture(t, clock)
+	pause, resume := make(chan struct{}), make(chan struct{})
+	w.mu.Lock()
+	w.afterHelloDecode = func() { close(pause); <-resume }
+	w.mu.Unlock()
+	a := armFixture()
+	sendFixture(t, child, helloFixture(a))
+	<-pause
+	mu.Lock()
+	now = now.Add(30 * time.Second)
+	mu.Unlock()
+	close(resume)
+	if _, e := w.AwaitHello(t.Context()); e == nil {
+		t.Fatal("postdecode late HELLO admitted")
+	}
+}
+func TestPrearmCapQueuedARMExclusiveAndOneUse(t *testing.T) {
+	for _, delta := range []time.Duration{-time.Nanosecond, 0, time.Nanosecond} {
+		t.Run(delta.String(), func(t *testing.T) {
+			var mu sync.Mutex
+			now := time.Now()
+			clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+			w, child := watchFixture(t, clock)
+			a := armFixture()
+			sendFixture(t, child, helloFixture(a))
+			if _, e := w.AwaitHello(t.Context()); e != nil {
+				t.Fatal(e)
+			}
+			mu.Lock()
+			now = now.Add(PrearmCap + delta)
+			mu.Unlock()
+			if delta < 0 {
+				done := make(chan error, 1)
+				go func() { _, e := w.ArmReceipt(t.Context(), a); done <- e }()
+				if _, e := ReadFrame(child); e != nil {
+					t.Fatal(e)
+				}
+				sendFixture(t, child, armedFixture(a))
+				if e := <-done; e != nil {
+					t.Fatal("before cap refused", e)
+				}
+			} else {
+				if _, e := w.ArmReceipt(t.Context(), a); e == nil {
+					t.Fatal("exact/after cap admitted")
+				}
+				child.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+				var b [1]byte
+				if n, _ := child.Read(b[:]); n != 0 {
+					t.Fatal("expired ARM wrote bytes")
+				}
+			}
+			if _, e := w.ArmReceipt(t.Context(), a); e == nil {
+				t.Fatal("consumed/expired watch rearmed")
+			}
+		})
+	}
+}
+func TestArmReceiptActualSendDeadlineDoesNotReset(t *testing.T) {
+	var mu sync.Mutex
+	now := time.Now()
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	w, child := watchFixture(t, clock)
+	a := armFixture()
+	sendFixture(t, child, helloFixture(a))
+	if _, e := w.AwaitHello(t.Context()); e != nil {
+		t.Fatal(e)
+	}
+	done := make(chan struct {
+		r ArmReceipt
+		e error
+	}, 1)
+	go func() {
+		r, e := w.ArmReceipt(t.Context(), a)
+		done <- struct {
+			r ArmReceipt
+			e error
+		}{r, e}
+	}()
+	if _, e := ReadFrame(child); e != nil {
+		t.Fatal(e)
+	}
+	w.mu.Lock()
+	sent, deadline := w.armReceipt.Sent, w.armReceipt.Deadline
+	w.mu.Unlock()
+	mu.Lock()
+	now = now.Add(500 * time.Millisecond)
+	mu.Unlock()
+	sendFixture(t, child, armedFixture(a))
+	got := <-done
+	if got.e != nil || !got.r.Matches(a) || got.r.Sent != sent || got.r.Deadline != deadline {
+		t.Fatal("receipt replaced actual send deadline", got.e)
+	}
+	if got.r.Current(deadline) {
+		t.Fatal("exact expiry accepted")
+	}
+}
+
+// This fixture holds the actual ARM caller after timely ARMED while the real
+// reader accepts SUMMARY. Only clock readings are synthetic; frames and phase
+// transitions use the retained nonblocking socket and production reader.
+func timelySummaryPausedARMFixture(t *testing.T, phase string) (*Watch, ClockReading, ClockReading, func(ClockReading), func(), <-chan error) {
+	t.Helper()
+	var clockMu sync.Mutex
+	r := ClockReading{WallNS: uint64(time.Now().UnixNano()), ContinuousNS: 1000000000}
+	read := func() (ClockReading, error) { clockMu.Lock(); defer clockMu.Unlock(); return r, nil }
+	set := func(next ClockReading) { clockMu.Lock(); r = next; clockMu.Unlock() }
+	c, err := newLaunchClock(read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fd := range fds {
+		syscall.CloseOnExec(fd)
+		syscall.SetNonblock(fd, true)
+	}
+	a := armFixture()
+	w := watchAt(os.NewFile(uintptr(fds[0]), "i1-parent"), a.Generation, a.Nonce, a.Candidate.MAC, c, func() time.Time { got, _ := read(); return time.Unix(0, int64(got.WallNS)) })
+	child := os.NewFile(uintptr(fds[1]), "i1-child")
+	child.SetDeadline(time.Now().Add(5 * time.Second))
+	paused, resume := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	release := func() { once.Do(func() { close(resume) }) }
+	t.Cleanup(func() { release(); w.Close(); child.Close() })
+	w.afterArmedWait = func() { close(paused); <-resume }
+	sendFixture(t, child, helloFixture(a))
+	if _, err := w.AwaitHello(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		receipt, err := w.ArmReceipt(t.Context(), a)
+		if err == nil && !receipt.Matches(a) {
+			err = ErrMetadata
+		}
+		result <- err
+	}()
+	if raw, err := ReadFrame(child); err != nil {
+		t.Fatal(err)
+	} else {
+		var got Arm
+		if Decode(raw, &got) != nil || got != a {
+			t.Fatal("actual ARM mismatch")
+		}
+	}
+	sendFixture(t, child, armedFixture(a))
+	select {
+	case <-paused:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ARM waiter did not pause after actual ARMED")
+	}
+	w.mu.Lock()
+	sent, deadline := w.armReceipt.Sent, w.armDeadline
+	if w.phase != "armed" {
+		t.Fatal("timely ARMED not admitted")
+	}
+	w.mu.Unlock()
+	timely := ClockReading{WallNS: sent.WallNS + uint64(time.Duration(a.DurationMS)*time.Millisecond), ContinuousNS: sent.ContinuousNS + uint64(time.Duration(a.DurationMS)*time.Millisecond)}
+	set(timely)
+	sendFixture(t, child, summaryFixture(a))
+	limit := time.Now().Add(2 * time.Second)
+	for {
+		w.mu.Lock()
+		got := w.phase
+		summary := w.summary
+		w.mu.Unlock()
+		if got == phase {
+			if !summary.Matches(a, armedFixture(a)) {
+				t.Fatal("timely SUMMARY not actually admitted")
+			}
+			break
+		}
+		if got == "invalid" || time.Now().After(limit) {
+			t.Fatalf("wanted actual %s after SUMMARY, got %s", phase, got)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return w, timely, deadline, set, release, result
+}
+
+func TestDiagnosticWatchSummaryARMWaiterOriginalDeadline(t *testing.T) {
+	for _, phase := range []string{"summary", "complete"} {
+		for _, axis := range []string{"wall", "continuous"} {
+			for _, edge := range []string{"before", "exact", "after"} {
+				t.Run(phase+"/"+axis+"/"+edge, func(t *testing.T) {
+					w, timely, deadline, set, release, result := timelySummaryPausedARMFixture(t, phase)
+					next := timely
+					bound := deadline.WallNS
+					if axis == "continuous" {
+						bound = deadline.ContinuousNS
+					}
+					if edge == "before" {
+						bound--
+					}
+					if edge == "after" {
+						bound++
+					}
+					if axis == "wall" {
+						next.WallNS = bound
+					} else {
+						next.ContinuousNS = bound
+					}
+					set(next)
+					release()
+					select {
+					case err := <-result:
+						if (err == nil) != (edge == "before") {
+							t.Fatalf("original %s ARM deadline %s in %s admitted=%t", axis, edge, phase, err == nil)
+						}
+					case <-time.After(time.Second):
+						t.Fatal("ARM result remained blocked")
+					}
+					w.mu.Lock()
+					gotPhase, gotDeadline := w.phase, w.armDeadline
+					w.mu.Unlock()
+					if gotDeadline != deadline {
+						t.Fatal("original deadline changed")
+					}
+					if edge != "before" {
+						if gotPhase != "invalid" {
+							t.Fatal("late ARM result did not become sticky invalid")
+						}
+						set(timely)
+						if _, err := w.armResult(); err == nil {
+							t.Fatal("invalid ARM waiter revived")
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestDiagnosticWatchCompletedCollectionRetainedWithoutLateARMWaiter(t *testing.T) {
+	for _, axis := range []string{"wall", "continuous"} {
+		t.Run(axis, func(t *testing.T) {
+			w, timely, deadline, set, release, result := timelySummaryPausedARMFixture(t, "summary")
+			// Complete the ARM caller on time, before reader completion and before
+			// advancing either clock beyond the original ARM-result deadline.
+			release()
+			if err := <-result; err != nil {
+				t.Fatal("timely ARM waiter refused", err)
+			}
+			select {
+			case <-w.done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("reader did not complete")
+			}
+			late := timely
+			if axis == "wall" {
+				late.WallNS = deadline.WallNS + 1
+			} else {
+				late.ContinuousNS = deadline.ContinuousNS + 1
+			}
+			set(late)
+			w.mu.Lock()
+			valid := w.validClockLocked()
+			phase := w.phase
+			w.mu.Unlock()
+			if !valid || phase != "complete" {
+				t.Fatal("general clock check changed completed-result contract")
+			}
+			a := armFixture()
+			got, err := w.Collect(t.Context(), a.OperationID)
+			if err != nil || !got.Matches(a, armedFixture(a)) {
+				t.Fatal("retained completed SUMMARY was lost", err)
+			}
+		})
+	}
+}

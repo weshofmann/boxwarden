@@ -238,7 +238,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 	foundationImports := make(map[string]string)
 	workspaceFormatterAlias := ""
 
-	if libprocSourcePattern.Match(source) {
+	if libprocSourcePattern.Match(source) && !diagnosticRetainedNativeAllowed(path, source) {
 		p.add(path, "discarded libproc", "libproc header, linker flag, or token")
 	}
 	if ofdSourcePattern.Match(source) {
@@ -304,6 +304,16 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 		ast.Inspect(file, func(node ast.Node) bool {
 			if spec, ok := node.(*ast.TypeSpec); ok && spec.Name.Name == "NativeOwner" {
 				if st, ok := spec.Type.(*ast.StructType); ok && exactDiagnosticNativeOwner(st) {
+					nativeOwnerTypes[st] = true
+				}
+			}
+			return true
+		})
+	}
+	if path == "internal/networkdiag/launch.go" && sourceImpliesTags(path, source, []string{"n1diagnostic"}, []string{"n1candidate"}) {
+		ast.Inspect(file, func(node ast.Node) bool {
+			if spec, ok := node.(*ast.TypeSpec); ok && spec.Name.Name == "ProcessCorrelation" {
+				if st, ok := spec.Type.(*ast.StructType); ok && exactRetainedProcessCorrelation(st) {
 					nativeOwnerTypes[st] = true
 				}
 			}
@@ -750,6 +760,71 @@ func exactDiagnosticNativeOwner(st *ast.StructType) bool {
 		}
 		tag, err := strconv.Unquote(f.Tag.Value)
 		if err != nil || string(reflect.StructTag(tag).Get("json")) != tags[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestDiagnosticRetainedCorrelationHasExactTaggedException(t *testing.T) {
+	nativeBody := "package tart\n/* #include <libproc.h> */\nimport \"C\"\n"
+	nativeTag := "n1diagnostic && !n1candidate && darwin && cgo"
+	for _, path := range []string{"internal/backend/tart/process_identity_diagnostic_darwin.go", "internal/networkdiag/process_darwin.go"} {
+		for _, tag := range []string{nativeTag, "n1diagnostic && !n1candidate", "n1diagnostic || darwin || cgo", "n1diagnostic && darwin && cgo", "n1diagnostic && !n1candidate && darwin", "n1diagnostic && !n1candidate && cgo", nativeTag + " && !n1diagnostic", nativeTag + " && a && b && c && d"} {
+			source := []byte("//go:build " + tag + "\n\n" + nativeBody)
+			issues := strings.Join(inspectSliceBSource(path, source), "\n")
+			if (tag == nativeTag) != (issues == "") {
+				t.Fatal(path, tag, issues)
+			}
+		}
+		for _, source := range []string{nativeBody, "// +build n1diagnostic,darwin,cgo\n" + nativeBody, "package tart\n//go:build " + nativeTag + "\n/* #include <libproc.h> */", "//go:build " + nativeTag + "\n//go:build " + nativeTag + "\n" + nativeBody} {
+			if len(inspectSliceBSource(path, []byte(source))) == 0 {
+				t.Fatal("legacy/missing/late/duplicate native exemption", path)
+			}
+		}
+	}
+	if len(inspectSliceBSource("internal/backend/tart/process_identity_diagnostic_sibling.go", []byte("//go:build "+nativeTag+"\n"+nativeBody))) == 0 {
+		t.Fatal("moved libproc admitted")
+	}
+	pid := "package networkdiag;type ProcessCorrelation struct { PID uint32 `json:\"pid\"`; BirthUS uint64 `json:\"birth_us\"`; UniqueID uint64 `json:\"unique_id\"` }"
+	tag := "//go:build n1diagnostic && !n1candidate\n\n"
+	path := "internal/networkdiag/launch.go"
+	if issues := inspectSliceBSource(path, []byte(tag+pid)); len(issues) != 0 {
+		t.Fatal("exact typed correlation refused", issues)
+	}
+	for _, bad := range []string{pid, strings.Replace(tag+pid, "ProcessCorrelation", "Other", 1), strings.Replace(tag+pid, "PID uint32", "PID uint64", 1), strings.Replace(tag+pid, "UniqueID uint64 `json:\"unique_id\"`", "Extra uint64 `json:\"extra\"`", 1), strings.Replace(tag+pid, "UniqueID uint64 `json:\"unique_id\"`", "UniqueID uint64 `json:\"unique_id\"`; Extra uint64", 1), strings.Replace(tag+pid, "!n1candidate", "n1candidate", 1), strings.Replace(tag+pid, "n1diagnostic && !n1candidate", "n1diagnostic || n1candidate", 1), tag + pid + "; var _ = map[string]any{\"pid\":1}"} {
+		if len(inspectSliceBSource(path, []byte(bad))) == 0 {
+			t.Fatal("wrong process metadata admitted", bad)
+		}
+	}
+	if len(inspectSliceBSource("internal/networkdiag/launch_other.go", []byte(tag+pid))) == 0 {
+		t.Fatal("moved correlation struct admitted")
+	}
+}
+
+func diagnosticRetainedNativeAllowed(path string, source []byte) bool {
+	if path != "internal/backend/tart/process_identity_diagnostic_darwin.go" && path != "internal/networkdiag/process_darwin.go" {
+		return false
+	}
+	return sourceImpliesTags(path, source, []string{"n1diagnostic", "darwin", "cgo"}, []string{"n1candidate"})
+}
+func exactRetainedProcessCorrelation(st *ast.StructType) bool {
+	names := []string{"PID", "BirthUS", "UniqueID"}
+	types := []string{"uint32", "uint64", "uint64"}
+	tags := []string{"pid", "birth_us", "unique_id"}
+	if len(st.Fields.List) != 3 {
+		return false
+	}
+	for i, f := range st.Fields.List {
+		if len(f.Names) != 1 || f.Names[0].Name != names[i] || f.Tag == nil {
+			return false
+		}
+		typ, ok := f.Type.(*ast.Ident)
+		if !ok || typ.Name != types[i] {
+			return false
+		}
+		tag, e := strconv.Unquote(f.Tag.Value)
+		if e != nil || tag != "json:\""+tags[i]+"\"" {
 			return false
 		}
 	}

@@ -61,6 +61,9 @@ type diagnosticWatchFixtureHandle struct {
 
 func (h *diagnosticWatchFixtureHandle) DiagnosticWatch() *networkdiag.Watch { return h.watch }
 func TestDiagnosticOwnerCollectRechecksOriginalPair(t *testing.T) {
+	if _, e := networkdiag.NewLaunchClock(); e != nil {
+		t.Skip("native suspend-aware clock unavailable; production refuses before spawn")
+	}
 	for _, drift := range []bool{false, true} {
 		t.Run(map[bool]string{false: "stable", true: "peer_pin_drift"}[drift], func(t *testing.T) {
 			a := networkdiag.Arm{Version: 1, Kind: "ARM", Generation: "00000000-0000-4000-8000-000000000011", Nonce: "00000000-0000-4000-8000-000000000030", OperationID: "00000000-0000-4000-8000-000000000040", DurationMS: 1000, Gateway: [4]uint8{192, 168, 64, 1}, ControlProvenance: "host_backend_pinned_owner"}

@@ -13,7 +13,7 @@ import (
 const MaxReceiptBytes = 16384
 const StockConfigSHA = "0fe963334098b05399a6e31d4df8de5759734e5c971c4ba70e2ccbc3aac2020b"
 const CandidateConfigSHA = "3ca4aaa4f4ebed8475d186679a08008c82db3fe737e48feda944c632d09e109c"
-const SoftnetSHA = "e567d610fb2a854755bd7786031ed00c28fc3a970213606f21350c6e1f754f61"
+const SoftnetSHA = "1bb12bec8821835ada8c036426c2c03061be6cebdf4a1b658249d268fc8bde05"
 
 type Window struct {
 	LockSHA           string `json:"lock_sha"`

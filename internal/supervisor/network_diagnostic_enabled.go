@@ -53,7 +53,7 @@ func handleNetworkDiagnosticControl(parent context.Context, c net.Conn, b Bindin
 	if json.Unmarshal(raw, &kind) != nil {
 		return false
 	}
-	if kind.Action == "n1_network_arm" || kind.Action == "n1_network_collect" {
+	if kind.Action == "n1_network_arm" || kind.Action == "n1_network_collect" || kind.Action == "n1_network_observe" {
 		return handleNetworkWatchControl(parent, c, b, owner, raw, accepted, kind.Action)
 	}
 	if kind.Action != "n1_network_inspect" {
@@ -101,6 +101,8 @@ func (c *Client) networkCall(ctx context.Context, b Binding, request any, respon
 	deadline, _ := operation.Deadline()
 	switch r := request.(type) {
 	case *networkInspectRequest:
+		r.ExpiresUnixNS = uint64(deadline.UnixNano())
+	case *networkObserveRequest:
 		r.ExpiresUnixNS = uint64(deadline.UnixNano())
 	case *networkArmRequest:
 		r.ExpiresUnixNS = uint64(deadline.UnixNano())

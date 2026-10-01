@@ -24,10 +24,31 @@ func handleNetworkWatchControl(parent context.Context, c net.Conn, b Binding, ow
 		defer cancel()
 		response := networkArmResponse{Version: 1, Binding: b}
 		if typed, ok := owner.(interface {
-			ArmDiagnosticWatch(context.Context, networkdiag.Arm) (networkdiag.Armed, error)
+			ArmDiagnosticWatchReceipt(context.Context, networkdiag.Arm) (networkdiag.ArmReceipt, error)
 		}); ok {
-			response.Armed, err = typed.ArmDiagnosticWatch(ctx, r.Arm)
-			response.OK = err == nil && ctx.Err() == nil && response.Armed.Matches(r.Arm)
+			response.Receipt, err = typed.ArmDiagnosticWatchReceipt(ctx, r.Arm)
+			response.OK = err == nil && ctx.Err() == nil && response.Receipt.Matches(r.Arm) && response.Receipt.Deadline.WallNS > uint64(time.Now().UnixNano())
+		}
+		if ctx.Err() != nil {
+			return true
+		}
+		data, err = networkdiag.Encode(response)
+	} else if action == "n1_network_observe" {
+		var r networkObserveRequest
+		if networkdiag.Decode(raw, &r) != nil || r.Version != 1 || r.Binding != b {
+			return true
+		}
+		ctx, cancel, ok := networkDeadline(parent, c, accepted, r.ExpiresUnixNS)
+		if !ok {
+			return true
+		}
+		defer cancel()
+		response := networkObserveResponse{Version: 1, Binding: b}
+		if typed, ok := owner.(interface {
+			ObserveDiagnosticLaunch(context.Context) (networkdiag.LaunchObservation, error)
+		}); ok {
+			response.Observation, err = typed.ObserveDiagnosticLaunch(ctx)
+			response.OK = err == nil && ctx.Err() == nil && response.Observation.Valid() && networkExact(b, response.Observation.Inspection.Binding)
 		}
 		if ctx.Err() != nil {
 			return true
@@ -61,15 +82,20 @@ func handleNetworkWatchControl(parent context.Context, c net.Conn, b Binding, ow
 	return true
 }
 func (c *Client) ArmDiagnosticWatch(ctx context.Context, b Binding, a networkdiag.Arm) (networkdiag.Armed, error) {
+	r, e := c.ArmDiagnosticWatchReceipt(ctx, b, a)
+	return r.Armed, e
+}
+func (c *Client) ArmDiagnosticWatchReceipt(ctx context.Context, b Binding, a networkdiag.Arm) (networkdiag.ArmReceipt, error) {
 	if !networkExact(b, a.Candidate) || !a.Valid(a.Generation, a.Nonce, a.Candidate.MAC, a.Gateway) {
-		return networkdiag.Armed{}, networkdiag.ErrMetadata
+		return networkdiag.ArmReceipt{}, networkdiag.ErrMetadata
 	}
 	var response networkArmResponse
 	err := c.networkCall(ctx, b, &networkArmRequest{Version: 1, Action: "n1_network_arm", Binding: b, Arm: a}, &response)
-	if err != nil || response.Version != 1 || response.Binding != b || !response.OK || !response.Armed.Matches(a) {
-		return networkdiag.Armed{}, networkdiag.ErrMetadata
+	now, ce := networkdiag.HostClockNow()
+	if err != nil || ce != nil || response.Version != 1 || response.Binding != b || !response.OK || !response.Receipt.Matches(a) || !response.Receipt.Current(now) {
+		return networkdiag.ArmReceipt{}, networkdiag.ErrMetadata
 	}
-	return response.Armed, nil
+	return response.Receipt, nil
 }
 func (c *Client) CollectDiagnosticWatch(ctx context.Context, b Binding, operation string) (networkdiag.Summary, error) {
 	if !networkdiag.UUID(operation) {
@@ -95,4 +121,47 @@ func (c *ExactController) CollectDiagnosticWatch(ctx context.Context, b Binding,
 		return networkdiag.Summary{}, err
 	}
 	return (&Client{RuntimeDirectory: dir}).CollectDiagnosticWatch(ctx, b, operation)
+}
+
+func (c *ExactController) ArmDiagnosticWatchReceipt(ctx context.Context, b Binding, a networkdiag.Arm) (networkdiag.ArmReceipt, error) {
+	if c == nil {
+		return networkdiag.ArmReceipt{}, networkdiag.ErrMetadata
+	}
+	dir, e := c.runtimeDirectory(b)
+	if e != nil {
+		return networkdiag.ArmReceipt{}, e
+	}
+	return (&Client{RuntimeDirectory: dir}).ArmDiagnosticWatchReceipt(ctx, b, a)
+}
+func (c *Client) ObserveDiagnosticLaunch(ctx context.Context, b Binding) (networkdiag.LaunchObservation, error) {
+	var response networkObserveResponse
+	e := c.networkCall(ctx, b, &networkObserveRequest{Version: 1, Action: "n1_network_observe", Binding: b}, &response)
+	now, ce := networkdiag.HostClockNow()
+	if e != nil || ce != nil || response.Version != 1 || response.Binding != b || !response.OK || !response.Observation.Valid() || !networkExact(b, response.Observation.Inspection.Binding) || !beforeLaunchDeadline(now, response.Observation) || ctx.Err() != nil {
+		return networkdiag.LaunchObservation{}, networkdiag.ErrMetadata
+	}
+	return response.Observation, nil
+}
+func beforeLaunchDeadline(now networkdiag.ClockReading, o networkdiag.LaunchObservation) bool {
+	return now.WallNS >= o.Watch.Observed.WallNS && now.ContinuousNS >= o.Watch.Observed.ContinuousNS && now.WallNS < o.Watch.Deadline.WallNS && now.ContinuousNS < o.Watch.Deadline.ContinuousNS && now.WallNS-o.Watch.Observed.WallNS <= uint64(networkControlTimeout)
+}
+func (r *ExactSnapshotReader) ObserveDiagnosticLaunch(ctx context.Context, b Binding) (networkdiag.LaunchObservation, error) {
+	if r == nil {
+		return networkdiag.LaunchObservation{}, networkdiag.ErrMetadata
+	}
+	dir, e := exactRuntimeDirectory(r.runtimeRoot, b)
+	if e != nil {
+		return networkdiag.LaunchObservation{}, e
+	}
+	return (&Client{RuntimeDirectory: dir}).ObserveDiagnosticLaunch(ctx, b)
+}
+func (c *ExactController) ObserveDiagnosticLaunch(ctx context.Context, b Binding) (networkdiag.LaunchObservation, error) {
+	if c == nil {
+		return networkdiag.LaunchObservation{}, networkdiag.ErrMetadata
+	}
+	dir, e := c.runtimeDirectory(b)
+	if e != nil {
+		return networkdiag.LaunchObservation{}, e
+	}
+	return (&Client{RuntimeDirectory: dir}).ObserveDiagnosticLaunch(ctx, b)
 }

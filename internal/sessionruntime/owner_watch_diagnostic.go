@@ -23,15 +23,19 @@ func (o *Owner) diagnosticWatch() *networkdiag.Watch {
 	return nil
 }
 func (o *Owner) ArmDiagnosticWatch(ctx context.Context, a networkdiag.Arm) (networkdiag.Armed, error) {
+	r, e := o.ArmDiagnosticWatchReceipt(ctx, a)
+	return r.Armed, e
+}
+func (o *Owner) ArmDiagnosticWatchReceipt(ctx context.Context, a networkdiag.Arm) (networkdiag.ArmReceipt, error) {
 	w := o.diagnosticWatch()
 	if w == nil {
-		return networkdiag.Armed{}, networkdiag.ErrMetadata
+		return networkdiag.ArmReceipt{}, networkdiag.ErrMetadata
 	}
 	o.diagnostic.mu.Lock()
 	if o.diagnostic.attempted {
 		o.diagnostic.mu.Unlock()
 		w.Invalidate()
-		return networkdiag.Armed{}, networkdiag.ErrMetadata
+		return networkdiag.ArmReceipt{}, networkdiag.ErrMetadata
 	}
 	o.diagnostic.attempted = true
 	o.diagnostic.arm = a
@@ -39,15 +43,15 @@ func (o *Owner) ArmDiagnosticWatch(ctx context.Context, a networkdiag.Arm) (netw
 	pair, err := o.currentDiagnosticPair(ctx, a)
 	if err != nil {
 		w.Invalidate()
-		return networkdiag.Armed{}, networkdiag.ErrMetadata
+		return networkdiag.ArmReceipt{}, networkdiag.ErrMetadata
 	}
-	armed, err := w.Arm(ctx, a)
+	armed, err := w.ArmReceipt(ctx, a)
 	if err != nil {
-		return networkdiag.Armed{}, err
+		return networkdiag.ArmReceipt{}, err
 	}
 	o.diagnostic.mu.Lock()
 	o.diagnostic.before = pair
-	o.diagnostic.armed = armed
+	o.diagnostic.armed = armed.Armed
 	o.diagnostic.mu.Unlock()
 	return armed, nil
 }
@@ -138,6 +142,62 @@ func (o *Owner) currentDiagnosticPair(ctx context.Context, a networkdiag.Arm) ([
 	}
 	if _, err = config.LoadN1ControlEnrollment(); err != nil {
 		return result, err
+	}
+	return result, nil
+}
+
+// ObserveDiagnosticLaunch admits only the retained, live, unarmed channel.
+// Inspection remains phase-independent for stock and post-ARM collection.
+func (o *Owner) ObserveDiagnosticLaunch(ctx context.Context) (networkdiag.LaunchObservation, error) {
+	refuse := func() (networkdiag.LaunchObservation, error) {
+		return networkdiag.LaunchObservation{}, networkdiag.ErrMetadata
+	}
+	if o == nil || ctx.Err() != nil {
+		return refuse()
+	}
+	o.mu.Lock()
+	handle := o.handle
+	connection, binding, pin, runtime, state, name, sshBinding := o.connection, o.binding, o.expectedPin, o.runtimePath, o.stateRoot, o.sessionName, o.sshBinding
+	typed, ok := handle.(interface {
+		DiagnosticWatch() *networkdiag.Watch
+		RetainedDiagnosticProcess() (networkdiag.ProcessCorrelation, error)
+	})
+	self := o.deps.diagnostic.process
+	o.mu.Unlock()
+	if !ok {
+		return refuse()
+	}
+	if self == nil {
+		self = networkdiag.CurrentOwnerProcess
+	}
+	owner, e := self()
+	if e != nil || !owner.Valid() {
+		return refuse()
+	}
+	child, e := typed.RetainedDiagnosticProcess()
+	if e != nil || !child.Valid() {
+		return refuse()
+	}
+	watch := typed.DiagnosticWatch()
+	observed, e := watch.Observe()
+	if e != nil {
+		return refuse()
+	}
+	inspection, e := o.InspectDiagnosticNetwork(ctx)
+	if e != nil {
+		return refuse()
+	}
+	// InspectDiagnosticNetwork's final Snapshot has completed. Recheck every
+	// captured authority field, retained child and watch against that capture.
+	childAfter, e := typed.RetainedDiagnosticProcess()
+	ownerAfter, se := self()
+	final, fe := watch.Observe()
+	o.mu.Lock()
+	same := o.active && o.handle == handle && o.connection == connection && o.binding == binding && o.expectedPin == pin && o.runtimePath == runtime && o.stateRoot == state && o.sessionName == name && o.sshBinding == sshBinding && typed.DiagnosticWatch() == watch && o.clipboardConnectionMatchesLocked(connection, binding)
+	o.mu.Unlock()
+	result := networkdiag.LaunchObservation{Version: 1, Inspection: inspection, Watch: final, Owner: owner, Child: child}
+	if e != nil || se != nil || fe != nil || !same || child != childAfter || owner != ownerAfter || observed.Hello != final.Hello || observed.Anchor != final.Anchor || observed.Deadline != final.Deadline || !result.Valid() || ctx.Err() != nil {
+		return refuse()
 	}
 	return result, nil
 }

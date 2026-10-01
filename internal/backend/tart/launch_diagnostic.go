@@ -50,7 +50,7 @@ func (l DiagnosticLauncher) Start(ctx context.Context, r backend.StartRequest) (
 		}
 		return nil, err
 	}
-	return &diagnosticHandle{Handle: h, watch: p.watch, managed: r.ManagedDisks != nil}, err
+	return &diagnosticHandle{Handle: h, watch: p.watch, managed: r.ManagedDisks != nil, child: p.child}, err
 }
 
 type diagnosticProcessStarter struct {
@@ -58,6 +58,7 @@ type diagnosticProcessStarter struct {
 	spawn   func(context.Context, processSpec, *os.File) (backend.Handle, error)
 	watch   *networkdiag.Watch
 	entered bool
+	child   networkdiag.ProcessCorrelation
 }
 
 func (p *diagnosticProcessStarter) start(ctx context.Context, spec processSpec) (h backend.Handle, result error) {
@@ -80,6 +81,10 @@ func (p *diagnosticProcessStarter) start(ctx context.Context, spec processSpec) 
 	if spawn == nil {
 		spawn = startDiagnosticProcess
 	}
+	clock, clockErr := networkdiag.NewLaunchClock()
+	if clockErr != nil {
+		return nil, errors.Join(clockErr, parent.Close())
+	}
 	h, err = spawn(ctx, spec, child)
 	if h == nil {
 		if e := parent.Close(); e != nil {
@@ -87,7 +92,12 @@ func (p *diagnosticProcessStarter) start(ctx context.Context, spec processSpec) 
 		}
 		return nil, err
 	}
-	p.watch = networkdiag.NewWatch(parent, p.binding.Generation, p.binding.Nonce, p.binding.CandidateMAC)
+	p.watch = networkdiag.NewWatchAt(parent, p.binding.Generation, p.binding.Nonce, p.binding.CandidateMAC, clock)
+	p.child, clockErr = forwardedDiagnosticProcess(h)
+	if clockErr != nil {
+		p.watch.Invalidate()
+		return h, errors.Join(err, clockErr)
+	}
 	if err != nil {
 		return h, err
 	}
@@ -158,6 +168,7 @@ type diagnosticHandle struct {
 	once       sync.Once
 	cleanupErr error
 	managed    bool
+	child      networkdiag.ProcessCorrelation
 }
 
 func (h *diagnosticHandle) DiagnosticWatch() *networkdiag.Watch { return h.watch }
@@ -191,4 +202,15 @@ func (h *diagnosticHandle) Wait(ctx context.Context) error {
 		}
 	})
 	return errors.Join(err, h.cleanupErr)
+}
+
+func (h *diagnosticHandle) RetainedDiagnosticProcess() (networkdiag.ProcessCorrelation, error) {
+	if h == nil || !h.child.Valid() || !h.RetainedChildLive() {
+		return networkdiag.ProcessCorrelation{}, networkdiag.ErrMetadata
+	}
+	p, e := forwardedDiagnosticProcess(h.Handle)
+	if e != nil || p != h.child || !h.RetainedChildLive() {
+		return networkdiag.ProcessCorrelation{}, networkdiag.ErrMetadata
+	}
+	return p, nil
 }

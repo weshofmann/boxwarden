@@ -34,7 +34,7 @@ func TestRootedPublisherPublishesManifestLastAndValidatesExactTree(t *testing.T)
 	}
 	entries, err := os.ReadDir(p.finalDir())
 	wantEntries := "[manifest.json softnet]"
-	if SoftnetVersion == "0.19.0-boxwarden-n1-diagnostic.1" {
+	if SoftnetVersion == "0.19.0-boxwarden-n1-diagnostic.2" {
 		wantEntries = "[launch.lock manifest.json softnet]"
 	}
 	if err != nil || fmt.Sprint(entryNames(entries)) != wantEntries {

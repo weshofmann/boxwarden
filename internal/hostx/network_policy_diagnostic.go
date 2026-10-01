@@ -9,7 +9,7 @@ const NetworkPolicyBuild = "N1 diagnostic preparation; launch integration and ho
 
 // Actual bytes from two independent offline native builds of published source.
 const (
-	SoftnetVersion          = "0.19.0-boxwarden-n1-diagnostic.1"
-	SoftnetExecutableSHA256 = "e567d610fb2a854755bd7786031ed00c28fc3a970213606f21350c6e1f754f61"
-	SoftnetArchiveSHA256    = "9f696a25549b324138f17242b5e4169a64664de3638f3e9417af24b534fa4aac"
+	SoftnetVersion          = "0.19.0-boxwarden-n1-diagnostic.2"
+	SoftnetExecutableSHA256 = "1bb12bec8821835ada8c036426c2c03061be6cebdf4a1b658249d268fc8bde05"
+	SoftnetArchiveSHA256    = "76704f05eba242cb649ab49db28028556c338a4daeefe9327fdfe37f874808ac"
 )

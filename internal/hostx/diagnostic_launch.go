@@ -91,7 +91,7 @@ func acquireDiagnosticTree(ctx context.Context, p RootedPublisher, expected Mani
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if SoftnetVersion != "0.19.0-boxwarden-n1-diagnostic.1" {
+	if SoftnetVersion != "0.19.0-boxwarden-n1-diagnostic.2" {
 		return nil, ErrDiagnosticLaunchDrift
 	}
 	expected.Group.Members = append([]int(nil), expected.Group.Members...)
