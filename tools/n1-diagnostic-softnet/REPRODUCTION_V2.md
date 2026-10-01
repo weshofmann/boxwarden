@@ -13,9 +13,9 @@ that earlier source commit; its independently reviewed bytes and later recipe
 publication identity are recorded separately. This avoids a self-referential
 source-commit cycle without narrowing the published-source check.
 
-Fresh independent targets are `rust-target-7` and `rust-target-8` below
+Fresh independent targets are `rust-target-9` and `rust-target-10` below
 `/Volumes/BoxwardenAlphaQualification/n1build-20260930`. Both legs use the same
-fresh `task5-prearm-stage-r1` pathname, moved into each new per-leg output on
+fresh `task5-prearm-stage-r2` pathname, moved into each new per-leg output on
 completion. The recipe refuses nonempty targets, existing stage/output,
 changed inputs and foreign retention paths before compiler dispatch. Selected
 compiler/SDK records, encrypted backing association, immutable cache inventory,
@@ -31,3 +31,14 @@ when the operator lacks that group, so it cannot exercise that control.
 Recipe/source checks are preparation evidence. New executable/archive digests
 require two fresh successful builds and byte equality. No diagnostic.2 artifact,
 installation or live qualification is claimed by this document.
+
+
+The first diagnostic.2 leg7 compiled but failed mandatory metadata admission:
+inherited caller umask077 made its binary0700. Failed target7/stage-r1/output7
+remain immutable; unused target8 is retained. The corrected recipe records
+and passes child umask022 directly to each `subprocess.run`, so compiler
+children inherit a known mask independently of the caller. It never changes
+the parent's mask or normalizes a produced binary. Private directories700 and
+evidence600 remain explicit. A harmless actual child fixture demonstrates the
+700-before/755-after behavior and unchanged parent/evidence modes. Existing
+metadata refusal stays exact. Fresh9/10 twins still require full byte equality.

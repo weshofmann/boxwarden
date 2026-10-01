@@ -199,12 +199,12 @@ def extract_archive(data, destination):
 def run_recorded(argv, env, cwd, output, label, boundary=None, timeout=1800):
     proof = check_boundary(boundary) if boundary else mount_proof()
     retain_json(output / (label + "-invocation.json"),
-                dict(argv_record(argv, env, cwd), boundary=proof))
+                dict(argv_record(argv, env, cwd), boundary=proof, child_umask=0o022))
     log = output / (label + ".txt")
     with log.open("xb") as sink:
         os.chmod(log, 0o600)
         result = subprocess.run(argv, env=env, cwd=cwd, stdout=sink,
-                                stderr=subprocess.STDOUT, timeout=timeout)
+                                stderr=subprocess.STDOUT, timeout=timeout, umask=0o022)
         sink.flush()
         os.fsync(sink.fileno())
     retain_json(output / (label + "-result.json"),
@@ -253,10 +253,10 @@ def main():
         p.error("unprivileged builds only")
     proof = mount_proof()
     external = Path(MOUNT) / "n1build-20260930"
-    if a.target not in [external / "rust-target-7", external / "rust-target-8"] or \
+    if a.target not in [external / "rust-target-9", external / "rust-target-10"] or \
             not a.target.is_dir() or list(a.target.iterdir()):
         p.error("target must be one approved independent empty reproduction directory")
-    if a.stage != external / "task5-prearm-stage-r1" or a.stage.exists() or a.output.exists():
+    if a.stage != external / "task5-prearm-stage-r2" or a.stage.exists() or a.output.exists():
         p.error("fresh fixed external stage and new output required")
     leg = a.target.name.removeprefix("rust-target-")
     if a.output != external / "outputs" / ("task5-prearm-reproduction-" + leg):

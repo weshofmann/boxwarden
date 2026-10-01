@@ -611,3 +611,15 @@ Independent recipe review, publication and fresh twin reproduction remain pendin
 ### Separate recipe component review closure
 
 Fresh independent requested Sol6.1/High review accepts the frozen six-file recipe/CI/documentation delta with 0 Critical, 0 Important and 0 Minor findings. It verified all 27 bound files, eight replacements/11 occurrences, all 21 producing-source files and all six actual test invocation/result bindings. Report SHA256 `d94d6fc9a82f7d4224aa03758e28481c78daa853a43200fb84138e2d5ef62691`; provenance `c78ef55205b1ba0dfe3efdf6a9534bb751a726deebc4e510bf96641c9c87bcbb`. Root independently checked those input and result bindings. Actual backend routing metadata was unavailable. This closes component review only; publication/current-head CI and fresh twin artifact equality remain separate gates. The two carried Task4a Minor findings remain outside this scope.
+
+
+### Fresh reproduction failure and bounded correction
+
+The first diagnostic.2 leg7 compiled release but failed required binary metadata: the Root launch harness's inherited umask077 produced operator-owned one-link0700, while admission requires0755. Failed target7/stage-r1/output7 remain immutable; no archive or accepted artifact result exists. The executable is not chmod-normalized, adopted or reused. Unused empty target8 is retained.
+
+A meaningful harmless child-process control reproduces700-before/755-after. The separately named recipe now records and supplies child umask022 directly to `subprocess.run`, without changing the parent mask; explicit private directories700/evidence600 and binary metadata refusal remain exact. Fresh paths are targets9/10 and stage-r2. This propagates the learned external-command contract before any next expensive leg. Source review/corrective publication and twin equality remain pending.
+
+
+### Fresh-path and child-umask correction review closure
+
+Fresh independent requested Sol6.1/High recheck reports 0 Critical/Important/Minor in the five-file corrective source unit. It independently verifies all47 bound files, unchanged21-file producing source, five exact replacements, selected Python3.9 child-mask support and all11 actual invocation/result bindings. Report SHA256 `18f6fcab3597098e83dd6eadbe79ca33bb10c559e1efda6736e20b5a5d3222f4`; provenance `76461f0da2be4b6791af21a51929cbaf2e7fda1026b3383a0123b243c63ffd6a`. Root checked every bound current source/evidence hash. Failed leg and prior review remain immutable. This closes source review only; corrective publication/current-head CI and fresh9/10 twin acceptance/equality remain gates. Preceding published recipe9e8b9cf passed CI438 all4jobs/41steps, with raw logs retained. No artifact or live qualification is claimed.
