@@ -67,7 +67,9 @@ func cleanupScratch(path string, owned os.FileInfo) error {
 	if len(entries) == 1 {
 		control := filepath.Join(path, "control.sock")
 		info, err := os.Lstat(control)
-		if err != nil || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0o755 || !ownedScratchEntry(info) {
+		// Tart's 0755 socket mode is filtered by the inherited operator umask.
+		// Accept removed group/other bits, never added permissions or lost owner access.
+		if err != nil || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm()&0o700 != 0o700 || info.Mode().Perm()&^os.FileMode(0o755) != 0 || !ownedScratchEntry(info) {
 			return fmt.Errorf("%w: unsafe Tart control socket: %v", ErrScratchCleanupUnproven, err)
 		}
 		if err := os.Remove(control); err != nil {

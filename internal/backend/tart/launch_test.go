@@ -2,6 +2,7 @@ package tart
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -114,49 +115,95 @@ func TestTartScratchCleanupRequiresReapAndExactContents(t *testing.T) {
 }
 
 func TestTartScratchCleanupRemovesOnlyOwnedSocketAfterReap(t *testing.T) {
-	root, err := filepath.EvalSymlinks("/tmp")
-	if err != nil {
-		t.Fatal(err)
+	for _, mode := range []os.FileMode{0o700, 0o750, 0o755} {
+		t.Run(fmt.Sprintf("%o", mode), func(t *testing.T) {
+			root, err := filepath.EvalSymlinks("/tmp")
+			if err != nil {
+				t.Fatal(err)
+			}
+			generation, err := os.MkdirTemp(root, "bw-tart-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.RemoveAll(generation) })
+			if err := os.Chmod(generation, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			process := &recordingProcessStarter{handle: &controlledProcessHandle{reap: make(chan struct{})}}
+			request := backend.StartRequest{ObjectID: "boxwarden-work-dev", SerialDevice: "/dev/ttys004", GenerationDirectory: generation}
+			handle, err := newLauncher(validLaunchConfig(), process).Start(context.Background(), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scratch := filepath.Join(generation, "tart")
+			socket := filepath.Join(scratch, "control.sock")
+			listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			listener.SetUnlinkOnClose(false)
+			if err := os.Chmod(socket, mode); err != nil {
+				t.Fatal(err)
+			}
+			if err := handle.Stop(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Lstat(socket); err != nil {
+				t.Fatalf("Stop removed Tart socket before reap: %v", err)
+			}
+			if err := listener.Close(); err != nil {
+				t.Fatal(err)
+			}
+			close(process.handle.(*controlledProcessHandle).reap)
+			if err := handle.Wait(context.Background()); err != nil {
+				t.Fatalf("Wait() cleanup error = %v", err)
+			}
+			if _, err := os.Lstat(scratch); !os.IsNotExist(err) {
+				t.Fatalf("scratch after exact reap = %v, want absent", err)
+			}
+		})
 	}
-	generation, err := os.MkdirTemp(root, "bw-tart-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(generation) })
-	if err := os.Chmod(generation, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	process := &recordingProcessStarter{handle: &controlledProcessHandle{reap: make(chan struct{})}}
-	request := backend.StartRequest{ObjectID: "boxwarden-work-dev", SerialDevice: "/dev/ttys004", GenerationDirectory: generation}
-	handle, err := newLauncher(validLaunchConfig(), process).Start(context.Background(), request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	scratch := filepath.Join(generation, "tart")
-	socket := filepath.Join(scratch, "control.sock")
-	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	listener.SetUnlinkOnClose(false)
-	if err := os.Chmod(socket, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := handle.Stop(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Lstat(socket); err != nil {
-		t.Fatalf("Stop removed Tart socket before reap: %v", err)
-	}
-	if err := listener.Close(); err != nil {
-		t.Fatal(err)
-	}
-	close(process.handle.(*controlledProcessHandle).reap)
-	if err := handle.Wait(context.Background()); err != nil {
-		t.Fatalf("Wait() cleanup error = %v", err)
-	}
-	if _, err := os.Lstat(scratch); !os.IsNotExist(err) {
-		t.Fatalf("scratch after exact reap = %v, want absent", err)
+}
+
+// Cleanup must retain sockets with added permissions or missing owner access.
+func TestTartScratchCleanupRetainsSocketWithAddedPermissions(t *testing.T) {
+	for _, mode := range []os.FileMode{0o770, 0o777, 0o600} {
+		t.Run(fmt.Sprintf("%o", mode), func(t *testing.T) {
+			root, err := filepath.EvalSymlinks("/tmp")
+			if err != nil {
+				t.Fatal(err)
+			}
+			generation, err := os.MkdirTemp(root, "bw-tart-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.RemoveAll(generation) })
+			if err := os.Chmod(generation, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			scratch, owned, err := createScratch(generation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			socket := filepath.Join(scratch, "control.sock")
+			listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			listener.SetUnlinkOnClose(false)
+			if err := listener.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(socket, mode); err != nil {
+				t.Fatal(err)
+			}
+			if err := cleanupScratch(scratch, owned); err == nil {
+				t.Fatal("unsafe socket was cleaned")
+			}
+			if _, err := os.Lstat(socket); err != nil {
+				t.Fatalf("unsafe socket was removed: %v", err)
+			}
+		})
 	}
 }
 
