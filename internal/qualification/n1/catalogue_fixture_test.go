@@ -10,13 +10,14 @@ import (
 )
 
 func censusFixture() (contract.StaticLock, contract.Catalogue) {
-	s := contract.StaticLock{Version: 2, Configs: [2]string{contract.StockConfigSHA, contract.CandidateConfigSHA}, SoftnetSHA: contract.SoftnetSHA, CatalogueSHA: strings.Repeat("a", 64), SchemaSHA: strings.Repeat("b", 64), ProcedureSHA: strings.Repeat("c", 64), NoReplacement: true, ActiveSeconds: 1200, AttendanceSeconds: 600}
+	s := contract.StaticLock{Version: 3, Configs: [2]string{contract.StockConfigSHA, contract.CandidateConfigSHA}, SoftnetSHA: contract.SoftnetSHA, CatalogueSHA: strings.Repeat("a", 64), SchemaSHA: strings.Repeat("b", 64), ProcedureSHA: strings.Repeat("c", 64), NoReplacement: true, ActiveSeconds: 1200, AttendanceSeconds: 600}
 	for i := range s.Artifacts {
 		s.Artifacts[i] = contract.Artifact{Name: filepath.Base(contract.ArtifactPath(i)), SHA: fmt.Sprintf("%064x", i+1), Source: strings.Repeat("a", 40)}
 	}
 	for i, n := range contract.StaticNames {
 		s.Files = append(s.Files, contract.StaticFile{Name: n, SHA: fmt.Sprintf("%064x", i+100), Source: strings.Repeat("b", 40)})
 	}
+	s.Files[33].SHA = contract.GenericBootstrapSHA
 	s.Files[4].SHA = contract.SoftnetSHA
 	s.Files[13].SHA = contract.StockConfigSHA
 	s.Files[14].SHA = contract.CandidateConfigSHA
@@ -31,6 +32,7 @@ func censusFixture() (contract.StaticLock, contract.Catalogue) {
 	raw, _ := json.Marshal(q)
 	records := [][]byte{raw}
 	s.ProtectedSudo = contract.ProtectedSudo{Kind: "protected-sudo", Path: contract.SudoPath, QualificationSHA: contract.SHA(raw)}
+	entries := []contract.OSImageEntry{}
 	for i, p := range contract.SystemPaths {
 		q := contract.Qualification{Version: 1, Kind: "digest", Path: p, Platform: contract.Platform{OS: "darwin", Arch: "arm64", Release: "27.0.1", Build: "26A434"}, SHA: fmt.Sprintf("%064x", i+40), IntendedUse: "synthetic approved exact OS path", Leaf: meta(p, 1, uint64(i+100), 1, 1, 1, 0755, 0)}
 		for parent := path.Dir(p); ; parent = path.Dir(parent) {
@@ -41,9 +43,25 @@ func censusFixture() (contract.StaticLock, contract.Catalogue) {
 		}
 		raw, _ := json.Marshal(q)
 		records = append(records, raw)
-		s.SystemImages = append(s.SystemImages, contract.SystemImage{Kind: "digest", Path: p, SHA: q.SHA, QualificationSHA: contract.SHA(raw)})
+		entries = append(entries, contract.OSImageEntry{Ordinal: i, Path: p, SHA: q.SHA, QualificationSHA: contract.SHA(raw)})
 	}
-	c, e := contract.AdmitCatalogue(s, records)
+
+	in := contract.CatalogueInputs{Records: records, Rejections: []byte(`{"version":1,"rejected":[]}`)}
+	index := contract.OSIndexRecord{Version: 1, Records: len(contract.SystemPaths), RejectionsSHA: contract.SHA(in.Rejections)}
+	for i := 0; i < contract.SystemPageCount; i++ {
+		end := (i + 1) * contract.SystemPageEntries
+		if end > len(entries) {
+			end = len(entries)
+		}
+		p := contract.OSPage{Version: 1, Ordinal: i, Entries: entries[i*contract.SystemPageEntries : end]}
+		raw, _ := json.Marshal(p)
+		in.Pages = append(in.Pages, raw)
+		index.Pages = append(index.Pages, contract.OSPageBinding{Ordinal: i, Records: len(p.Entries), SHA: contract.SHA(raw)})
+	}
+	in.Index, _ = json.Marshal(index)
+	s.OSIndex = contract.OSIndex{Version: 1, SHA: contract.SHA(in.Index), Records: len(contract.SystemPaths), Pages: contract.SystemPageCount}
+
+	c, e := contract.AdmitCatalogue(s, in)
 	if e != nil {
 		panic(e)
 	}

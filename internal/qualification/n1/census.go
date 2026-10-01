@@ -11,13 +11,29 @@ const maxProcesses = 8192
 
 // Executable pathname/file identity and birth/unique identity are bounded
 // observations. They do not prove an immutable running image or atomic absence.
+type kernelObservation struct {
+	PID, PPID, UID, GID, RUID, RGID, SUID, SGID, Status, Flags uint32
+	Comm, Name                                                 string
+	Birth                                                      uint64
+}
+
+func (k kernelObservation) valid() bool {
+	return k.PID == 0 && k.PPID == 0 && k.UID == 0 && k.GID == 0 && k.RUID == 0 && k.RGID == 0 && k.SUID == 0 && k.SGID == 0 && k.Status == 2 && k.Flags == 17 && k.Comm == "kernel_task" && k.Name == "kernel_task" && k.Birth > 0
+}
+
 type process struct {
+	Kernel                 kernelObservation
 	PID                    int
 	Birth, Unique          uint64
 	Path, SHA              string
 	Device, Inode          uint64
 	Kind, QualificationSHA string
 }
+
+func kernelProcessValid(p process) bool {
+	return p.PID == 0 && p.Kernel.valid() && p.Birth == p.Kernel.Birth && p.Unique == 0 && p.Path == "" && p.SHA == "" && p.Device == 0 && p.Inode == 0 && p.Kind == "kernel" && p.QualificationSHA == ""
+}
+
 type sampler interface {
 	snapshot(context.Context) ([]process, error)
 }
@@ -76,7 +92,19 @@ func validateProcessesInPhase(xs []process, l contract.StaticLock, self process,
 		}
 	}
 	matchedSelf := false
+	matchedKernel := false
 	for _, p := range xs {
+		if p.PID == 0 {
+			if seen[0] || !kernelProcessValid(p) {
+				return ErrRefused
+			}
+			seen[0] = true
+			matchedKernel = true
+			continue
+		}
+		if p.Kernel != (kernelObservation{}) {
+			return ErrRefused
+		}
 		if p.PID <= 0 || seen[p.PID] || p.Birth == 0 || p.Unique == 0 || p.Device == 0 || p.Inode == 0 || !filepath.IsAbs(p.Path) || filepath.Clean(p.Path) != p.Path || len(p.Path) > 4096 || forbidden[p.SHA] {
 			return ErrRefused
 		}
@@ -102,7 +130,7 @@ func validateProcessesInPhase(xs []process, l contract.StaticLock, self process,
 			return ErrRefused
 		}
 	}
-	if !matchedSelf {
+	if !matchedSelf || !matchedKernel {
 		return ErrRefused
 	}
 	return nil

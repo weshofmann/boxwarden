@@ -162,8 +162,14 @@ jobs:
           go test -tags "$cleanup_tags" -count=1 "${cleanup_packages[@]}"
           go test -race -tags "$cleanup_tags" -count=1 "${cleanup_packages[@]}"
           go vet -tags "$cleanup_tags" "${cleanup_packages[@]}"
-          for command in n1-attend n1-attend-root n1-cleanup; do
-            go build -tags "$cleanup_tags" -trimpath -buildvcs=false \
+          for command in n1-window n1-run-window n1-attend n1-attend-root n1-cleanup n1-closeout n1-stock-worker n1-candidate-worker; do
+            case "$command" in
+              n1-attend|n1-attend-root) command_tags=n1diagnostic ;;
+              n1-cleanup) command_tags=n1diagnostic,n1cleanup ;;
+              n1-stock-worker) command_tags=n1clipboarddiagnostic ;;
+              *) command_tags=n1diagnostic,n1clipboarddiagnostic ;;
+            esac
+            go build -tags "$command_tags" -trimpath -buildvcs=false \
               -o "$scratch/$command" "./cmd/$command"
           done
           if go build -tags n1candidate,n1diagnostic -o "$scratch/forbidden" ./cmd/boxwarden \

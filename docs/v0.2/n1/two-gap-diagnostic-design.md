@@ -356,3 +356,61 @@ Guest transport headf0fd8dd passed CI442 all4jobs/41steps; this new publication
 requires its own CI. This is component source/fixture closure. L/C/F, finite
 kernel/paged OS catalogue, complete static lock, final Go twins and four fresh
 final reviews remain gates. No current census, installation or live trial occurred.
+
+## Runnable window source composition
+
+The new finite coordinator C composes the existing public CLI and fixed worker
+operations: explicit domain initialization and enrolled config publication,
+two fresh clones, initial controls, trial-only staging and one planned restart,
+review of observed dynamic bindings, two finite diagnostic intervals, exact
+public stop/delete transitions, bounded metadata archive, and handoff. Creation
+reserves each of the two attempts before dispatch, including partial failures;
+there is no adoption, resume or replacement attempt. Original wall and
+suspend-aware continuous time charge all work to the shared20-minute active,
+10-minute attendance and30-minute whole-window budgets. These are future
+execution mechanisms, not authorization to execute this preparation.
+
+Candidate post-ARM controls use the phase-independent exact retained READY
+inspection; the public unarmed inspection remains strict. The actual public
+Stop path is checked against the original running record, backend and generation
+before dispatch and fresh stopped state afterward. It has no atomic generation
+argument. The attended procedure must therefore retain the trusted operator
+premise of no concurrent lifecycle, name/config/state replacement through H.
+Backend-running alone never implies READY or grants stop authority.
+
+L retains actual C exit20 and empty bounded output before replacing its image
+with U through the checked unnamed fd3 handoff. Its Darwin descriptor containment
+enumerates the bounded fixed /dev/fd devfs surface rather than relying on the
+current soft descriptor limit. A retained real exec control covers an already
+open fd192 above a lowered Cur64. Explicit native duplication, directory read,
+EOF and close proofs are checked, followed by exact descriptor-set/CLOEXEC
+reobservation. This preserves stdio/fd3 and refuses without CGo. It requires
+cooperating code not to create arbitrary non-CLOEXEC descriptors before exec;
+it does not establish atomic containment against hostile same-UID code.
+
+F receives only the phase3 pipe after actual R success. It admits the bound
+completion/archive and one-use intent, checks exact diagnostic-tree absence,
+protected inventory and actual stock doctor, inventories the exact temporary
+state, and retires only that observed state plus the two enrolled configs.
+Descriptor-relative removals require original identity/security, exact remaining
+membership, checked ACL/volume/path brackets and adjacent original clock checks.
+Final root retirement rechecks the admitted empty root after the last potentially
+slow parent/volume observations. It never discovers additional removal targets,
+recursively removes unknown state, repairs drift or retries partial cleanup.
+Final receipt publication and actual empty successful F return are both required.
+
+The native census separately admits exactly one SDK-bounded PID0 kernel record;
+it invents no executable path/hash or qualifying image. The v3 OS catalogue uses
+an exact823-path literal table and seven bounded pages. Unknown executable images
+still refuse. The native H-only process/consumer qualification remains a future
+attended gate, and finite catalogue preparation does not demonstrate that gate's
+success on a current host.
+
+Independent component reviews and original-severity corrections are closed.
+The integrated source race suite, architecture walkers and exact-role vet checks
+pass. CI now builds every new actor/worker with its actual tag selection,
+including the stock worker's clipboard-only role. Complete immutable compile
+graphs, independent final Go twins, the instantiated static package/current CI
+and four fresh final reviews remain required. Retained component compiler/SDK
+metadata is functional evidence, not full SDK attestation or final artifact
+identity. No production actor, current census, installation or live trial ran.

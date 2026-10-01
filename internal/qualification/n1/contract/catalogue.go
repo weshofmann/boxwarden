@@ -1,11 +1,12 @@
 package contract
 
-import "path"
+import (
+	"fmt"
+	"path"
+)
 
 const SudoPath = "/usr/bin/sudo"
 const QualificationRoot = PackageRoot + "/qualification"
-
-var SystemPaths = [...]string{"/sbin/launchd", "/bin/zsh", "/bin/ls", "/usr/bin/sw_vers", "/usr/bin/dscl", "/usr/bin/ssh", "/usr/bin/ssh-keygen", "/usr/bin/hdiutil", "/usr/sbin/diskutil", "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"}
 
 type ProtectedSudo struct {
 	Kind             string `json:"kind"`
@@ -125,31 +126,6 @@ type Catalogue struct {
 	hashes  []string
 }
 
-func AdmitCatalogue(s StaticLock, raw [][]byte) (Catalogue, error) {
-	if !s.Valid() || len(raw) != len(s.SystemImages)+1 {
-		return Catalogue{}, ErrRefused
-	}
-	c := Catalogue{}
-	total := 0
-	for i, b := range raw {
-		total += len(b)
-		if total > MaxLockBytes {
-			return Catalogue{}, ErrRefused
-		}
-		kind, p, sha, recordSHA := "protected-sudo", s.ProtectedSudo.Path, "", s.ProtectedSudo.QualificationSHA
-		if i > 0 {
-			x := s.SystemImages[i-1]
-			kind, p, sha, recordSHA = x.Kind, x.Path, x.SHA, x.QualificationSHA
-		}
-		q, e := ParseQualification(b, kind, p, sha, recordSHA)
-		if e != nil {
-			return Catalogue{}, ErrRefused
-		}
-		c.records = append(c.records, q)
-		c.hashes = append(c.hashes, recordSHA)
-	}
-	return c, nil
-}
 func (c Catalogue) Valid() bool {
 	return len(c.records) == len(SystemPaths)+1 && len(c.hashes) == len(c.records)
 }
@@ -172,5 +148,5 @@ func QualificationPath(index int) string {
 	if index == 0 {
 		return QualificationRoot + "/sudo.json"
 	}
-	return QualificationRoot + "/system-" + string(rune('0'+(index-1)/10)) + string(rune('0'+(index-1)%10)) + ".json"
+	return fmt.Sprintf("%s/system-%04d.json", QualificationRoot, index-1)
 }

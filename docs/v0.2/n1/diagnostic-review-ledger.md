@@ -737,3 +737,51 @@ Guest transport headf0fd8dd passed CI442 all4jobs/41steps; this new publication
 requires its own CI. This is component source/fixture closure. L/C/F, finite
 kernel/paged OS catalogue, complete static lock, final Go twins and four fresh
 final reviews remain gates. No current census, installation or live trial occurred.
+
+## Coordinator, launcher, closeout and native catalogue source closure
+
+Fresh independent C review accepted the finite public lifecycle/worker
+composition with0Critical/0Important/0Minor. Report SHA256
+5399463b42aac9eeeeb970dec4d2be729ba75ea16cff25048fe57f2f1a361ad0.
+Its23 frozen sources and428 indexed evidence files were checked. Kernel capture
+qualification remains false until actual Linux interface/offload qualification;
+timeout cannot manufacture a causal PASS.
+
+L's original P2 Important descriptor-limit finding is CLOSED at its original
+severity. Real inherited-fd192/Cur64 RED and final production exec GREEN retain
+stdio/fd3, and the composed actual C20-to-pipe-to-exec control passes. The reviewer
+checked seven corrective sources, twelve unchanged-source runs,67 actual compiler
+records and44 retained native input files. Closure SHA256
+2a370a1cbe86724c3d92e1a1d98a4f91109ea0f374b4b1a4bfc5a0092cb8b0f3;
+remaining correction0Critical/0Important/0Minor. Seven failed attempts remain
+failed, including one originally mislabeled green.
+
+F's original Important final-root interval finding is CLOSED at its original
+severity. RED demonstrated three late mode/ACL false successes; the correction
+requires original root security, exact empty membership and full current tuples
+after the last slow observations, with the clock adjacent to exact unlink.
+The reviewer checked42 sources and910 corrective evidence files, including
+functional/race/vet and uninvoked build exits zero. Closure SHA256
+5c6dd3bed66efdfb0d6efe2b5aea665c7aef4fe1110462e68b8926fc3ac7dd0a;
+remaining component0Critical/0Important/0Minor.
+
+Native review's original P2 reporting finding is CLOSED by additive clarification,
+without altering historical evidence. All222 compiler records and20 invocations
+used system TMPDIR; only Go caches/GOTMPDIR were external. Actual compiler
+environments included Go/xcrun search-path augmentations. MacOSX.sdk is the actual
+canonical directory, not the symlink inferred in the original review; the
+versioned SDK names point to it. Selected metadata is not full SDK attestation.
+No native source finding remains; native qualification/static/artifact gates do.
+
+Root verified125 exact current component source bindings against the declared
+frozen hashes and retained copies where present. The823-path JSON has a declared
+source-manifest binding rather than an original retained copy. Combined N1
+race/architecture and certificate-policy race checks pass. An initial combined
+vet invocation refused the stock worker's intentionally excluded diagnostic tags;
+corrected diagnostic and exact clipboard-only stock-role vet both pass. CI's
+command builds now use those exact roles. Original failed outputs remain retained.
+
+These are component/source closures, not any of the four fresh final package
+review seats. Final Go artifacts/compile graphs, complete static lock, current
+integrated CI, fresh reviews and the concrete future owner gate remain pending.
+No actor, current process census, privileged install or live trial was executed.

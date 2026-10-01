@@ -45,7 +45,7 @@ func TestCensusRejectsUnknownControllerChurnOverflowAndUnrelatedTart(t *testing.
 			case "pid0":
 				p.PID = 0
 			}
-			xs = []process{p, self}
+			xs = []process{p, self, fixtureKernel()}
 			if which == "missing-self" {
 				xs = []process{p}
 			}
@@ -59,7 +59,7 @@ func TestCensusRejectsUnknownControllerChurnOverflowAndUnrelatedTart(t *testing.
 			if which == "churn" {
 				q := p
 				q.Birth++
-				f.values[1] = []process{q, self}
+				f.values[1] = []process{q, self, fixtureKernel()}
 			}
 			if which == "denied" {
 				f.err = errors.New("denied")
@@ -73,4 +73,19 @@ func TestCensusRejectsUnknownControllerChurnOverflowAndUnrelatedTart(t *testing.
 			}
 		})
 	}
+}
+
+func TestKernelObservationRequiresExactlyOneRetainedZero(t *testing.T) {
+	l, c := censusFixture()
+	self := process{PID: 999, Birth: 9, Unique: 99, Kind: "digest", Path: contract.ArtifactPath(4), SHA: l.Artifacts[4].SHA, Device: 1, Inode: 3}
+	kernel := fixtureKernel()
+	xs := []process{self, kernel}
+	if e := census(t.Context(), &censusFake{values: [][]process{xs, xs}}, l, self, c); e != nil {
+		t.Fatal("valid retained kernel refused", e)
+	}
+}
+
+func fixtureKernel() process {
+	k := kernelObservation{Status: 2, Flags: 17, Comm: "kernel_task", Name: "kernel_task", Birth: 1}
+	return process{PID: 0, Birth: 1, Kind: "kernel", Kernel: k}
 }

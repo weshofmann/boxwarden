@@ -88,19 +88,21 @@ func qualificationCompositionAllowed(relative string, source []byte) bool {
 	if strings.HasPrefix(relative, "internal/qualification/") {
 		return true
 	}
-	cleanup := false
+	required := []string{"n1diagnostic"}
+	forbidden := []string{"n1candidate"}
 	switch relative {
 	case "cmd/n1-attend/main.go", "cmd/n1-attend-root/main.go":
 	case "cmd/n1-cleanup/main.go", "internal/hostx/diagnostic_cleanup.go":
-		cleanup = true
+		required = append(required, "n1cleanup")
+	case "cmd/n1-window/main.go", "cmd/n1-run-window/main.go", "cmd/n1-closeout/main.go", "cmd/n1-candidate-worker/main.go":
+		required = append(required, "n1clipboarddiagnostic")
+	case "cmd/n1-stock-worker/main.go":
+		required = []string{"n1clipboarddiagnostic"}
+		forbidden = append(forbidden, "n1diagnostic")
 	default:
 		return false
 	}
-	required := []string{"n1diagnostic"}
-	if cleanup {
-		required = append(required, "n1cleanup")
-	}
-	return sourceImpliesTags(relative, source, required, []string{"n1candidate"})
+	return sourceImpliesTags(relative, source, required, forbidden)
 }
 
 // Reuse the same finite actual-leading-comment implication proof for exact
@@ -212,7 +214,12 @@ func sourceImpliesTags(relative string, source []byte, required, forbidden []str
 }
 
 func tartQualificationCompositionAllowed(relative string, source []byte) bool {
-	return relative == "cmd/n1-cleanup/main.go" && qualificationCompositionAllowed(relative, source)
+	switch relative {
+	case "cmd/n1-cleanup/main.go", "cmd/n1-stock-worker/main.go", "cmd/n1-candidate-worker/main.go":
+		return qualificationCompositionAllowed(relative, source)
+	default:
+		return false
+	}
 }
 func TestOnlyExactConstrainedCleanupMainCanComposeReadOnlyTart(t *testing.T) {
 	for _, x := range []struct {

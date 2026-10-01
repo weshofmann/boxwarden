@@ -1,4 +1,4 @@
-//go:build darwin && n1diagnostic && n1cleanup && !n1candidate
+//go:build darwin && (n1diagnostic || n1clipboarddiagnostic) && !n1candidate
 
 package pathmeta
 

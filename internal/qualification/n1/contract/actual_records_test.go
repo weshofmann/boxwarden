@@ -8,8 +8,6 @@ import (
 )
 
 func TestRetainedActualCanonicalQualificationRecords(t *testing.T) {
-	s, _ := staticFixture()
-	records := [][]byte{}
 	for i := 0; i < 11; i++ {
 		name := "sudo.json"
 		if i > 0 {
@@ -23,17 +21,30 @@ func TestRetainedActualCanonicalQualificationRecords(t *testing.T) {
 		if json.Unmarshal(raw, &q) != nil {
 			t.Fatal("fixture encoding")
 		}
-		if _, e := ParseQualification(raw, q.Kind, q.Path, q.SHA, SHA(raw)); e != nil {
+		if _, e = ParseQualification(raw, q.Kind, q.Path, q.SHA, SHA(raw)); e != nil {
 			t.Fatal(name, e)
 		}
-		records = append(records, raw)
-		if i == 0 {
-			s.ProtectedSudo = ProtectedSudo{q.Kind, q.Path, SHA(raw)}
-		} else {
-			s.SystemImages[i-1] = SystemImage{q.Kind, q.Path, q.SHA, SHA(raw)}
-		}
 	}
-	if _, e := AdmitCatalogue(s, records); e != nil {
-		t.Fatal(e)
+}
+
+// Optional received-byte control. Reads only named retained records; never
+// inspects executable files, enumerates processes or generates qualifications.
+func TestPrepared823ReceivedRecordsPureParser(t *testing.T) {
+	dir := os.Getenv("N1_RECEIVED_RECORD_DIR")
+	if dir == "" {
+		t.Skip("explicit retained-record fixture not supplied")
+	}
+	for i, p := range SystemPaths {
+		raw, e := os.ReadFile(fmt.Sprintf("%s/system-%04d.json", dir, i))
+		if e != nil {
+			t.Fatal(i, e)
+		}
+		var q Qualification
+		if json.Unmarshal(raw, &q) != nil {
+			t.Fatal(i, "fixture encoding")
+		}
+		if _, e = ParseQualification(raw, "digest", p, q.SHA, SHA(raw)); e != nil {
+			t.Fatal(i, p, e)
+		}
 	}
 }

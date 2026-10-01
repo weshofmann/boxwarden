@@ -131,14 +131,15 @@ func TestSlice1LegacyLockWithoutProtectedSudoCannotAuthorize(t *testing.T) {
 	}
 }
 
-func staticFixture() (StaticLock, [][]byte) {
-	s := StaticLock{Version: 2, Configs: [2]string{StockConfigSHA, CandidateConfigSHA}, SoftnetSHA: SoftnetSHA, CatalogueSHA: repeat("a"), SchemaSHA: repeat("b"), ProcedureSHA: repeat("c"), NoReplacement: true, ActiveSeconds: 1200, AttendanceSeconds: 600}
+func staticFixture() (StaticLock, CatalogueInputs) {
+	s := StaticLock{Version: 3, Configs: [2]string{StockConfigSHA, CandidateConfigSHA}, SoftnetSHA: SoftnetSHA, CatalogueSHA: repeat("a"), SchemaSHA: repeat("b"), ProcedureSHA: repeat("c"), NoReplacement: true, ActiveSeconds: 1200, AttendanceSeconds: 600}
 	for i := range s.Artifacts {
 		s.Artifacts[i] = Artifact{Name: artifactNames[i], SHA: fmt.Sprintf("%064x", i+1), Source: strings.Repeat("a", 40)}
 	}
 	for i, n := range StaticNames {
 		s.Files = append(s.Files, StaticFile{n, fmt.Sprintf("%064x", i+100), strings.Repeat("b", 40)})
 	}
+	s.Files[33].SHA = GenericBootstrapSHA
 	s.Files[4].SHA = SoftnetSHA
 	s.Files[13].SHA = StockConfigSHA
 	s.Files[14].SHA = CandidateConfigSHA
@@ -153,6 +154,7 @@ func staticFixture() (StaticLock, [][]byte) {
 	raw, _ := json.Marshal(q)
 	records := [][]byte{raw}
 	s.ProtectedSudo = ProtectedSudo{"protected-sudo", SudoPath, SHA(raw)}
+	entries := []OSImageEntry{}
 	for i, p := range SystemPaths {
 		q := Qualification{Version: 1, Kind: "digest", Path: p, Platform: Platform{"darwin", "arm64", "27.0.1", "26A434"}, SHA: fmt.Sprintf("%064x", i+40), IntendedUse: "synthetic approved exact OS path", Leaf: meta(p, 1, uint64(i+100), 1, 1, 1, 0755, 0)}
 		for parent := path.Dir(p); ; parent = path.Dir(parent) {
@@ -163,7 +165,23 @@ func staticFixture() (StaticLock, [][]byte) {
 		}
 		raw, _ := json.Marshal(q)
 		records = append(records, raw)
-		s.SystemImages = append(s.SystemImages, SystemImage{"digest", p, q.SHA, SHA(raw)})
+		entries = append(entries, OSImageEntry{Ordinal: i, Path: p, SHA: q.SHA, QualificationSHA: SHA(raw)})
 	}
-	return s, records
+
+	in := CatalogueInputs{Records: records, Rejections: []byte(`{"version":1,"rejected":[]}`)}
+	index := OSIndexRecord{Version: 1, Records: len(SystemPaths), RejectionsSHA: SHA(in.Rejections)}
+	for i := 0; i < SystemPageCount; i++ {
+		end := (i + 1) * SystemPageEntries
+		if end > len(entries) {
+			end = len(entries)
+		}
+		p := OSPage{Version: 1, Ordinal: i, Entries: entries[i*SystemPageEntries : end]}
+		raw, _ := json.Marshal(p)
+		in.Pages = append(in.Pages, raw)
+		index.Pages = append(index.Pages, OSPageBinding{Ordinal: i, Records: len(p.Entries), SHA: SHA(raw)})
+	}
+	in.Index, _ = json.Marshal(index)
+	s.OSIndex = OSIndex{Version: 1, SHA: SHA(in.Index), Records: len(SystemPaths), Pages: SystemPageCount}
+
+	return s, in
 }

@@ -25,7 +25,7 @@ func TestSlice1CanonicalCatalogueHashesAndKinds(t *testing.T) {
 	if q2.Ancestors[0].Mode != 0755 {
 		t.Fatal("mutable catalogue")
 	}
-	for _, change := range []func(*StaticLock){func(s *StaticLock) { s.Version = 1 }, func(s *StaticLock) { s.ProtectedSudo.Kind = "digest" }, func(s *StaticLock) { s.ProtectedSudo.Path = "/bin/sudo" }, func(s *StaticLock) { s.ProtectedSudo.QualificationSHA = "" }, func(s *StaticLock) { s.SystemImages[0].Path = SudoPath }, func(s *StaticLock) { s.SystemImages[0].Kind = "protected-sudo" }, func(s *StaticLock) { s.SystemImages[0].SHA = "" }, func(s *StaticLock) { s.SystemImages[1] = s.SystemImages[0] }, func(s *StaticLock) { s.Files = s.Files[:len(s.Files)-1] }, func(s *StaticLock) { s.Files[0].Name = "arbitrary" }} {
+	for _, change := range []func(*StaticLock){func(s *StaticLock) { s.Version = 2 }, func(s *StaticLock) { s.ProtectedSudo.Kind = "digest" }, func(s *StaticLock) { s.ProtectedSudo.Path = "/bin/sudo" }, func(s *StaticLock) { s.ProtectedSudo.QualificationSHA = "" }, func(s *StaticLock) { s.OSIndex.Records-- }, func(s *StaticLock) { s.OSIndex.Pages++ }, func(s *StaticLock) { s.OSIndex.SHA = "" }, func(s *StaticLock) { s.Files = s.Files[:len(s.Files)-1] }, func(s *StaticLock) { s.Files[0].Name = "arbitrary" }, func(s *StaticLock) { s.Files[33].SHA = s.Files[0].SHA }} {
 		x, _ := staticFixture()
 		change(&x)
 		raw, _ := json.Marshal(x)
@@ -33,9 +33,10 @@ func TestSlice1CanonicalCatalogueHashesAndKinds(t *testing.T) {
 			t.Fatal("invalid static lock admitted")
 		}
 	}
-	for _, invalid := range [][]byte{append([]byte(" "), records[0]...), bytes.Replace(records[0], []byte(`"version":1`), []byte(`"version":1,"version":1`), 1), bytes.Replace(records[0], []byte(`"sha":""`), []byte(`"sha":null`), 1), bytes.Replace(records[0], []byte(`"sha":""`), []byte(`"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`), 1)} {
-		xs := append([][]byte(nil), records...)
-		xs[0] = invalid
+	for _, invalid := range [][]byte{append([]byte(" "), records.Records[0]...), bytes.Replace(records.Records[0], []byte(`"version":1`), []byte(`"version":1,"version":1`), 1), bytes.Replace(records.Records[0], []byte(`"sha":""`), []byte(`"sha":null`), 1), bytes.Replace(records.Records[0], []byte(`"sha":""`), []byte(`"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`), 1)} {
+		xs := records
+		xs.Records = append([][]byte(nil), records.Records...)
+		xs.Records[0] = invalid
 		if _, e := AdmitCatalogue(s, xs); e == nil {
 			t.Fatal("tampered/mixed/noncanonical record admitted")
 		}
@@ -47,5 +48,17 @@ func TestSlice1CanonicalCatalogueHashesAndKinds(t *testing.T) {
 		if _, e := ParseQualification(b, q.Kind, q.Path, q.SHA, SHA(b)); e == nil {
 			t.Fatal("forged qualification with recomputed hash admitted")
 		}
+	}
+}
+
+func TestPagedVersionThreeLeavesLockBudgetUnchanged(t *testing.T) {
+	s, _ := staticFixture()
+	s.Version = 3
+	raw, _ := json.Marshal(s)
+	if _, e := ParseStaticLock(raw); e != nil {
+		t.Fatal("version3 static lock refused", e)
+	}
+	if MaxLockBytes != 65536 {
+		t.Fatal("lock limit widened")
 	}
 }

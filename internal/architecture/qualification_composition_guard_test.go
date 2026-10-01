@@ -1,6 +1,9 @@
 package architecture
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func compositionSource(tag string) []byte {
 	return []byte(tag + "\n\npackage fixture\nimport _ \"github.com/weshofmann/boxwarden/internal/qualification/n1/contract\"\n")
@@ -37,5 +40,48 @@ func TestQualificationCompositionRequiresExactPathAndProof(t *testing.T) {
 				t.Fatal("unproved qualification import admitted", x.name)
 			}
 		})
+	}
+}
+
+func TestSlice2ExactActorConstraints(t *testing.T) {
+	both := "//go:build darwin && cgo && n1diagnostic && n1clipboarddiagnostic && !n1candidate"
+	stock := "//go:build darwin && cgo && n1clipboarddiagnostic && !n1diagnostic && !n1candidate"
+	for _, p := range []string{"cmd/n1-window/main.go", "cmd/n1-run-window/main.go", "cmd/n1-closeout/main.go", "cmd/n1-stock-worker/main.go", "cmd/n1-candidate-worker/main.go"} {
+		t.Run(p, func(t *testing.T) {
+			tag := both
+			if p == "cmd/n1-stock-worker/main.go" {
+				tag = stock
+			}
+			if !qualificationCompositionAllowed(p, compositionSource(tag)) {
+				t.Fatal("exact actor refused")
+			}
+			for name, source := range map[string][]byte{"missing": compositionSource(""), "OR": compositionSource(tag + " || linux"), "late": []byte("package fixture\n" + tag + "\n"), "legacy": compositionSource(tag + "\n// +build linux"), "clipboard-absent": compositionSource("//go:build n1diagnostic && !n1candidate"), "candidate": compositionSource(tag + " || n1candidate"), "wrong-role": compositionSource(strings.ReplaceAll(tag, "!n1diagnostic", "n1diagnostic"))} {
+				if name == "wrong-role" && p != "cmd/n1-stock-worker/main.go" {
+					source = compositionSource(stock)
+				}
+				if qualificationCompositionAllowed(p, source) {
+					t.Fatal("unproved actor admitted", name)
+				}
+			}
+			sibling := strings.TrimSuffix(p, "main.go") + "sibling.go"
+			moved := "cmd/moved-" + strings.TrimPrefix(p, "cmd/")
+			if qualificationCompositionAllowed(sibling, compositionSource(tag)) || qualificationCompositionAllowed(moved, compositionSource(tag)) {
+				t.Fatal("moved/sibling actor granted exemption")
+			}
+		})
+	}
+	for _, p := range []string{"cmd/n1-stock-worker/main.go", "cmd/n1-candidate-worker/main.go"} {
+		tag := both
+		if p == "cmd/n1-stock-worker/main.go" {
+			tag = stock
+		}
+		if !tartQualificationCompositionAllowed(p, compositionSource(tag)) {
+			t.Fatal("exact worker Tart composition refused", p)
+		}
+	}
+	for _, p := range []string{"cmd/n1-window/main.go", "cmd/n1-run-window/main.go", "cmd/n1-closeout/main.go", "cmd/n1-stock-worker/other.go", "internal/qualification/n1/worker/main.go"} {
+		if tartQualificationCompositionAllowed(p, compositionSource(both)) {
+			t.Fatal("Tart factory broadened", p)
+		}
 	}
 }

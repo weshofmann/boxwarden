@@ -95,12 +95,6 @@ type Artifact struct {
 	SHA    string `json:"sha"`
 	Source string `json:"source"`
 }
-type SystemImage struct {
-	Kind             string `json:"kind"`
-	Path             string `json:"path"`
-	SHA              string `json:"sha"`
-	QualificationSHA string `json:"qualification_sha"`
-}
 type StaticLock struct {
 	Version           int           `json:"version"`
 	ProtectedSudo     ProtectedSudo `json:"protected_sudo"`
@@ -111,7 +105,7 @@ type StaticLock struct {
 	CatalogueSHA      string        `json:"catalogue_sha"`
 	SchemaSHA         string        `json:"schema_sha"`
 	ProcedureSHA      string        `json:"procedure_sha"`
-	SystemImages      []SystemImage `json:"system_images"`
+	OSIndex           OSIndex       `json:"os_index"`
 	NoReplacement     bool          `json:"no_replacement"`
 	ActiveSeconds     uint16        `json:"active_seconds"`
 	AttendanceSeconds uint16        `json:"attendance_seconds"`
@@ -126,7 +120,7 @@ func ArtifactPath(index int) string {
 	return PackageRoot + "/artifacts/" + artifactNames[index]
 }
 func (s StaticLock) Valid() bool {
-	if s.Version != 2 || !s.ProtectedSudo.Valid() || !validStaticFiles(s.Files) || s.Configs != [2]string{StockConfigSHA, CandidateConfigSHA} || s.SoftnetSHA != SoftnetSHA || !digest(s.CatalogueSHA) || !digest(s.SchemaSHA) || !digest(s.ProcedureSHA) || s.CatalogueSHA != s.Files[30].SHA || s.SchemaSHA != s.Files[31].SHA || s.ProcedureSHA != s.Files[28].SHA || !s.NoReplacement || s.ActiveSeconds != 1200 || s.AttendanceSeconds != 600 || len(s.SystemImages) != len(SystemPaths) {
+	if s.Version != 3 || !s.ProtectedSudo.Valid() || !validStaticFiles(s.Files) || s.Configs != [2]string{StockConfigSHA, CandidateConfigSHA} || s.SoftnetSHA != SoftnetSHA || !digest(s.CatalogueSHA) || !digest(s.SchemaSHA) || !digest(s.ProcedureSHA) || s.CatalogueSHA != s.Files[30].SHA || s.SchemaSHA != s.Files[31].SHA || s.ProcedureSHA != s.Files[28].SHA || !s.NoReplacement || s.ActiveSeconds != 1200 || s.AttendanceSeconds != 600 || !s.OSIndex.Valid() {
 		return false
 	}
 	seen := map[string]bool{}
@@ -135,12 +129,6 @@ func (s StaticLock) Valid() bool {
 			return false
 		}
 		seen[a.SHA] = true
-	}
-	for i, x := range s.SystemImages {
-		if x.Kind != "digest" || x.Path != SystemPaths[i] || !digest(x.SHA) || !digest(x.QualificationSHA) || seen[x.SHA] {
-			return false
-		}
-		seen[x.SHA] = true
 	}
 	return true
 }
@@ -217,7 +205,7 @@ func (h Handoff) Valid() bool {
 }
 func commandID(s string) bool {
 	switch s {
-	case "enroll", "install", "control-create", "candidate-create", "control-stage", "candidate-stage", "control-restart", "candidate-restart", "initial-review", "final-review", "control-copy", "control-read", "candidate-copy", "candidate-read", "network-controls", "observer-control", "observer-candidate", "arm", "connect", "collect", "control-stop", "candidate-stop", "control-delete", "candidate-delete", "archive":
+	case "enroll", "domain-init", "install", "control-create", "candidate-create", "control-start", "candidate-start", "control-stage", "candidate-stage", "control-restart", "candidate-restart", "initial-review", "final-review", "control-copy", "control-read", "candidate-copy", "candidate-read", "network-controls-before", "network-controls-after", "positive-before", "positive-after", "observer-control", "observer-candidate", "arm", "connect", "collect", "control-stop", "candidate-stop", "control-delete", "candidate-delete", "archive":
 		return true
 	}
 	return false

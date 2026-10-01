@@ -73,7 +73,8 @@ func RunUser() error {
 	if e != nil {
 		return fixed.ErrRefused
 	}
-	if _, e = fixed.ValidateChild(v, child, 3); e != nil {
+	completionWitness, e := fixed.ValidateChild(v, child, 3)
+	if e != nil {
 		return fixed.ErrRefused
 	}
 	if check(&g, v) != nil {
@@ -85,7 +86,7 @@ func RunUser() error {
 	if check(&g, v) != nil {
 		return fixed.ErrRefused
 	}
-	child, e = fixed.WaitChild(contract.ArtifactPath(5), nil, fixed.Environment(false), nil, time.Unix(0, int64(v.Handoff.DeadlineWall())))
+	child, e = fixed.WaitCloseout(v, completionWitness, time.Unix(0, int64(v.Handoff.DeadlineWall())))
 	return finalize(&g, child, e, clock.Now)
 }
 

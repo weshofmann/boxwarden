@@ -43,7 +43,7 @@ func readStatic(read staticReader, dir func(string) error) (StaticInputs, error)
 	}
 	for i, f := range v.Lock.Files {
 		mode := uint32(0600)
-		if i <= 4 || i >= 6 && i <= 9 {
+		if i <= 4 || i >= 6 && i <= 9 || i == 33 {
 			mode = 0500
 		}
 		raw, e = read(contract.StaticFilePath(i), 128<<20, 501, mode, -1)
@@ -51,15 +51,7 @@ func readStatic(read staticReader, dir func(string) error) (StaticInputs, error)
 			return StaticInputs{}, ErrRefused
 		}
 	}
-	records := [][]byte{}
-	for i := 0; i <= len(v.Lock.SystemImages); i++ {
-		raw, e = read(contract.QualificationPath(i), 8192, 501, 0600, -1)
-		if e != nil {
-			return StaticInputs{}, ErrRefused
-		}
-		records = append(records, raw)
-	}
-	v.Catalogue, e = contract.AdmitCatalogue(v.Lock, records)
+	v.Catalogue, e = readCatalogue(read, v.Lock)
 	if e != nil {
 		return StaticInputs{}, ErrRefused
 	}
@@ -81,4 +73,53 @@ func readStatic(read staticReader, dir func(string) error) (StaticInputs, error)
 		return StaticInputs{}, ErrRefused
 	}
 	return v, nil
+}
+
+// The fixed reader validates each bounded layer before reading the next. Its
+// input path set is derived only from compile-fixed ordinals, never index data.
+func readCatalogue(read staticReader, s contract.StaticLock) (contract.Catalogue, error) {
+	if read == nil || !s.Valid() {
+		return contract.Catalogue{}, ErrRefused
+	}
+	in := contract.CatalogueInputs{}
+	total := 0
+	bounded := func(p string, limit int) ([]byte, error) {
+		raw, e := read(p, limit, 501, 0600, -1)
+		total += len(raw)
+		if e != nil || len(raw) == 0 || len(raw) > limit || total > contract.MaxCatalogueBytes {
+			return nil, ErrRefused
+		}
+		return raw, nil
+	}
+	var e error
+	in.Index, e = bounded(contract.OSIndexPath, contract.MaxOSIndexBytes)
+	if e != nil {
+		return contract.Catalogue{}, ErrRefused
+	}
+	index, e := contract.ParseOSIndex(in.Index, s.OSIndex)
+	if e != nil {
+		return contract.Catalogue{}, ErrRefused
+	}
+	in.Rejections, e = bounded(contract.OSRejectionsPath, contract.MaxOSRejectionsBytes)
+	if e != nil || contract.SHA(in.Rejections) != index.RejectionsSHA {
+		return contract.Catalogue{}, ErrRefused
+	}
+	for i := 0; i < contract.SystemPageCount; i++ {
+		raw, e := bounded(contract.SystemPagePath(i), contract.MaxOSPageBytes)
+		if e != nil {
+			return contract.Catalogue{}, ErrRefused
+		}
+		if _, e = contract.ParseOSPage(raw, i, index.Pages[i]); e != nil {
+			return contract.Catalogue{}, ErrRefused
+		}
+		in.Pages = append(in.Pages, raw)
+	}
+	for i := 0; i <= len(contract.SystemPaths); i++ {
+		raw, e := bounded(contract.QualificationPath(i), contract.MaxQualificationBytes)
+		if e != nil {
+			return contract.Catalogue{}, ErrRefused
+		}
+		in.Records = append(in.Records, raw)
+	}
+	return contract.AdmitCatalogue(s, in)
 }
