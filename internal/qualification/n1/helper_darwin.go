@@ -38,7 +38,7 @@ func RunCleanup() error {
 	if check(ctx) != nil {
 		return ErrRefused
 	}
-	self, e := nativeProcess(os.Getpid())
+	self, e := nativeProcess(ctx, os.Getpid(), v.Catalogue)
 	if e != nil || self.SHA != v.Lock.Artifacts[4].SHA || self.Path != contract.ArtifactPath(4) {
 		return ErrRefused
 	}
@@ -47,7 +47,9 @@ func RunCleanup() error {
 		return hostx.NewSystemDoctor().AcquireDiagnosticCleanup(ctx, request)
 	}, inventory: func(ctx context.Context) (stateGuard, error) {
 		return inventory(ctx, scope{root: contract.StateRoot, uid: 501, acl: hostx.OSACLInspector{}}, v.Handoff)
-	}, storage: storage, census: func(ctx context.Context) error { return census(ctx, nativeSampler{}, v.Lock, self) }, check: check, publish: receipt.Publish}
+	}, storage: storage, census: func(ctx context.Context) error {
+		return census(ctx, nativeSampler{v.Catalogue}, v.Lock, self, v.Catalogue)
+	}, check: check, publish: receipt.Publish}
 	if executeCleanup(ctx, v, d) != nil || check(ctx) != nil {
 		return ErrRefused
 	}

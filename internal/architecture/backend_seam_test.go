@@ -36,7 +36,9 @@ func TestOnlyApprovedCompositionPackagesImportTheTartAdapter(t *testing.T) {
 			// Slice B adds a focused detached-child composition package. The
 			// common control plane and supervisor remain backend-neutral.
 			packageDirectory := filepath.Dir(relative)
-			if packageDirectory != filepath.Join("cmd", "boxwarden") && packageDirectory != filepath.Join("internal", "sessionruntime") {
+			source, readErr := os.ReadFile(path)
+			exactH := readErr == nil && tartQualificationCompositionAllowed(filepath.ToSlash(relative), source)
+			if !exactH && packageDirectory != filepath.Join("cmd", "boxwarden") && packageDirectory != filepath.Join("internal", "sessionruntime") {
 				t.Errorf("%s imports the Tart adapter directly; only cmd/boxwarden and internal/sessionruntime composition may do so", relative)
 			}
 		}
@@ -184,4 +186,22 @@ func qualificationCompositionAllowed(relative string, source []byte) bool {
 		}
 	}
 	return satisfiable
+}
+
+func tartQualificationCompositionAllowed(relative string, source []byte) bool {
+	return relative == "cmd/n1-cleanup/main.go" && qualificationCompositionAllowed(relative, source)
+}
+func TestOnlyExactConstrainedCleanupMainCanComposeReadOnlyTart(t *testing.T) {
+	for _, x := range []struct {
+		p, tag string
+		good   bool
+	}{{"cmd/n1-cleanup/main.go", "n1diagnostic && n1cleanup && !n1candidate", true}, {"cmd/n1-cleanup/sibling.go", "n1diagnostic && n1cleanup && !n1candidate", false}, {"cmd/n1-cleanup/main.go", "n1diagnostic && !n1candidate", false}, {"cmd/n1-cleanup/main.go", "n1diagnostic || n1cleanup", false}, {"cmd/n1-cleanup/main.go", "", false}} {
+		s := "package main\n"
+		if x.tag != "" {
+			s = "//go:build " + x.tag + "\n\n" + s
+		}
+		if tartQualificationCompositionAllowed(x.p, []byte(s)) != x.good {
+			t.Fatalf("%+v", x)
+		}
+	}
 }

@@ -95,3 +95,8 @@ func sameSudo(a, b os.FileInfo) bool {
 	y, yok := b.Sys().(*syscall.Stat_t)
 	return xok && yok && x.Dev == y.Dev && x.Ino == y.Ino && x.Uid == y.Uid && x.Gid == y.Gid && x.Nlink == y.Nlink && a.Mode() == b.Mode() && a.Size() == b.Size() && a.ModTime().Equal(b.ModTime())
 }
+
+// CheckPlatform exposes only the already fixed read-only OS qualification.
+func CheckPlatform() error {
+	return sudoPlatform(execx.OSRunner{MaxOutputBytes: 512, StrictStderr: true}, runtime.GOOS, runtime.GOARCH)
+}

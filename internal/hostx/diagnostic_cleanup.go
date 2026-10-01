@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/weshofmann/boxwarden/internal/execx"
 	"github.com/weshofmann/boxwarden/internal/qualification/n1/clock"
 	"github.com/weshofmann/boxwarden/internal/qualification/n1/fixed"
 	"io"
@@ -47,32 +46,14 @@ func (s SystemDoctor) AcquireDiagnosticCleanup(ctx context.Context, r Request) (
 	if os.Getuid() != 0 || os.Geteuid() != 0 {
 		return nil, ErrDiagnosticCleanup
 	}
-	if len(r.ConfiguredStateRoots) != 1 || r.ConfiguredStateRoots[0] != "/Volumes/BoxwardenAlphaQualification/n1-diagnostic-20260930-state" || r.TartPath != "/Users/devel/Library/Application Support/boxwarden/toolchains/tart/2.32.1/tart.app/Contents/MacOS/tart" || r.TartHome != "/Users/devel/Library/Application Support/boxwarden/tart" || r.SoftnetPath != "/Users/devel/Backup/boxwarden_archive/n1-diagnostic-20260930/package/artifacts/softnet-diagnostic" {
-		return nil, ErrDiagnosticCleanup
-	}
-	inspector := s.inspector
-	if inspector == nil {
-		n := NewOSDoctorInspector().(*osDoctorInspector)
-		op, e := n.LookupOperator(501)
-		if e != nil || op != (Operator{501, "devel", "/Users/devel"}) {
-			return nil, ErrDiagnosticCleanup
-		}
-		n.policyOperator = "devel"
-		n.runner = execx.OSRunner{MaxOutputBytes: 16 << 10, StrictStderr: true}
-		inspector = n
+	inspector, m, e := s.diagnosticPreflightAdmission(ctx, r)
+	if e != nil {
+		return nil, e
 	}
 	s.inspector = inspector
 	check := func(ctx context.Context) (Manifest, error) {
-		a := s.inspectPolicy(ctx, r, false)
-		m := a.manifest
-		if a.report.Status != Healthy || m.Operator != (Operator{501, "devel", "/Users/devel"}) || m.Group.ID != 501 || m.Group.Name != OperatorGroupName || len(m.Group.Members) != 1 || m.Group.Members[0] != 501 || ctx.Err() != nil {
-			return Manifest{}, ErrDiagnosticCleanup
-		}
-		return m, nil
-	}
-	m, e := check(ctx)
-	if e != nil {
-		return nil, e
+		_, m, e := s.diagnosticPreflightAdmission(ctx, r)
+		return m, e
 	}
 	p := RootedPublisher{Root: productionToolchainPath(), platform: inspector.Platform(), ACL: OSACLInspector{}}
 	g, e := acquireDiagnosticCleanup(ctx, p, m, nil)

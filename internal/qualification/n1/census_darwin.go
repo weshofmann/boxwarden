@@ -25,12 +25,13 @@ static int bw_identity(int pid,struct bw_identity *out){
 import "C"
 import (
 	"context"
+	"github.com/weshofmann/boxwarden/internal/qualification/n1/contract"
 	"unsafe"
 )
 
-type nativeSampler struct{}
+type nativeSampler struct{ catalogue contract.Catalogue }
 
-func (nativeSampler) snapshot(ctx context.Context) ([]process, error) {
+func (s nativeSampler) snapshot(ctx context.Context) ([]process, error) {
 	var values [maxProcesses + 1]C.int
 	n := int(C.bw_pids((*C.int)(unsafe.Pointer(&values[0])), C.int(len(values))))
 	if n <= 0 || n > maxProcesses {
@@ -41,7 +42,7 @@ func (nativeSampler) snapshot(ctx context.Context) ([]process, error) {
 		if ctx.Err() != nil {
 			return nil, ErrRefused
 		}
-		p, e := nativeProcess(int(pid))
+		p, e := nativeProcess(ctx, int(pid), s.catalogue)
 		if e != nil {
 			return nil, ErrRefused
 		}
@@ -49,17 +50,20 @@ func (nativeSampler) snapshot(ctx context.Context) ([]process, error) {
 	}
 	return xs, nil
 }
-func nativeProcess(pid int) (process, error) {
+func nativeProcess(ctx context.Context, pid int, catalogue contract.Catalogue) (process, error) {
 	var before, after C.struct_bw_identity
 	if C.bw_identity(C.int(pid), &before) != 0 {
 		return process{}, ErrRefused
 	}
 	path := C.GoString(&before.path[0])
-	image, e := readProcessImage(path, openProcessImage)
+	image, e := inspectProcessImage(ctx, path, catalogue)
+	if e != nil {
+		return process{}, ErrRefused
+	}
 	if e != nil || C.bw_identity(C.int(pid), &after) != 0 || before.pid != after.pid || before.birth != after.birth || before.unique != after.unique || path != C.GoString(&after.path[0]) {
 		return process{}, ErrRefused
 	}
-	return process{pid, uint64(before.birth), uint64(before.unique), path, image.sha, image.device, image.inode}, nil
+	return process{PID: pid, Birth: uint64(before.birth), Unique: uint64(before.unique), Path: path, SHA: image.sha, Device: image.device, Inode: image.inode, Kind: image.kind, QualificationSHA: image.qualification}, nil
 }
 
 func checkedNativeCount(count, code int) int {

@@ -96,11 +96,15 @@ type Artifact struct {
 	Source string `json:"source"`
 }
 type SystemImage struct {
+	Kind             string `json:"kind"`
+	Path             string `json:"path"`
 	SHA              string `json:"sha"`
 	QualificationSHA string `json:"qualification_sha"`
 }
 type StaticLock struct {
 	Version           int           `json:"version"`
+	ProtectedSudo     ProtectedSudo `json:"protected_sudo"`
+	Files             []StaticFile  `json:"files"`
 	Artifacts         [6]Artifact   `json:"artifacts"`
 	Configs           [2]string     `json:"configs"`
 	SoftnetSHA        string        `json:"softnet_sha"`
@@ -122,7 +126,7 @@ func ArtifactPath(index int) string {
 	return PackageRoot + "/artifacts/" + artifactNames[index]
 }
 func (s StaticLock) Valid() bool {
-	if s.Version != 1 || s.Configs != [2]string{StockConfigSHA, CandidateConfigSHA} || s.SoftnetSHA != SoftnetSHA || !digest(s.CatalogueSHA) || !digest(s.SchemaSHA) || !digest(s.ProcedureSHA) || !s.NoReplacement || s.ActiveSeconds != 1200 || s.AttendanceSeconds != 600 || len(s.SystemImages) > 256 {
+	if s.Version != 2 || !s.ProtectedSudo.Valid() || !validStaticFiles(s.Files) || s.Configs != [2]string{StockConfigSHA, CandidateConfigSHA} || s.SoftnetSHA != SoftnetSHA || !digest(s.CatalogueSHA) || !digest(s.SchemaSHA) || !digest(s.ProcedureSHA) || s.CatalogueSHA != s.Files[30].SHA || s.SchemaSHA != s.Files[31].SHA || s.ProcedureSHA != s.Files[28].SHA || !s.NoReplacement || s.ActiveSeconds != 1200 || s.AttendanceSeconds != 600 || len(s.SystemImages) != len(SystemPaths) {
 		return false
 	}
 	seen := map[string]bool{}
@@ -132,8 +136,8 @@ func (s StaticLock) Valid() bool {
 		}
 		seen[a.SHA] = true
 	}
-	for _, x := range s.SystemImages {
-		if !digest(x.SHA) || !digest(x.QualificationSHA) || seen[x.SHA] {
+	for i, x := range s.SystemImages {
+		if x.Kind != "digest" || x.Path != SystemPaths[i] || !digest(x.SHA) || !digest(x.QualificationSHA) || seen[x.SHA] {
 			return false
 		}
 		seen[x.SHA] = true
@@ -357,4 +361,12 @@ func strict(raw []byte, limit int, dst any) error {
 		return ErrRefused
 	}
 	return nil
+}
+
+func ParseOrigin(raw []byte) (Window, error) {
+	var w Window
+	if len(raw) == 0 || len(raw) > MaxWitnessBytes || raw[len(raw)-1] != '\n' || strict(raw[:len(raw)-1], MaxWitnessBytes-1, &w) != nil || !w.Valid() {
+		return Window{}, ErrRefused
+	}
+	return w, nil
 }

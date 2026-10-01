@@ -13,6 +13,9 @@ import (
 var ErrRefused = errors.New("n1 fixed input refused")
 
 type Inputs struct {
+	Catalogue           contract.Catalogue
+	Protected           contract.ProtectedInventory
+	Build               contract.BuildInputs
 	Lock                contract.StaticLock
 	Handoff             contract.Handoff
 	LockSHA, HandoffSHA string
@@ -20,21 +23,19 @@ type Inputs struct {
 
 func ReadInputs() (Inputs, error) {
 	var v Inputs
-	for _, dir := range []string{contract.PackageRoot, contract.ConfigRoot, contract.EvidenceRoot} {
-		if checkDirectory(dir, 501, 0700) != nil {
-			return v, ErrRefused
-		}
-	}
-	raw, e := read(contract.LockPath, contract.MaxLockBytes, 501, 0600, -1)
-	if e != nil {
-		return v, e
-	}
-	v.Lock, e = contract.ParseStaticLock(raw)
+	static, e := ReadStatic()
 	if e != nil {
 		return v, ErrRefused
 	}
-	v.LockSHA = contract.SHA(raw)
-	raw, e = read(contract.EvidenceRoot+"/"+contract.HandoffName, contract.MaxReceiptBytes, 501, 0600, -1)
+	v.Lock = static.Lock
+	v.LockSHA = static.LockSHA
+	v.Catalogue = static.Catalogue
+	v.Protected = static.Protected
+	v.Build = static.Build
+	if checkDirectory(contract.EvidenceRoot, 501, 0700) != nil {
+		return v, ErrRefused
+	}
+	raw, e := read(contract.EvidenceRoot+"/"+contract.HandoffName, contract.MaxReceiptBytes, 501, 0600, -1)
 	if e != nil {
 		return v, e
 	}
@@ -92,7 +93,7 @@ func ancestry(path string) error {
 			return ErrRefused
 		}
 		st, ok := info.Sys().(*syscall.Stat_t)
-		if !ok || (st.Uid != 0 && st.Uid != 501) || pathmeta.Check(p, info, pathmeta.OSInspector{}) != nil {
+		if !ok || (st.Uid != 0 && st.Uid != 501) || pathmeta.CheckQualificationAncestor(p, info, pathmeta.OSInspector{}, CheckPlatform) != nil {
 			return ErrRefused
 		}
 		if p == "/" {
@@ -100,23 +101,44 @@ func ancestry(path string) error {
 		}
 	}
 }
-func read(path string, cap, uid int, mode os.FileMode, gid int) (raw []byte, err error) {
-	if ancestry(path) != nil {
+
+type fileReadHandle interface {
+	io.Reader
+	Stat() (os.FileInfo, error)
+	Close() error
+}
+type fileReadChecks struct {
+	ancestry func(string) error
+	stat     func(string) (os.FileInfo, error)
+	acl      func(string, os.FileInfo) error
+	open     func(string) (fileReadHandle, error)
+}
+
+func read(path string, cap, uid int, mode os.FileMode, gid int) ([]byte, error) {
+	return readChecked(path, cap, uid, mode, gid, fileReadChecks{ancestry, os.Lstat, func(p string, f os.FileInfo) error { return pathmeta.Check(p, f, pathmeta.OSInspector{}) }, func(p string) (fileReadHandle, error) {
+		fd, e := syscall.Open(p, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+		if e != nil {
+			return nil, e
+		}
+		return os.NewFile(uintptr(fd), "n1-fixed-input"), nil
+	}})
+}
+func readChecked(path string, cap, uid int, mode os.FileMode, gid int, i fileReadChecks) (raw []byte, err error) {
+	if i.ancestry == nil || i.stat == nil || i.acl == nil || i.open == nil || cap < 1 || i.ancestry(path) != nil {
 		return nil, ErrRefused
 	}
-	before, e := os.Lstat(path)
-	if e != nil || !before.Mode().IsRegular() || before.Mode() != mode || before.Size() < 1 || before.Size() > int64(cap) {
+	before, e := i.stat(path)
+	if e != nil || before == nil || !before.Mode().IsRegular() || before.Mode() != mode || before.Size() < 1 || before.Size() > int64(cap) {
 		return nil, ErrRefused
 	}
 	st, ok := before.Sys().(*syscall.Stat_t)
-	if !ok || int(st.Uid) != uid || st.Nlink != 1 || gid >= 0 && int(st.Gid) != gid || pathmeta.Check(path, before, pathmeta.OSInspector{}) != nil {
+	if !ok || int(st.Uid) != uid || st.Nlink != 1 || gid >= 0 && int(st.Gid) != gid || i.acl(path, before) != nil {
 		return nil, ErrRefused
 	}
-	fd, e := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
-	if e != nil {
+	f, e := i.open(path)
+	if e != nil || f == nil {
 		return nil, ErrRefused
 	}
-	f := os.NewFile(uintptr(fd), "n1-fixed-input")
 	defer func() {
 		if f.Close() != nil {
 			raw = nil
@@ -131,20 +153,27 @@ func read(path string, cap, uid int, mode os.FileMode, gid int) (raw []byte, err
 	if e != nil || len(raw) > cap {
 		return nil, ErrRefused
 	}
-	visible, e := os.Lstat(path)
+	visible, e := i.stat(path)
 	after, e2 := f.Stat()
-	if e != nil || e2 != nil || !same(opened, visible) || !same(opened, after) || ancestry(path) != nil {
+	if e != nil || e2 != nil || !same(opened, visible) || !same(opened, after) || i.ancestry(path) != nil || i.acl(path, visible) != nil {
+		return nil, ErrRefused
+	}
+	// The ACL query is pathname-based: bracket its complete leaf security tuple
+	// against the retained descriptor and the original opened identity.
+	finalVisible, ve := i.stat(path)
+	finalOpened, fe := f.Stat()
+	if ve != nil || fe != nil || !same(opened, finalVisible) || !same(opened, finalOpened) {
 		return nil, ErrRefused
 	}
 	return raw, nil
 }
 func same(a, b os.FileInfo) bool {
-	if !os.SameFile(a, b) || a.Mode() != b.Mode() || a.Size() != b.Size() || !a.ModTime().Equal(b.ModTime()) {
+	if a == nil || b == nil || !os.SameFile(a, b) || a.Mode() != b.Mode() || a.Size() != b.Size() || !a.ModTime().Equal(b.ModTime()) {
 		return false
 	}
 	x, xo := a.Sys().(*syscall.Stat_t)
 	y, yo := b.Sys().(*syscall.Stat_t)
-	return xo && yo && x.Uid == y.Uid && x.Gid == y.Gid && x.Nlink == y.Nlink
+	return xo && yo && x.Dev == y.Dev && x.Ino == y.Ino && x.Uid == y.Uid && x.Gid == y.Gid && x.Mode == y.Mode && x.Nlink == y.Nlink && sameNativeSecurity(x, y)
 }
 
 func CheckStateDirectory() error {

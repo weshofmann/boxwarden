@@ -25,10 +25,10 @@ func (f *censusFake) snapshot(context.Context) ([]process, error) {
 	return f.values[i], nil
 }
 func TestCensusRejectsUnknownControllerChurnOverflowAndUnrelatedTart(t *testing.T) {
-	safe := process{PID: 123, Birth: 1, Unique: 7, Path: "/fixed/native-attend", SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Device: 1, Inode: 2}
-	l := contract.StaticLock{}
+	safe := process{PID: 123, Birth: 1, Unique: 7, Kind: "digest", Path: contract.ArtifactPath(2), SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Device: 1, Inode: 2}
+	l, c := censusFixture()
 	l.Artifacts[2].SHA = safe.SHA
-	self := process{PID: 999, Birth: 9, Unique: 99, Path: "/fixed/cleanup", SHA: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", Device: 1, Inode: 3}
+	self := process{PID: 999, Birth: 9, Unique: 99, Kind: "digest", Path: contract.ArtifactPath(4), SHA: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", Device: 1, Inode: 3}
 	l.Artifacts[4].SHA = self.SHA
 	for _, which := range []string{"safe", "controller", "tart", "unknown", "pid0", "churn", "empty", "overflow", "denied", "missing-self"} {
 		t.Run(which, func(t *testing.T) {
@@ -64,7 +64,7 @@ func TestCensusRejectsUnknownControllerChurnOverflowAndUnrelatedTart(t *testing.
 			if which == "denied" {
 				f.err = errors.New("denied")
 			}
-			e := census(t.Context(), f, l, self)
+			e := census(t.Context(), f, l, self, c)
 			if which == "safe" && e != nil {
 				t.Fatal(e)
 			}

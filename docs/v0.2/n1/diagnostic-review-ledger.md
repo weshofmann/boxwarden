@@ -623,3 +623,51 @@ A meaningful harmless child-process control reproduces700-before/755-after. The 
 ### Fresh-path and child-umask correction review closure
 
 Fresh independent requested Sol6.1/High recheck reports 0 Critical/Important/Minor in the five-file corrective source unit. It independently verifies all47 bound files, unchanged21-file producing source, five exact replacements, selected Python3.9 child-mask support and all11 actual invocation/result bindings. Report SHA256 `18f6fcab3597098e83dd6eadbe79ca33bb10c559e1efda6736e20b5a5d3222f4`; provenance `76461f0da2be4b6791af21a51929cbaf2e7fda1026b3383a0123b243c63ffd6a`. Root checked every bound current source/evidence hash. Failed leg and prior review remain immutable. This closes source review only; corrective publication/current-head CI and fresh9/10 twin acceptance/equality remain gates. Preceding published recipe9e8b9cf passed CI438 all4jobs/41steps, with raw logs retained. No artifact or live qualification is claimed.
+
+
+## Diagnostic.2 reproduced artifact and fixture correction
+
+Fresh corrected targets9/10 both exited zero with raw0755 executables, without
+normalization. Full executable/archive/applied-source bytes match, with449
+actual nested compiler records per leg and checked argument counts/bytes.
+Executable1bb12bec8821835ada8c036426c2c03061be6cebdf4a1b658249d268fc8bde05
+and USTAR76704f05eba242cb649ab49db28028556c338a4daeefe9327fdfe37f874808ac
+are bound in separately named artifact_v2.json. All21 files of the producing
+Rust source remain unchanged. Historical failed leg7 stays unaccepted.
+
+CI439 passed the packet-policy and both Rust-platform jobs; the main verify job
+failed the new child-umask fixture because it used a runner temporary-path alias
+as its canonical SDK target. Published622bdec corrects the fixture with an
+explicit symlink and resolved target. Five local deterministic controls pass;
+production recipe boundary validation is unchanged. Full current-head CI
+remains a separate gate. The local twin-evidence retention copy resumed only
+missing files after verifying existing copies; no evidence was overwritten and
+the16MiB/1024record bound did not change.
+
+These records certify Rust preparation only. Full Go/static/coordinator/closeout
+closure, final artifacts, green integrated CI and four fresh final review seats
+remain required before the future owner-approval gate. No install or live trial.
+
+
+## Static admission component closure
+
+The corrected64-file Go/static slice now has independent component acceptance.
+The original review remains0Critical/2Important/0Minor; both Important findings
+are ADDRESSED at their original severity, with no new finding. Final fixed-file
+reads recheck strict leaf ACL and native ctime/flags across descriptor/path
+observations; preinstall census refuses exact U/R while cleanup retains them.
+Three changed originals plus five additions leave56 original bindings unchanged.
+
+Seven corrective retained runs include two RED attempts and five exit-zero
+results: focused GREEN, affected native tests/race/vet and default tests.
+140 actual compiler-child argument records and978 corrective evidence files
+were independently verified. Closure report SHA256
+896c3d1440de68a79a0e224dad985b0a63629e13a14b0590e9aa89d97c7c20a5;
+Root readback68b2d085cf47808ffdd270526acc38de4d80c79a66949a5c1e0ff20747a63150.
+
+This is source/fixture acceptance. The finite OS-image table still needs
+known GUI-image preparation before the final lock; native census usability
+is unqualified. No current process census, installation or actor execution
+was performed. Launch/watch, coordinator/closeout, exact Go artifacts and
+four fresh final package reviews remain pending. Published622bdec passed
+CI440 all4jobs/41steps; the next source publication needs its own CI.

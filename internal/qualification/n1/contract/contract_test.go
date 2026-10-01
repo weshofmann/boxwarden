@@ -3,6 +3,9 @@ package contract
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"path"
+	"strings"
 	"testing"
 	"time"
 )
@@ -90,10 +93,7 @@ func TestOnceOnlyLedgerAndOriginalCumulativeBudget(t *testing.T) {
 	}
 }
 func TestStaticLockNoMissingPlaceholderOrDuplicateAndWitnessBindings(t *testing.T) {
-	s := StaticLock{Version: 1, Configs: [2]string{StockConfigSHA, CandidateConfigSHA}, SoftnetSHA: SoftnetSHA, CatalogueSHA: repeat("a"), SchemaSHA: repeat("b"), ProcedureSHA: repeat("c"), NoReplacement: true, ActiveSeconds: 1200, AttendanceSeconds: 600}
-	for i := range s.Artifacts {
-		s.Artifacts[i] = Artifact{Name: artifactNames[i], SHA: repeat(string(byte('1' + i))), Source: string(bytes.Repeat([]byte("a"), 40))}
-	}
+	s, _ := staticFixture()
 	raw, _ := Encode(s)
 	if _, e := ParseStaticLock(raw); e != nil {
 		t.Fatal(e)
@@ -118,4 +118,52 @@ func TestStaticLockNoMissingPlaceholderOrDuplicateAndWitnessBindings(t *testing.
 	if _, e = EncodeWitness(w); e == nil {
 		t.Fatal("unproven actual exit/completion admitted")
 	}
+}
+
+func TestSlice1LegacyLockWithoutProtectedSudoCannotAuthorize(t *testing.T) {
+	s := StaticLock{Version: 1, Configs: [2]string{StockConfigSHA, CandidateConfigSHA}, SoftnetSHA: SoftnetSHA, CatalogueSHA: repeat("a"), SchemaSHA: repeat("b"), ProcedureSHA: repeat("c"), NoReplacement: true, ActiveSeconds: 1200, AttendanceSeconds: 600}
+	for i := range s.Artifacts {
+		s.Artifacts[i] = Artifact{Name: artifactNames[i], SHA: repeat(string(byte('1' + i))), Source: string(bytes.Repeat([]byte("a"), 40))}
+	}
+	raw, _ := Encode(s)
+	if _, err := ParseStaticLock(raw); err == nil {
+		t.Fatal("legacy lock without exact ProtectedSudo/canonical qualifications admitted")
+	}
+}
+
+func staticFixture() (StaticLock, [][]byte) {
+	s := StaticLock{Version: 2, Configs: [2]string{StockConfigSHA, CandidateConfigSHA}, SoftnetSHA: SoftnetSHA, CatalogueSHA: repeat("a"), SchemaSHA: repeat("b"), ProcedureSHA: repeat("c"), NoReplacement: true, ActiveSeconds: 1200, AttendanceSeconds: 600}
+	for i := range s.Artifacts {
+		s.Artifacts[i] = Artifact{Name: artifactNames[i], SHA: fmt.Sprintf("%064x", i+1), Source: strings.Repeat("a", 40)}
+	}
+	for i, n := range StaticNames {
+		s.Files = append(s.Files, StaticFile{n, fmt.Sprintf("%064x", i+100), strings.Repeat("b", 40)})
+	}
+	s.Files[4].SHA = SoftnetSHA
+	s.Files[13].SHA = StockConfigSHA
+	s.Files[14].SHA = CandidateConfigSHA
+	s.Files[30].SHA = s.CatalogueSHA
+	s.Files[31].SHA = s.SchemaSHA
+	s.Files[28].SHA = s.ProcedureSHA
+	meta := func(p string, dev, ino, links, size, ts uint64, mode, flags uint32) ImageMetadata {
+		return ImageMetadata{Path: p, Device: dev, Inode: ino, UID: 0, GID: 0, Mode: mode, Nlink: links, Bytes: size, MtimeNS: ts, CtimeNS: ts, Flags: flags, NoACL: true}
+	}
+	q := Qualification{Version: 1, Kind: "protected-sudo", Path: SudoPath, Platform: Platform{"darwin", "arm64", "27.0.1", "26A434"}, SHA: "", IntendedUse: "fixed native privilege status relay", Leaf: meta(SudoPath, 16777230, 1152921500312608819, 1, 2362384, 1790233837000000000, 04511, 524320)}
+	q.Ancestors = []ImageMetadata{meta("/", 16777230, 2, 23, 736, 1790233837000000000, 0755, 1048576), meta("/usr", 16777230, 1152921500312607501, 11, 352, 1790233837000000000, 0755, 557056), meta("/usr/bin", 16777230, 1152921500312607504, 934, 29888, 1790233837000000000, 0755, 524288)}
+	raw, _ := json.Marshal(q)
+	records := [][]byte{raw}
+	s.ProtectedSudo = ProtectedSudo{"protected-sudo", SudoPath, SHA(raw)}
+	for i, p := range SystemPaths {
+		q := Qualification{Version: 1, Kind: "digest", Path: p, Platform: Platform{"darwin", "arm64", "27.0.1", "26A434"}, SHA: fmt.Sprintf("%064x", i+40), IntendedUse: "synthetic approved exact OS path", Leaf: meta(p, 1, uint64(i+100), 1, 1, 1, 0755, 0)}
+		for parent := path.Dir(p); ; parent = path.Dir(parent) {
+			q.Ancestors = append([]ImageMetadata{meta(parent, 1, 1, 2, 1, 1, 0755, 0)}, q.Ancestors...)
+			if parent == "/" {
+				break
+			}
+		}
+		raw, _ := json.Marshal(q)
+		records = append(records, raw)
+		s.SystemImages = append(s.SystemImages, SystemImage{"digest", p, q.SHA, SHA(raw)})
+	}
+	return s, records
 }

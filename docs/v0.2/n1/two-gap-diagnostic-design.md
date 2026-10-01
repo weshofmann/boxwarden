@@ -247,3 +247,46 @@ The channel caps bound resources; their different local origins do not independe
 A separate unarmed `ObserveDiagnosticLaunch` returns strictly bounded retained HELLO and exact owner/handle/watch/connection correlation. It neither creates readiness nor changes phase or deadlines. Existing phase-independent network inspection remains available for stock and post-ARM collection rechecks. The ARM control envelope must carry the actual host deadline; callers must never restart the interval from RPC return.
 
 Any changed Rust bytes are a distinct diagnostic.2 source/artifact identity. Diagnostic.1 source, reproduced executable/archive and review evidence remain historical. Rust timing/source controls, fresh independent delta review, publication and fresh twin reproduction precede new Go exact-identity binding. Source-complete Task5 graphs precede final Go twins. This contract is prospective source work, not installed-host or live-window qualification.
+
+
+## Diagnostic.2 artifact reproduction checkpoint
+
+The corrected native recipe produced two independent successful targets9/10
+from Rust source `85bcb9aebffcc4a8c98b1bec111df2db8c18e81f`. Their executable,
+USTAR and applied-source record bytes are equal. Executable SHA256 is
+`1bb12bec8821835ada8c036426c2c03061be6cebdf4a1b658249d268fc8bde05`; archive
+SHA256 is `76704f05eba242cb649ab49db28028556c338a4daeefe9327fdfe37f874808ac`.
+`artifact_v2.json` records the exact producing source, source manifest, recipe
+and compiler identities separately from historical diagnostic.1 evidence.
+The recipe was published at02c4b6 and the artifact record at622bdec.
+
+This closes the Rust reproduction prerequisite only. Go exact admission,
+original-budget/ARM-send receipt guards, finite launch/coordinator/closeout
+graphs, full static package closure and four final reviews remain required.
+The fixed candidate config path is versionless; its existing expected enrolled
+bytes remain unchanged while the compiled executable identity changes.
+No native installation or live diagnostic result follows from this checkpoint.
+
+
+## Static admission component closure
+
+The corrected64-file Go/static slice now has independent component acceptance.
+The original review remains0Critical/2Important/0Minor; both Important findings
+are ADDRESSED at their original severity, with no new finding. Final fixed-file
+reads recheck strict leaf ACL and native ctime/flags across descriptor/path
+observations; preinstall census refuses exact U/R while cleanup retains them.
+Three changed originals plus five additions leave56 original bindings unchanged.
+
+Seven corrective retained runs include two RED attempts and five exit-zero
+results: focused GREEN, affected native tests/race/vet and default tests.
+140 actual compiler-child argument records and978 corrective evidence files
+were independently verified. Closure report SHA256
+896c3d1440de68a79a0e224dad985b0a63629e13a14b0590e9aa89d97c7c20a5;
+Root readback68b2d085cf47808ffdd270526acc38de4d80c79a66949a5c1e0ff20747a63150.
+
+This is source/fixture acceptance. The finite OS-image table still needs
+known GUI-image preparation before the final lock; native census usability
+is unqualified. No current process census, installation or actor execution
+was performed. Launch/watch, coordinator/closeout, exact Go artifacts and
+four fresh final package reviews remain pending. Published622bdec passed
+CI440 all4jobs/41steps; the next source publication needs its own CI.
