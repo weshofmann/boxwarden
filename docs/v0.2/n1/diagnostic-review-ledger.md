@@ -496,3 +496,64 @@ records. Corrective publication and a new full current-head hosted run remain
 required; the failed historical run cannot certify the corrected source.
 Task4b, Task5, final artifact/static closure and four fresh final reviews remain.
 Private evidence stays outside Git. No live or privileged effect occurred.
+
+
+## Task3c green CI and Task4b initial component review
+
+The fixture-only corrective commit be3091eaaec03b1a30006a81b352de7c23457ceb
+has green hosted run 36784164893: four jobs and all41 steps succeeded. Expanded
+diagnostic tests/race/vet/build remain unfiltered; production/workflow source
+was unchanged by that correction. Historical failed run36779931013 remains
+immutable and does not certify corrected source.
+
+Fresh independent Task4b component review requested GPT-6.1 Sol/High with no
+shared history. Runtime model metadata was unavailable. Spec and quality
+need fixes: 0 Critical, 2 Important, 0 new Minor. Report SHA256:
+37541be1a7ddd81baeb0db72ca39fd97cea8ec45b2e1a9a3d2eb7f3074f3fca3.
+I1: U rereads enrolled configs after correct F retirement, yielding false
+refusal despite actual exit0/checked closure. I2: native process-image admission
+compares stable link counts but never enforces required Nlink1. Both retain
+Important severity; focused production-used regressions/corrections and
+independent re-review precede publication. The two carried Task4a Minor
+limitations remain unchanged.
+
+Root and reviewer independently checked44 frozen/current source files and1781
+evidence hashes;40 command/result records include23 source-sealed runs and17
+explicit historical observations without per-run source seals. Root verified
+367 compiler argv/count/byte records and301 retained generated C inputs. Actual
+child environment differs from submitted Go environment; no whole-SDK or
+nested-linker attestation is claimed. Scoped native fixtures and affected
+ordinary/candidate checks passed, but no diagnostic actor, sudo authentication,
+current process census, installation or live effect was executed. Task5
+composition/full bindings, twin final artifacts, complete verification, green
+final CI and four fresh final package reviews remain separate gates.
+
+
+## Task4b correction and CI portability closure
+
+Original Important I1/I2 are independently closed without severity reduction:
+U's production-used finalizer has no retired-input reader; native image loading
+requires explicit Nlink1 on all admission brackets. Actual RED demonstrates
+both defects; corrected GREEN, scoped native tests/builds and vet pass. Fresh
+r2 recheck accepts spec/quality, 0C/0I/0M in its scope. Report SHA256:
+92e823af015acd8ac87033910900ad355b243a14d7cbc70c123d2315dc3ab7db.
+
+Root then identified two CI fixture issues before publication: hardcoded devel
+ACL principal on a hosted runner account and race-runtime exit sleep violating
+a synthetic timing assertion. Meaningful REDs reproduced both. Exactly two
+test files now select the current checked fixture identity and set
+GORACE=atexit_sleep_ms=0 only for explicit synthetic children; race detection
+remains enabled and production identity/environment/Wait/deadlines unchanged.
+CI adds unfiltered cleanup test/race/vet plus separate U/R/H compile builds,
+retaining umask077 and all preceding diagnostic checks. Local exact equivalents
+and native private ACL controls pass. Initial no-tests-to-run evidence is
+explicitly nonverification, and all actual failures remain immutable. Fresh
+r3 scoped review accepts spec/quality with 0C/0I/0M. Report SHA256:
+d47bac6a388ac35a9fd0b1bd2482eb6a449b33467ab6596c726fd967ad6a3729.
+
+Root independently verified48 final source identities and3040 evidence hashes,
+55 run argv/output/exit bindings and598 compiler records. No production source
+changed between r2 and r3. The two carried Task4a Minor limitations remain.
+Verified publication/current hosted CI, Task5/system-image static closure,
+final twins/full checks and four fresh final reviews remain gates. Native
+qualification, installation and live effects remain unperformed.

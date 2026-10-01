@@ -155,6 +155,16 @@ jobs:
             go build -tags "$tags" -trimpath -buildvcs=false \
               -o "$scratch/boxwarden-${tags}" ./cmd/boxwarden
           done
+          cleanup_tags=n1diagnostic,n1clipboarddiagnostic,n1cleanup
+          cleanup_packages=(./internal/hostx ./internal/qualification/n1/...
+            ./cmd/n1-attend ./cmd/n1-attend-root ./cmd/n1-cleanup)
+          go test -tags "$cleanup_tags" -count=1 "${cleanup_packages[@]}"
+          go test -race -tags "$cleanup_tags" -count=1 "${cleanup_packages[@]}"
+          go vet -tags "$cleanup_tags" "${cleanup_packages[@]}"
+          for command in n1-attend n1-attend-root n1-cleanup; do
+            go build -tags "$cleanup_tags" -trimpath -buildvcs=false \
+              -o "$scratch/$command" "./cmd/$command"
+          done
           if go build -tags n1candidate,n1diagnostic -o "$scratch/forbidden" ./cmd/boxwarden \
               >"$scratch/forbidden.log" 2>&1; then
             echo 'mutually exclusive diagnostic/candidate tags unexpectedly compiled' >&2

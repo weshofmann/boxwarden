@@ -140,6 +140,11 @@ func (s SystemDoctor) Doctor(ctx context.Context, request Request) Report {
 }
 
 func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspection {
+	return s.inspectPolicy(ctx, request, true)
+}
+
+// Cleanup policy is private; ordinary doctor always checks process membership.
+func (s SystemDoctor) inspectPolicy(ctx context.Context, request Request, requireEffectiveMembership bool) doctorInspection {
 	if ctx.Err() != nil {
 		return doctorInspection{report: Report{Status: Drifted, Findings: []Finding{{
 			Code: "inspection.canceled", Category: Drifted,
@@ -246,8 +251,11 @@ func (s SystemDoctor) inspect(ctx context.Context, request Request) doctorInspec
 		if groupErr != nil || group.ID != manifest.Group.ID || group.Name != manifest.Group.Name || fmt.Sprint(group.Members) != fmt.Sprint(manifest.Group.Members) {
 			add("group.identity", Drifted, "directory group mismatch", "exact manifested group ID/name/membership", "inspect directory-service state manually")
 		}
-		effective, err := inspector.EffectiveGroups()
-		if err != nil || !containsInt(effective, manifest.Group.ID) {
+		effective, err := []int(nil), error(nil)
+		if requireEffectiveMembership {
+			effective, err = inspector.EffectiveGroups()
+		}
+		if requireEffectiveMembership && (err != nil || !containsInt(effective, manifest.Group.ID)) {
 			add("group.not-effective", Drifted, "group absent from current process", fmt.Sprintf("supplementary gid %d", manifest.Group.ID), "refresh the login session, then rerun doctor")
 		}
 	}

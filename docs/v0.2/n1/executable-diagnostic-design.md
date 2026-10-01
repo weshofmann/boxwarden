@@ -392,3 +392,80 @@ uninstall still refuses before mutation; qualification-only EX/census/exact
 unlink belongs to Task4b. Fresh R1 component review approves the corrected
 source with 0C/0I/2 carried Minor findings. Publication/current CI, Task4b,
 Task5, final Go reproduction and four fresh final reviews remain gates.
+
+
+## Task4b cleanup and attendance source boundary (2026-09-30)
+
+The qualification path uses six separate native roles: L retains coordinator C
+and replaces itself with unprivileged attendance U after actual C exit; U owns
+sudo, root relay R directly retains helper H, and restricted closeout F follows
+only acknowledged H return. Task4b implements U/R/H and pure contracts. L/C/F
+and their complete procedure/static bindings remain Task5. An unnamed bounded
+transition pipe, actual child exit, EOF and checked closure carry terminal
+observations; receipts cannot reconstruct process ownership or successful
+syscall return from namespace effect. Sudo is a trusted status relay, not a
+direct H handle. Attendance remains in Wes's separate Terminal.
+
+H independently admits the exact operator and boxwarden-operators group,
+protected three-entry tree and current platform, then acquires nonblocking EX.
+The private root policy query lists only devel's policy with sudo -U devel -ll;
+ordinary doctor still requires current-process operator membership and retains
+its existing denial semantics. Exhaustive bounded state inventory preserves
+only the original pair's exact public host-pin records and admitted public
+CA/base metadata. Private CA bytes are never read or hashed. Every unexplained
+runtime, temporary, lock, socket or foreign record refuses. Exact removal
+consumes its guard before effects, checks ancestry/current entries between
+unlinks, removes only softnet, manifest.json, launch.lock and the empty digest
+directory, syncs the pinned parent and checks lock-last closure. Partial
+effect, failed return, lost completion or failed close is unknown and cannot
+be retried or certified from absence. H publishes private operator-owned
+completion only after acknowledged effects and closure.
+
+Original wall and Darwin continuous deadlines survive all transitions. Handoff
+carries cumulative active/attendance expenditure; elapsed time after handoff
+conservatively consumes both remaining caps, with sticky refusal on invalidity,
+regression or expiry. No actor resets the 20-minute active, 10-minute attendance
+or original 30-minute total limits. Final C must measure and bind these facts.
+
+The unprivileged fixed system-sudo check uses structural OS trust: canonical
+/usr/bin/sudo, root:wheel 04511, one link, exact protected root:wheel 0755
+ancestors without ACL, metadata brackets and strict darwin/arm64 platform
+27.0.1/26A434 probes. UID501 cannot read this executable; no digest is invented.
+H's separately qualified SystemImages digest catalogue remains mandatory.
+Bounded executable-path/file/birth snapshots cannot prove atomic universal
+absence or immutable loaded images. Trusted host/operator must introduce no
+new consumers and replace no frozen images or inputs throughout the window.
+Unknown, denied, PID0 or unstable observations refuse; no usability exception
+is granted. Root/libproc/sudo/TTY/continuous-sleep/storage and actual native
+removal behavior still require future attended qualification.
+
+Frozen source and private synthetic/native fixture evidence passed readback;
+fresh component review found two Important defects: U's terminal revalidation
+rereads configs after F's planned retirement, and native executable inspection
+checks link stability without requiring one link. Focused corrections and
+independent re-review are pending. No source component or runnable package is
+certified by this checkpoint. Nothing has been installed or exercised against
+a VM, guest, real clipboard or host network.
+
+
+## Task4b corrective component closure
+
+The two original Important findings are independently closed at their original
+severity. U keeps complete input/artifact admission before F dispatch; after
+retained F success it checks actual exit/EOF/checked closure/empty output and
+the same sticky clock budget without rereading retired inputs. The native
+process image loader explicitly requires one link before open, before hashing
+and on final descriptor/pathname brackets. Private actual hardlink and terminal
+retirement controls reproduce the former defects and pass with corrections.
+Fresh recheck approves this scope with 0C/0I/0M.
+
+A subsequent test-only correction selects the current ACL fixture account and
+removes the race runtime's exit delay only from synthetic child environments.
+Production operator admission, environment, Wait and deadlines are unchanged.
+Added unfiltered deterministic cleanup test/race/vet and U/R/H compile coverage
+preserves restrictive CI umask and existing diagnostic checks. Local checks
+and fresh scoped review pass; publication/current hosted CI remain required.
+Task5 must resolve the exact static system-image identity mechanism and finish
+L/C/F, complete catalogue/bindings and compile graphs before final artifacts.
+These component closures do not qualify native privileged behavior or the
+complete runnable package.

@@ -153,3 +153,27 @@ Full verification, green final current-head CI and four fresh final reviews
 still precede the single concrete future owner gate. No live installation,
 qualification, privileged mutation, VM/guest/clipboard/network effect or
 current-host process census is authorized during preparation.
+
+
+## Task4b source and initial review checkpoint
+
+Task3c corrective hosted run36784164893 is green at be3091e. Task4b now
+implements pure bounded contracts and separately built U/R/H with independent
+EX admission, exhaustive inventory, conservative census and exact one-use
+cleanup/publication. Frozen44-file source and1781-file private evidence
+readback match. Fresh independent component review needs fixes0C/2I/0newM:
+post-F config reread and missing native executable Nlink1 enforcement. Focused
+correction and independent re-review precede its verified source publication.
+Task5 L/C/F/full catalogue/static bindings remains next, followed by complete
+compile-graph freeze, final twin artifacts, full checks and four fresh final
+package seats. No live or privileged effect is authorized by this checkpoint.
+
+
+Task4b corrective component gates now pass: the original two Important findings
+are independently closed without downgrade. Scoped r2 and fixture/workflow r3
+reviews accept their respective deltas with 0C/0I/0M. Local unfiltered cleanup
+test/race/vet and three separate actor builds pass; final frozen source contains
+47 Go files plus the CI workflow. Source publication/current hosted CI follows.
+The original plan's final Go twins remain deliberately deferred until Task5
+finishes every source graph and full static/system-image identity closure.
+Nothing has been installed, and final package/native qualification is pending.
