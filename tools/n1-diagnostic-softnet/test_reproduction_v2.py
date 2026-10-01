@@ -53,7 +53,8 @@ class ReproductionV2Tests(unittest.TestCase):
     def test_actual_child_umask_is_fixed_while_parent_remains_private(self):
         with tempfile.TemporaryDirectory() as temp:
             root=pathlib.Path(temp);output=root/"output";output.mkdir(mode=0o700);artifact=root/"artifact"
-            boundary={"pinned_files":{},"sdk_path":str(root),"sdk_resolved":str(root)}
+            sdk_alias=root/"sdk-alias";sdk_alias.symlink_to(root.resolve(),target_is_directory=True)
+            boundary={"pinned_files":{},"sdk_path":str(sdk_alias),"sdk_resolved":str(root.resolve())}
             argv=[sys.executable,"-c","import os,sys; fd=os.open(sys.argv[1],os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o755); os.close(fd)",str(artifact)]
             previous=os.umask(0o077)
             try:

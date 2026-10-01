@@ -29,8 +29,8 @@ operator-owned `TMPDIR`; root-group `/private/tmp` clears a synthetic setgid bit
 when the operator lacks that group, so it cannot exercise that control.
 
 Recipe/source checks are preparation evidence. New executable/archive digests
-require two fresh successful builds and byte equality. No diagnostic.2 artifact,
-installation or live qualification is claimed by this document.
+require two fresh successful builds and byte equality. The completed diagnostic.2 twins are recorded in `artifact_v2.json`; no
+installation or live qualification is claimed.
 
 
 The first diagnostic.2 leg7 compiled but failed mandatory metadata admission:
@@ -41,4 +41,13 @@ children inherit a known mask independently of the caller. It never changes
 the parent's mask or normalizes a produced binary. Private directories700 and
 evidence600 remain explicit. A harmless actual child fixture demonstrates the
 700-before/755-after behavior and unchanged parent/evidence modes. Existing
-metadata refusal stays exact. Fresh9/10 twins still require full byte equality.
+metadata refusal stays exact. Fresh9/10 twins now have full binary/archive/applied-source byte equality.
+Both compiler runs and version queries exited zero; the raw binaries admitted
+0755 without normalization. Executable SHA256 is
+`1bb12bec8821835ada8c036426c2c03061be6cebdf4a1b658249d268fc8bde05`;
+USTAR SHA256 is
+`76704f05eba242cb649ab49db28028556c338a4daeefe9327fdfe37f874808ac`.
+The producing Rust commit remains85bcb9a; the separate recipe publication is
+02c4b6. The deterministic child-umask fixture uses an explicit SDK symlink and
+its canonical target, so runner temporary-path aliases do not falsely fail
+production boundary validation.
