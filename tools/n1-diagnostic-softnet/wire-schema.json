@@ -1,6 +1,6 @@
 {
   "status": "PROPOSED R1; ROOT MUST FREEZE BEFORE IMPLEMENTATION",
-  "diagnostic_version": "0.19.0-boxwarden-n1-diagnostic.1",
+  "diagnostic_version": "0.19.0-boxwarden-n1-diagnostic.2",
   "selector": "@boxwarden-n1-diagnostic:<generation>:<nonce>; one exact --block argv value",
   "transport": "inherited fd1 unnamed AF_UNIX SOCK_STREAM; nonblocking; no arbitrary fd/path",
   "framing": {

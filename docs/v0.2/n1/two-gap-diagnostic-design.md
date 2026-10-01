@@ -234,3 +234,16 @@ sudo test runners out of that execution. Locked fetch precedes offline tests;
 fetch or configuration refusal prevents test execution. Local syntax and
 command-spy controls pass, but spies do not establish native compiler identity
 or exact native child environment. Hosted execution remains pending publication.
+
+
+## Executable preparation: separate startup and pre-ARM bounds
+
+The actual diagnostic.1 watch used one 30-second timeout for HELLO and the subsequent pre-ARM wait. The approved sequence performs guest readiness, runtime review and both clipboard attempts before ARM; it can legitimately exceed that timeout. A read-only independent protocol review resolves this integration blocker with a short startup deadline and a separately anchored, finite resource cap. Review SHA256: `95a5e165a60619650ad90894595ca05cb220f4a992386fbe377171abd1050ad7`.
+
+Go must receive HELLO within 30 seconds of the retained pre-spawn launch anchor. The unarmed channel has one immutable maximum 30-minute cap from that anchor; Rust anchors its local maximum at channel admission before host/VM construction. Both use suspend-aware continuous expiry, wall/regression/error refusal and checked arithmetic. Neither inspection, readiness, credential renewal nor partial input can extend the cap. Rust checks before queued input and after full decode. ARM remains single-use with the existing 1000–30000-millisecond duration range, 100-millisecond close grace and passive forwarding/privacy rules.
+
+The channel caps bound resources; their different local origins do not independently enforce the original owner approval expiry at Rust consumption. The trusted coordinator retains the original wall/continuous anchors and cumulative 20-minute active, 10-minute attendance and 30-minute total budget. It checks remaining headroom before ARM, then the returned actual host-send deadline and original budgets before connect and every subsequent dispatch. A late receipt refuses connect and leaves attribution incomplete; no rearm, restart or fresh deadline is admitted. No original-expiry child-enforcement claim is made.
+
+A separate unarmed `ObserveDiagnosticLaunch` returns strictly bounded retained HELLO and exact owner/handle/watch/connection correlation. It neither creates readiness nor changes phase or deadlines. Existing phase-independent network inspection remains available for stock and post-ARM collection rechecks. The ARM control envelope must carry the actual host deadline; callers must never restart the interval from RPC return.
+
+Any changed Rust bytes are a distinct diagnostic.2 source/artifact identity. Diagnostic.1 source, reproduced executable/archive and review evidence remain historical. Rust timing/source controls, fresh independent delta review, publication and fresh twin reproduction precede new Go exact-identity binding. Source-complete Task5 graphs precede final Go twins. This contract is prospective source work, not installed-host or live-window qualification.

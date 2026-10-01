@@ -75,4 +75,38 @@ class BuildContractTests(unittest.TestCase):
         self.assertEqual(record["argv_hex"],[os.fsencode(v).hex() for v in argv])
         self.assertEqual(record["environment"],{"PATH":"/fixed"})
 
+class SourceContractTests(unittest.TestCase):
+    def test_current_source_manifest_rejects_changed_missing_extra_bytes(self):
+        import hashlib, json
+        root=Path(__file__).parent;manifest=json.loads((root/"source-manifest.json").read_text())
+        expected=manifest["files"]
+        actual={n:hashlib.sha256((root/n).read_bytes()).hexdigest() for n in expected}
+        build.validate_inventory(actual,expected)
+        key="watch.rs"
+        for invalid in ({k:v for k,v in actual.items() if k!=key},dict(actual,**{key:"0"*64}),dict(actual,unexpected="0"*64)):
+            with self.assertRaises(RuntimeError):build.validate_inventory(invalid,expected)
+        self.assertEqual(manifest["version"],"0.19.0-boxwarden-n1-diagnostic.2")
+        self.assertEqual(manifest["wire_schema_sha256"],actual["wire-schema.json"])
+
+    def test_added_runtime_patch_shadows_are_exact_and_hunk_counts_checked(self):
+        import re
+        root=Path(__file__).parent;patch=(root/"diagnostic.patch").read_text()
+        def added(text,name):
+            marker="--- /dev/null\n+++ b/lib/proxy/"+name+"\n"
+            self.assertEqual(text.count(marker),1)
+            rest=text.split(marker,1)[1].splitlines(True)
+            end=next((i for i,line in enumerate(rest) if line.startswith("--- ")),len(rest))
+            header=rest[0].rstrip("\n");match=re.fullmatch(r"@@ -0,0 \+1,(\d+) @@",header)
+            self.assertIsNotNone(match)
+            lines=rest[1:end];self.assertEqual(len(lines),int(match[1]))
+            self.assertTrue(all(line.startswith("+") for line in lines))
+            return "".join(line[1:]for line in lines)
+        for name in ["watch.rs","wire.rs","args.rs","dispatch.rs","admission.rs"]:
+            self.assertEqual(added(patch,name),(root/name).read_text())
+        bad=patch.replace("+++ b/lib/proxy/watch.rs","+++ b/lib/proxy/wrong.rs",1)
+        with self.assertRaises(AssertionError):added(bad,"watch.rs")
+        marker="--- /dev/null\n+++ b/lib/proxy/watch.rs\n";start=patch.index(marker)+len(marker);end=patch.index("\n",start)
+        bad=patch[:start]+"@@ -0,0 +1,1 @@"+patch[end:]
+        with self.assertRaises(AssertionError):added(bad,"watch.rs")
+
 if __name__ == "__main__": unittest.main()

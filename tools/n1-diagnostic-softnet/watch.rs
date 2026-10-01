@@ -2,15 +2,68 @@
 use super::{
     boxwarden_policy::Policy, dispatch::Observer, wire::*
 };
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use std::io;
+// Resource cap only: trusted coordinator approval remains a separate authority.
+const PREARM_CAP_NS: u64 = 1_800_000_000_000;
+#[derive(Clone, Copy)]
+struct Reading { wall: u64, continuous: u64, offset: u64 }
+struct ClockGuard { last: Reading, wall_deadline: u64, continuous_deadline: u64, invalid: bool }
+impl ClockGuard {
+    fn new(anchor: Reading) -> io::Result<Self> {
+        Ok(Self { last: anchor,
+            wall_deadline: anchor.wall.checked_add(PREARM_CAP_NS).ok_or_else(clock_error)?,
+            continuous_deadline: anchor.continuous.checked_add(PREARM_CAP_NS).ok_or_else(clock_error)?, invalid: false })
+    }
+    fn check(&mut self, reading: io::Result<Reading>, prearm: bool) -> io::Result<Reading> {
+        let reading = reading.and_then(|r| {
+            if self.invalid || r.wall < self.last.wall || r.continuous < self.last.continuous || r.offset < self.last.offset
+                || (prearm && (r.wall >= self.wall_deadline || r.continuous >= self.continuous_deadline)) {
+                Err(clock_error())
+            } else { Ok(r) }
+        });
+        match reading {
+            Ok(r) => { self.last = r; Ok(r) },
+            Err(e) => { self.invalid = true; Err(e) },
+        }
+    }
+}
+fn clock_error() -> io::Error { io::Error::other("diagnostic clock invalid") }
+fn scale_ticks(ticks: u64, numerator: u32, denominator: u32) -> io::Result<u64> {
+    if numerator == 0 || denominator == 0 { return Err(clock_error()); }
+    let ns = u128::from(ticks).checked_mul(u128::from(numerator)).ok_or_else(clock_error)? / u128::from(denominator);
+    ns.try_into().map_err(|_| clock_error())
+}
+#[cfg(target_os="macos")]
+fn continuous_now() -> io::Result<u64> {
+    unsafe extern "C" { fn mach_continuous_time() -> u64; }
+    let mut info = libc::mach_timebase_info { numer: 0, denom: 0 };
+    if unsafe { libc::mach_timebase_info(&mut info) } != 0 { return Err(clock_error()); }
+    scale_ticks(unsafe { mach_continuous_time() }, info.numer, info.denom)
+}
+#[cfg(target_os="linux")]
+fn continuous_now() -> io::Result<u64> {
+    let mut ts: libc::timespec = unsafe { std::mem::zeroed() };
+    if unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut ts) } != 0 || ts.tv_sec < 0 || !(0..1_000_000_000).contains(&ts.tv_nsec) {
+        return Err(clock_error());
+    }
+    (ts.tv_sec as u64).checked_mul(1_000_000_000).and_then(|n| n.checked_add(ts.tv_nsec as u64)).ok_or_else(clock_error)
+}
+#[cfg(not(any(target_os="macos",target_os="linux")))]
+fn continuous_now() -> io::Result<u64> { Err(clock_error()) }
+fn native_reading(epoch: Instant) -> io::Result<Reading> {
+    let wall = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| clock_error())?.as_nanos().try_into().map_err(|_| clock_error())?;
+    let continuous = continuous_now()?;
+    let offset = epoch.elapsed().as_nanos().try_into().map_err(|_| clock_error())?;
+    Ok(Reading { wall, continuous, offset })
+}
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
     Admitted, AwaitArm, Watching, Closed, Invalid
 }
 pub struct WatchChannel {
     selector: Selector, mac: [u8;     6], gateway: [u8;     4], fd: i32,
-    phase: Phase, epoch: Instant, last: u64, hello_at: u64, start: u64, deadline: u64,
+    phase: Phase, clock: Box<dyn FnMut() -> io::Result<Reading>>, guard: ClockGuard, hello_at: u64, start: u64, deadline: u64,
     incoming: Vec<u8>, output_bytes: usize, pub observer: Observer,
 }
 impl WatchChannel {
@@ -18,9 +71,14 @@ impl WatchChannel {
         Self::admit_socket(selector,mac,1)
     }
     fn admit_socket(selector: Selector, mac: [u8;6], fd: i32) -> io::Result<Self> {
+        let epoch = Instant::now();
+        Self::admit_with_clock(selector, mac, fd, Box::new(move || native_reading(epoch)))
+    }
+    fn admit_with_clock(selector: Selector, mac: [u8;6], fd: i32, mut clock: Box<dyn FnMut() -> io::Result<Reading>>) -> io::Result<Self> {
         validate_socket(fd)?;
+        let guard = ClockGuard::new(clock()?)?;
         Ok(Self {
-            selector,mac,gateway:[0;4],fd,phase:Phase::Admitted,epoch:Instant::now(),last:0,hello_at:0,start:0,deadline:0,incoming:Vec::with_capacity(MAX_FRAME+5),output_bytes:0,observer:Observer::default()
+            selector,mac,gateway:[0;4],fd,phase:Phase::Admitted,clock,guard,hello_at:0,start:0,deadline:0,incoming:Vec::with_capacity(MAX_FRAME+5),output_bytes:0,observer:Observer::default()
         })
     }
     pub fn hello_after_privdrop(&mut self, gateway: [u8;4]) {
@@ -28,8 +86,9 @@ impl WatchChannel {
             self.invalidate(13);
             return;
         }
+        let Some(reading) = self.read_clock() else { return; };
         self.gateway=gateway;
-        self.hello_at=self.now();
+        self.hello_at=reading.offset;
         self.phase=Phase::AwaitArm;
         let h=Hello {
             version:1,kind:"HELLO".into(),generation:self.selector.generation.clone(),nonce:self.selector.nonce.clone(),candidate_mac:self.mac,gateway
@@ -38,8 +97,18 @@ impl WatchChannel {
             self.invalidate(12);
         }
     }
-    fn now(&self) -> u64 {
-        self.epoch.elapsed().as_nanos().try_into().unwrap_or(u64::MAX)
+    fn read_clock(&mut self) -> Option<Reading> {
+        let prearm = matches!(self.phase, Phase::Admitted | Phase::AwaitArm);
+        match self.guard.check((self.clock)(), prearm) {
+            Ok(r) => Some(r),
+            Err(_) => {
+                self.observer.fail(9);
+                self.observer.fail(12);
+                self.observer.arm = None;
+                self.phase = Phase::Invalid;
+                None
+            }
+        }
     }
     fn invalidate(&mut self, flag: usize) {
         self.observer.fail(flag);
@@ -61,20 +130,12 @@ impl WatchChannel {
         n==b.len() as isize // no queued retry after partial write/backpressure/error
     }
     pub fn service(&mut self, policy:&mut Policy, policy_now:u64) {
-        let now=self.now();
-        self.service_at(policy,policy_now,now);
-    }
-    fn service_at(&mut self, policy:&mut Policy, policy_now:u64, now:u64) {
-        if now<self.last {
-            self.invalidate(9);
-        }self.last=now;
+        let Some(reading) = self.read_clock() else { return; };
+        let mut now = reading.offset;
         if self.phase==Phase::Admitted {
             return;
         }
-        // HELLO admission expires before queued/partial ARM bytes can change phase.
-        if self.phase==Phase::AwaitArm && now.saturating_sub(self.hello_at)>30_000_000_000 {
-            self.invalidate(12);
-        }
+        // read_clock checked the immutable admission cap before receiving queued bytes.
         // Bounded one read at every boundary. Any post-ARM byte is invalid; never resynchronize.
         if self.phase!=Phase::Invalid {
             let mut b=[0u8;             MAX_FRAME+5];
@@ -104,10 +165,16 @@ impl WatchChannel {
                         else if self.incoming.len()==len+4 {
                             let arm=decode::<Arm>(&self.incoming[4..]);
                             self.incoming.clear();
+                            // Decode is bounded, but cannot carry a buffered ARM across expiry.
+                            let Some(decoded_at) = self.read_clock() else { return; };
+                            now = decoded_at.offset;
                             match arm {
                                 Ok(a) if a.valid(&self.selector,self.mac,self.gateway) && policy.candidate_lease_valid(a.candidate.address,a.candidate.mac,a.gateway,policy_now)=>{
+                                    let Some(deadline) = now.checked_add(u64::from(a.duration_ms) * 1_000_000) else {
+                                        self.observer.fail(9); self.phase = Phase::Invalid; return;
+                                    };
                                     self.start=now;
-                                    self.deadline=now.saturating_add(a.duration_ms as u64*1_000_000);
+                                    self.deadline=deadline;
                                     policy.bind_candidate(std::net::Ipv4Addr::from(a.candidate.address));
                                     let armed=Armed{
                                         version:1,kind:"ARMED".into(),generation:a.generation.clone(),nonce:a.nonce.clone(),operation_id:a.operation_id.clone(),candidate:a.candidate.clone(),control:a.control.clone(),gateway:a.gateway,duration_ms:a.duration_ms,control_provenance:a.control_provenance.clone(),armed_offset_ns:now,candidate_lease_valid:true
@@ -146,6 +213,12 @@ impl WatchChannel {
                 // counters/loss survive, no more interval tickets
             }
         }
+    }
+    #[cfg(test)]
+    fn service_at(&mut self, policy: &mut Policy, policy_now: u64, now: u64) {
+        let original = std::mem::replace(&mut self.clock, Box::new(move || Ok(Reading { wall: now, continuous: now, offset: now })));
+        self.service(policy, policy_now);
+        self.clock = original;
     }
     pub fn failed_read(&mut self) {
         self.observer.fail(7);
@@ -232,7 +305,7 @@ mod tests {
         let s=Selector{
             generation:a.generation,nonce:a.nonce
         };
-        let channel=WatchChannel::admit_socket(s,CM,child.as_raw_fd()).unwrap();
+        let channel=WatchChannel::admit_with_clock(s,CM,child.as_raw_fd(),Box::new(||Ok(Reading { wall: 0, continuous: 0, offset: 0 }))).unwrap();
         (channel,child,parent)
     }
     fn receipt<T:for<'de>serde::Deserialize<'de>>(parent:&mut UnixStream)->T{
@@ -307,6 +380,12 @@ mod tests {
                 },1=>c.service_at(&mut policy,700,30),2=>c.service_at(&mut policy,1,19),3=>c.failed_read(),_=>c.observer.fail(0)
             }
             c.service_at(&mut policy,1,1_000_000_020);
+            if failure == 2 {
+                assert!(matches!(c.phase,Phase::Invalid));
+                assert!(c.observer.loss && c.observer.arm.is_none());
+                assert_eq!(p.read(&mut [0;1]).unwrap_err().kind(),io::ErrorKind::WouldBlock);
+                continue;
+            }
             let s:Summary=receipt(&mut p);
             assert!(!s.complete);
             assert!(s.loss);
@@ -329,7 +408,7 @@ mod tests {
                 },_=>{
                 }
             }
-            c.service_at(&mut policy,1,31_000_000_000);
+            c.service_at(&mut policy,1,if mode==4 { PREARM_CAP_NS } else { 10 });
             assert!(matches!(c.phase,Phase::Invalid));
             assert!(c.observer.loss);
             assert!(c.observer.arm.is_none());
@@ -404,7 +483,7 @@ mod tests {
         assert!(c.observer.loss&&c.observer.invalid[12]);
         assert!(c.observer.arm.is_none());
         assert_eq!(c.output_bytes,hello_bytes);
-        c.service_at(policy,1,c.hello_at+32_000_000_000);
+        c.service_at(policy,1,PREARM_CAP_NS+1);
         assert!(matches!(c.phase,Phase::Invalid));
         assert!(c.observer.arm.is_none());
         assert_eq!(c.output_bytes,hello_bytes);
@@ -434,7 +513,7 @@ mod tests {
         c.hello_at=10;
         let hello_bytes=c.output_bytes;
         peer.write_all(&frame(&arm()).unwrap()).unwrap();
-        c.service_at(&mut policy,1,c.hello_at+31_000_000_000);
+        c.service_at(&mut policy,1,PREARM_CAP_NS+1);
         r1_assert_timeout_is_sticky_and_forwarding_passive(&mut c,&mut peer,&mut policy,hello_bytes);
     }
     #[test]
@@ -451,12 +530,12 @@ mod tests {
         assert!(matches!(c.phase,Phase::AwaitArm));
         assert!(c.observer.arm.is_none());
         peer.write_all(&bytes[bytes.len()-1..]).unwrap();
-        c.service_at(&mut policy,1,c.hello_at+31_000_000_000);
+        c.service_at(&mut policy,1,PREARM_CAP_NS+1);
         r1_assert_timeout_is_sticky_and_forwarding_passive(&mut c,&mut peer,&mut policy,hello_bytes);
     }
     #[test]
-    fn r1_hello_timeout_preserves_before_and_exact_boundary_admission() {
-        for elapsed in [29_999_999_999,30_000_000_000] {
+    fn slice0_fixed_cap_preserves_before_boundary_admission() {
+        for elapsed in [60_000_000_000,PREARM_CAP_NS-11] {
             let(mut c,_child,mut peer)=pair();
             let mut policy=leased();
             c.hello_after_privdrop(GA);
@@ -472,6 +551,127 @@ mod tests {
             let summary:Summary=receipt(&mut peer);
             assert!(summary.complete);
         }
+    }
+    #[test]
+    fn slice0_timely_hello_delayed_arm_over_thirty_seconds() {
+        let(mut c,_child,mut peer)=pair();
+        let mut policy=leased();
+        c.hello_after_privdrop(GA);
+        let _:Hello=receipt(&mut peer);
+        peer.write_all(&frame(&arm()).unwrap()).unwrap();
+        c.service_at(&mut policy,1,60_000_000_000);
+        assert!(matches!(c.phase,Phase::Watching),"timely HELLO must allow one ARM after 30 seconds within the fixed admission cap");
+        let armed:Armed=receipt(&mut peer);
+        assert_eq!(armed.armed_offset_ns,60_000_000_000);
+    }
+    fn reading(wall:u64,continuous:u64,offset:u64)->Reading { Reading {wall,continuous,offset} }
+    fn readings(c:&mut WatchChannel,values:Vec<io::Result<Reading>>) {
+        let mut queue:std::collections::VecDeque<_>=values.into();
+        c.clock=Box::new(move||queue.pop_front().expect("bounded clock-read contract"));
+    }
+    fn refused(c:&WatchChannel,peer:&mut UnixStream,hello_bytes:usize) {
+        assert!(matches!(c.phase,Phase::Invalid));
+        assert!(c.observer.loss && c.observer.arm.is_none());
+        assert_eq!(c.output_bytes,hello_bytes);
+        assert_eq!(peer.read(&mut [0;1]).unwrap_err().kind(),io::ErrorKind::WouldBlock);
+    }
+    #[test]
+    fn slice0_queued_complete_exact_after_and_suspend_caps_refuse_before_recv() {
+        for stamp in [reading(PREARM_CAP_NS,PREARM_CAP_NS,PREARM_CAP_NS),
+            reading(PREARM_CAP_NS+1,PREARM_CAP_NS+1,PREARM_CAP_NS+1),
+            reading(60_000_000_000,PREARM_CAP_NS,60_000_000_000),
+            reading(PREARM_CAP_NS,60_000_000_000,60_000_000_000)] {
+            let(mut c,child,mut peer)=pair();let mut policy=leased();
+            c.hello_after_privdrop(GA);let _:Hello=receipt(&mut peer);let hello_bytes=c.output_bytes;
+            let bytes=frame(&arm()).unwrap();peer.write_all(&bytes).unwrap();
+            readings(&mut c,vec![Ok(stamp)]);c.service(&mut policy,1);
+            refused(&c,&mut peer,hello_bytes);
+            // No queued byte was consumed at expired admission.
+            let mut queued=vec![0;bytes.len()];assert_eq!(unsafe {libc::recv(child.as_raw_fd(),queued.as_mut_ptr().cast(),queued.len(),libc::MSG_DONTWAIT)},bytes.len() as isize);
+            assert_eq!(queued,bytes);
+            readings(&mut c,vec![Ok(reading(PREARM_CAP_NS-1,PREARM_CAP_NS-1,PREARM_CAP_NS-1))]);c.service(&mut policy,1);
+            refused(&c,&mut peer,hello_bytes);
+        }
+    }
+    #[test]
+    fn slice0_partial_final_bytes_at_cap_do_not_renew_admission() {
+        let(mut c,_child,mut peer)=pair();let mut policy=leased();
+        c.hello_after_privdrop(GA);let _:Hello=receipt(&mut peer);let hello_bytes=c.output_bytes;
+        let bytes=frame(&arm()).unwrap();peer.write_all(&bytes[..bytes.len()-1]).unwrap();
+        c.service_at(&mut policy,1,PREARM_CAP_NS-1);assert_eq!(c.incoming.len(),bytes.len()-1);
+        peer.write_all(&bytes[bytes.len()-1..]).unwrap();c.service_at(&mut policy,1,PREARM_CAP_NS);
+        refused(&c,&mut peer,hello_bytes);assert_eq!(c.incoming.len(),bytes.len()-1);
+    }
+    #[test]
+    fn slice0_postdecode_expiry_error_regression_and_interval_overflow_never_bind() {
+        for (first,second) in [
+            (reading(PREARM_CAP_NS-1,PREARM_CAP_NS-1,100),Ok(reading(PREARM_CAP_NS,PREARM_CAP_NS,101))),
+            (reading(100,100,100),Ok(reading(99,101,101))),
+            (reading(100,100,100),Ok(reading(101,99,101))),
+            (reading(100,100,100),Ok(reading(101,101,99))),
+            (reading(100,100,100),Err(clock_error())),
+            (reading(1,1,u64::MAX-1),Ok(reading(2,2,u64::MAX-1))),
+        ] {
+            let(mut c,_child,mut peer)=pair();let mut policy=leased();
+            c.hello_after_privdrop(GA);let _:Hello=receipt(&mut peer);let hello_bytes=c.output_bytes;
+            // A foreign sentinel makes an unintended bind visible to the real choosing branch.
+            policy.bind_candidate(crate::tests::PA.into());
+            let before=policy.metadata();peer.write_all(&frame(&arm()).unwrap()).unwrap();
+            readings(&mut c,vec![Ok(first),second]);c.service(&mut policy,1);
+            refused(&c,&mut peer,hello_bytes);assert!(c.incoming.is_empty());
+            assert_eq!(policy.metadata(),before);
+            let packet=crate::tests::arp(crate::tests::CA,GA,CM,crate::tests::GM,1);
+            let mut oracle=crate::tests::oracle();
+            assert_eq!(policy.guest(&packet,&[GA.into()],1)as u8,oracle.guest(&packet,&[GA.into()],1)as u8);
+            assert_eq!(policy.metadata().lease,4,"actual choosing branch must remain unbound after refused ARM");
+        }
+    }
+    #[test]
+    fn slice0_native_and_admission_clock_failures_and_checked_scaling() {
+        let epoch=Instant::now();let a=native_reading(epoch).unwrap();let b=native_reading(epoch).unwrap();
+        assert!(b.wall>=a.wall && b.continuous>=a.continuous && b.offset>=a.offset);
+        assert_eq!(scale_ticks(10,3,2).unwrap(),15);
+        for (ticks,num,den) in [(1,0,1),(1,1,0),(u64::MAX,2,1)] { assert!(scale_ticks(ticks,num,den).is_err()); }
+        for anchor in [reading(u64::MAX,0,0),reading(0,u64::MAX,0)] { assert!(ClockGuard::new(anchor).is_err()); }
+        let(c,child,_peer)=pair();
+        assert!(WatchChannel::admit_with_clock(c.selector.clone(),CM,child.as_raw_fd(),Box::new(||Err(clock_error()))).is_err());
+        assert!(WatchChannel::admit_with_clock(c.selector.clone(),CM,child.as_raw_fd(),Box::new(||Ok(reading(u64::MAX,0,0)))).is_err());
+    }
+    #[test]
+    fn slice0_native_production_admission_service_and_local_offsets() {
+        let(c,child,mut peer)=pair();
+        let mut c=WatchChannel::admit_socket(c.selector,CM,child.as_raw_fd()).unwrap();
+        let mut policy=leased();c.hello_after_privdrop(GA);let _:Hello=receipt(&mut peer);
+        peer.write_all(&frame(&arm()).unwrap()).unwrap();c.service(&mut policy,1);
+        let armed:Armed=receipt(&mut peer);assert!(armed.armed_offset_ns>=c.hello_at);
+        assert!(matches!(c.phase,Phase::Watching));assert!(c.observer.arm.is_some());
+        c.shutdown();assert!(c.observer.loss);
+    }
+    #[test]
+    fn slice0_late_hello_and_clock_fail_then_valid_are_sticky() {
+        let(mut c,_child,mut peer)=pair();readings(&mut c,vec![Ok(reading(PREARM_CAP_NS,PREARM_CAP_NS,1))]);
+        c.hello_after_privdrop(GA);refused(&c,&mut peer,0);
+        for fault in [Err(clock_error()),Ok(reading(99,101,101)),Ok(reading(101,99,101)),Ok(reading(101,101,99))] {
+            let(mut c,_child,mut peer)=pair();let mut policy=leased();
+            c.hello_after_privdrop(GA);let _:Hello=receipt(&mut peer);let hello_bytes=c.output_bytes;
+            readings(&mut c,vec![Ok(reading(100,100,100)),fault,Ok(reading(102,102,102))]);
+            c.service(&mut policy,1);assert!(matches!(c.phase,Phase::AwaitArm));
+            c.service(&mut policy,1);refused(&c,&mut peer,hello_bytes);
+            peer.write_all(&frame(&arm()).unwrap()).unwrap();c.service(&mut policy,1);refused(&c,&mut peer,hello_bytes);
+        }
+    }
+    #[test]
+    fn slice0_delayed_hello_cannot_restart_anchor_and_one_arm_cannot_rearm() {
+        let(mut c,_child,mut peer)=pair();let mut policy=leased();
+        readings(&mut c,vec![Ok(reading(PREARM_CAP_NS-1,PREARM_CAP_NS-1,PREARM_CAP_NS-1)),Ok(reading(PREARM_CAP_NS,PREARM_CAP_NS,PREARM_CAP_NS))]);
+        c.hello_after_privdrop(GA);let _:Hello=receipt(&mut peer);let hello_bytes=c.output_bytes;
+        peer.write_all(&frame(&arm()).unwrap()).unwrap();c.service(&mut policy,1);refused(&c,&mut peer,hello_bytes);
+        let(mut c,_child,mut peer)=pair();let mut policy=leased();c.hello_after_privdrop(GA);let _:Hello=receipt(&mut peer);
+        peer.write_all(&frame(&arm()).unwrap()).unwrap();c.service_at(&mut policy,1,60_000_000_000);let _:Armed=receipt(&mut peer);
+        peer.write_all(&frame(&arm()).unwrap()).unwrap();c.service_at(&mut policy,1,60_000_000_001);
+        assert!(c.observer.invalid[13]);c.service_at(&mut policy,1,61_000_000_000);let summary:Summary=receipt(&mut peer);assert!(!summary.complete);
+        peer.write_all(&frame(&arm()).unwrap()).unwrap();c.service_at(&mut policy,1,62_000_000_000);assert!(matches!(c.phase,Phase::Closed));
+        assert!(c.observer.arm.is_none());assert_eq!(peer.read(&mut [0;1]).unwrap_err().kind(),io::ErrorKind::WouldBlock);
     }
     #[test]
     fn anonymous_sockaddr_negative_shapes(){

@@ -2,7 +2,7 @@
 use serde::{
     Deserialize, Serialize
 };
-pub const VERSION: &str = "0.19.0-boxwarden-n1-diagnostic.1";
+pub const VERSION: &str = "0.19.0-boxwarden-n1-diagnostic.2";
 pub const MAX_FRAME: usize = 4096;
 pub const MAX_OUTPUT: usize = 16384;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

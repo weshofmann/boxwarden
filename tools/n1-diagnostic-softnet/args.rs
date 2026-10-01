@@ -4,7 +4,7 @@ use super::wire::{
     Selector,mac
 };
 #[derive(Parser,Debug)]
-#[command(version="0.19.0-boxwarden-n1-diagnostic.1")]
+#[command(version="0.19.0-boxwarden-n1-diagnostic.2")]
 pub struct Args {
     #[arg(long)] pub vm_fd:i32,
     #[arg(long)] pub vm_mac_address:String,
