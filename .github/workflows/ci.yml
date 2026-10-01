@@ -146,6 +146,7 @@ jobs:
           scratch="$(mktemp -d "${RUNNER_TEMP:?}/boxwarden-n1-diagnostic-ci.XXXXXX")"
           trap 'rm -rf -- "$scratch"' EXIT
           python3 -B tools/n1-diagnostic-softnet/test_build.py
+          python3 -B tools/n1-diagnostic-softnet/test_reproduction_v2.py
           packages=(./internal/hostx ./internal/backend/tart ./internal/architecture ./cmd/boxwarden
             ./internal/networkdiag ./internal/session ./internal/sessionruntime
             ./internal/supervisor ./internal/config ./internal/serialx)

@@ -469,3 +469,8 @@ Task5 must resolve the exact static system-image identity mechanism and finish
 L/C/F, complete catalogue/bindings and compile graphs before final artifacts.
 These component closures do not qualify native privileged behavior or the
 complete runnable package.
+
+
+## Separately bound diagnostic.2 recipe
+
+The Rust source-producing commit precedes a separately named `reproduce_v2.py` publication. Historical `build.py`/artifact bytes remain diagnostic.1 evidence. The new recipe preserves byte comparison of every published source-directory file, and independently pins its own bytes before every compiler dispatch. Because its new filename was absent from the producing Rust commit, rebinding it cannot create a self-reference in that comparison. Record the two publication identities separately; do not invent an unknown commit or substitute an older artifact digest. Fresh targets7/8, identical fresh staging pathname, exact per-leg outputs and all existing compiler/cache/encrypted-mount/argv/retention gates remain required. Twin equality is a later artifact gate.
