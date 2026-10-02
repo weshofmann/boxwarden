@@ -29,6 +29,8 @@ project list
 project setup|setup-update --source-root PATH --formatter-bundle PATH --iso PATH --go PATH
 project create [--base current|REGISTERED-BASE] [--size-mib 16..1024] NAME
 project open|status|stop NAME
+project rebuild [--base current|REGISTERED-BASE] NAME
+project rebuild retry NAME
 project import --source PRIVATE-DIRECTORY NAME
 project import retry NAME
 project export --destination NEW-DIRECTORY NAME

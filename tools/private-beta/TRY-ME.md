@@ -209,3 +209,16 @@ recovery and complete network isolation are outside this walkthrough.
 To rebuild from a clean committed checkout on this Mac:
 `GO_BIN=/absolute/actual/go bash tools/private-beta/build.sh 0.2.0-beta.1 /absolute/new-output`.
 This builds locally and publishes no release.
+
+## Replace a disposable project system
+
+With a stopped named project, `bw project rebuild --base current NAME` clones
+the supported prepared base even if the base name is unchanged, retains the
+same workspace and import selection, and rebinds later open/export to the new
+system. It boots the candidate before retiring the old system. If interrupted,
+use `bw project rebuild retry NAME` to continue the same candidate. `bw project
+list` shows retained projects and pending replacements. System-only changes
+are discarded; workspace contents remain untrusted and are not sanitized.
+See `support/source/docs/operations/projects.md` for the runnable sequence and
+failure behavior. Explicit guest clipboard helpers may require restaging on
+the replacement system.

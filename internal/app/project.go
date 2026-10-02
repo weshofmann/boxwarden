@@ -21,7 +21,7 @@ import (
 )
 
 const projectMount = "/home/boxwarden/workspaces/project"
-const projectUsage = "project list; project setup|setup-update --source-root PATH --formatter-bundle PATH --iso PATH --go PATH; project create [--base current|REGISTERED-BASE] [--size-mib 16..1024] NAME; project open|status|stop NAME; project import --source PRIVATE-DIRECTORY NAME; project import retry NAME; project export --destination NEW-DIRECTORY NAME"
+const projectUsage = "project list; project setup|setup-update --source-root PATH --formatter-bundle PATH --iso PATH --go PATH; project create [--base current|REGISTERED-BASE] [--size-mib 16..1024] NAME; project open|status|stop NAME; project rebuild [--base current|REGISTERED-BASE] NAME; project rebuild retry NAME; project import --source PRIVATE-DIRECTORY NAME; project import retry NAME; project export --destination NEW-DIRECTORY NAME"
 
 type projectCommand struct {
 	operation, name, base, source, destination string
@@ -36,7 +36,7 @@ func parseProject(args []string) (projectCommand, error) {
 		return p, errors.New(projectUsage)
 	}
 	p.operation = args[0]
-	if p.operation == "import" && len(args) > 1 && args[1] == "retry" {
+	if (p.operation == "import" || p.operation == "rebuild") && len(args) > 1 && args[1] == "retry" {
 		p.retry = true
 		args = append([]string{args[0]}, args[2:]...)
 	}
@@ -52,6 +52,8 @@ func parseProject(args []string) (projectCommand, error) {
 	case "create":
 		set.StringVar(&p.base, "base", "current", "registered prepared base or current")
 		set.Int64Var(&p.sizeMiB, "size-mib", 64, "workspace size in MiB, 16..1024")
+	case "rebuild":
+		set.StringVar(&p.base, "base", "current", "registered prepared replacement base")
 	case "import":
 		set.StringVar(&p.source, "source", "", "explicit private source directory")
 	case "export":
@@ -90,8 +92,11 @@ func parseProject(args []string) (projectCommand, error) {
 	if _, err := session.ParseName(p.name); err != nil {
 		return p, err
 	}
-	if p.operation == "create" {
-		if p.sizeMiB < 16 || p.sizeMiB > 1024 {
+	if p.operation == "rebuild" && p.retry && set.NFlag() != 0 {
+		return p, errors.New("project rebuild retry reuses the recorded candidate; do not supply --base")
+	}
+	if p.operation == "create" || p.operation == "rebuild" {
+		if p.operation == "create" && (p.sizeMiB < 16 || p.sizeMiB > 1024) {
 			return p, errors.New("project workspace size must be 16..1024 MiB for supported export")
 		}
 		if p.base != "current" {
@@ -160,6 +165,14 @@ func runProject(ctx context.Context, c parsedCommand, loaded config.Config, d co
 	r, err := projectx.Load(d.StateRoot, d.ID, p.name)
 	if err != nil {
 		return fmt.Errorf("load project %s: %w", p.name, err)
+	}
+	if p.operation == "rebuild" {
+		return rebuildProject(ctx, c, loaded, d, r, o)
+	}
+	if _, replacementErr := projectx.LoadReplacement(d.StateRoot, d.ID, r.Name); replacementErr == nil {
+		return fmt.Errorf("project system replacement is pending; use project rebuild retry %s", r.Name)
+	} else if !errors.Is(replacementErr, os.ErrNotExist) {
+		return replacementErr
 	}
 	if r.SessionID == "" {
 		return fmt.Errorf("project %s has an incomplete session allocation; inspect session status %s; no existing session will be adopted", r.Name, r.Name)

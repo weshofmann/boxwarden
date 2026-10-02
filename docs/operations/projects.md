@@ -154,6 +154,49 @@ is not verification of edited returned files. Create another named project with
 the same public commands to obtain a distinct sandbox/workspace; no new setup
 or hand-prepared bindings are needed.
 
+## Replace a stopped project's disposable system
+
+Keep work in the independent workspace. To discard guest system-disk changes
+and clone a registered prepared base under the same project name:
+
+```sh
+bw project list
+bw project stop myproject
+bw project rebuild --base current myproject
+bw project status myproject
+bw project open myproject
+```
+
+This explicitly creates a replacement even when the selected base is unchanged.
+The existing rebuild driver first records a stopped candidate, switches the
+session binding, boots that exact candidate to fresh READY with the retained
+workspace, then retires only the old system. Rebuild can leave the candidate
+running; `project open` reuses that candidate. The name, session ID, workspace
+UUID, filesystem identity, attachment and original import selection stay the
+same. Subsequent open/export use the new system binding. Workspace data is
+neither reformatted nor reimported. Guest packages, system files and settings
+created after the prepared base disappear; explicitly staged guest clipboard
+helpers may need to be staged again on the replacement.
+
+Rebuild requires a stopped project with no unfinished import. If preparation,
+boot, retirement or bookmark publication fails, keep the retained state and use:
+
+```sh
+bw project rebuild retry myproject
+```
+
+Retry uses the recorded candidate; do not supply another base. The immutable
+replacement history allows a retry to settle a final directory-sync failure.
+It cannot authorize rebuilding, starting or deleting a different system. List
+shows a pending replacement and its retry command. Unrelated or inconsistent
+bindings fail closed and require inspection.
+
+Rebuilding the system does **not** sanitize a workspace modified by a malicious
+guest. Treat returned files as untrusted data. Verify a system-only marker has
+disappeared, inspect the retained project edits in the guest, then stop and
+export to a new private destination using the commands above. Compare the
+returned bytes against the intended edits, not the pristine import receipt.
+
 ## Errors and limits
 
 A name collision directs you to `project open`; a legacy session is not adopted.
@@ -178,7 +221,7 @@ transactions for the existing low-level recovery path.
 
 Ordinary stop/open retains system-disk and independent-workspace bytes;
 processes, RAM, windows and the management generation do not persist. This path
-does not qualify power loss, system rebuild, disaster recovery, provider login
+does not qualify power loss, disaster recovery, provider login
 or complete network isolation. The vmnet-gateway exposure remains a limitation.
 Automatic Mac clipboard/audio sharing remains disabled; controlled clipboard
 transfers remain separate explicit actions.

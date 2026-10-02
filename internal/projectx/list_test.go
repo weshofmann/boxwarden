@@ -89,3 +89,96 @@ func TestListBoundsRegistryBeforeReadingRecords(t *testing.T) {
 		t.Fatalf("unbounded registry: %v", err)
 	}
 }
+
+func TestListAdmitsReplacementMetadataWithoutInventingProjects(t *testing.T) {
+	root, before, j := replacementFixture(t)
+	intent, err := BeginReplacement(root, "work", before, j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, phase := range []string{"pending", "completed"} {
+		if phase == "completed" {
+			if _, err := CompleteReplacement(root, "work", intent); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := List(root, "work")
+		if err != nil || len(got) != 1 || got[0].Name != before.Name {
+			t.Fatalf("%s metadata was listed as a project: %+v %v", phase, got, err)
+		}
+	}
+}
+
+func TestListRejectsReplacementMetadataCorruptionAndForeignBindings(t *testing.T) {
+	for _, change := range []string{"unknown-hidden", "pending-name", "pending-current", "history-operation", "history-domain", "history-corrupt", "history-symlink", "history-nonprivate"} {
+		t.Run(change, func(t *testing.T) {
+			root, before, j := replacementFixture(t)
+			intent, err := BeginReplacement(root, "work", before, j)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, "projects", replacementName(before.Name))
+			switch change {
+			case "unknown-hidden":
+				path = filepath.Join(root, "projects", ".unknown.json")
+				err = os.WriteFile(path, []byte("{}"), 0600)
+			case "pending-name":
+				err = os.Rename(path, filepath.Join(root, "projects", replacementName("foreign")))
+			case "pending-current":
+				changed := before
+				changed.Base = "changed-base"
+				err = os.WriteFile(recordPath(root), append(mustJSON(t, changed), '\n'), 0600)
+			default:
+				if _, err := CompleteReplacement(root, "work", intent); err != nil {
+					t.Fatal(err)
+				}
+				path = filepath.Join(root, "projects", replacementHistory(intent))
+				switch change {
+				case "history-operation":
+					err = os.Rename(path, filepath.Join(root, "projects", ".replacement-history-55552233-4455-6677-8899-aabbccddeeff.json"))
+				case "history-domain":
+					changed := intent
+					changed.Before.Domain = "alpha"
+					err = os.WriteFile(path, append(mustJSON(t, changed), '\n'), 0600)
+				case "history-corrupt":
+					err = os.WriteFile(path, []byte("{}"), 0600)
+				case "history-symlink":
+					if err := os.Rename(path, path+".outside"); err != nil {
+						t.Fatal(err)
+					}
+					err = os.Symlink(path+".outside", path)
+				case "history-nonprivate":
+					err = os.Chmod(path, 0644)
+				}
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := List(root, "work"); err == nil {
+				t.Fatalf("admitted %s", change)
+			}
+		})
+	}
+}
+
+func TestListSkipsOnlyKnownAtomicPublicationNames(t *testing.T) {
+	for _, name := range []string{"dev.json", ".setup.json", ".replacement-dev.json", ".replacement-history-55552233-4455-6677-8899-aabbccddeeff.json", ".unknown.json"} {
+		t.Run(name, func(t *testing.T) {
+			root := privateRoot(t)
+			if err := os.Mkdir(filepath.Join(root, "projects"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "projects", name+".tmp-"+strings.Repeat("a", 32)), []byte("interrupted publication"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := List(root, "work")
+			if name == ".unknown.json" {
+				if err == nil {
+					t.Fatal("unknown hidden metadata skipped as temporary")
+				}
+			} else if err != nil || len(got) != 0 {
+				t.Fatalf("known temporary: %v %v", got, err)
+			}
+		})
+	}
+}

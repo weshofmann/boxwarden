@@ -103,3 +103,28 @@ func TestListIgnoresInterruptedSetupHistoryTemporaryPublication(t *testing.T) {
 		t.Fatalf("interrupted publication blocked read-only list: %v %v", got, err)
 	}
 }
+
+func TestListRefusesForgedSetupHistoryTemporaryKeys(t *testing.T) {
+	hash := strings.Repeat("a", 64)
+	nonce := strings.Repeat("b", 32)
+	for _, key := range []string{
+		".unknown-history-" + hash + ".json.tmp-" + nonce,
+		".setup-history-" + strings.ToUpper(hash) + ".json.tmp-" + nonce,
+		".setup-history-" + hash[:63] + ".json.tmp-" + nonce,
+		".setup-history-" + hash + ".json.tmp-" + strings.ToUpper(nonce),
+		".setup-history-" + hash + ".json.tmp-" + nonce[:31],
+	} {
+		t.Run(key, func(t *testing.T) {
+			root := privateRoot(t)
+			if err := SaveSetup(root, fixtureSetup()); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "projects", key), []byte("incomplete"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := List(root, "work"); err == nil {
+				t.Fatal("forged temporary key hidden")
+			}
+		})
+	}
+}
