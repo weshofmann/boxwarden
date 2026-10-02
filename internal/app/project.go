@@ -21,7 +21,7 @@ import (
 )
 
 const projectMount = "/home/boxwarden/workspaces/project"
-const projectUsage = "project setup --source-root PATH --formatter-bundle PATH --iso PATH --go PATH; project create [--base current|REGISTERED-BASE] [--size-mib 16..1024] NAME; project open|status|stop NAME; project import --source PRIVATE-DIRECTORY NAME; project import retry NAME; project export --destination NEW-DIRECTORY NAME"
+const projectUsage = "project list; project setup --source-root PATH --formatter-bundle PATH --iso PATH --go PATH; project create [--base current|REGISTERED-BASE] [--size-mib 16..1024] NAME; project open|status|stop NAME; project import --source PRIVATE-DIRECTORY NAME; project import retry NAME; project export --destination NEW-DIRECTORY NAME"
 
 type projectCommand struct {
 	operation, name, base, source, destination string
@@ -56,12 +56,18 @@ func parseProject(args []string) (projectCommand, error) {
 		set.StringVar(&p.source, "source", "", "explicit private source directory")
 	case "export":
 		set.StringVar(&p.destination, "destination", "", "new host destination")
-	case "open", "status", "stop":
+	case "list", "open", "status", "stop":
 	default:
 		return p, errors.New(projectUsage)
 	}
 	if err := set.Parse(args[1:]); err != nil {
 		return p, err
+	}
+	if p.operation == "list" {
+		if len(set.Args()) != 0 {
+			return p, errors.New("project list takes no name or options")
+		}
+		return p, nil
 	}
 	if p.operation == "setup" {
 		if len(set.Args()) != 0 {
@@ -117,6 +123,9 @@ func runProject(ctx context.Context, c parsedCommand, loaded config.Config, d co
 		return errors.New("project workflow currently supports the explicit alpha domain")
 	}
 	p := c.project
+	if p.operation == "list" {
+		return listProjects(ctx, loaded, d, o)
+	}
 	scope := "project-" + string(d.ID) + "-" + p.name
 	if p.operation == "setup" {
 		scope = "project-setup-" + string(d.ID)
