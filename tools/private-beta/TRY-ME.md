@@ -105,6 +105,10 @@ Create opens the native desktop. Wait for **`management-readiness: ready` and
 `actions: complete`** before treating software setup as complete; READY alone
 checks the management channel. The ChatGPT recipe opens its graphical application
 automatically; sign-in is optional and is not part of this walkthrough.
+On a fresh desktop, Ubuntu may show optional update/upgrade notices and a
+keyring creation dialog. For this credential-free trial, cancel keyring creation
+and dismiss the optional updater; no password or upgrade is needed to reach
+the application's sign-in screen.
 If a fresh observation expires, run `bw project open myproject` to re-establish
 readiness, then `bw project import retry myproject` for a recorded import. The
 retry keeps its original selection and transaction; do not create another import.
