@@ -32,6 +32,10 @@ import (
 type rootInstaller func(context.Context, []byte) ([]byte, error)
 
 func main() {
+	if handled, err := runInfo(os.Args[1:], os.Stdout); handled {
+		finish(err)
+		return
+	}
 	ctx := context.Background()
 	handled, err := runInternal(ctx, os.Args[1:], os.Stdin, os.Stdout, hostx.RunRootHostInstall, sessionruntime.RunRequest)
 	if handled {
