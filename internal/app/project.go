@@ -21,14 +21,14 @@ import (
 )
 
 const projectMount = "/home/boxwarden/workspaces/project"
-const projectUsage = "project list; project setup|setup-update --source-root PATH --formatter-bundle PATH --iso PATH --go PATH; project create [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] [--size-mib 16..1024] NAME; project open|status|stop NAME; project rebuild [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] NAME; project rebuild retry NAME; project import --source PRIVATE-DIRECTORY NAME; project import retry NAME; project export --destination NEW-DIRECTORY NAME"
+const projectUsage = "project list; project setup|setup-update --source-root PATH --formatter-bundle PATH --iso PATH --go PATH; project create [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] [--size-mib 16..1024] NAME; project open|status|stop NAME; project rebuild [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] NAME; project rebuild retry NAME; project import --source PRIVATE-DIRECTORY NAME; project import retry NAME; project export --destination NEW-DIRECTORY NAME; project export retry --transaction UUID NAME"
 
 type projectCommand struct {
-	operation, name, base, source, destination, recipe string
-	sizeMiB                                            int64
-	setup                                              projectx.Setup
-	retry                                              bool
-	baseExplicit                                       bool
+	operation, name, base, source, destination, recipe, transaction string
+	sizeMiB                                                         int64
+	setup                                                           projectx.Setup
+	retry                                                           bool
+	baseExplicit                                                    bool
 }
 
 func parseProject(args []string) (projectCommand, error) {
@@ -37,7 +37,7 @@ func parseProject(args []string) (projectCommand, error) {
 		return p, errors.New(projectUsage)
 	}
 	p.operation = args[0]
-	if (p.operation == "import" || p.operation == "rebuild") && len(args) > 1 && args[1] == "retry" {
+	if (p.operation == "import" || p.operation == "rebuild" || p.operation == "export") && len(args) > 1 && args[1] == "retry" {
 		p.retry = true
 		args = append([]string{args[0]}, args[2:]...)
 	}
@@ -64,7 +64,11 @@ func parseProject(args []string) (projectCommand, error) {
 	case "import":
 		set.StringVar(&p.source, "source", "", "explicit private source directory")
 	case "export":
-		set.StringVar(&p.destination, "destination", "", "new host destination")
+		if p.retry {
+			set.StringVar(&p.transaction, "transaction", "", "retained export transaction UUID")
+		} else {
+			set.StringVar(&p.destination, "destination", "", "new host destination")
+		}
 	case "list", "open", "status", "stop":
 	default:
 		return p, errors.New(projectUsage)
@@ -138,7 +142,10 @@ func parseProject(args []string) (projectCommand, error) {
 	if p.operation == "import" && !p.retry && !cleanProjectPath(p.source) {
 		return p, errors.New("project import requires a clean absolute --source directory")
 	}
-	if p.operation == "export" && !cleanProjectPath(p.destination) {
+	if p.operation == "export" && p.retry && !alphaCreateUUID(p.transaction) {
+		return p, errors.New("project export retry requires --transaction with the retained canonical UUID")
+	}
+	if p.operation == "export" && !p.retry && !cleanProjectPath(p.destination) {
 		return p, errors.New("project export requires a clean absolute --destination directory")
 	}
 	return p, nil
@@ -228,6 +235,9 @@ func runProject(ctx context.Context, c parsedCommand, loaded config.Config, d co
 	case "import":
 		return importProject(ctx, c, d, r, o)
 	case "export":
+		if p.retry {
+			return retryProjectExport(ctx, c, loaded, d, r, o)
+		}
 		return exportProject(ctx, c, loaded, d, r, o)
 	}
 	return errors.New(projectUsage)
@@ -535,9 +545,9 @@ func exportProject(ctx context.Context, c parsedCommand, loaded config.Config, d
 	}
 	journal, published, err := o.AlphaExport(ctx, d, input, o.Observer)
 	if err != nil {
-		return fmt.Errorf("project export transaction %s incomplete; retained evidence: %w", journal.ID, err)
+		return projectExportFailure(r, journal.ID, err)
 	}
-	if journal.Phase != workspacex.ExportPublished || !alphaCreateUUID(journal.ID) || journal.Domain != d.ID || journal.VolumeID != r.VolumeID || journal.SessionID != r.SessionID || journal.SessionName != r.Name || journal.BackendObject != r.BackendObject || journal.FilesystemUUID != r.FilesystemUUID || journal.SizeBytes != r.SizeBytes || journal.DestinationParent != destination || len(journal.Selected) != 1 || journal.Selected[0] != selection {
+	if journal.Phase != workspacex.ExportPublished || !projectExportMatches(journal, d, r) || journal.DestinationParent != destination {
 		return errors.New("project export receipt differs from exact project binding and selection")
 	}
 	if err := writeAlphaExport(o.Output, d, journal, published); err != nil {

@@ -167,6 +167,12 @@ func createExportJournal(stateRoot string, journal ExportJournal) error {
 	return syncDirectory(exports)
 }
 
+// LoadExportJournal reads an exact private transaction for operator recovery
+// selection. The receipt is a locator, not authority to publish or resume.
+func LoadExportJournal(stateRoot string, expectedDomain domain.ID, id string) (ExportJournal, error) {
+	return loadExportJournal(stateRoot, expectedDomain, id)
+}
+
 func loadExportJournal(stateRoot string, expectedDomain domain.ID, id string) (ExportJournal, error) {
 	if !validUUID(id) {
 		return ExportJournal{}, fmt.Errorf("invalid export transaction ID")

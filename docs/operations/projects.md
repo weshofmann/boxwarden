@@ -239,8 +239,50 @@ Export requires the exact stopped sandbox. `forced=false` does not prove clean
 ext4, and stop may report `workspace_cleanliness=unverified`. The exporter
 separately checks clean-superblock/recovery flags, copies a snapshot and mounts
 that snapshot read-only without journal replay. A refused dirty disk stays
-refused; do not force export or rewrite records. Errors identify retained export
-transactions for the existing low-level recovery path.
+refused; do not force export or rewrite records.
+
+Normal stop first asks the pinned guest helper to unmount the exact workspaces
+and enqueue systemd poweroff. An open Terminal/editor can keep a workspace busy;
+that request then falls back to Tart's virtual power button. The supervisor waits
+up to 60 seconds for cooperative shutdown before enforcing a stop. A guest
+acknowledgement and `forced=false` describe request/control flow; neither verifies
+ext4 cleanliness.
+
+### Interrupted transfer
+
+Cancel with Ctrl-C and wait for the command to return. Keep an interrupted
+initial import in the same running generation, then use:
+
+```sh
+bw project import retry myproject
+```
+
+The original capture/transaction is retained; a completed import refuses replay.
+Do not stop/rebuild or edit its guest selection while a pending import is being
+resolved. A changed generation or divergent guest content requires inspection.
+
+For an interrupted stopped export, take the transaction UUID from its error:
+
+```sh
+bw project export retry --transaction UUID-FROM-ERROR myproject
+```
+
+Retry uses the saved project assets and the original private destination. A
+completed snapshot resumes inspection/publication; an interrupted partial copy
+is explicitly aborted and publishes no files. After `export: aborted`, start a
+new export with a new destination. Successful retry prints `project files:`.
+Existing output, changed identities, unexpected spool files or an unproven
+helper lifetime still require inspection and are never silently overwritten or
+cleaned up. An already-published journal directs you to inspect its destination.
+A stop, rebuild or setup update is not a transfer-recovery command.
+
+If failure occurred before a transaction was returned, inspect the retained
+destination and choose a new destination for another export. If the
+process died without printing its UUID, retain its private journals for
+operator diagnosis; there is currently no public export transaction listing.
+The underlying `workspace export resume` remains available for independently
+retained snapshots after a project has changed owner; the named-project wrapper
+requires the transaction to match the current stopped project exactly.
 
 Ordinary stop/open retains system-disk and independent-workspace bytes;
 processes, RAM, windows and the management generation do not persist. This path
