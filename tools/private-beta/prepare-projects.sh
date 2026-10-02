@@ -1,8 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 umask 077
+operation=setup
+if [[ ${1:-} == --update ]]; then
+  operation=setup-update
+  shift
+fi
 if [[ $# != 5 ]]; then
-  echo 'usage: bash prepare-projects.sh /absolute/config.json /absolute/ubuntu.iso /absolute/e2fsck-static.deb /absolute/go /absolute/zstd' >&2
+  echo 'usage: bash prepare-projects.sh [--update] /absolute/config.json /absolute/ubuntu.iso /absolute/e2fsck-static.deb /absolute/go /absolute/zstd' >&2
   exit 2
 fi
 package="$(cd "$(dirname "$0")" && pwd -P)"
@@ -62,5 +67,5 @@ PY
   candidate=""
   rm -rf -- "$prepared"
 fi
-"$package/bin/boxwarden" --config "$config" --domain alpha project setup \
+"$package/bin/boxwarden" --config "$config" --domain alpha project "$operation" \
   --source-root "$package/support/source" --formatter-bundle "$formatter" --iso "$iso" --go "$go_bin"

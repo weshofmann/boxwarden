@@ -43,6 +43,13 @@ is safe; different locators are refused. Keep the staged source checkout and
 bundle together at their original paths and revision. Routine use below needs
 only `BW`, `CONFIG`, a name and explicit transfer paths; no UUIDs or helper flags.
 
+For an explicit change of asset locators, use `project setup-update` with the
+same four flags. It repeats asset admission, archives the exact previous setup
+bytes before atomic replacement, and never rewrites workspace or transfer
+receipts. See the [side-by-side beta update guide](../../tools/private-beta/UPGRADING.md)
+for package preparation, explicit guest helper updates, failure recovery and the
+limits on returning to an old version. Ordinary `project setup` remains create-only.
+
 ## Create and explicitly import
 
 Choose a fresh name and a new absolute private source path outside domain state:
