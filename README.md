@@ -18,7 +18,11 @@ and controlled stopped-workspace export. The published evidence records two
 independent synthetic workspace histories, including a recovered start rather
 than uninterrupted first-start success in one replacement history.
 
-Start with the [v0.2 operator quickstart](docs/v0.2/alpha-quickstart.md).
+For an initialized Mac with an admitted base, start with the
+[basic graphical workflow](docs/operations/basic-workflow.md): create, open the
+desktop, stop, and restart with an independent workspace. Use the
+[v0.2 operator quickstart](docs/v0.2/alpha-quickstart.md) for recipe preparation
+and the broader rebuild/export walkthrough.
 The [progress record](docs/v0.2/alpha-progress.md) and
 [review ledger](docs/v0.2/alpha-review-ledger.md) distinguish implementation,
 source checks, observed guest behavior, and remaining gaps. The
@@ -30,8 +34,8 @@ vmnet gateway remain reachable. Workspace remount/device-identity reconciliation
 reboot/reconnect, and some interruption cases retain documented limits.
 Provider sign-in and authenticated agent use have not been demonstrated.
 Merging this baseline is not a release or a change to those claims. Automatic
-clipboard sharing remains disabled; the proposed explicit transfers are not
-implemented yet.
+clipboard sharing remains disabled; controlled transfers are explicit operator
+actions.
 
 <details>
 <summary>Historical v0.1 status and qualification context</summary>

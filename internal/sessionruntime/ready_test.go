@@ -121,6 +121,10 @@ func readyFixture(t *testing.T) (*fixture, *readyClient) {
 			if err := os.WriteFile(key+"-cert.pub", []byte("cert"), 0o644); err != nil {
 				return sshx.Certificate{}, err
 			}
+			// The real issuer normalizes public modes independently of umask.
+			if err := os.Chmod(key+"-cert.pub", 0o644); err != nil {
+				return sshx.Certificate{}, err
+			}
 			return sshx.Certificate{Path: key + "-cert.pub", Identity: binding.CertificateIdentity(), Principal: binding.Principal(), NotAfter: time.Now().Add(15 * time.Minute)}, nil
 		})
 	}
@@ -335,6 +339,9 @@ func TestReadyRenewsGenerationCertificateBeforeItBecomesNoncurrent(t *testing.T)
 			count := issues.Add(1)
 			path := key + "-cert.pub"
 			if err := os.WriteFile(path, []byte("cert"), 0o644); err != nil {
+				return sshx.Certificate{}, err
+			}
+			if err := os.Chmod(path, 0o644); err != nil {
 				return sshx.Certificate{}, err
 			}
 			lifetime := 6 * time.Minute

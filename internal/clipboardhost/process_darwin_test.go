@@ -49,6 +49,12 @@ func TestPrivatePasteboardHelperProcess(t *testing.T) {
 		}
 	}
 	if mode == "oversized" || mode == "invalid" || mode == "trailing" {
+		// Match the real read handshake before emitting malformed output. Otherwise
+		// this child can exit before the parent writes, racing frame errors with EPIPE.
+		token, err := readHelperByte(os.Stdin)
+		if err != nil || token != helperStart || !helperEOF(os.Stdin) {
+			os.Exit(93)
+		}
 		os.Stdout.Write([]byte{helperReady})
 		switch mode {
 		case "oversized":

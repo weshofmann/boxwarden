@@ -138,6 +138,10 @@ func runProcessOwner(path string) error {
 			if err := os.WriteFile(path, []byte("test-certificate"), 0o644); err != nil {
 				return sshx.Certificate{}, err
 			}
+			// Match the real issuer's public-file normalization under umask 077.
+			if err := os.Chmod(path, 0o644); err != nil {
+				return sshx.Certificate{}, err
+			}
 			return sshx.Certificate{Path: path, Identity: binding.CertificateIdentity(), Principal: binding.Principal(), NotAfter: time.Now().Add(15 * time.Minute)}, nil
 		})
 	}

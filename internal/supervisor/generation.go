@@ -227,7 +227,9 @@ func validateGenerationEntry(dir, name string) error {
 		}
 		if len(entries) == 1 {
 			socket, err := os.Lstat(filepath.Join(dir, name, "control.sock"))
-			if err != nil || !ownedByCurrentUser(socket) || socket.Mode()&os.ModeSocket == 0 || socket.Mode().Perm() != 0o755 {
+			// Match Tart cleanup: a restrictive operator umask can remove
+			// group/other bits from 0755 without making this private socket unsafe.
+			if err != nil || !ownedByCurrentUser(socket) || socket.Mode()&os.ModeSocket == 0 || socket.Mode().Perm()&0o700 != 0o700 || socket.Mode().Perm()&^os.FileMode(0o755) != 0 {
 				return fmt.Errorf("invalid Tart scratch control socket")
 			}
 		}

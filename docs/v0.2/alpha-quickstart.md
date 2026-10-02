@@ -1,5 +1,12 @@
 # Boxwarden v0.2 alpha quickstart
 
+For create → graphical desktop → stop → start using an already admitted base,
+use the [basic workflow](../operations/basic-workflow.md). This longer walkthrough
+includes recipe preparation, rebuild/replacement, and stopped export checks.
+Current workspace/start operations require an explicitly
+[enrolled storage config](workspace-remount-recovery-r1.md#existing-installation-upgrade-sequence);
+legacy handoff configs must be enrolled into a new copy before those operations.
+
 This is the current source-tracked operator path. Two synthetic workspace
 histories passed the recorded public workflow, including recovery in the
 independent replacement history; see [alpha progress](alpha-progress.md) for
