@@ -203,11 +203,11 @@ Leave successful demos stopped for inspection.
 This is an experimental functional beta, not new security qualification.
 Existing vmnet-gateway exposure, shutdown uncertainty, transfer limits and
 untested Mac/guest environments remain. Automatic Tart clipboard/audio sharing
-stays disabled. Provider sign-in, cold-machine installation, rebuild, power-loss
+stays disabled. Provider sign-in, cold-machine installation, power-loss
 recovery and complete network isolation are outside this walkthrough.
 
 To rebuild from a clean committed checkout on this Mac:
-`GO_BIN=/absolute/actual/go bash tools/private-beta/build.sh 0.2.0-beta.1 /absolute/new-output`.
+`GO_BIN=/absolute/actual/go bash tools/private-beta/build.sh 0.2.0-beta.3 /absolute/new-output`.
 This builds locally and publishes no release.
 
 ## Replace a disposable project system
