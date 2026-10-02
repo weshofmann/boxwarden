@@ -108,9 +108,9 @@ func projectListState(ctx context.Context, loaded config.Config, d config.Domain
 	if err != nil {
 		return "", "", err
 	}
-	systemMatches := s.Backend.ObjectID == r.BackendObject && s.GoldenRevision == r.Base
+	systemMatches := s.Backend.ObjectID == r.BackendObject && s.GoldenRevision == r.Base && s.RecipeIntentDigest == r.RecipeIntentDigest
 	if pending != nil {
-		systemMatches = s.Backend.ObjectID == pending.Before.BackendObject && s.GoldenRevision == pending.Before.Base || s.Backend.ObjectID == pending.BackendObject && s.GoldenRevision == pending.Base
+		systemMatches = (s.Backend.ObjectID == pending.Before.BackendObject && s.GoldenRevision == pending.Before.Base && s.RecipeIntentDigest == pending.Before.RecipeIntentDigest) || (s.Backend.ObjectID == pending.BackendObject && s.GoldenRevision == pending.Base && s.RecipeIntentDigest == pending.IntentDigest)
 	}
 	if s.ID != r.SessionID || s.Backend.Kind != "tart" || !systemMatches || s.Mode != session.ModeClean {
 		return "", "", errors.New("project session binding differs from remembered identity")
@@ -119,7 +119,7 @@ func projectListState(ctx context.Context, loaded config.Config, d config.Domain
 		if pending == nil {
 			return "unavailable", "system rebuild is pending; inspect session status before further operations", nil
 		}
-		if journal.OperationID != pending.OperationID || journal.SessionID != pending.Before.SessionID || journal.OldBackend != pending.Before.BackendObject || journal.OldRevision != pending.Before.Base || journal.CandidateBackend != pending.BackendObject || journal.CandidateRevision != pending.Base {
+		if journal.OperationID != pending.OperationID || journal.SessionID != pending.Before.SessionID || journal.OldBackend != pending.Before.BackendObject || journal.OldRevision != pending.Before.Base || journal.CandidateBackend != pending.BackendObject || journal.CandidateRevision != pending.Base || journal.OldIntentDigest != pending.Before.RecipeIntentDigest || journal.CandidateIntentDigest != pending.IntentDigest {
 			return "", "", errors.New("system rebuild journal differs from exact project replacement")
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {

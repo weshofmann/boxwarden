@@ -200,3 +200,34 @@ The architecture distinguishes two build products:
 The separation leaves room for a future Linux backend or image-construction path, possibly including bootc after a separate design, without adding either to M1A. The control plane does not make application workloads depend on Tart or require a particular guest runtime; OCI is one optional portability format. Platform identifiers include host/backend, guest OS, architecture, and libc where relevant so incompatible artifacts cannot collide. A later exact `session cp` command may transfer explicitly named files over V3/V4 management SSH; it does not authorize host filesystem sharing. Live host-tree attachment remains outside V0.1 and ADR 021 remains proposed.
 
 See state-model.md, memory-model.md, security-model.md, lifecycle-and-recovery.md, and decisions/.
+
+## Versioned named-project recipe bindings
+
+Project bookmarks are private locators, not admission or readiness authority.
+The store admits legacy version 1 setup, project and replacement documents with
+exactly their original field sets and preserves their JSON shape. Version 2
+setup additionally requires canonical OpenSSL/xorriso executable paths and
+lowercase SHA-256 digests. These remembered locators do not authorize tool
+installation or bypass the preparation tool checks.
+
+A version 2 project reserves a nonempty immutable recipe-intent digest alongside
+its base and workspace identity. Fresh recipe-aware session creation validates
+the captured intent before clone and retains create-only name reservation.
+Every bound project operation compares the session's exact recipe digest;
+read-only discovery also compares both old/candidate recipe bindings during a
+pending replacement. Management READY remains separate from action completion.
+
+A version 2 replacement receipt freezes the candidate digest and the complete
+old bookmark, including its old digest. Only that explicit replacement can
+advance the system/base/recipe binding; ordinary bookmark saves cannot add,
+erase or retarget a recipe. Workspace, filesystem, session ID and original
+import selection remain unchanged. An explicitly empty candidate digest in a
+version 2 receipt represents recipe removal; it is required JSON, never a
+missing-field default. Legacy replacement receipts continue to operate without
+recipe intent. Historical receipts remain private and immutable, and completed
+retries must match the exact current bookmark and archived intent bytes.
+
+These source-level seams reuse the existing preparation cache, captured recipe
+intent and durable rebuild driver. They introduce no new guest execution or
+automatic-action policy. Selecting recipes through the named-project CLI and
+qualifying the resulting graphical workflow are separate integration work.

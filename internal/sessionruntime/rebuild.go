@@ -47,6 +47,17 @@ func PrepareRebuild(ctx context.Context, loaded config.Config, selected config.D
 	return rebuilder.PrepareCandidate(ctx, name, revision)
 }
 
+// PrepareRebuildWithIntent reserves a fresh stopped candidate with the exact
+// captured recipe, including when the prepared base matches the old system.
+// The existing driver freezes both old and candidate intent for exact retry.
+func PrepareRebuildWithIntent(ctx context.Context, loaded config.Config, selected config.Domain, configPath, name, revision, digest string) (session.RebuildJournal, error) {
+	rebuilder, _, err := admittedRebuilder(ctx, loaded, selected, configPath)
+	if err != nil {
+		return session.RebuildJournal{}, err
+	}
+	return rebuilder.PrepareCandidateWithIntent(ctx, name, revision, digest)
+}
+
 func admittedRebuilder(ctx context.Context, loaded config.Config, selected config.Domain, configPath string) (*session.RebuildService, *session.Service, error) {
 	admittedDomain, err := loaded.Domain(string(selected.ID))
 	if err != nil || admittedDomain != selected {

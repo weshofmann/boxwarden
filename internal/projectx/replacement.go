@@ -22,18 +22,38 @@ type Replacement struct {
 	OperationID   string `json:"operation_id"`
 	BackendObject string `json:"backend_object"`
 	Base          string `json:"base"`
+	IntentDigest  string `json:"intent_digest,omitempty"`
+}
+
+// MarshalJSON preserves the legacy shape while version 2 writes an explicit
+// candidate digest even when empty: removing a recipe is a frozen choice, not
+// a missing field that may default during recovery.
+func (r Replacement) MarshalJSON() ([]byte, error) {
+	type document Replacement
+	if r.Version == 1 {
+		return json.Marshal(document(r))
+	}
+	return json.Marshal(struct {
+		document
+		IntentDigest string `json:"intent_digest"`
+	}{document: document(r), IntentDigest: r.IntentDigest})
 }
 
 // Witness reconstructs the frozen operation tuple, not the runtime pin witness.
 // The admitted rebuild driver reads and validates its own original pin record.
 func (r Replacement) Witness() session.RebuildJournal {
-	return session.RebuildJournal{Version: 1, Domain: r.Before.Domain, SessionName: r.Before.Name, SessionID: r.Before.SessionID, OperationID: r.OperationID, Phase: session.RebuildCloned, OldBackend: r.Before.BackendObject, OldRevision: r.Before.Base, CandidateBackend: r.BackendObject, CandidateRevision: r.Base}
+	return session.RebuildJournal{Version: 1, Domain: r.Before.Domain, SessionName: r.Before.Name, SessionID: r.Before.SessionID, OperationID: r.OperationID, Phase: session.RebuildCloned, OldBackend: r.Before.BackendObject, OldRevision: r.Before.Base, CandidateBackend: r.BackendObject, CandidateRevision: r.Base, OldIntentDigest: r.Before.RecipeIntentDigest, CandidateIntentDigest: r.IntentDigest}
 }
 
 func (r Replacement) Next() Record {
 	next := r.Before
 	next.Base = r.Base
 	next.BackendObject = r.BackendObject
+	next.RecipeIntentDigest = r.IntentDigest
+	next.Version = 1
+	if r.IntentDigest != "" {
+		next.Version = 2
+	}
 	return next
 }
 func replacementName(name string) string { return ".replacement-" + name + ".json" }
@@ -44,14 +64,18 @@ func validateReplacement(d domain.ID, r Replacement) error {
 	if err := validateRecord(d, r.Before); err != nil {
 		return err
 	}
-	if r.Version != 1 || !r.Before.Initialized || !validUUID(r.OperationID) || r.BackendObject != "boxwarden-"+string(d)+"-"+strings.ReplaceAll(r.OperationID, "-", "") || r.BackendObject == r.Before.BackendObject {
+	if (r.Version != 1 && r.Version != 2) || !r.Before.Initialized || !validUUID(r.OperationID) || r.BackendObject != "boxwarden-"+string(d)+"-"+strings.ReplaceAll(r.OperationID, "-", "") || r.BackendObject == r.Before.BackendObject {
 		return fmt.Errorf("invalid project replacement identity")
+	}
+	if r.Version == 1 && (r.Before.RecipeIntentDigest != "" || r.IntentDigest != "") ||
+		r.Version == 2 && r.Before.RecipeIntentDigest == "" && r.IntentDigest == "" {
+		return fmt.Errorf("project replacement version differs from recipe binding")
 	}
 	return validateRecord(d, r.Next())
 }
 func decodeReplacement(raw []byte, d domain.ID, name string) (Replacement, error) {
 	var r Replacement
-	if err := decodeDocument(raw, &r, []string{"version", "before", "operation_id", "backend_object", "base"}); err != nil {
+	if err := decodeVersionedDocument(raw, &r, []string{"version", "before", "operation_id", "backend_object", "base"}, []string{"intent_digest"}); err != nil {
 		return r, err
 	}
 	var nested struct {
@@ -60,7 +84,7 @@ func decodeReplacement(raw []byte, d domain.ID, name string) (Replacement, error
 	if err := json.Unmarshal(raw, &nested); err != nil {
 		return r, err
 	}
-	if err := decodeDocument(nested.Before, &r.Before, recordFields); err != nil {
+	if err := decodeRecord(nested.Before, &r.Before); err != nil {
 		return r, err
 	}
 	if err := validateReplacement(d, r); err != nil {
@@ -187,11 +211,14 @@ func settleCompletedReplacement(dir *os.Root, d domain.ID, intent Replacement) (
 // BeginReplacement snapshots only an exact old bookmark and a stopped cloned
 // candidate from the existing rebuild journal. Caller holds the project lock.
 func BeginReplacement(root string, d domain.ID, before Record, j session.RebuildJournal) (Replacement, error) {
-	intent := Replacement{1, before, j.OperationID, j.CandidateBackend, j.CandidateRevision}
+	intent := Replacement{Version: 1, Before: before, OperationID: j.OperationID, BackendObject: j.CandidateBackend, Base: j.CandidateRevision, IntentDigest: j.CandidateIntentDigest}
+	if before.RecipeIntentDigest != "" || j.CandidateIntentDigest != "" {
+		intent.Version = 2
+	}
 	if err := validateReplacement(d, intent); err != nil {
 		return Replacement{}, err
 	}
-	if j.Version != 1 || j.Domain != d || j.SessionName != before.Name || j.SessionID != before.SessionID || j.OldBackend != before.BackendObject || j.OldRevision != before.Base || j.Phase != session.RebuildCloned || j.OldIntentDigest != "" || j.CandidateIntentDigest != "" {
+	if j.Version != 1 || j.Domain != d || j.SessionName != before.Name || j.SessionID != before.SessionID || j.OldBackend != before.BackendObject || j.OldRevision != before.Base || j.Phase != session.RebuildCloned || j.OldIntentDigest != before.RecipeIntentDigest {
 		return Replacement{}, fmt.Errorf("replacement witness differs from exact cloned project system")
 	}
 	dir, err := openProjects(root, false)
@@ -224,7 +251,7 @@ func BeginReplacement(root string, d domain.ID, before Record, j session.Rebuild
 }
 
 // CompleteReplacement preserves a private immutable history receipt before
-// changing only the system/base bookmark, then clears the retry intent last.
+// changing only the system/base/recipe bookmark, then clears the retry intent last.
 // Runtime completion is independently checked by the caller. A visible rename
 // followed by failed sync is settled by an exact retry, never by another clone.
 func CompleteReplacement(root string, d domain.ID, intent Replacement) (Record, error) {

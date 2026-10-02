@@ -28,7 +28,7 @@ func UpdateSetup(stateRoot string, next Setup) (string, error) {
 		return "", err
 	}
 	var prior Setup
-	if err := decodeDocument(raw, &prior, setupFields); err != nil {
+	if err := decodeSetup(raw, &prior); err != nil {
 		return "", err
 	}
 	if err := validateSetup(prior); err != nil {
@@ -82,7 +82,7 @@ func admitSetupHistory(dir *os.Root, name string) (bool, error) {
 		return false, errors.New("setup history bytes differ from filename digest")
 	}
 	var previous Setup
-	if err := decodeDocument(raw, &previous, setupFields); err != nil {
+	if err := decodeSetup(raw, &previous); err != nil {
 		return false, err
 	}
 	if err := validateSetup(previous); err != nil {
