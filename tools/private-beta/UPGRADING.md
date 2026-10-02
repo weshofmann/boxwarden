@@ -24,6 +24,7 @@ shasum -a 256 -c SHA256SUMS
 bw() { "$PACKAGE/bin/boxwarden" --config "$CONFIG" --domain alpha "$@"; }
 bw project stop myproject
 bash "$PACKAGE/prepare-projects.sh" --update "$CONFIG" "$ISO" "$CHECKER" "$GO_BIN" "$ZSTD_BIN"
+bw project list
 bw project status myproject
 bw project open myproject
 ```
@@ -38,7 +39,8 @@ success. The previous setup document is archived byte-for-byte in the private
 state root under `projects/.setup-history-<sha256>.json`, and its path is printed.
 Then the active `projects/.setup.json` is atomically replaced. Future creation and
 stopped export use the new admitted locators; project identity and data selection
-remain unchanged.
+remain unchanged. `project list` still discovers those names read-only after the
+update; it validates retained setup history without treating it as a project.
 
 For an already prepared new formatter, the equivalent public command is:
 

@@ -17,13 +17,13 @@ claim download/Gatekeeper distribution acceptance; it does not bypass OS checks.
 ## Verify and configure once
 
 Verify the archive beside its checksum file with
-`shasum -a 256 -c boxwarden-0.2.0-beta.2-darwin-arm64.tar.gz.sha256`, then extract
+`shasum -a 256 -c boxwarden-0.2.0-beta.3-darwin-arm64.tar.gz.sha256`, then extract
 in a new private user-owned directory. In a **new terminal**, set these
 paths to your actual assets; no profile sourcing or private bindings is needed:
 
 ```sh
 umask 077
-PACKAGE=/absolute/boxwarden-0.2.0-beta.2-darwin-arm64
+PACKAGE=/absolute/boxwarden-0.2.0-beta.3-darwin-arm64
 cd "$PACKAGE"
 shasum -a 256 -c SHA256SUMS
 "$PACKAGE/bin/boxwarden" version
@@ -77,9 +77,16 @@ mkdir -m 700 "$SOURCE"
 printf 'Original host project.\n' > "$SOURCE/notes.txt"
 printf 'unchanged-reference-v1\n' > "$SOURCE/reference.txt"
 bw project create --size-mib 64 myproject
+bw project list
 bw project status myproject
 bw project import --source "$SOURCE" myproject
 ```
+
+`bw project list` discovers existing named projects in name order, with their
+current state, exact workspace association, and next commands. It is a read-only
+snapshot: unavailable backing storage is an error, incomplete projects stay
+visible, and a running backend is READY only with a fresh exact supervisor check.
+The commands shown recheck their bindings before doing work.
 
 Create opens the native desktop. Wait for `readiness: ready` before importing.
 If a fresh observation expires, run `bw project open myproject` to re-establish

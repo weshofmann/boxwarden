@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -77,5 +78,26 @@ func TestProjectSetupUpdateAdmitsAssetsAndRetainsExistingProject(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "returned")
 	if err := Run(t.Context(), append(prefix, "project", "export", "--destination", dest, "demo"), o); err == nil || !strings.Contains(err.Error(), "captured updated exporter") {
 		t.Fatalf("export: %v", err)
+	}
+}
+
+func TestPublicListAfterSetupUpdateRemainsReadOnly(t *testing.T) {
+	prefix, d, o, _, out := projectFixture(t)
+	if err := Run(t.Context(), append(prefix, "project", "create", "--size-mib", "16", "demo"), o); err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(t.Context(), append(prefix, "project", "setup-update", "--source-root", "/new/source", "--formatter-bundle", "/new/formatter", "--iso", "/new/ubuntu.iso", "--go", "/new/tool/go"), o); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshotProjectTree(t, d.StateRoot)
+	out.Reset()
+	if err := Run(t.Context(), append(prefix, "project", "list"), o); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, snapshotProjectTree(t, d.StateRoot)) {
+		t.Fatal("list after update changed tree")
+	}
+	if !strings.Contains(out.String(), "project: demo") || !strings.Contains(out.String(), "state: stopped") {
+		t.Fatalf("list %s", out.String())
 	}
 }
