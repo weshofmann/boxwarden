@@ -29,21 +29,26 @@ type Setup struct {
 	FormatterBundle string `json:"formatter_bundle"`
 	ISOPath         string `json:"iso_path"`
 	GoBinary        string `json:"go_binary"`
+	OpenSSLPath     string `json:"openssl_path,omitempty"`
+	OpenSSLSHA256   string `json:"openssl_sha256,omitempty"`
+	XorrisoPath     string `json:"xorriso_path,omitempty"`
+	XorrisoSHA256   string `json:"xorriso_sha256,omitempty"`
 }
 type Record struct {
-	Version        int       `json:"version"`
-	Domain         domain.ID `json:"domain"`
-	Name           string    `json:"name"`
-	Base           string    `json:"base"`
-	VolumeID       string    `json:"volume_id"`
-	FilesystemUUID string    `json:"filesystem_uuid"`
-	SizeBytes      int64     `json:"size_bytes"`
-	SessionID      string    `json:"session_id"`
-	BackendObject  string    `json:"backend_object"`
-	Initialized    bool      `json:"initialized"`
-	ImportID       string    `json:"import_id"`
-	ImportSource   string    `json:"import_source"`
-	Imported       bool      `json:"imported"`
+	Version            int       `json:"version"`
+	Domain             domain.ID `json:"domain"`
+	Name               string    `json:"name"`
+	Base               string    `json:"base"`
+	VolumeID           string    `json:"volume_id"`
+	FilesystemUUID     string    `json:"filesystem_uuid"`
+	SizeBytes          int64     `json:"size_bytes"`
+	SessionID          string    `json:"session_id"`
+	BackendObject      string    `json:"backend_object"`
+	Initialized        bool      `json:"initialized"`
+	ImportID           string    `json:"import_id"`
+	ImportSource       string    `json:"import_source"`
+	Imported           bool      `json:"imported"`
+	RecipeIntentDigest string    `json:"recipe_intent_digest,omitempty"`
 }
 
 // SaveSetup creates an immutable profile. An identical retry completes any
@@ -60,7 +65,7 @@ func SaveSetup(stateRoot string, next Setup) error {
 	raw, _, err := readDocument(dir, setupName)
 	if err == nil {
 		var prior Setup
-		if err := decodeDocument(raw, &prior, setupFields); err != nil {
+		if err := decodeSetup(raw, &prior); err != nil {
 			return err
 		}
 		if err := validateSetup(prior); err != nil {
@@ -87,7 +92,7 @@ func LoadSetup(stateRoot string) (Setup, error) {
 	if err != nil {
 		return s, err
 	}
-	if err = decodeDocument(raw, &s, setupFields); err != nil {
+	if err = decodeSetup(raw, &s); err != nil {
 		return Setup{}, err
 	}
 	if err = validateSetup(s); err != nil {
@@ -139,7 +144,7 @@ func Save(stateRoot string, expectedDomain domain.ID, next Record) error {
 	if err != nil {
 		return err
 	}
-	if prior.Base != next.Base || prior.VolumeID != next.VolumeID || prior.FilesystemUUID != next.FilesystemUUID || prior.SizeBytes != next.SizeBytes ||
+	if prior.Version != next.Version || prior.RecipeIntentDigest != next.RecipeIntentDigest || prior.Base != next.Base || prior.VolumeID != next.VolumeID || prior.FilesystemUUID != next.FilesystemUUID || prior.SizeBytes != next.SizeBytes ||
 		prior.SessionID != "" && (prior.SessionID != next.SessionID || prior.BackendObject != next.BackendObject) ||
 		prior.ImportID != "" && (prior.ImportID != next.ImportID || prior.ImportSource != next.ImportSource) || prior.Initialized && !next.Initialized || prior.Imported && !next.Imported {
 		return fmt.Errorf("project binding is immutable or receipt state regressed")
@@ -172,7 +177,7 @@ func loadRecord(dir *os.Root, d domain.ID, name string) (Record, os.FileInfo, er
 		return Record{}, nil, err
 	}
 	var r Record
-	if err := decodeDocument(raw, &r, recordFields); err != nil {
+	if err := decodeRecord(raw, &r); err != nil {
 		return Record{}, nil, err
 	}
 	if err := validateRecord(d, r); err != nil {
@@ -298,6 +303,34 @@ func publishRaw(dir *os.Root, name string, raw []byte, expected os.FileInfo) err
 var setupFields = []string{"version", "source_root", "formatter_bundle", "iso_path", "go_binary"}
 var recordFields = []string{"version", "domain", "name", "base", "volume_id", "filesystem_uuid", "size_bytes", "session_id", "backend_object", "initialized", "import_id", "import_source", "imported"}
 
+// Version 1 keeps its original exact field set. Version 2 requires every
+// additional field rather than treating absent JSON as an empty binding. The
+// initial version read only selects a schema; decodeDocument still rejects
+// duplicate versions, case aliases, nulls, unknown fields and trailing objects.
+func decodeVersionedDocument(raw []byte, value any, legacy, additions []string) error {
+	var header struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &header); err != nil {
+		return err
+	}
+	fields := legacy
+	switch header.Version {
+	case 1:
+	case 2:
+		fields = append(append([]string(nil), legacy...), additions...)
+	default:
+		return fmt.Errorf("unsupported project document version %d", header.Version)
+	}
+	return decodeDocument(raw, value, fields)
+}
+func decodeSetup(raw []byte, value *Setup) error {
+	return decodeVersionedDocument(raw, value, setupFields, []string{"openssl_path", "openssl_sha256", "xorriso_path", "xorriso_sha256"})
+}
+func decodeRecord(raw []byte, value *Record) error {
+	return decodeVersionedDocument(raw, value, recordFields, []string{"recipe_intent_digest"})
+}
+
 // All fields are required, including false/empty receipt markers. Tokenizing
 // first prevents encoding/json from silently accepting duplicate fields or
 // case-insensitive aliases. Scalar nulls are also rejected rather than zeroed.
@@ -359,8 +392,28 @@ func canonicalPath(path string) bool {
 	return filepath.IsAbs(path) && filepath.Clean(path) == path && len(path) <= 4096 && !strings.ContainsAny(path, "\x00\r\n")
 }
 func validateSetup(s Setup) error {
-	if s.Version != 1 || !canonicalPath(s.SourceRoot) || !canonicalPath(s.FormatterBundle) || !canonicalPath(s.ISOPath) || !canonicalPath(s.GoBinary) || filepath.Base(s.GoBinary) != "go" {
+	if (s.Version != 1 && s.Version != 2) || !canonicalPath(s.SourceRoot) || !canonicalPath(s.FormatterBundle) || !canonicalPath(s.ISOPath) || !canonicalPath(s.GoBinary) || filepath.Base(s.GoBinary) != "go" {
 		return fmt.Errorf("invalid project setup version or canonical paths")
 	}
+	if s.Version == 1 {
+		if s.OpenSSLPath != "" || s.OpenSSLSHA256 != "" || s.XorrisoPath != "" || s.XorrisoSHA256 != "" {
+			return fmt.Errorf("legacy project setup cannot contain recipe tools")
+		}
+	} else if !canonicalPath(s.OpenSSLPath) || filepath.Base(s.OpenSSLPath) != "openssl" || !lowerSHA256(s.OpenSSLSHA256) ||
+		!canonicalPath(s.XorrisoPath) || filepath.Base(s.XorrisoPath) != "xorriso" || !lowerSHA256(s.XorrisoSHA256) {
+		return fmt.Errorf("recipe setup requires exact canonical tool paths and lowercase SHA-256 digests")
+	}
 	return nil
+}
+
+func lowerSHA256(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, c := range value {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }

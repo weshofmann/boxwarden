@@ -330,7 +330,7 @@ func boundProjectSession(d config.Domain, r projectx.Record) (session.Record, er
 	if err != nil {
 		return s, err
 	}
-	if r.SessionID == "" || s.ID != r.SessionID || s.Backend.ObjectID != r.BackendObject || s.Backend.Kind != "tart" || s.GoldenRevision != r.Base || s.Mode != session.ModeClean {
+	if r.SessionID == "" || s.ID != r.SessionID || s.Backend.ObjectID != r.BackendObject || s.Backend.Kind != "tart" || s.GoldenRevision != r.Base || s.RecipeIntentDigest != r.RecipeIntentDigest || s.Mode != session.ModeClean {
 		return s, errors.New("project session identity differs from remembered binding")
 	}
 	if err := session.RequireNoRebuild(d.StateRoot, d.ID, r.Name); err != nil {
