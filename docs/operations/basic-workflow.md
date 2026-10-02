@@ -96,6 +96,9 @@ Then exercise the ordinary lifecycle:
 
 ## Persistence and limits
 
+To modify an imported project and bring it back into a new private host
+directory, continue with the [project round trip](project-roundtrip.md).
+
 Stop/start retains the same writable system disk: installed guest software,
 home files, and desktop settings persist. Processes, RAM, open application
 windows, and the running management generation do not persist. The workspace
