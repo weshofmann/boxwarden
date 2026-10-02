@@ -65,6 +65,10 @@ new state root. Run it once, before creating projects. Identical setup retries
 are safe; different saved asset locators are refused. Keep this package and its
 formatter in place. Do not reuse an older demo's state root or change its setup.
 
+For an explicit side-by-side update of an existing private configuration, see
+[UPGRADING.md](UPGRADING.md). Retain the old package and assets; preparation with
+`--update` switches admitted asset locators and preserves previous setup bytes.
+
 ## Create, import, edit and resume
 
 ```sh

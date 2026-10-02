@@ -25,7 +25,7 @@ boxwarden version
 boxwarden --config /absolute/config.json doctor
 boxwarden --config /absolute/config.json --domain alpha project COMMAND
 
-project setup --source-root PATH --formatter-bundle PATH --iso PATH --go PATH
+project setup|setup-update --source-root PATH --formatter-bundle PATH --iso PATH --go PATH
 project create [--base current|REGISTERED-BASE] [--size-mib 16..1024] NAME
 project open|status|stop NAME
 project import --source PRIVATE-DIRECTORY NAME

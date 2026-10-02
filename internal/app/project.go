@@ -21,7 +21,7 @@ import (
 )
 
 const projectMount = "/home/boxwarden/workspaces/project"
-const projectUsage = "project setup --source-root PATH --formatter-bundle PATH --iso PATH --go PATH; project create [--base current|REGISTERED-BASE] [--size-mib 16..1024] NAME; project open|status|stop NAME; project import --source PRIVATE-DIRECTORY NAME; project import retry NAME; project export --destination NEW-DIRECTORY NAME"
+const projectUsage = "project setup|setup-update --source-root PATH --formatter-bundle PATH --iso PATH --go PATH; project create [--base current|REGISTERED-BASE] [--size-mib 16..1024] NAME; project open|status|stop NAME; project import --source PRIVATE-DIRECTORY NAME; project import retry NAME; project export --destination NEW-DIRECTORY NAME"
 
 type projectCommand struct {
 	operation, name, base, source, destination string
@@ -43,7 +43,7 @@ func parseProject(args []string) (projectCommand, error) {
 	set := flag.NewFlagSet("project "+p.operation, flag.ContinueOnError)
 	set.SetOutput(io.Discard)
 	switch p.operation {
-	case "setup":
+	case "setup", "setup-update":
 		p.setup.Version = 1
 		set.StringVar(&p.setup.SourceRoot, "source-root", "", "clean committed source checkout")
 		set.StringVar(&p.setup.FormatterBundle, "formatter-bundle", "", "admitted private formatter bundle")
@@ -63,7 +63,7 @@ func parseProject(args []string) (projectCommand, error) {
 	if err := set.Parse(args[1:]); err != nil {
 		return p, err
 	}
-	if p.operation == "setup" {
+	if p.operation == "setup" || p.operation == "setup-update" {
 		if len(set.Args()) != 0 {
 			return p, errors.New(projectUsage)
 		}
@@ -118,7 +118,7 @@ func runProject(ctx context.Context, c parsedCommand, loaded config.Config, d co
 	}
 	p := c.project
 	scope := "project-" + string(d.ID) + "-" + p.name
-	if p.operation == "setup" {
+	if p.operation == "setup" || p.operation == "setup-update" {
 		scope = "project-setup-" + string(d.ID)
 	}
 	held, err := lock.Acquire(ctx, d.StateRoot, scope)
@@ -126,12 +126,18 @@ func runProject(ctx context.Context, c parsedCommand, loaded config.Config, d co
 		return err
 	}
 	defer func() { err = errors.Join(err, held.Release()) }()
-	if p.operation == "setup" {
+	if p.operation == "setup" || p.operation == "setup-update" {
 		if o.ProjectSetupCheck == nil {
 			return errors.New("project setup asset checker is required")
 		}
 		if err := o.ProjectSetupCheck(ctx, d, p.setup); err != nil {
+			if p.operation == "setup-update" {
+				return fmt.Errorf("project setup-update prerequisites failed; previous setup retained; correct the new package/assets and rerun the same setup-update command: %w", err)
+			}
 			return fmt.Errorf("project setup prerequisites: %w", err)
+		}
+		if p.operation == "setup-update" {
+			return updateProjectSetup(d.StateRoot, p.setup, o.Output)
 		}
 		if err := projectx.SaveSetup(d.StateRoot, p.setup); err != nil {
 			return err
