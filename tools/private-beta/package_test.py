@@ -43,7 +43,7 @@ class PackageInputTests(unittest.TestCase):
             names = "kernel-image formatter-initrd alpha-formatter e2fsck.static alpha-formatter-host binding.swift manifest.json".split()
             for name in names:
                 (prepared / name).write_text(name)
-            helper.write_text('#!/bin/bash\nset -e\nout=$(mktemp -d /private/tmp/boxwarden-alpha-formatter.XXXXXX)\n/bin/cp "$FIXTURE_ARTIFACTS"/* "$out/"\nprintf "%s\\n" "$out" >> "$FIXTURE_OUTPUTS"\nprintf "prepared formatter boot artifacts: %s\\n" "$out"\n')
+            helper.write_text('#!/bin/bash\nset -e\n[[ "$PWD" == "$FIXTURE_SOURCE" ]] || exit 72\ncommand -v zstd >/dev/null || exit 71\nout=$(mktemp -d /private/tmp/boxwarden-alpha-formatter.XXXXXX)\n/bin/cp "$FIXTURE_ARTIFACTS"/* "$out/"\nprintf "%s\\n" "$out" >> "$FIXTURE_OUTPUTS"\nprintf "prepared formatter boot artifacts: %s\\n" "$out"\n')
             (package / "bin").mkdir()
             cli = package / "bin/boxwarden"
             cli.write_text('#!/bin/bash\nset -e\nfor name in ' + ' '.join(names) + '; do test -f "$(dirname "$0")/../formatter/$name"; done\necho saved\n')
@@ -53,6 +53,9 @@ class PackageInputTests(unittest.TestCase):
             go = bin_dir / "go"
             go.write_text('#!/bin/bash\nexit 0\n')
             go.chmod(0o700)
+            zstd = bin_dir / "zstd"
+            zstd.write_text('#!/bin/bash\nexit 0\n')
+            zstd.chmod(0o700)
             cp = bin_dir / "cp"
             cp.write_text('#!/bin/bash\nif [[ "$1" == */alpha-formatter ]]; then exit 73; fi\nexec /bin/cp "$@"\n')
             cp.chmod(0o700)
@@ -60,8 +63,8 @@ class PackageInputTests(unittest.TestCase):
             for path in inputs:
                 path.write_text("synthetic")
             outputs = root / "outputs"
-            env = dict(os.environ, FIXTURE_ARTIFACTS=str(prepared), FIXTURE_OUTPUTS=str(outputs))
-            args = ["bash", str(package / "prepare-projects.sh"), *map(str, inputs), str(go)]
+            env = dict(os.environ, FIXTURE_ARTIFACTS=str(prepared), FIXTURE_OUTPUTS=str(outputs), FIXTURE_SOURCE=str(package / "support/source"))
+            args = ["bash", str(package / "prepare-projects.sh"), *map(str, inputs), str(go), str(zstd)]
             try:
                 failed = subprocess.run(args, env=env, capture_output=True, text=True)
                 self.assertEqual(failed.returncode, 73, failed.stderr)

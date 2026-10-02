@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 umask 077
-if [[ $# != 4 ]]; then
-  echo 'usage: bash prepare-projects.sh /absolute/config.json /absolute/ubuntu.iso /absolute/e2fsck-static.deb /absolute/go' >&2
+if [[ $# != 5 ]]; then
+  echo 'usage: bash prepare-projects.sh /absolute/config.json /absolute/ubuntu.iso /absolute/e2fsck-static.deb /absolute/go /absolute/zstd' >&2
   exit 2
 fi
 package="$(cd "$(dirname "$0")" && pwd -P)"
@@ -10,9 +10,10 @@ config=$1
 iso=$2
 checker=$3
 go_bin=$4
-for path in "$config" "$iso" "$checker" "$go_bin"; do
+zstd_bin=$5
+for path in "$config" "$iso" "$checker" "$go_bin" "$zstd_bin"; do
   if [[ "$path" != /* || ! -f "$path" ]]; then
-    echo 'all four inputs must be existing absolute files' >&2
+    echo 'all five inputs must be existing absolute files' >&2
     exit 2
   fi
 done
@@ -20,14 +21,21 @@ if [[ ! -x "$go_bin" || -L "$go_bin" || $(basename "$go_bin") != go ]]; then
   echo 'supply the actual Go executable, not a shim' >&2
   exit 2
 fi
-export PATH="$(dirname "$go_bin"):/usr/bin:/bin"
+if [[ ! -x "$zstd_bin" || -L "$zstd_bin" || $(basename "$zstd_bin") != zstd ]]; then
+  echo 'supply the actual zstd executable, not a shim' >&2
+  exit 2
+fi
+export PATH="$(dirname "$go_bin"):$(dirname "$zstd_bin"):/usr/bin:/bin"
 export GOENV=off GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off
 formatter="$package/formatter"
 if [[ ! -e "$formatter" && ! -L "$formatter" ]]; then
   log=$(mktemp /private/tmp/boxwarden-beta-formatter.XXXXXX)
   candidate=""
   trap 'rm -f -- "$log"; if [[ -n "$candidate" ]]; then rm -rf -- "$candidate"; fi' EXIT
-  bash "$package/support/source/tools/alpha-formatter/prepare_boot.sh" "$iso" "$checker" "$config" alpha | tee "$log"
+  (
+    cd "$package/support/source"
+    bash tools/alpha-formatter/prepare_boot.sh "$iso" "$checker" "$config" alpha
+  ) | tee "$log"
   prepared=$(sed -n 's/^prepared formatter boot artifacts: //p' "$log")
   if [[ ! "$prepared" =~ ^/private/tmp/boxwarden-alpha-formatter\.[A-Za-z0-9]+$ || ! -d "$prepared" ]]; then
     echo 'formatter preparation did not return its private output' >&2

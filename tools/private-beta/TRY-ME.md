@@ -4,7 +4,7 @@ This archive targets an **already initialized** Mac with admitted Tart 2.32.1 /
 Softnet 0.19.0, private enrolled APFS storage and a stopped, generic prepared
 Ubuntu 24.04.4 Desktop ARM64 base. It does not install or upgrade host tools.
 One-time helper preparation/export also requires actual Go 1.27.0, Xcode
-Command Line Tools, system Python 3, the pinned Ubuntu Desktop ARM64 ISO and
+Command Line Tools, system Python 3, an existing `zstd` executable, the pinned Ubuntu Desktop ARM64 ISO and
 `e2fsck-static_1.47.0-2.4~exp1ubuntu4.1_arm64.deb`. These are external assets.
 
 Keep the extracted directory at its final absolute location. It contains the
@@ -36,6 +36,7 @@ BASE=existing-stopped-prepared-base-name
 ISO=/absolute/ubuntu-24.04.4-desktop-arm64.iso
 CHECKER=/absolute/e2fsck-static_1.47.0-2.4~exp1ubuntu4.1_arm64.deb
 GO_BIN=/absolute/actual/go
+ZSTD_BIN=/absolute/actual/zstd
 mkdir -m 700 "$STATE"
 mkdir -p -m 700 "$(dirname "$CONFIG")"
 python3 - "$ENROLLED_CONFIG" "$CONFIG" "$STATE" <<'PY'
@@ -54,7 +55,7 @@ bw() { "$PACKAGE/bin/boxwarden" --config "$CONFIG" --domain alpha "$@"; }
 "$PACKAGE/bin/boxwarden" --config "$CONFIG" doctor
 bw domain init
 bw golden register "$BASE"
-bash "$PACKAGE/prepare-projects.sh" "$CONFIG" "$ISO" "$CHECKER" "$GO_BIN"
+bash "$PACKAGE/prepare-projects.sh" "$CONFIG" "$ISO" "$CHECKER" "$GO_BIN" "$ZSTD_BIN"
 ```
 
 The new config preserves the existing toolchain/storage enrollment and creates
