@@ -16,7 +16,9 @@ claim download/Gatekeeper distribution acceptance; it does not bypass OS checks.
 
 ## Verify and configure once
 
-Extract in a new private user-owned directory. In a **new terminal**, set these
+Verify the archive beside its checksum file with
+`shasum -a 256 -c boxwarden-0.2.0-beta.1-darwin-arm64.tar.gz.sha256`, then extract
+in a new private user-owned directory. In a **new terminal**, set these
 paths to your actual assets; no profile sourcing or private bindings is needed:
 
 ```sh

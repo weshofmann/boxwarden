@@ -96,5 +96,8 @@ chmod -R go-rwx "$package"
   shasum -a 256 -c SHA256SUMS > /dev/null
 )
 COPYFILE_DISABLE=1 tar -czf "$output/$name.tar.gz" -C "$output" "$name"
-shasum -a 256 "$output/$name.tar.gz" > "$output/$name.tar.gz.sha256"
+(
+  cd "$output"
+  shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+)
 printf 'archive: %s\nrevision: %s\n' "$output/$name.tar.gz" "$revision"
