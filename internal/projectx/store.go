@@ -1,0 +1,360 @@
+// Package projectx stores private project bookmarks, not runtime authority.
+package projectx
+
+import (
+	"bytes"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
+
+	"github.com/weshofmann/boxwarden/internal/domain"
+	"github.com/weshofmann/boxwarden/internal/renamex"
+)
+
+const maxDocumentBytes = 64 << 10
+const setupName = ".setup.json"
+
+var syncProjectDirectory = syncDirectory
+
+type Setup struct {
+	Version         int    `json:"version"`
+	SourceRoot      string `json:"source_root"`
+	FormatterBundle string `json:"formatter_bundle"`
+	ISOPath         string `json:"iso_path"`
+	GoBinary        string `json:"go_binary"`
+}
+type Record struct {
+	Version        int       `json:"version"`
+	Domain         domain.ID `json:"domain"`
+	Name           string    `json:"name"`
+	Base           string    `json:"base"`
+	VolumeID       string    `json:"volume_id"`
+	FilesystemUUID string    `json:"filesystem_uuid"`
+	SizeBytes      int64     `json:"size_bytes"`
+	SessionID      string    `json:"session_id"`
+	BackendObject  string    `json:"backend_object"`
+	Initialized    bool      `json:"initialized"`
+	ImportID       string    `json:"import_id"`
+	ImportSource   string    `json:"import_source"`
+	Imported       bool      `json:"imported"`
+}
+
+// SaveSetup creates an immutable profile. An identical retry completes any
+// previous publication's directory sync; consumers re-admit the stored paths.
+func SaveSetup(stateRoot string, next Setup) error {
+	if err := validateSetup(next); err != nil {
+		return err
+	}
+	dir, err := openProjects(stateRoot, true)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	raw, _, err := readDocument(dir, setupName)
+	if err == nil {
+		var prior Setup
+		if err := decodeDocument(raw, &prior, setupFields); err != nil {
+			return err
+		}
+		if err := validateSetup(prior); err != nil {
+			return err
+		}
+		if prior != next {
+			return fmt.Errorf("project setup is immutable")
+		}
+		return syncProjectDirectory(dir)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return publish(dir, setupName, next, nil)
+}
+func LoadSetup(stateRoot string) (Setup, error) {
+	var s Setup
+	dir, err := openProjects(stateRoot, false)
+	if err != nil {
+		return s, err
+	}
+	defer dir.Close()
+	raw, _, err := readDocument(dir, setupName)
+	if err != nil {
+		return s, err
+	}
+	if err = decodeDocument(raw, &s, setupFields); err != nil {
+		return Setup{}, err
+	}
+	if err = validateSetup(s); err != nil {
+		return Setup{}, err
+	}
+	return s, nil
+}
+
+// Create publishes allocated project intent without replacing an existing
+// bookmark. The caller holds the project-specific operation lock.
+func Create(stateRoot string, expectedDomain domain.ID, next Record) error {
+	if err := validateRecord(expectedDomain, next); err != nil {
+		return err
+	}
+	dir, err := openProjects(stateRoot, true)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return publish(dir, next.Name+".json", next, nil)
+}
+func Load(stateRoot string, expectedDomain domain.ID, name string) (Record, error) {
+	if err := validateKey(expectedDomain, name); err != nil {
+		return Record{}, err
+	}
+	dir, err := openProjects(stateRoot, false)
+	if err != nil {
+		return Record{}, err
+	}
+	defer dir.Close()
+	r, _, err := loadRecord(dir, expectedDomain, name)
+	return r, err
+}
+
+// Save advances only a pre-existing bookmark. Allocated bindings and receipt
+// identities cannot change; receipt flags cannot regress. Callers validate
+// receipts using the existing services before setting these advisory fields
+// and hold the project-specific operation lock throughout the operation.
+func Save(stateRoot string, expectedDomain domain.ID, next Record) error {
+	if err := validateRecord(expectedDomain, next); err != nil {
+		return err
+	}
+	dir, err := openProjects(stateRoot, false)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	prior, info, err := loadRecord(dir, expectedDomain, next.Name)
+	if err != nil {
+		return err
+	}
+	if prior.Base != next.Base || prior.VolumeID != next.VolumeID || prior.FilesystemUUID != next.FilesystemUUID || prior.SizeBytes != next.SizeBytes ||
+		prior.SessionID != "" && (prior.SessionID != next.SessionID || prior.BackendObject != next.BackendObject) ||
+		prior.ImportID != "" && (prior.ImportID != next.ImportID || prior.ImportSource != next.ImportSource) || prior.Initialized && !next.Initialized || prior.Imported && !next.Imported {
+		return fmt.Errorf("project binding is immutable or receipt state regressed")
+	}
+	return publish(dir, next.Name+".json", next, info)
+}
+func openProjects(path string, create bool) (*os.Root, error) {
+	root, err := openStateRoot(path)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	dir, err := openChild(root, "projects", create)
+	if err != nil {
+		return nil, err
+	}
+	// A prior mkdir may have returned a sync error. Existing pathname
+	// visibility does not establish that the parent entry is durable.
+	if create {
+		if err := syncProjectDirectory(root); err != nil {
+			dir.Close()
+			return nil, err
+		}
+	}
+	return dir, nil
+}
+func loadRecord(dir *os.Root, d domain.ID, name string) (Record, os.FileInfo, error) {
+	raw, info, err := readDocument(dir, name+".json")
+	if err != nil {
+		return Record{}, nil, err
+	}
+	var r Record
+	if err := decodeDocument(raw, &r, recordFields); err != nil {
+		return Record{}, nil, err
+	}
+	if err := validateRecord(d, r); err != nil {
+		return Record{}, nil, err
+	}
+	if r.Name != name {
+		return Record{}, nil, fmt.Errorf("project name does not match file key")
+	}
+	return r, info, nil
+}
+func readDocument(dir *os.Root, name string) ([]byte, os.FileInfo, error) {
+	f, err := openPrivateFile(dir, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, nil, err
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, maxDocumentBytes+1))
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(raw) > maxDocumentBytes {
+		return nil, nil, fmt.Errorf("project JSON exceeds 64 KiB")
+	}
+	return raw, info, nil
+}
+func publish(dir *os.Root, name string, value any, expected os.FileInfo) error {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	if len(raw) > maxDocumentBytes {
+		return fmt.Errorf("project JSON exceeds 64 KiB")
+	}
+	var nonce [16]byte
+	if _, err = rand.Read(nonce[:]); err != nil {
+		return err
+	}
+	temporary := name + ".tmp-" + hex.EncodeToString(nonce[:])
+	f, err := dir.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0600)
+	if err != nil {
+		return err
+	}
+	defer dir.Remove(temporary)
+	// Close on every error path, including failed ACL admission.
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if err = privateRegular(info); err != nil {
+		return err
+	}
+	if err = checkPrivateACL(filepath.Join(dir.Name(), temporary), info); err != nil {
+		return err
+	}
+	if _, err = f.Write(raw); err != nil {
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	dirInfo, err := dir.Stat(".")
+	if err != nil {
+		return err
+	}
+	if err = privateDirectory(dirInfo); err != nil {
+		return err
+	}
+	if err = checkPrivateACL(dir.Name(), dirInfo); err != nil {
+		return err
+	}
+	if expected == nil {
+		err = renamex.NoReplace(dir, temporary, name)
+	} else {
+		current, e := dir.Lstat(name)
+		if e != nil {
+			return e
+		}
+		if !os.SameFile(expected, current) {
+			return fmt.Errorf("project changed before publication")
+		}
+		if err = privateRegular(current); err != nil {
+			return err
+		}
+		if err = checkPrivateACL(filepath.Join(dir.Name(), name), current); err != nil {
+			return err
+		}
+		err = dir.Rename(temporary, name)
+	}
+	if err != nil {
+		return err
+	}
+	published, err := dir.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(info, published) {
+		return fmt.Errorf("project changed during publication")
+	}
+	if err = privateRegular(published); err != nil {
+		return err
+	}
+	if err = checkPrivateACL(filepath.Join(dir.Name(), name), published); err != nil {
+		return err
+	}
+	return syncProjectDirectory(dir)
+}
+
+var setupFields = []string{"version", "source_root", "formatter_bundle", "iso_path", "go_binary"}
+var recordFields = []string{"version", "domain", "name", "base", "volume_id", "filesystem_uuid", "size_bytes", "session_id", "backend_object", "initialized", "import_id", "import_source", "imported"}
+
+// All fields are required, including false/empty receipt markers. Tokenizing
+// first prevents encoding/json from silently accepting duplicate fields or
+// case-insensitive aliases. Scalar nulls are also rejected rather than zeroed.
+func decodeDocument(raw []byte, value any, fields []string) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	if token != json.Delim('{') {
+		return fmt.Errorf("expected project JSON object")
+	}
+	seen := make(map[string]bool, len(fields))
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		name, ok := token.(string)
+		if !ok {
+			return fmt.Errorf("invalid JSON field")
+		}
+		if seen[name] {
+			return fmt.Errorf("duplicate project field %q", name)
+		}
+		allowed := false
+		for _, field := range fields {
+			if name == field {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return fmt.Errorf("unknown project field %q", name)
+		}
+		seen[name] = true
+		var scalar json.RawMessage
+		if err := decoder.Decode(&scalar); err != nil {
+			return err
+		}
+		if bytes.Equal(bytes.TrimSpace(scalar), []byte("null")) {
+			return fmt.Errorf("null project field %q", name)
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return fmt.Errorf("trailing project JSON: %v", err)
+	}
+	for _, field := range fields {
+		if !seen[field] {
+			return fmt.Errorf("missing project field %q", field)
+		}
+	}
+	return json.Unmarshal(raw, value)
+}
+func canonicalPath(path string) bool {
+	return filepath.IsAbs(path) && filepath.Clean(path) == path && len(path) <= 4096 && !strings.ContainsAny(path, "\x00\r\n")
+}
+func validateSetup(s Setup) error {
+	if s.Version != 1 || !canonicalPath(s.SourceRoot) || !canonicalPath(s.FormatterBundle) || !canonicalPath(s.ISOPath) || !canonicalPath(s.GoBinary) || filepath.Base(s.GoBinary) != "go" {
+		return fmt.Errorf("invalid project setup version or canonical paths")
+	}
+	return nil
+}

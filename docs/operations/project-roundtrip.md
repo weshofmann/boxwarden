@@ -1,5 +1,8 @@
 # Bring a guest-edited project back to the host
 
+[Named projects](projects.md) remember the bindings and assets for routine use.
+This guide retains the underlying import/export commands for direct operation.
+
 Start with the [basic graphical workflow](basic-workflow.md): an initialized
 Mac, a CGO-enabled CLI, explicit enrolled `CONFIG`, and a READY sandbox with an
 attached independent workspace at `/home/boxwarden/workspaces/project`.

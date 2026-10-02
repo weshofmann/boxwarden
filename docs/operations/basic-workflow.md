@@ -1,5 +1,8 @@
 # Basic graphical sandbox workflow
 
+For routine use without hand-managed internal IDs, use
+[named projects](projects.md). This guide retains the underlying commands.
+
 Use this path on an already initialized Mac with a healthy `doctor`, an
 initialized domain, and a selected, admitted, stopped generic golden. It clones
 that existing golden; it does not rebuild a base, install host tools, or sign in

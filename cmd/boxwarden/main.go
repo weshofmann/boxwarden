@@ -63,8 +63,9 @@ func publicOptions(output io.Writer) app.Options {
 	hostInitializer := hostx.NewSystemInitializer()
 	hostDoctor := hostx.NewSystemDoctor()
 	return app.Options{
-		OutputTerminal: clipboardTerminal(os.Stdout),
-		Pasteboard:     clipboardhost.New(),
+		ProjectSetupCheck: checkProjectSetup,
+		OutputTerminal:    clipboardTerminal(os.Stdout),
+		Pasteboard:        clipboardhost.New(),
 		ClipboardTransferFactory: func(ctx context.Context, loaded config.Config, selected config.Domain) (app.ClipboardTransfer, error) {
 			admitted, err := loaded.Domain(string(selected.ID))
 			if err != nil || admitted != selected {

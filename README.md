@@ -18,11 +18,13 @@ and controlled stopped-workspace export. The published evidence records two
 independent synthetic workspace histories, including a recovered start rather
 than uninterrupted first-start success in one replacement history.
 
-For an initialized Mac with an admitted base, start with the
-[basic graphical workflow](docs/operations/basic-workflow.md): create, open the
-desktop, stop, and restart with an independent workspace. Then use the
-[project round trip](docs/operations/project-roundtrip.md) to edit in the guest
-and return files through stopped-workspace export. Use the
+For an initialized Mac with an admitted base, start with
+[named projects](docs/operations/projects.md): create a graphical sandbox,
+explicitly import files, stop/resume the same workspace and return guest edits
+through stopped-workspace export. The
+[basic graphical workflow](docs/operations/basic-workflow.md) and
+[project round trip](docs/operations/project-roundtrip.md) also document the
+underlying session/workspace commands. Use the
 [v0.2 operator quickstart](docs/v0.2/alpha-quickstart.md) for recipe preparation
 and the broader rebuild/export walkthrough.
 The [progress record](docs/v0.2/alpha-progress.md) and
