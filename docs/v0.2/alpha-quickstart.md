@@ -156,6 +156,10 @@ running verification:
   --export "$EXPORT_UUID" "$IMPORT_UUID"
 ```
 
+This verification compares the pristine import. After guest edits, use the
+[project round trip](../operations/project-roundtrip.md) and independently
+compare against the intended edited bytes instead.
+
 The verify command reports `import: verified` only after the stopped backend,
 qualified disk, published whole-directory export, and captured source all
 match. Complete this verification while the original importing session and

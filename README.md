@@ -20,7 +20,9 @@ than uninterrupted first-start success in one replacement history.
 
 For an initialized Mac with an admitted base, start with the
 [basic graphical workflow](docs/operations/basic-workflow.md): create, open the
-desktop, stop, and restart with an independent workspace. Use the
+desktop, stop, and restart with an independent workspace. Then use the
+[project round trip](docs/operations/project-roundtrip.md) to edit in the guest
+and return files through stopped-workspace export. Use the
 [v0.2 operator quickstart](docs/v0.2/alpha-quickstart.md) for recipe preparation
 and the broader rebuild/export walkthrough.
 The [progress record](docs/v0.2/alpha-progress.md) and
