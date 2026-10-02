@@ -119,7 +119,7 @@ RETURNED=/absolute/new-returned-directory
 bw project export --destination "$RETURNED" myproject
 ```
 
-Export prints **`host project files:`** with the actual returned directory.
+Export prints **`project files:`** with the actual returned directory.
 Inspect its `notes.txt`, `new.txt` and unchanged `reference.txt`; compare against
 the intended edited bytes. The source should still contain its original two
 files. Export refuses a running sandbox or an existing destination. Returned
