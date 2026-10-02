@@ -170,6 +170,8 @@ type Dependencies struct {
 	Checks Checks
 	Seed   SeedBuilder
 	VM     VirtualMachine
+	// Progress reports durable host stages; it confers no readiness authority.
+	Progress func(Phase)
 }
 
 // Build reserves exactly one fresh attempt and leaves its candidate stopped.
@@ -209,7 +211,20 @@ func Build(ctx context.Context, in Inputs, deps Dependencies) (result Result, er
 			err = errors.Join(err, writeAttempt(attemptDir, state))
 		}
 	}()
-	setPhase := func(phase Phase) error { state.Phase = phase; return writeAttempt(attemptDir, state) }
+	reportPhase := func(phase Phase) {
+		if deps.Progress != nil {
+			deps.Progress(phase)
+		}
+	}
+	reportPhase(PhaseReserved)
+	setPhase := func(phase Phase) error {
+		state.Phase = phase
+		if err := writeAttempt(attemptDir, state); err != nil {
+			return err
+		}
+		reportPhase(phase)
+		return nil
+	}
 	staged, err := deps.Checks.Stage(ctx, in, attemptDir, key)
 	if err != nil {
 		return Result{}, fmt.Errorf("stage exact build inputs: %w", err)

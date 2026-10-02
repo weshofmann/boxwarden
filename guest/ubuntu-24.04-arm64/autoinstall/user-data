@@ -150,6 +150,8 @@ autoinstall:
     - install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/launch-chatgpt.py /target/usr/local/libexec/boxwarden-launch-chatgpt
     - "printf '%s  %s\\n' '__BOXWARDEN_CLIPBOARD_HELPER_SHA256__' '/cdrom/boxwarden-artifacts/clipboard.py' | sha256sum -c -"
     - install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/clipboard.py /target/usr/local/libexec/boxwarden-guest-clipboard.py
+    - "printf '%s  %s\\n' '__BOXWARDEN_SUPPORT_CHECK_SHA256__' '/cdrom/boxwarden-artifacts/support-check.py' | sha256sum -c -"
+    - install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/support-check.py /target/usr/local/libexec/boxwarden-guest-support-check
     - "printf '%s  %s\\n' '__BOXWARDEN_RECIPE_PAYLOAD_SHA256__' '/cdrom/boxwarden-artifacts/recipe-prepare.json' | sha256sum -c -"
     - install -d -o root -g root -m 0700 /target/var/lib/boxwarden
     - install -o root -g root -m 0600 /cdrom/boxwarden-artifacts/recipe-prepare.json /target/var/lib/boxwarden/recipe-prepare.json

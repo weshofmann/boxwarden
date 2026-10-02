@@ -59,6 +59,8 @@ type SessionStopperFactory func(config.Config, config.Domain, string) (SessionSt
 
 type AlphaRebuildCandidateFunc func(context.Context, config.Config, config.Domain, string, session.RebuildJournal) (session.Record, error)
 
+type AlphaRebuildPrepareWithIntentFunc func(context.Context, config.Config, config.Domain, string, string, string, string) (session.RebuildJournal, error)
+
 type AlphaRebuildPrepareFunc func(context.Context, config.Config, config.Domain, string, string, string) (session.RebuildJournal, error)
 
 type AlphaRebuildFunc func(context.Context, config.Config, config.Domain, string, string, string, string) (session.Record, error)
@@ -91,38 +93,39 @@ type ClipboardTransfer interface {
 type ClipboardTransferFactory func(context.Context, config.Config, config.Domain) (ClipboardTransfer, error)
 
 type Options struct {
-	ProjectSetupCheck        func(context.Context, config.Domain, projectx.Setup) error
-	ClipboardTransferFactory ClipboardTransferFactory
-	Input                    io.Reader
-	ClipboardOutput          io.Writer
-	OutputTerminal           bool
-	Pasteboard               clipboardx.Pasteboard
-	ConfigPath               string
-	Env                      []string
-	Observer                 backend.Observer
-	Creator                  backend.Creator
-	BackendFactory           BackendFactory
-	HostInit                 HostInitializer
-	HostDoctor               HostDoctor
-	CAInit                   CAInitializer
-	SessionStarter           SessionStarter
-	SessionStarterFactory    SessionStarterFactory
-	SessionStopper           SessionStopper
-	SessionStopperFactory    SessionStopperFactory
-	StatusSnapshotFactory    StatusSnapshotFactory
-	AlphaPrepare             AlphaPrepareFunc
-	AlphaRebuildCandidate    AlphaRebuildCandidateFunc
-	AlphaRebuildPrepare      AlphaRebuildPrepareFunc
-	AlphaRebuild             AlphaRebuildFunc
-	AlphaDelete              AlphaDeleteFunc
-	AlphaWorkspaceCreate     AlphaWorkspaceCreateFunc
-	AlphaExport              AlphaExportFunc
-	AlphaExportResume        AlphaExportResumeFunc
-	AlphaImport              AlphaImportFunc
-	AlphaImportVerify        AlphaImportVerifyFunc
-	AlphaAction              AlphaActionFunc
-	AlphaAutomatic           AlphaAutomaticFunc
-	Output                   io.Writer
+	ProjectSetupCheck             func(context.Context, config.Domain, projectx.Setup) error
+	ClipboardTransferFactory      ClipboardTransferFactory
+	Input                         io.Reader
+	ClipboardOutput               io.Writer
+	OutputTerminal                bool
+	Pasteboard                    clipboardx.Pasteboard
+	ConfigPath                    string
+	Env                           []string
+	Observer                      backend.Observer
+	Creator                       backend.Creator
+	BackendFactory                BackendFactory
+	HostInit                      HostInitializer
+	HostDoctor                    HostDoctor
+	CAInit                        CAInitializer
+	SessionStarter                SessionStarter
+	SessionStarterFactory         SessionStarterFactory
+	SessionStopper                SessionStopper
+	SessionStopperFactory         SessionStopperFactory
+	StatusSnapshotFactory         StatusSnapshotFactory
+	AlphaPrepare                  AlphaPrepareFunc
+	AlphaRebuildCandidate         AlphaRebuildCandidateFunc
+	AlphaRebuildPrepare           AlphaRebuildPrepareFunc
+	AlphaRebuildPrepareWithIntent AlphaRebuildPrepareWithIntentFunc
+	AlphaRebuild                  AlphaRebuildFunc
+	AlphaDelete                   AlphaDeleteFunc
+	AlphaWorkspaceCreate          AlphaWorkspaceCreateFunc
+	AlphaExport                   AlphaExportFunc
+	AlphaExportResume             AlphaExportResumeFunc
+	AlphaImport                   AlphaImportFunc
+	AlphaImportVerify             AlphaImportVerifyFunc
+	AlphaAction                   AlphaActionFunc
+	AlphaAutomatic                AlphaAutomaticFunc
+	Output                        io.Writer
 	// storageCheck is an identity source for synthetic command tests. Production
 	// uses the pinned APFS check when this is nil.
 	storageCheck  func(hostidentity.StorageExpectation) error
@@ -429,6 +432,9 @@ func Run(ctx context.Context, args []string, options Options) error {
 			}
 			if options.AlphaAutomatic == nil {
 				return errors.New("alpha automatic action composition is required")
+			}
+			if _, err := fmt.Fprintln(options.Output, "management-readiness: ready; running/checking captured once and startup software actions"); err != nil {
+				return err
 			}
 			attempts, automaticErr := options.AlphaAutomatic(ctx, selectedDomain, record)
 			return writeAlphaAutomaticStart(options.Output, record, attempts, automaticErr)

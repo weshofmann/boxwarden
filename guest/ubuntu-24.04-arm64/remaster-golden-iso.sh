@@ -17,11 +17,12 @@ recipe_helper="${guest_dir}/recipe-prepare.py"
 chatgpt_installer="${guest_dir}/install-pinned-chatgpt.py"
 chatgpt_launcher="${guest_dir}/launch-chatgpt.py"
 clipboard_helper="${guest_dir}/clipboard.py"
+support_check="${guest_dir}/support-check.py"
 lock="${guest_dir}/artifacts.lock.json"
 
 command -v xorriso >/dev/null 2>&1 || die 'xorriso is unavailable'
 [[ -f "$source_iso" && -f "$rendered_user_data" && -f "$preparation_json" && ! -L "$preparation_json" && ! -e "$output_iso" && ! -L "$output_iso" ]] || die 'source, rendered user-data, recipe preparation, or output path is invalid'
-[[ -f "$helper" && -x "$helper" && -f "$finalizer" && -f "$recipe_helper" && -f "$chatgpt_installer" && -f "$chatgpt_launcher" && -f "$clipboard_helper" ]] || die 'current guest artifacts are missing'
+[[ -f "$helper" && -x "$helper" && -f "$finalizer" && -f "$recipe_helper" && -f "$chatgpt_installer" && -f "$chatgpt_launcher" && -f "$clipboard_helper" && -f "$support_check" ]] || die 'current guest artifacts are missing'
 [[ "$(wc -c <"$preparation_json" | tr -d ' ')" -ge 1 && "$(wc -c <"$preparation_json" | tr -d ' ')" -le 1048576 ]] || die 'recipe preparation exceeds bound'
 expected_helper="$(sed -n 's/.*"sha256": "\([0-9a-f]\{64\}\)".*/\1/p' "$lock")"
 [[ "$expected_helper" =~ ^[0-9a-f]{64}$ ]] || die 'helper lock is invalid'
@@ -32,6 +33,7 @@ grep -Fq "'${expected_helper}'" "$rendered_user_data" || die 'rendered user-data
 [[ "$(grep -Fo '__BOXWARDEN_CHATGPT_INSTALLER_SHA256__' "$rendered_user_data" | wc -l | tr -d ' ')" == 1 ]] || die 'rendered user-data lacks one ChatGPT installer digest slot'
 [[ "$(grep -Fo '__BOXWARDEN_CHATGPT_LAUNCHER_SHA256__' "$rendered_user_data" | wc -l | tr -d ' ')" == 1 ]] || die 'rendered user-data lacks one ChatGPT launcher digest slot'
 [[ "$(grep -Fo '__BOXWARDEN_CLIPBOARD_HELPER_SHA256__' "$rendered_user_data" | wc -l | tr -d ' ')" == 1 ]] || die 'rendered user-data lacks one clipboard helper digest slot'
+[[ "$(grep -Fo '__BOXWARDEN_SUPPORT_CHECK_SHA256__' "$rendered_user_data" | wc -l | tr -d ' ')" == 1 ]] || die 'rendered user-data lacks one support checker digest slot'
 [[ "$(grep -Fo '__BOXWARDEN_RECIPE_PAYLOAD_SHA256__' "$rendered_user_data" | wc -l | tr -d ' ')" == 1 ]] || die 'rendered user-data lacks one recipe payload digest slot'
 for required in __BOXWARDEN_RUN_ID__ __BOXWARDEN_TIMEZONE__ __BOXWARDEN_PASSWORD_HASH__; do
   ! grep -Fq "$required" "$rendered_user_data" || die "rendered user-data retains ${required}"
@@ -48,12 +50,14 @@ recipe_helper_sha="$(shasum -a 256 "$recipe_helper" | awk '{print $1}')"
 chatgpt_installer_sha="$(shasum -a 256 "$chatgpt_installer" | awk '{print $1}')"
 chatgpt_launcher_sha="$(shasum -a 256 "$chatgpt_launcher" | awk '{print $1}')"
 clipboard_helper_sha="$(shasum -a 256 "$clipboard_helper" | awk '{print $1}')"
+support_check_sha="$(shasum -a 256 "$support_check" | awk '{print $1}')"
 preparation_sha="$(shasum -a 256 "$preparation_json" | awk '{print $1}')"
 sed -e "s/__BOXWARDEN_FINALIZER_SHA256__/${finalizer_sha}/" \
     -e "s/__BOXWARDEN_RECIPE_HELPER_SHA256__/${recipe_helper_sha}/" \
     -e "s/__BOXWARDEN_CHATGPT_INSTALLER_SHA256__/${chatgpt_installer_sha}/" \
     -e "s/__BOXWARDEN_CHATGPT_LAUNCHER_SHA256__/${chatgpt_launcher_sha}/" \
     -e "s/__BOXWARDEN_CLIPBOARD_HELPER_SHA256__/${clipboard_helper_sha}/" \
+    -e "s/__BOXWARDEN_SUPPORT_CHECK_SHA256__/${support_check_sha}/" \
     -e "s/__BOXWARDEN_RECIPE_PAYLOAD_SHA256__/${preparation_sha}/" \
     "$rendered_user_data" >"$work_dir/user-data"
 ! grep -Fq __BOXWARDEN_ "$work_dir/user-data" || die 'mapped user-data retains a placeholder'
@@ -75,6 +79,7 @@ xorriso \
   -map "$chatgpt_installer" /boxwarden-artifacts/install-pinned-chatgpt.py \
   -map "$chatgpt_launcher" /boxwarden-artifacts/launch-chatgpt.py \
   -map "$clipboard_helper" /boxwarden-artifacts/clipboard.py \
+  -map "$support_check" /boxwarden-artifacts/support-check.py \
   -map "$preparation_json" /boxwarden-artifacts/recipe-prepare.json \
   -map "$work_dir/grub.autoinstall.cfg" /boot/grub/grub.cfg \
   -commit \

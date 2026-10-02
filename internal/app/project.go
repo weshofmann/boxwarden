@@ -21,13 +21,14 @@ import (
 )
 
 const projectMount = "/home/boxwarden/workspaces/project"
-const projectUsage = "project list; project setup|setup-update --source-root PATH --formatter-bundle PATH --iso PATH --go PATH; project create [--base current|REGISTERED-BASE] [--size-mib 16..1024] NAME; project open|status|stop NAME; project rebuild [--base current|REGISTERED-BASE] NAME; project rebuild retry NAME; project import --source PRIVATE-DIRECTORY NAME; project import retry NAME; project export --destination NEW-DIRECTORY NAME"
+const projectUsage = "project list; project setup|setup-update --source-root PATH --formatter-bundle PATH --iso PATH --go PATH; project create [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] [--size-mib 16..1024] NAME; project open|status|stop NAME; project rebuild [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] NAME; project rebuild retry NAME; project import --source PRIVATE-DIRECTORY NAME; project import retry NAME; project export --destination NEW-DIRECTORY NAME"
 
 type projectCommand struct {
-	operation, name, base, source, destination string
-	sizeMiB                                    int64
-	setup                                      projectx.Setup
-	retry                                      bool
+	operation, name, base, source, destination, recipe string
+	sizeMiB                                            int64
+	setup                                              projectx.Setup
+	retry                                              bool
+	baseExplicit                                       bool
 }
 
 func parseProject(args []string) (projectCommand, error) {
@@ -49,10 +50,16 @@ func parseProject(args []string) (projectCommand, error) {
 		set.StringVar(&p.setup.FormatterBundle, "formatter-bundle", "", "admitted private formatter bundle")
 		set.StringVar(&p.setup.ISOPath, "iso", "", "admitted Ubuntu Desktop ARM64 ISO")
 		set.StringVar(&p.setup.GoBinary, "go", "", "absolute Go executable")
+		set.StringVar(&p.setup.OpenSSLPath, "openssl", "", "exact SHA-512 crypt executable")
+		set.StringVar(&p.setup.OpenSSLSHA256, "openssl-sha256", "", "exact SHA-256")
+		set.StringVar(&p.setup.XorrisoPath, "xorriso", "", "exact ISO remaster executable")
+		set.StringVar(&p.setup.XorrisoSHA256, "xorriso-sha256", "", "exact SHA-256")
 	case "create":
+		set.StringVar(&p.recipe, "recipe", "", "supported packaged recipe")
 		set.StringVar(&p.base, "base", "current", "registered prepared base or current")
 		set.Int64Var(&p.sizeMiB, "size-mib", 64, "workspace size in MiB, 16..1024")
 	case "rebuild":
+		set.StringVar(&p.recipe, "recipe", "", "selected software for the new system")
 		set.StringVar(&p.base, "base", "current", "registered prepared replacement base")
 	case "import":
 		set.StringVar(&p.source, "source", "", "explicit private source directory")
@@ -64,6 +71,23 @@ func parseProject(args []string) (projectCommand, error) {
 	}
 	if err := set.Parse(args[1:]); err != nil {
 		return p, err
+	}
+	set.Visit(func(f *flag.Flag) {
+		if f.Name == "base" {
+			p.baseExplicit = true
+		}
+		switch f.Name {
+		case "openssl", "openssl-sha256", "xorriso", "xorriso-sha256":
+			p.setup.Version = 2
+		}
+	})
+	if p.recipe != "" {
+		if _, err := projectRecipeFile(p.recipe); err != nil {
+			return p, err
+		}
+		if p.baseExplicit {
+			return p, errors.New("choose --recipe or --base, not both")
+		}
 	}
 	if p.operation == "list" {
 		if len(set.Args()) != 0 {
@@ -83,6 +107,9 @@ func parseProject(args []string) (projectCommand, error) {
 		if filepath.Base(p.setup.GoBinary) != "go" {
 			return p, errors.New("project setup requires an exact Go executable")
 		}
+		if p.setup.Version == 2 && (!cleanProjectPath(p.setup.OpenSSLPath) || filepath.Base(p.setup.OpenSSLPath) != "openssl" || !lowerSHA(p.setup.OpenSSLSHA256) || !cleanProjectPath(p.setup.XorrisoPath) || filepath.Base(p.setup.XorrisoPath) != "xorriso" || !lowerSHA(p.setup.XorrisoSHA256)) {
+			return p, errors.New("recipe setup requires both exact OpenSSL/xorriso paths and lowercase SHA-256 digests")
+		}
 		return p, nil
 	}
 	if len(set.Args()) != 1 {
@@ -93,7 +120,7 @@ func parseProject(args []string) (projectCommand, error) {
 		return p, err
 	}
 	if p.operation == "rebuild" && p.retry && set.NFlag() != 0 {
-		return p, errors.New("project rebuild retry reuses the recorded candidate; do not supply --base")
+		return p, errors.New("project rebuild retry reuses the recorded candidate; do not supply --base or --recipe")
 	}
 	if p.operation == "create" || p.operation == "rebuild" {
 		if p.operation == "create" && (p.sizeMiB < 16 || p.sizeMiB > 1024) {
@@ -243,6 +270,16 @@ func createProject(ctx context.Context, c parsedCommand, loaded config.Config, d
 		return errors.New("project requires admitted backend observer and creator")
 	}
 	base := p.base
+	intentDigest := ""
+	if p.recipe == "" && setup.Version == 2 && !p.baseExplicit {
+		p.recipe = "desktop"
+	}
+	if p.recipe != "" {
+		base, intentDigest, err = prepareProjectRecipe(ctx, c, loaded, d, setup, p.recipe, "", o)
+		if err != nil {
+			return err
+		}
+	}
 	if base == "current" {
 		g, err := golden.LoadCurrent(ctx, d)
 		if err != nil {
@@ -268,10 +305,20 @@ func createProject(ctx context.Context, c parsedCommand, loaded config.Config, d
 		return err
 	}
 	r := projectx.Record{Version: 1, Domain: d.ID, Name: p.name, Base: base, VolumeID: volume, FilesystemUUID: fs, SizeBytes: p.sizeMiB << 20}
+	if intentDigest != "" {
+		r.Version = 2
+		r.RecipeIntentDigest = intentDigest
+	}
 	if err := projectx.Create(d.StateRoot, d.ID, r); err != nil {
 		return err
 	}
-	fresh, err := session.NewService(d, o.Observer, o.Creator).CreateFreshFromRevision(ctx, p.name, session.ModeClean, base)
+	var fresh session.FreshCreation
+	service := session.NewService(d, o.Observer, o.Creator)
+	if intentDigest != "" {
+		fresh, err = service.CreateFreshFromRevisionWithIntent(ctx, p.name, session.ModeClean, base, intentDigest)
+	} else {
+		fresh, err = service.CreateFreshFromRevision(ctx, p.name, session.ModeClean, base)
+	}
 	if err != nil {
 		return fmt.Errorf("project session creation incomplete; retained project intent: %w", err)
 	}
@@ -361,6 +408,15 @@ func projectStatus(ctx context.Context, c parsedCommand, d config.Domain, r proj
 }
 
 func writeProject(out io.Writer, r projectx.Record) error {
+	if r.RecipeIntentDigest != "" {
+		if _, err := fmt.Fprintf(out, "project recipe intent: %s\nsoftware setup: inspect actions in session status; management READY alone does not confirm software or clipboard\n", r.RecipeIntentDigest); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprintln(out, "project recipe: legacy registered base; guest support is unverified"); err != nil {
+			return err
+		}
+	}
 	phase := "not imported"
 	remote := "(none)"
 	if r.ImportID != "" {

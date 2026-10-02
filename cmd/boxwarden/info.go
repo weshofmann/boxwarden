@@ -27,9 +27,9 @@ boxwarden --config /absolute/config.json --domain alpha project COMMAND
 
 project list
 project setup|setup-update --source-root PATH --formatter-bundle PATH --iso PATH --go PATH
-project create [--base current|REGISTERED-BASE] [--size-mib 16..1024] NAME
+project create [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] [--size-mib 16..1024] NAME
 project open|status|stop NAME
-project rebuild [--base current|REGISTERED-BASE] NAME
+project rebuild [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] NAME
 project rebuild retry NAME
 project import --source PRIVATE-DIRECTORY NAME
 project import retry NAME
@@ -41,7 +41,8 @@ clipboard paste NAME                    guest → redirected stdout
 clipboard push|pull NAME                explicit general Mac clipboard transfer
 
 See the archive's TRY-ME.md for one-time setup and the stopped export workflow.
-Host installation and an admitted prepared Ubuntu Desktop base are prerequisites.`)
+Host installation and pinned Ubuntu inputs are prerequisites. Recipe preparation
+installs new-system software/support and reuses matching qualified preparation.`)
 		return true, err
 	default:
 		return false, nil

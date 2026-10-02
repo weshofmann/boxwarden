@@ -24,6 +24,7 @@ type BuildComponents struct {
 	OpenSSLSHA256 string
 	XorrisoPath   string
 	XorrisoSHA256 string
+	Progress      func(basebuild.Phase)
 }
 
 // NewBuildDependencies binds an admitted runtime to the exact configured
@@ -63,5 +64,5 @@ func NewBuildDependencies(loaded config.Config, selected config.Domain, runtime 
 	if err != nil {
 		return basebuild.Dependencies{}, fmt.Errorf("base builder VM: %w", err)
 	}
-	return basebuild.Dependencies{Checks: basebuild.RecipeChecks{}, Seed: seed, VM: vm}, nil
+	return basebuild.Dependencies{Checks: basebuild.RecipeChecks{}, Seed: seed, VM: vm, Progress: components.Progress}, nil
 }

@@ -19,6 +19,7 @@ var guestDefinitionFiles = []string{
 	"autoinstall/user-data",
 	"finalize-golden.sh",
 	"clipboard.py",
+	"support-check.py",
 	"install-pinned-chatgpt.py",
 	"launch-chatgpt.py",
 	"recipe-prepare.py",
