@@ -110,8 +110,10 @@ func publicOptions(output io.Writer) app.Options {
 		SessionStopperFactory: func(loaded config.Config, selected config.Domain, path string) (app.SessionStopper, error) {
 			return sessionruntime.NewStarter(loaded, selected, path)
 		},
-		AlphaRebuild: sessionruntime.Rebuild,
-		AlphaDelete:  sessionruntime.Delete,
+		AlphaRebuild:          sessionruntime.Rebuild,
+		AlphaRebuildPrepare:   sessionruntime.PrepareRebuild,
+		AlphaRebuildCandidate: sessionruntime.CompleteRebuild,
+		AlphaDelete:           sessionruntime.Delete,
 		AlphaAction: func(ctx context.Context, selected config.Domain, input app.AlphaActionInput) (session.ActionAttempt, error) {
 			controller, err := supervisor.NewExactActionController(filepath.Join(selected.StateRoot, "runtime"))
 			if err != nil {

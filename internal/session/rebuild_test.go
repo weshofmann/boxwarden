@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
@@ -518,5 +519,168 @@ func TestRecipeRebuildResumeRetainsJournaledCandidateIntent(t *testing.T) {
 	}
 	if _, err := LoadRebuildJournal(rebuilder.domain.StateRoot, old.Domain, "dev"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("resumed rebuild retained journal: %v", err)
+	}
+}
+
+func TestExecutePreparedRebuildRejectsForeignCompletedBindingWithoutEffects(t *testing.T) {
+	rebuilder, b, old := rebuildPreparationFixture(t)
+	expected, err := rebuilder.PrepareCandidate(t.Context(), "dev", "golden-r2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(rebuilder.domain.StateRoot, "rebuilds", "dev.json")); err != nil {
+		t.Fatal(err)
+	}
+	control := &startSupervisorFake{}
+	starter := newStartTestService(rebuilder.domain, b, control, time.Now, func() (string, error) { return testStartGeneration, nil })
+	for _, sameBase := range []bool{false, true} {
+		current := old
+		if sameBase {
+			current.GoldenRevision = expected.CandidateRevision
+		}
+		if err := SaveRecord(rebuilder.domain.StateRoot, old.Domain, current); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := rebuilder.ExecutePrepared(t.Context(), "dev", expected, starter); err == nil {
+			t.Fatal("foreign completed system authorized candidate mutation")
+		}
+		stored, err := LoadRecord(rebuilder.domain.StateRoot, string(old.Domain), "dev")
+		if err != nil || stored != current {
+			t.Fatalf("foreign session changed: %+v, %v", stored, err)
+		}
+	}
+	if len(b.CloneCalls()) != 2 || len(b.DeleteCalls()) != 0 || control.startCalls != 0 {
+		t.Fatal("foreign binding caused backend effects")
+	}
+}
+
+func TestExecutePreparedRebuildRejectsForeignOperationInEveryPhase(t *testing.T) {
+	for _, phase := range []RebuildPhase{RebuildCloned, RebuildCutover, RebuildReady, RebuildRetiring} {
+		t.Run(string(phase), func(t *testing.T) {
+			rebuilder, b, old := rebuildPreparationFixture(t)
+			expected, err := rebuilder.PrepareCandidate(t.Context(), "dev", "golden-r2")
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreign := expected
+			foreign.OperationID = "7fb25db7-3cc1-4d92-a04c-b60fd05fa422"
+			foreign.CandidateBackend = objectIDFor(old.Domain, foreign.OperationID)
+			foreign.Phase = phase
+			if err := os.Remove(filepath.Join(rebuilder.domain.StateRoot, "rebuilds", "dev.json")); err != nil {
+				t.Fatal(err)
+			}
+			reserved := foreign
+			reserved.Phase = RebuildReserved
+			if err := createRebuildJournal(rebuilder.domain.StateRoot, reserved); err != nil {
+				t.Fatal(err)
+			}
+			for _, step := range []RebuildPhase{RebuildCloned, RebuildCutover, RebuildReady, RebuildRetiring} {
+				next := reserved
+				next.Phase = step
+				if err := advanceRebuildJournal(rebuilder.domain.StateRoot, reserved, next); err != nil {
+					t.Fatal(err)
+				}
+				reserved = next
+				if step == phase {
+					break
+				}
+			}
+			control := &startSupervisorFake{}
+			starter := newStartTestService(rebuilder.domain, b, control, time.Now, func() (string, error) { return testStartGeneration, nil })
+			if _, err := rebuilder.ExecutePrepared(t.Context(), "dev", expected, starter); err == nil {
+				t.Fatal("foreign operation adopted")
+			}
+			bound := *rebuilder
+			bound.prepared = &expected
+			for _, fn := range []func() (Record, error){
+				func() (Record, error) { return bound.Cutover(t.Context(), "dev") },
+				func() (Record, error) { return bound.ConfirmReady(t.Context(), "dev", starter) },
+				func() (Record, error) { return bound.RetireOld(t.Context(), "dev", starter) },
+			} {
+				if _, err := fn(); err == nil {
+					t.Fatal("phase driver adopted foreign operation")
+				}
+			}
+			got, err := LoadRecord(rebuilder.domain.StateRoot, string(old.Domain), "dev")
+			if err != nil || got != old {
+				t.Fatalf("foreign operation changed session: %+v, %v", got, err)
+			}
+			if len(b.CloneCalls()) != 2 || len(b.DeleteCalls()) != 0 || control.startCalls != 0 {
+				t.Fatal("foreign operation caused backend effects")
+			}
+		})
+	}
+}
+
+func TestExecutePreparedSameBaseRebuildRetiresOnlyFrozenSystem(t *testing.T) {
+	rebuilder, b, old := rebuildPreparationFixture(t)
+	expected, err := rebuilder.PrepareCandidate(t.Context(), "dev", old.GoldenRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := &startSupervisorFake{
+		start: func(r supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+			return readySnapshot(r.Binding, time.Now()), nil
+		},
+		snapshot: func(b supervisor.Binding) (supervisor.Snapshot, error) { return readySnapshot(b, time.Now()), nil },
+	}
+	starter := newStartTestService(rebuilder.domain, b, control, time.Now, func() (string, error) { return testStartGeneration, nil })
+	got, err := rebuilder.ExecutePrepared(t.Context(), "dev", expected, starter)
+	if err != nil || got.ID != old.ID || got.Backend.ObjectID != expected.CandidateBackend || got.GoldenRevision != old.GoldenRevision {
+		t.Fatalf("same-base replacement: %+v, %v", got, err)
+	}
+	if len(b.CloneCalls()) != 2 || len(b.DeleteCalls()) != 1 || b.DeleteCalls()[0] != old.Backend.ObjectID {
+		t.Fatalf("wrong exact mutations: clones=%d deletes=%v", len(b.CloneCalls()), b.DeleteCalls())
+	}
+	if _, err := rebuilder.ExecutePrepared(t.Context(), "dev", expected, starter); err != nil || len(b.CloneCalls()) != 2 || len(b.DeleteCalls()) != 1 {
+		t.Fatalf("completed prepared retry: %v", err)
+	}
+}
+
+func TestExecutePreparedCompletedRetryRechecksFrozenBindingUnderLocks(t *testing.T) {
+	rebuilder, b, old := rebuildPreparationFixture(t)
+	expected, err := rebuilder.PrepareCandidate(t.Context(), "dev", "golden-r2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := &startSupervisorFake{
+		start: func(r supervisor.LaunchRequest) (supervisor.Snapshot, error) {
+			return readySnapshot(r.Binding, time.Now()), nil
+		},
+		snapshot: func(b supervisor.Binding) (supervisor.Snapshot, error) { return readySnapshot(b, time.Now()), nil },
+	}
+	starter := newStartTestService(rebuilder.domain, b, control, time.Now, func() (string, error) { return testStartGeneration, nil })
+	completed, err := rebuilder.ExecutePrepared(t.Context(), "dev", expected, starter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := completed
+	foreign.IntendedState = StateStopped
+	foreign.StartGeneration = ""
+	foreign.Readiness = ReadinessRecord{Status: ReadinessNotReady}
+	foreign.Backend.ObjectID = old.Backend.ObjectID
+	foreign.GoldenRevision = old.GoldenRevision
+	b.SetObservation(backend.Observation{ObjectID: foreign.Backend.ObjectID, Exists: true, State: backend.ObjectStopped})
+	originalSync := sessionSyncRoot
+	t.Cleanup(func() { sessionSyncRoot = originalSync })
+	injected := false
+	sessionSyncRoot = func(root *os.Root) error {
+		if !injected {
+			injected = true
+			if err := SaveRecord(rebuilder.domain.StateRoot, old.Domain, foreign); err != nil {
+				return err
+			}
+		}
+		return originalSync(root)
+	}
+	if _, err := rebuilder.ExecutePrepared(t.Context(), "dev", expected, starter); err == nil {
+		t.Fatal("completed retry adopted foreign system changed after initial lookup")
+	}
+	stored, err := LoadRecord(rebuilder.domain.StateRoot, string(old.Domain), "dev")
+	if err != nil || stored != foreign {
+		t.Fatalf("foreign system changed: %+v, %v", stored, err)
+	}
+	if control.startCalls != 1 || len(b.CloneCalls()) != 2 || len(b.DeleteCalls()) != 1 {
+		t.Fatal("completed retry caused another backend effect")
 	}
 }
