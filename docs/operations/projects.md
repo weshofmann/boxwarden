@@ -22,7 +22,7 @@ config. This shell function only abbreviates public flags:
 BW=/absolute/private/build/boxwarden
 CONFIG=/absolute/private/config.json
 bw() { "$BW" --config "$CONFIG" --domain alpha "$@"; }
-bw doctor
+"$BW" --config "$CONFIG" doctor
 ```
 
 Once per state root, remember the existing admitted assets. Set `SOURCE_ROOT`
