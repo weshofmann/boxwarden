@@ -118,6 +118,8 @@ files as data; do not execute guest files or overwrite an existing host project.
 Set `RETURNED` to that printed path and compare independently:
 
 ```sh
+# Restore the original import source path if this is a new terminal.
+SOURCE=/absolute/private/synthetic-source
 ls -l "$RETURNED"
 python3 - "$RETURNED" "$SOURCE" <<'PY'
 from pathlib import Path
@@ -173,3 +175,22 @@ does not qualify power loss, system rebuild, disaster recovery, provider login
 or complete network isolation. The vmnet-gateway exposure remains a limitation.
 Automatic Mac clipboard/audio sharing remains disabled; controlled clipboard
 transfers remain separate explicit actions.
+
+## Observed initialized-Mac workflow
+
+The named-project walkthrough was exercised with a CGO Darwin ARM64 CLI built
+with Go 1.27.0, admitted Tart 2.32.1 / Softnet 0.19.0, an enrolled APFS backing
+volume and the existing prepared Ubuntu 24.04.4 Desktop ARM64 base. Guest GUI
+edits and the new file matched independent intended hashes before stop and after
+open; repeated open preserved them. Stopped export returned exactly those three
+files, and independent host comparison confirmed the original source unchanged.
+Both stops reported `tart_fallback`, `forced=false`, and cleanliness unverified;
+the actual exporter separately passed its clean/recovery-superblock guard.
+A second name allocated a distinct sandbox/workspace with the same saved setup.
+An initial missing-source import was repaired at its original path and the
+public retry succeeded. Its distinct GUI edits exported correctly, its host
+source stayed unchanged, and hashes of the first project's workspace disk,
+bookmark, attachment record, source and returned files stayed unchanged.
+Both new sandboxes were left stopped with workspaces attached and exports
+available. Name collision, missing setup, running export and a synthetic
+storage identity mismatch were also refused; no host settings were changed.
