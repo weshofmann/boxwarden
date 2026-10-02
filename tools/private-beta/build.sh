@@ -58,6 +58,7 @@ bash "$repo_root/host/clipboard-menu/build.sh" --cli "$package/bin/boxwarden" \
 cp "$repo_root/LICENSE" "$repo_root/NOTICE" "$package/"
 cp "$repo_root/tools/private-beta/TRY-ME.md" "$package/TRY-ME.md"
 cp "$repo_root/tools/private-beta/prepare-projects.sh" "$package/prepare-projects.sh"
+cp "$repo_root/tools/private-beta/prepare-guest-clipboard.sh" "$package/prepare-guest-clipboard.sh"
 goroot=$("$go_bin" env GOROOT)
 cp "$goroot/LICENSE" "$package/notices/Go-LICENSE"
 cp "$goroot/PATENTS" "$package/notices/Go-PATENTS"

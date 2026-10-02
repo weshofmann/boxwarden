@@ -17,13 +17,13 @@ claim download/Gatekeeper distribution acceptance; it does not bypass OS checks.
 ## Verify and configure once
 
 Verify the archive beside its checksum file with
-`shasum -a 256 -c boxwarden-0.2.0-beta.1-darwin-arm64.tar.gz.sha256`, then extract
+`shasum -a 256 -c boxwarden-0.2.0-beta.2-darwin-arm64.tar.gz.sha256`, then extract
 in a new private user-owned directory. In a **new terminal**, set these
 paths to your actual assets; no profile sourcing or private bindings is needed:
 
 ```sh
 umask 077
-PACKAGE=/absolute/boxwarden-0.2.0-beta.1-darwin-arm64
+PACKAGE=/absolute/boxwarden-0.2.0-beta.2-darwin-arm64
 cd "$PACKAGE"
 shasum -a 256 -c SHA256SUMS
 "$PACKAGE/bin/boxwarden" version
@@ -78,6 +78,9 @@ bw project import --source "$SOURCE" myproject
 ```
 
 Create opens the native desktop. Wait for `readiness: ready` before importing.
+If a fresh observation expires, run `bw project open myproject` to re-establish
+readiness, then `bw project import retry myproject` for a recorded import. The
+retry keeps its original selection and transaction; do not create another import.
 Open Ubuntu Terminal through Show Apps. Enter the printed guest files directory
 under `/home/boxwarden/workspaces/project`; type the prefix
 `cd /home/boxwarden/workspaces/project/boxwarden-import-` and press Tab to complete
@@ -113,6 +116,49 @@ guest files are data: inspect them before deliberately running anything.
 Transfers are explicit, bounded to 256 files / 16 MiB, not synchronization.
 
 ## Controlled clipboard
+
+### An older prepared base
+
+Older prepared bases may have working management SSH without the current guest
+clipboard adapter. On the already initialized Mac, prepare the two generic guest
+helpers from this package's source, then explicitly import them into a READY
+synthetic project. This changes that project's system disk; it does not change
+the registered base or any host component. Preparation requires the actual
+Go 1.27.0 executable and creates a new private source directory. The bootstrap
+is gzip-compressed to fit the existing 4 MiB per-file import limit; its
+uncompressed checksum is retained separately:
+
+```sh
+CLIPBOARD_SOURCE=/absolute/new-private-clipboard-source
+bash "$PACKAGE/prepare-guest-clipboard.sh" "$GO_BIN" "$CLIPBOARD_SOURCE"
+bw project open myproject
+bw project status myproject
+# Set VOLUME to the workspace UUID printed by project status.
+VOLUME=printed-workspace-uuid
+bw workspace import --source "$CLIPBOARD_SOURCE" "$VOLUME" myproject
+```
+
+Use the exact **`remote:`** directory printed by workspace import. In Ubuntu
+Terminal, enter that path and verify the imported files before installing them:
+
+```sh
+cd /home/boxwarden/workspaces/project/boxwarden-import-PRINTED-TRANSACTION-UUID
+sha256sum -c SHA256SUMS
+umask 077
+gzip -dc boxwarden-guest-bootstrap.gz > boxwarden-guest-bootstrap
+sha256sum -c BOOTSTRAP.sha256
+sudo -n install -o root -g root -m 0755 boxwarden-guest-bootstrap /usr/local/libexec/boxwarden-guest-bootstrap
+sudo -n install -o root -g root -m 0755 boxwarden-guest-clipboard.py /usr/local/libexec/boxwarden-guest-clipboard.py
+```
+
+Both checksums and installation commands must succeed. Then, in the Mac terminal,
+run `bw project stop myproject`, `bw project open myproject`, and
+`bw project status myproject`. Wait for READY before the clipboard test below.
+The restart lets the current helper bind clipboard operations to the new
+management generation. The installed helpers persist across ordinary stop/open;
+a different clone from the older base needs this preparation separately.
+
+### Discover and transfer
 
 ```sh
 open -a "$PACKAGE/Boxwarden Clipboard.app" --args --config "$CONFIG"
