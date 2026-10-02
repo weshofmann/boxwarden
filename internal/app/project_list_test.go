@@ -222,3 +222,77 @@ func TestProjectListReadyRequiresFreshExactSupervisorAndDoesNotWrite(t *testing.
 	reader.snapshot.Binding.Generation = "11112233-4455-6677-8899-aabbccddeeff"
 	check(false)
 }
+
+func TestProjectListPendingCutoverAndCompletedHistoryAreReadOnly(t *testing.T) {
+	prefix, d, o, b, out := projectFixture(t)
+	if err := Run(t.Context(), append(prefix, "project", "create", "--size-mib", "16", "demo"), o); err != nil {
+		t.Fatal(err)
+	}
+	before, err := projectx.Load(d.StateRoot, d.ID, "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := "55552233-4455-6677-8899-aabbccddeeff"
+	j := session.RebuildJournal{Version: 1, Domain: d.ID, SessionName: before.Name, SessionID: before.SessionID, OperationID: operation, Phase: session.RebuildCloned, OldBackend: before.BackendObject, OldRevision: before.Base, CandidateBackend: "boxwarden-alpha-55552233445566778899aabbccddeeff", CandidateRevision: "golden-r2"}
+	intent, err := projectx.BeginReplacement(d.StateRoot, d.ID, before, j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := session.LoadRecord(d.StateRoot, string(d.ID), before.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Backend.ObjectID = intent.BackendObject
+	s.GoldenRevision = intent.Base
+	if err := session.SaveRecord(d.StateRoot, d.ID, s); err != nil {
+		t.Fatal(err)
+	}
+	b.SetObservation(backend.Observation{ObjectID: intent.BackendObject, Exists: true, State: backend.ObjectStopped})
+	check := func(want string) {
+		t.Helper()
+		out.Reset()
+		tree := snapshotProjectTree(t, d.StateRoot)
+		if err := Run(t.Context(), append(prefix, "project", "list"), o); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(tree, snapshotProjectTree(t, d.StateRoot)) {
+			t.Fatal("replacement-aware list writes state")
+		}
+		if !strings.Contains(out.String(), want) || !strings.Contains(out.String(), before.VolumeID) || strings.Contains(out.String(), "state: READY") {
+			t.Fatalf("replacement status lost: %s", out)
+		}
+	}
+	check("next: project rebuild retry demo")
+	workspacePath := filepath.Join(d.StateRoot, "workspaces", before.VolumeID+".json")
+	workspaceBytes, err := os.ReadFile(workspacePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workspace map[string]any
+	if err := json.Unmarshal(workspaceBytes, &workspace); err != nil {
+		t.Fatal(err)
+	}
+	workspace["filesystem_uuid"] = "66662233-4455-6677-8899-aabbccddeeff"
+	wrongWorkspace, _ := json.Marshal(workspace)
+	if err := os.WriteFile(workspacePath, wrongWorkspace, 0600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := Run(t.Context(), append(prefix, "project", "list"), o); err == nil || out.Len() != 0 {
+		t.Fatalf("pending receipt hid foreign workspace: %v %s", err, out)
+	}
+	if err := os.WriteFile(workspacePath, workspaceBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	check("next: project rebuild retry demo")
+	if !strings.Contains(out.String(), "state: rebuild pending") {
+		t.Fatalf("pending cutover hidden: %s", out)
+	}
+	if _, err := projectx.CompleteReplacement(d.StateRoot, d.ID, intent); err != nil {
+		t.Fatal(err)
+	}
+	check("state: stopped")
+	if !strings.Contains(out.String(), intent.BackendObject) || strings.Contains(out.String(), "project rebuild retry") {
+		t.Fatalf("completed history treated as pending: %s", out)
+	}
+}

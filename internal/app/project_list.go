@@ -57,6 +57,8 @@ func listProjects(ctx context.Context, loaded config.Config, d config.Domain, o 
 			fmt.Fprintf(&out, "project files: %s/boxwarden-import-%s\n", projectMount, r.ImportID)
 		}
 		switch {
+		case state == "rebuild pending":
+			fmt.Fprintf(&out, "next: project rebuild retry %s | session status %s\n", r.Name, r.Name)
 		case r.SessionID == "" || state == "unavailable":
 			fmt.Fprintf(&out, "next: session status %s (inspect before changing the project)\n", r.Name)
 		default:
@@ -76,6 +78,18 @@ func listProjects(ctx context.Context, loaded config.Config, d config.Domain, o 
 }
 
 func projectListState(ctx context.Context, loaded config.Config, d config.Domain, r projectx.Record, o Options) (string, string, error) {
+	// A cutover can leave the bookmark at Before while the system already uses
+	// Next. The retained locator is checked before ordinary binding equality;
+	// it authorizes a retry hint only, never READY or another clone.
+	var pending *projectx.Replacement
+	if intent, err := projectx.LoadReplacement(d.StateRoot, d.ID, r.Name); err == nil {
+		if r != intent.Before && r != intent.Next() {
+			return "", "", errors.New("replacement differs from exact current project bookmark")
+		}
+		pending = &intent
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", "", err
+	}
 	// Even allocation-only bookmarks cannot borrow another project's volume.
 	if r.SessionID == "" {
 		v, err := workspacex.LoadRecord(d.StateRoot, d.ID, r.VolumeID)
@@ -94,11 +108,20 @@ func projectListState(ctx context.Context, loaded config.Config, d config.Domain
 	if err != nil {
 		return "", "", err
 	}
-	if s.ID != r.SessionID || s.Backend.Kind != "tart" || s.Backend.ObjectID != r.BackendObject || s.GoldenRevision != r.Base || s.Mode != session.ModeClean {
+	systemMatches := s.Backend.ObjectID == r.BackendObject && s.GoldenRevision == r.Base
+	if pending != nil {
+		systemMatches = s.Backend.ObjectID == pending.Before.BackendObject && s.GoldenRevision == pending.Before.Base || s.Backend.ObjectID == pending.BackendObject && s.GoldenRevision == pending.Base
+	}
+	if s.ID != r.SessionID || s.Backend.Kind != "tart" || !systemMatches || s.Mode != session.ModeClean {
 		return "", "", errors.New("project session binding differs from remembered identity")
 	}
-	if _, err := session.LoadRebuildJournal(d.StateRoot, d.ID, r.Name); err == nil {
-		return "unavailable", "system rebuild is pending; inspect session status before further operations", nil
+	if journal, err := session.LoadRebuildJournal(d.StateRoot, d.ID, r.Name); err == nil {
+		if pending == nil {
+			return "unavailable", "system rebuild is pending; inspect session status before further operations", nil
+		}
+		if journal.OperationID != pending.OperationID || journal.SessionID != pending.Before.SessionID || journal.OldBackend != pending.Before.BackendObject || journal.OldRevision != pending.Before.Base || journal.CandidateBackend != pending.BackendObject || journal.CandidateRevision != pending.Base {
+			return "", "", errors.New("system rebuild journal differs from exact project replacement")
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", "", err
 	}
@@ -137,8 +160,11 @@ func projectListState(ctx context.Context, loaded config.Config, d config.Domain
 	if s.IntendedState == session.StateRunning && v.Use == nil {
 		return "unavailable", "running system lacks its exact workspace use reservation; inspect session status", nil
 	}
-	if v.Use != nil && (v.Use.BackendObject != r.BackendObject || v.Use.BackendKind != s.Backend.Kind || v.Use.Generation != s.StartGeneration) {
+	if v.Use != nil && (v.Use.BackendObject != s.Backend.ObjectID || v.Use.BackendKind != s.Backend.Kind || v.Use.Generation != s.StartGeneration) {
 		return "unavailable", "workspace use differs from the current system generation; inspect session status", nil
+	}
+	if pending != nil {
+		return "rebuild pending", fmt.Sprintf("retained candidate %s; workspace identity remains unchanged; readiness requires explicit rebuild retry", pending.BackendObject), nil
 	}
 	if o.Observer == nil {
 		return "unavailable", "backend observer is unavailable", nil

@@ -41,6 +41,7 @@ type RebuildService struct {
 	newID       func() (string, error)
 	cutoverHook func() error
 	readyHook   func() error
+	prepared    *RebuildJournal
 }
 
 func NewRebuildService(configured config.Domain, dependencies RebuildDependencies) *RebuildService {
@@ -98,6 +99,9 @@ func (s *RebuildService) prepareCandidate(ctx context.Context, rawName, revision
 	}
 	journal, err = LoadRebuildJournal(s.domain.StateRoot, domainID, string(name))
 	if errors.Is(err, os.ErrNotExist) {
+		if s.prepared != nil {
+			return RebuildJournal{}, fmt.Errorf("frozen candidate journal is missing; no new candidate will be allocated")
+		}
 		err = s.deps.Gate(ctx, s.domain.StateRoot, domainID, record, s.deps.Observer, func() error {
 			var reserveErr error
 			journal, reserveErr = s.reserveCandidate(ctx, record, revision, candidateDigest)
@@ -107,6 +111,9 @@ func (s *RebuildService) prepareCandidate(ctx context.Context, rawName, revision
 			return RebuildJournal{}, err
 		}
 	} else if err != nil {
+		return RebuildJournal{}, err
+	}
+	if err := s.requirePrepared(journal); err != nil {
 		return RebuildJournal{}, err
 	}
 	if journal.SessionID != record.ID || journal.OldBackend != record.Backend.ObjectID || journal.OldRevision != record.GoldenRevision ||
@@ -301,6 +308,9 @@ func (s *RebuildService) Cutover(ctx context.Context, rawName string) (record Re
 	if err != nil || (journal.Phase != RebuildCloned && journal.Phase != RebuildCutover) {
 		return Record{}, fmt.Errorf("candidate is not journaled as cloned or in cutover: %v", err)
 	}
+	if err := s.requirePrepared(journal); err != nil {
+		return Record{}, err
+	}
 	record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
 	if err != nil || record.ID != journal.SessionID || record.Backend.Kind != "tart" {
 		return Record{}, fmt.Errorf("session identity changed before rebuild cutover: %v", err)
@@ -379,6 +389,9 @@ func (s *RebuildService) ConfirmReady(ctx context.Context, rawName string, start
 	if err != nil || (journal.Phase != RebuildCutover && journal.Phase != RebuildReady) {
 		return Record{}, fmt.Errorf("rebuild is not in candidate readiness phase: %v", err)
 	}
+	if err := s.requirePrepared(journal); err != nil {
+		return Record{}, err
+	}
 	record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
 	if err != nil || record.ID != journal.SessionID || record.Backend.Kind != "tart" ||
 		record.Backend.ObjectID != journal.CandidateBackend || record.GoldenRevision != journal.CandidateRevision || record.RecipeIntentDigest != journal.CandidateIntentDigest ||
@@ -444,6 +457,9 @@ func (s *RebuildService) RetireOld(ctx context.Context, rawName string, starter 
 	if err != nil || (journal.Phase != RebuildReady && journal.Phase != RebuildRetiring) {
 		return Record{}, fmt.Errorf("rebuild is not ready for exact old-system retirement: %v", err)
 	}
+	if err := s.requirePrepared(journal); err != nil {
+		return Record{}, err
+	}
 	record, err = LoadRecord(s.domain.StateRoot, string(domainID), string(name))
 	if err != nil || record.ID != journal.SessionID || record.Backend.Kind != "tart" ||
 		record.Backend.ObjectID != journal.CandidateBackend || record.GoldenRevision != journal.CandidateRevision || record.RecipeIntentDigest != journal.CandidateIntentDigest ||
@@ -499,10 +515,32 @@ func (s *RebuildService) RetireOld(ctx context.Context, rawName string, starter 
 	return record, nil
 }
 
+// ExecutePrepared resumes only the frozen candidate reserved by the caller.
+// Unlike Execute, an absent journal cannot authorize a new replacement. Every
+// phase checks the same tuple under its existing transition/session locks.
+func (s *RebuildService) ExecutePrepared(ctx context.Context, rawName string, expected RebuildJournal, starter *Service) (Record, error) {
+	if s == nil || validateRebuildJournal(expected) != nil || expected.Domain != s.domain.ID || expected.SessionName != rawName || expected.Phase != RebuildCloned {
+		return Record{}, fmt.Errorf("exact cloned replacement witness is required")
+	}
+	bound := *s
+	bound.prepared = &expected
+	return bound.execute(ctx, rawName, expected.CandidateRevision, expected.CandidateIntentDigest, starter)
+}
+
+func (s *RebuildService) requirePrepared(j RebuildJournal) error {
+	if s.prepared == nil {
+		return nil
+	}
+	expected := *s.prepared
+	if j.Domain != expected.Domain || j.SessionName != expected.SessionName || j.SessionID != expected.SessionID || j.OperationID != expected.OperationID || j.OldBackend != expected.OldBackend || j.OldRevision != expected.OldRevision || j.CandidateBackend != expected.CandidateBackend || j.CandidateRevision != expected.CandidateRevision || j.OldIntentDigest != expected.OldIntentDigest || j.CandidateIntentDigest != expected.CandidateIntentDigest {
+		return fmt.Errorf("rebuild journal differs from frozen replacement candidate")
+	}
+	// The existing driver separately validates the journal's old pin witness.
+	return nil
+}
+
 // Execute advances one requested replacement through its durable journal.
-// Every phase is retryable; an incomplete boot remains Starting and needs a
-// later invocation. An already selected base with no journal is a no-op, so
-// retrying a completed command does not create another disposable system.
+// An already selected base with no journal is a no-op; retries do not clone.
 func (s *RebuildService) Execute(ctx context.Context, rawName, revision string, starter *Service) (Record, error) {
 	return s.execute(ctx, rawName, revision, "", starter)
 }
@@ -537,6 +575,9 @@ func (s *RebuildService) execute(ctx context.Context, rawName, revision, candida
 	}
 	j, err := LoadRebuildJournal(s.domain.StateRoot, s.domain.ID, string(name))
 	if errors.Is(err, os.ErrNotExist) {
+		if s.prepared != nil {
+			return s.settlePrepared(ctx, string(name), starter)
+		}
 		if revision == "" {
 			return Record{}, fmt.Errorf("new rebuild requires an exact prepared base revision")
 		}
@@ -562,6 +603,9 @@ func (s *RebuildService) execute(ctx context.Context, rawName, revision, candida
 	} else if err != nil {
 		return Record{}, err
 	} else {
+		if err := s.requirePrepared(j); err != nil {
+			return Record{}, err
+		}
 		if revision == "" {
 			revision = j.CandidateRevision
 			candidateDigest = j.CandidateIntentDigest
@@ -592,6 +636,9 @@ func (s *RebuildService) execute(ctx context.Context, rawName, revision, candida
 		if err != nil {
 			return Record{}, err
 		}
+		if err := s.requirePrepared(j); err != nil {
+			return Record{}, err
+		}
 		record, startErr := starter.StartRebuildCandidate(ctx, string(name), j)
 		if startErr != nil {
 			return Record{}, startErr
@@ -604,6 +651,9 @@ func (s *RebuildService) execute(ctx context.Context, rawName, revision, candida
 		}
 	}
 	if (j.Phase == RebuildReady || j.Phase == RebuildRetiring) && (current.IntendedState == StateStopped || current.IntendedState == StateStarting) {
+		if err := s.requirePrepared(j); err != nil {
+			return Record{}, err
+		}
 		record, startErr := starter.StartRebuildCandidate(ctx, string(name), j)
 		if startErr != nil {
 			return Record{}, startErr
@@ -613,4 +663,52 @@ func (s *RebuildService) execute(ctx context.Context, rawName, revision, candida
 		}
 	}
 	return s.RetireOld(ctx, string(name), starter)
+}
+
+// A completed prepared retry only settles its exact active candidate. Holding
+// the ordinary transition/session locks prevents a later replacement being
+// started or adopted between checking the witness and checking readiness.
+func (s *RebuildService) settlePrepared(ctx context.Context, name string, starter *Service) (record Record, err error) {
+	if err := starter.validStartDependencies(); err != nil {
+		return Record{}, err
+	}
+	transition, err := lock.Acquire(ctx, s.domain.StateRoot, "transition-"+string(s.domain.ID)+"-"+name)
+	if err != nil {
+		return Record{}, err
+	}
+	defer func() { err = errors.Join(err, transition.Release()) }()
+	held, err := lock.AcquireSession(ctx, s.domain.StateRoot, string(s.domain.ID), name)
+	if err != nil {
+		return Record{}, err
+	}
+	defer func() { err = errors.Join(err, held.Release()) }()
+	if err := RequireNoRebuild(s.domain.StateRoot, s.domain.ID, name); err != nil {
+		return Record{}, err
+	}
+	if err := syncRebuildJournalRegistry(s.domain.StateRoot); err != nil {
+		return Record{}, fmt.Errorf("settle completed rebuild journal directory: %w", err)
+	}
+	record, err = LoadRecord(s.domain.StateRoot, string(s.domain.ID), name)
+	if err != nil {
+		return Record{}, err
+	}
+	expected := s.prepared
+	if record.ID != expected.SessionID || record.Backend.Kind != "tart" || record.Backend.ObjectID != expected.CandidateBackend || record.GoldenRevision != expected.CandidateRevision || record.RecipeIntentDigest != expected.CandidateIntentDigest {
+		return Record{}, fmt.Errorf("completed system differs from frozen replacement candidate; no new rebuild is authorized")
+	}
+	switch record.IntendedState {
+	case StateStopped:
+		observed, err := s.observeExact(ctx, record.Backend.ObjectID)
+		if err != nil || !observed.Exists || observed.State != backend.ObjectStopped {
+			return Record{}, fmt.Errorf("completed candidate is not exactly stopped: %v", err)
+		}
+		return record, nil
+	case StateRunning:
+		if err := starter.start.Workspaces.VerifyUses(ctx, s.domain.StateRoot, s.domain.ID, record); err != nil {
+			return Record{}, err
+		}
+		return starter.reconcileReady(ctx, record)
+	default:
+		return Record{}, fmt.Errorf("completed candidate is not stopped or ready; inspect its exact session")
+	}
 }
