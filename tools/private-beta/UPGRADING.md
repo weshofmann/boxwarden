@@ -9,12 +9,21 @@ records the preparation tools; it changes no guest. New projects can then select
 new system while retaining its workspace. Later recipe-bound replacements use
 captured software intent by default. Ordinary open never updates helpers or
 reimports work. See [TRY-ME.md](TRY-ME.md) for the seven-argument setup and route.
+After selecting the new package and existing configuration/asset variables
+from that guide, use the recipe-enabled update:
+
+```sh
+bash "$PACKAGE/prepare-projects.sh" --update "$CONFIG" "$ISO" "$CHECKER" \
+  "$GO_BIN" "$ZSTD_BIN" "$OPENSSL_BIN" "$XORRISO_BIN"
+```
 
 Recipe-enabled setup/bookmarks use strict version2 records. Older beta packages
 may refuse those records; returning to an old binary is not a metadata rollback.
 Retain the old package and its independent configuration for the old trial.
 The legacy manual helper staging below applies to an older registered-base
 workflow, not the recipe-created/rebuilt systems.
+
+## Legacy registered-base update (five inputs)
 
 This updates the package and helper asset locators for an existing private
 configuration. It does not install Tart/Softnet, change host settings, reformat a
