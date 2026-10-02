@@ -19,6 +19,7 @@ var stagedGuestDefinitionFiles = []string{
 	"autoinstall/user-data",
 	"finalize-golden.sh",
 	"clipboard.py",
+	"support-check.py",
 	"install-pinned-chatgpt.py",
 	"launch-chatgpt.py",
 	"recipe-prepare.py",
@@ -45,7 +46,7 @@ func stageBuildInputs(ctx context.Context, in Inputs, attemptDir string) (Inputs
 	for _, name := range stagedGuestDefinitionFiles {
 		mode := os.FileMode(0400)
 		switch name {
-		case "clipboard.py", "artifacts/boxwarden-guest-bootstrap", "finalize-golden.sh", "install-pinned-chatgpt.py", "launch-chatgpt.py", "recipe-prepare.py", "remaster-golden-iso.sh", "render-golden-seed.sh":
+		case "support-check.py", "clipboard.py", "artifacts/boxwarden-guest-bootstrap", "finalize-golden.sh", "install-pinned-chatgpt.py", "launch-chatgpt.py", "recipe-prepare.py", "remaster-golden-iso.sh", "render-golden-seed.sh":
 			mode = 0500
 		}
 		if err := stageSourceFile(ctx, filepath.Join(in.GuestDefinitionRoot, name), filepath.Join(guest, name), mode, 64<<20, false); err != nil {

@@ -181,6 +181,9 @@ func Prepare(ctx context.Context, request PrepareRequest, deps PrepareDependenci
 		state.Failure = "qualification failed"
 		return PreparedResult{}, errors.Join(cause, writeAttempt(build.AttemptDirectory, state))
 	}
+	if deps.Build.Progress != nil {
+		deps.Build.Progress(PhaseQualifying)
+	}
 	receipt, err := deps.Qualifier.Qualify(ctx, build)
 	if err != nil {
 		return qualificationFailed(fmt.Errorf("qualify fresh clone: %w", err))

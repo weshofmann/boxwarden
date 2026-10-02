@@ -20,6 +20,9 @@ type AlphaPrepareInput struct {
 	RecipePath, ISOPath, GuestDefinitionRoot string
 	OpenSSLPath, OpenSSLSHA256               string
 	XorrisoPath, XorrisoSHA256               string
+	// Project-only inputs; the raw alpha CLI does not expose these switches.
+	RequireGuestSupport  bool
+	CapturedIntentDigest string
 }
 
 // AlphaPrepared carries the reusable base receipt and the complete captured

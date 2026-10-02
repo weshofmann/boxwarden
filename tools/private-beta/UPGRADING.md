@@ -1,5 +1,21 @@
 # Update a user-owned beta package beside the old package
 
+For beta.4 recipe-enabled setup, keep the new extracted package at its final
+path and run its `prepare-projects.sh --update` with the existing five asset
+arguments plus exact existing OpenSSL and xorriso executables. This admits and
+records the preparation tools; it changes no guest. New projects can then select
+`--recipe desktop|actions|chatgpt`. A stopped existing project can explicitly
+`project rebuild --recipe chatgpt NAME` to provision software and support on a
+new system while retaining its workspace. Later recipe-bound replacements use
+captured software intent by default. Ordinary open never updates helpers or
+reimports work. See [TRY-ME.md](TRY-ME.md) for the seven-argument setup and route.
+
+Recipe-enabled setup/bookmarks use strict version2 records. Older beta packages
+may refuse those records; returning to an old binary is not a metadata rollback.
+Retain the old package and its independent configuration for the old trial.
+The legacy manual helper staging below applies to an older registered-base
+workflow, not the recipe-created/rebuilt systems.
+
 This updates the package and helper asset locators for an existing private
 configuration. It does not install Tart/Softnet, change host settings, reformat a
 workspace, reimport a project, or silently install guest helpers. Use a new package

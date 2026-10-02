@@ -774,10 +774,13 @@ func TestAlphaRecipeStartReportsAutomaticCompletionAfterManagementReady(t *testi
 			if starter.name != "dev" || domain != selected || started != record {
 				t.Fatalf("automatic runner received wrong start: %+v, %+v", domain, started)
 			}
+			if !strings.Contains(output.String(), "management-readiness: ready;") || strings.Contains(output.String(), "actions: complete") {
+				t.Fatal("progress conflated management readiness with setup completion")
+			}
 			return nil, nil
 		},
 	})
-	if err != nil || !called || output.String() != "domain: alpha\nsession: dev\nstate: running\nmanagement-readiness: ready\nactions: complete\n" {
+	if err != nil || !called || !strings.HasSuffix(output.String(), "domain: alpha\nsession: dev\nstate: running\nmanagement-readiness: ready\nactions: complete\n") {
 		t.Fatalf("alpha automatic start = %v, called=%t, output=%q", err, called, output.String())
 	}
 }

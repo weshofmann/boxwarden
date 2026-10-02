@@ -43,7 +43,11 @@ func listProjects(ctx context.Context, loaded config.Config, d config.Domain, o 
 		if err != nil {
 			return fmt.Errorf("project %s: %w", r.Name, err)
 		}
-		fmt.Fprintf(&out, "project: %s\nstate: %s\n", r.Name, state)
+		displayState := state
+		if r.RecipeIntentDigest != "" && state == "READY" {
+			displayState = "management READY; inspect project status for software actions"
+		}
+		fmt.Fprintf(&out, "project: %s\nstate: %s\n", r.Name, displayState)
 		if r.SessionID == "" {
 			fmt.Fprintln(&out, "system: not allocated")
 		} else {
