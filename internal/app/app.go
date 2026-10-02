@@ -21,6 +21,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/hostidentity"
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/lifecycle"
+	"github.com/weshofmann/boxwarden/internal/projectx"
 	"github.com/weshofmann/boxwarden/internal/recipe"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/sshx"
@@ -86,6 +87,7 @@ type ClipboardTransfer interface {
 type ClipboardTransferFactory func(context.Context, config.Config, config.Domain) (ClipboardTransfer, error)
 
 type Options struct {
+	ProjectSetupCheck        func(context.Context, config.Domain, projectx.Setup) error
 	ClipboardTransferFactory ClipboardTransferFactory
 	Input                    io.Reader
 	ClipboardOutput          io.Writer
@@ -188,6 +190,9 @@ func Run(ctx context.Context, args []string, options Options) error {
 			}
 			options.Observer, options.Creator = dependencies.Observer, dependencies.Creator
 		}
+	}
+	if command.kind == commandProject {
+		return runProject(ctx, command, loaded, selectedDomain, options)
 	}
 
 	switch command.kind {
@@ -625,6 +630,7 @@ const (
 	commandAlphaAction
 	commandAlphaActionList
 	commandClipboardTargets
+	commandProject
 )
 
 type parsedCommand struct {
@@ -649,6 +655,7 @@ type parsedCommand struct {
 	mountPath            string
 	expectedAPFSUUID     string
 	outputConfigPath     string
+	project              projectCommand
 }
 
 func (c parsedCommand) requiresDomain() bool {
@@ -657,7 +664,7 @@ func (c parsedCommand) requiresDomain() bool {
 
 func (c parsedCommand) requiresWorkspaceStorage() bool {
 	switch c.kind {
-	case commandSessionStart, commandSessionRebuild, commandSessionDelete,
+	case commandProject, commandSessionStart, commandSessionRebuild, commandSessionDelete,
 		commandWorkspaceCreate, commandWorkspaceAttach, commandWorkspaceDetach,
 		commandWorkspaceExport, commandWorkspaceExportResume,
 		commandWorkspaceImport, commandWorkspaceImportVerify, commandWorkspaceReconcile:
@@ -775,6 +782,13 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		return parsedCommand{}, errors.New("domain is required; pass --domain or set BOXWARDEN_DOMAIN")
 	}
 	base.domain = *domain
+	if len(remaining) > 0 && remaining[0] == "project" {
+		var err error
+		base.project, err = parseProject(remaining[1:])
+		base.kind = commandProject
+		base.name = base.project.name
+		return base, err
+	}
 	if len(remaining) >= 2 && remaining[0] == "clipboard" {
 		if !explicitDomain {
 			return parsedCommand{}, errors.New("clipboard requires explicit --domain")
