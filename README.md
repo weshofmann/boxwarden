@@ -9,6 +9,12 @@ trusted host.
 
 ## Current development baseline: v0.2 prototype
 
+For the local private beta archive, see the [TRY-ME guide](tools/private-beta/TRY-ME.md).
+Build from a clean committed checkout on an initialized Apple Silicon Mac with
+`GO_BIN=/absolute/actual/go bash tools/private-beta/build.sh 0.2.0-beta.1 /absolute/new-output`.
+The archive includes the CLI, clipboard menu and standalone source resources;
+it does not install host tools or publish a release.
+
 **FUNCTIONAL PROTOTYPE — MATERIAL GAPS LISTED. Not ready for general use.**
 
 The owner-approved v0.2 baseline is the prototype delivered by PR #12:
