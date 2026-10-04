@@ -4,12 +4,14 @@ base="$(cd "$(dirname "$0")/../.." && pwd -P)"
 output="$base/.build/Boxwarden Clipboard.app"
 custom_output=false
 cli=""
+app_kind="clipboard"
 version=""
 build=""
 fail() { echo "$*" >&2; exit 1; }
 while [[ $# -gt 0 ]]; do
   [[ $# -ge 2 && -n "$2" ]] || fail "expected a value for $1"
   case "$1" in
+    --app) [[ "$2" == clipboard || "$2" == project-manager ]] || fail "--app requires clipboard or project-manager"; app_kind="$2" ;;
     --cli) [[ -z "$cli" ]] || fail "duplicate --cli"; cli="$2" ;;
     --output) [[ "$custom_output" == false ]] || fail "duplicate --output"; output="$2"; custom_output=true ;;
     --version) [[ -z "$version" ]] || fail "duplicate --version"; version="$2" ;;
@@ -18,6 +20,12 @@ while [[ $# -gt 0 ]]; do
   esac
   shift 2
 done
+if [[ "$app_kind" == project-manager ]]; then
+  app_name="Boxwarden"; native_executable="Boxwarden Projects"; plist="ProjectInfo.plist"
+  [[ "$custom_output" == true ]] || output="$base/.build/$app_name.app"
+else
+  app_name="Boxwarden Clipboard"; native_executable="$app_name"; plist="Info.plist"
+fi
 number='(0|[1-9][0-9]*)'
 identifier='(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)'
 semver="^$number\\.$number\\.$number(-$identifier(\\.$identifier)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
@@ -35,9 +43,9 @@ if [[ -n "$cli" ]]; then
 fi
 stage="$(mktemp -d "${TMPDIR:-/private/tmp}/boxwarden-menu.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
-app="$stage/Boxwarden Clipboard.app"
+app="$stage/$app_name.app"
 mkdir -p "$app/Contents/MacOS"
-cp "$base/host/clipboard-menu/Info.plist" "$app/Contents/Info.plist"
+cp "$base/host/clipboard-menu/$plist" "$app/Contents/Info.plist"
 if [[ -n "$version" ]]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$app/Contents/Info.plist"
 fi
@@ -52,11 +60,14 @@ else
     CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -trimpath -o "$app/Contents/MacOS/boxwarden" ./cmd/boxwarden
   )
 fi
+sources=("$base/host/clipboard-menu/Sources/MenuModel.swift" "$base/host/clipboard-menu/Sources/CLIClient.swift")
+if [[ "$app_kind" == project-manager ]]; then
+  sources+=("$base"/host/clipboard-menu/Sources/Project*.swift)
+else
+  sources+=("$base/host/clipboard-menu/Sources/MenuApp.swift")
+fi
 swiftc -O -target arm64-apple-macos13.0 -module-cache-path "$stage/module-cache" -framework AppKit \
-  "$base/host/clipboard-menu/Sources/MenuModel.swift" \
-  "$base/host/clipboard-menu/Sources/CLIClient.swift" \
-  "$base/host/clipboard-menu/Sources/MenuApp.swift" \
-  -o "$app/Contents/MacOS/Boxwarden Clipboard"
+  "${sources[@]}" -o "$app/Contents/MacOS/$native_executable"
 if [[ -z "$cli" ]]; then
   codesign --force --sign - "$app/Contents/MacOS/boxwarden"
 fi
@@ -85,7 +96,7 @@ if [[ "$custom_output" == true ]]; then
 else
   mv "$app" "$output"
 fi
-if [[ ! -f "$output/Contents/Info.plist" || ! -x "$output/Contents/MacOS/Boxwarden Clipboard" || ! -x "$output/Contents/MacOS/boxwarden" ]]; then
+if [[ ! -f "$output/Contents/Info.plist" || ! -x "$output/Contents/MacOS/$native_executable" || ! -x "$output/Contents/MacOS/boxwarden" ]]; then
   echo "staged app bundle is incomplete: $output" >&2
   exit 1
 fi
