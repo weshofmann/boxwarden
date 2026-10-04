@@ -57,6 +57,9 @@ func retryProjectExport(ctx context.Context, c parsedCommand, loaded config.Conf
 	if err := validAlphaExportResumeInput(input); err != nil {
 		return err
 	}
+	if err := projectProgress(o, "Recovering the retained export transaction"); err != nil {
+		return err
+	}
 	journal, published, err := o.AlphaExportResume(ctx, d, input, o.Observer)
 	if err != nil {
 		return projectExportFailure(r, initial.ID, err)
@@ -68,6 +71,7 @@ func retryProjectExport(ctx context.Context, c parsedCommand, loaded config.Conf
 	if !reflect.DeepEqual(expected, journal) || (!aborted && !completed) {
 		return errors.New("project export recovery receipt differs from retained transaction")
 	}
+	captureProjectExport(o, r, journal, published)
 	if err := writeAlphaExport(o.Output, d, journal, published); err != nil {
 		return err
 	}

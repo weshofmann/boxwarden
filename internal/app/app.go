@@ -126,6 +126,9 @@ type Options struct {
 	AlphaAction                   AlphaActionFunc
 	AlphaAutomatic                AlphaAutomaticFunc
 	Output                        io.Writer
+	projectJSON                   *projectJSON
+	projectObservation            *backend.Observation
+	projectSessionSnapshot        *session.Record
 	// storageCheck is an identity source for synthetic command tests. Production
 	// uses the pinned APFS check when this is nil.
 	storageCheck  func(hostidentity.StorageExpectation) error
@@ -143,7 +146,29 @@ func DefaultConfigPath() (string, error) {
 
 // Run executes one Boxwarden command. Commands that own domain state require an
 // explicit domain; host-global commands deliberately do not select one.
-func Run(ctx context.Context, args []string, options Options) error {
+func Run(ctx context.Context, args []string, options Options) (runErr error) {
+	if operation, jsonMode := projectJSONRequest(args); jsonMode && options.projectJSON == nil && options.Output != nil {
+		stream, ok := options.Output.(*projectJSON)
+		if !ok {
+			stream = &projectJSON{output: options.Output, operation: operation}
+		}
+		options.Output, options.projectJSON = stream, stream
+		defer func() {
+			if runErr != nil {
+				runErr = errors.Join(runErr, stream.emit("error", runErr.Error(), map[string]any{"uncertain": true}))
+				return
+			}
+			if stream.data == nil {
+				runErr = errors.New("structured command returned no terminal receipt")
+				runErr = errors.Join(runErr, stream.emit("error", runErr.Error(), map[string]any{"uncertain": true}))
+				return
+			}
+			runErr = stream.emit("result", "", stream.data)
+			if runErr != nil {
+				runErr = errors.Join(runErr, stream.emit("error", runErr.Error(), map[string]any{"uncertain": true}))
+			}
+		}()
+	}
 	command, err := parseCommand(args, options)
 	if err != nil {
 		return err
@@ -201,7 +226,11 @@ func Run(ctx context.Context, args []string, options Options) error {
 		}
 	}
 	if command.kind == commandProject {
-		return runProject(ctx, command, loaded, selectedDomain, options)
+		err := runProject(ctx, command, loaded, selectedDomain, options)
+		if err == nil && options.projectJSON != nil {
+			finishProjectJSON(ctx, command, loaded, selectedDomain, options)
+		}
+		return err
 	}
 
 	switch command.kind {

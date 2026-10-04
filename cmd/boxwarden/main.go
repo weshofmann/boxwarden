@@ -44,7 +44,7 @@ func main() {
 	}
 
 	publicCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	options := publicOptions(os.Stdout)
+	options := publicOptions(app.ProjectOutput(os.Args[1:], os.Stdout))
 	input := &clipboardInput{source: os.Stdin}
 	options.Input = input
 	clipboardOutput := &clipboardOutput{source: os.Stdout}

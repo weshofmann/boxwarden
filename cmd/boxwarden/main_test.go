@@ -194,6 +194,18 @@ func TestProductionAlphaPrepareReportsPlannedIdentityBeforeHostAdmission(t *test
 	if err == nil || !strings.Contains(output.String(), "preparation-attempt: alpha-attempt-") || !strings.Contains(output.String(), "planned-candidate: boxwarden-alpha-base-") {
 		t.Fatalf("planned identity not reported before unavailable host: %v, %q", err, output.String())
 	}
+	output.Reset()
+	options = publicOptions(app.ProjectOutput([]string{"project", "create", "--json", "example"}, &output))
+	_, err = options.AlphaPrepare(context.Background(), loaded, selected, configPath, app.AlphaPrepareInput{RecipePath: recipePath, ISOPath: filepath.Join(root, "installer.iso"), GuestDefinitionRoot: filepath.Join(root, "guest")})
+	if err == nil {
+		t.Fatal("fixture unexpectedly admitted host")
+	}
+	for _, line := range strings.Split(strings.TrimSpace(output.String()), "\n") {
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil || event["type"] != "progress" || event["operation"] != "project.create" {
+			t.Fatalf("production callback bypassed JSON: %q %v", line, err)
+		}
+	}
 }
 
 func TestProductionBackendFactoryRejectsMissingHostAndUnselectedDomain(t *testing.T) {

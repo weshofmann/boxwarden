@@ -112,6 +112,9 @@ func projectListState(ctx context.Context, loaded config.Config, d config.Domain
 	if err != nil {
 		return "", "", err
 	}
+	if o.projectSessionSnapshot != nil {
+		*o.projectSessionSnapshot = s
+	}
 	systemMatches := s.Backend.ObjectID == r.BackendObject && s.GoldenRevision == r.Base && s.RecipeIntentDigest == r.RecipeIntentDigest
 	if pending != nil {
 		systemMatches = (s.Backend.ObjectID == pending.Before.BackendObject && s.GoldenRevision == pending.Before.Base && s.RecipeIntentDigest == pending.Before.RecipeIntentDigest) || (s.Backend.ObjectID == pending.BackendObject && s.GoldenRevision == pending.Base && s.RecipeIntentDigest == pending.IntentDigest)
@@ -182,6 +185,9 @@ func projectListState(ctx context.Context, loaded config.Config, d config.Domain
 	}
 	if observed.Exists && observed.ObjectID != r.BackendObject {
 		return "", "", errors.New("backend observation differs from exact project binding")
+	}
+	if o.projectObservation != nil {
+		*o.projectObservation = observed
 	}
 	reconciled := lifecycle.Reconcile(s.IntendedState, observed)
 	reconciled, readiness := reconcileStatusSnapshot(ctx, loaded, d, s, observed, reconciled, o.StatusSnapshotFactory)
