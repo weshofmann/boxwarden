@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -205,16 +206,29 @@ func publicOptions(output io.Writer) app.Options {
 				input.SourceRoot, input.ISOPath, input.GoBinary, observer)
 		},
 		AlphaImport: func(ctx context.Context, selected config.Domain, input app.AlphaImportInput) (workspacex.ImportJournal, supervisor.ImportResult, error) {
-			controller, err := supervisor.NewExactImportController(filepath.Join(selected.StateRoot, "runtime"))
+			selection, err := importx.ParseSelection(input.Selection)
 			if err != nil {
 				return workspacex.ImportJournal{}, supervisor.ImportResult{}, err
 			}
 			staging := filepath.Join(selected.StateRoot, "imports")
+			if input.Resume && selection.ExpectedDigest != "" {
+				snapshot, err := importx.InspectSnapshot(staging, input.TransactionID)
+				if err != nil {
+					return workspacex.ImportJournal{}, supervisor.ImportResult{}, err
+				}
+				if snapshot.Digest != selection.ExpectedDigest {
+					return workspacex.ImportJournal{}, supervisor.ImportResult{}, errors.New("retained import snapshot differs from preview")
+				}
+			}
+			controller, err := supervisor.NewExactImportController(filepath.Join(selected.StateRoot, "runtime"))
+			if err != nil {
+				return workspacex.ImportJournal{}, supervisor.ImportResult{}, err
+			}
 			if !input.Resume {
 				if err := os.Mkdir(staging, 0o700); err != nil && !os.IsExist(err) {
 					return workspacex.ImportJournal{}, supervisor.ImportResult{}, err
 				}
-				if _, err := importx.CaptureSource(ctx, input.SourcePath, staging, input.TransactionID); err != nil {
+				if _, err := importx.CaptureSelectedSource(ctx, input.SourcePath, staging, input.TransactionID, selection); err != nil {
 					return workspacex.ImportJournal{}, supervisor.ImportResult{}, err
 				}
 			}

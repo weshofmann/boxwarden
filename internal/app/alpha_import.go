@@ -10,14 +10,15 @@ import (
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/config"
+	"github.com/weshofmann/boxwarden/internal/importx"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
 	"github.com/weshofmann/boxwarden/internal/workspacex"
 )
 
 type AlphaImportInput struct {
-	TransactionID, SourcePath, VolumeID, SessionName string
-	Resume                                           bool
+	TransactionID, SourcePath, VolumeID, SessionName, Selection string
+	Resume                                                      bool
 }
 
 type AlphaImportFunc func(context.Context, config.Domain, AlphaImportInput) (workspacex.ImportJournal, supervisor.ImportResult, error)
@@ -34,6 +35,9 @@ func validAlphaImportVerifyInput(input AlphaImportVerifyInput) error {
 }
 
 func validAlphaImportInput(input AlphaImportInput) error {
+	if _, err := importx.ParseSelection(input.Selection); err != nil {
+		return err
+	}
 	if !alphaCreateUUID(input.VolumeID) || input.SessionName == "" {
 		return errors.New("workspace import requires one canonical volume UUID and session name")
 	}
@@ -51,12 +55,19 @@ func validAlphaImportInput(input AlphaImportInput) error {
 }
 
 func writeAlphaImport(output io.Writer, selected config.Domain, input AlphaImportInput, journal workspacex.ImportJournal, receipt supervisor.ImportResult) error {
+	selection, err := importx.ParseSelection(input.Selection)
+	if err != nil {
+		return err
+	}
+	if selection.ExpectedDigest != "" && selection.ExpectedDigest != journal.SourceDigest {
+		return errors.New("workspace import digest differs from preview")
+	}
 	if journal.ID != input.TransactionID || journal.Domain != selected.ID || journal.VolumeID != input.VolumeID || journal.SessionName != input.SessionName ||
 		journal.Phase != workspacex.ImportTransferring || receipt.Digest != journal.SourceDigest || receipt.FileCount != journal.FileCount ||
 		receipt.TotalBytes != journal.TotalBytes || receipt.RemotePath != journal.MountPath+"/boxwarden-import-"+journal.ID {
 		return errors.New("workspace import returned an invalid transfer receipt")
 	}
-	_, err := fmt.Fprintf(output, "domain: %s\nvolume: %s\nimport: readback-matched\njournal: transferring\nremote: %s\n", selected.ID, input.VolumeID, receipt.RemotePath)
+	_, err = fmt.Fprintf(output, "domain: %s\nvolume: %s\nimport: readback-matched\njournal: transferring\nremote: %s\n", selected.ID, input.VolumeID, receipt.RemotePath)
 	return err
 }
 

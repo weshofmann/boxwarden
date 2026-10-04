@@ -29,8 +29,8 @@ const (
 	sftpFXEOF      = 1
 	sftpMaxPacket  = 64 << 10
 	sftpReadChunk  = 32 << 10
-	sftpMaxFile    = 4 << 20
-	sftpMaxTotal   = 16 << 20
+	sftpMaxFile    = importx.MaxFileBytes
+	sftpMaxTotal   = importx.MaxTotalBytes
 )
 
 func runPinnedSFTPReadback(ctx context.Context, connection Connection, entries []importx.Entry, remote, local string) error {
@@ -114,15 +114,19 @@ func readbackSFTP(ctx context.Context, reader io.Reader, writer io.Writer, entri
 		return fmt.Errorf("invalid SFTP readback roots")
 	}
 	var total int64
-	var files int
+	var files, directories int
 	for _, entry := range entries {
 		if !filepath.IsLocal(entry.Path) || filepath.Clean(entry.Path) != entry.Path || !safeSFTPPath(remote+"/"+entry.Path) {
 			return fmt.Errorf("invalid SFTP readback entry path")
 		}
 		if entry.Kind == "directory" {
+			if directories >= importx.MaxDirectories {
+				return fmt.Errorf("invalid readback directory bounds")
+			}
+			directories++
 			continue
 		}
-		if entry.Kind != "file" || entry.Size < 0 || entry.Size > sftpMaxFile || files >= 256 || total > sftpMaxTotal-entry.Size {
+		if entry.Kind != "file" || entry.Size < 0 || entry.Size > sftpMaxFile || files >= importx.MaxFiles || total > sftpMaxTotal-entry.Size {
 			return fmt.Errorf("invalid readback file bounds")
 		}
 		files++

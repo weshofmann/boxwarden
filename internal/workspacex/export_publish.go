@@ -78,7 +78,7 @@ func publishCapturedExport(ctx context.Context, stateRoot string, domainID domai
 	}
 	options := exportx.Options{Parent: journal.DestinationParent, TransactionID: transaction,
 		Selected: append([]string(nil), journal.Selected...), MaxChunkBytes: 1 << 20,
-		MaxFileBytes: 256 << 20, MaxTotalBytes: 256 << 20, MaxFiles: 4096,
+		MaxFileBytes: 256 << 20, MaxTotalBytes: 512 << 20, MaxFiles: 8192,
 		MaxDirectories: 4096, MinFreeBytes: minimumFree}
 	publishedPath, err = exportx.ReceiveSelectedExport(ctx, captured.Stream, options)
 	if err != nil {

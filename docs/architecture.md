@@ -231,3 +231,25 @@ These source-level seams reuse the existing preparation cache, captured recipe
 intent and durable rebuild driver. They introduce no new guest execution or
 automatic-action policy. Selecting recipes through the named-project CLI and
 qualifying the resulting graphical workflow are separate integration work.
+
+## Frozen explicit project import selections
+
+A version 3 project bookmark adds a canonical bounded `import_selection` value
+and explicitly retains its recipe digest (empty for a legacy prepared base).
+Only the first import can advance a version 1/2 bookmark to version 3; its
+source, transaction, literal exclusions and optional preview digest are saved
+before capture. Existing pending version 1/2 imports retain whole-tree retry
+semantics. Ordinary saves cannot change a retained selection or regress it.
+Replacement receipts keep their existing versions while accepting a validated
+version 3 nested bookmark, so replacing a system preserves the original transfer.
+Older packages that only understand version 1/2 cannot operate these new
+bookmarks; keep a compatible package/setup for their entire lifetime.
+
+Read-only preview and capture share the same owner/private/path/coherence checks
+and selected-file hashing. Excluded literal paths are omitted without opening
+them. There are no implicit ignores, permission changes or live shares. A digest
+pin rejects changed selected paths or bytes before exclusive snapshot publication
+and is checked again on a retained snapshot before transfer. The existing private
+snapshot, pinned SFTP readback, journals and stopped export remain the transport.
+The current supported bounds and unchanged path/time/reserve constraints are
+listed in [named project operations](operations/projects.md#supported-transfer-bounds).

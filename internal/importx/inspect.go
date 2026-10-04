@@ -15,7 +15,7 @@ import (
 	"syscall"
 )
 
-const maxManifestBytes = 256 << 10
+const maxManifestBytes = 4 << 20
 
 var beforeSnapshotWalk = func() {}
 

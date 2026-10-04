@@ -20,8 +20,8 @@ type guestExportLimits struct {
 }
 
 var defaultGuestExportLimits = guestExportLimits{
-	maxFile: 256 << 20, maxTotal: 256 << 20,
-	maxFiles: 4096, maxDirectories: 4096,
+	maxFile: 256 << 20, maxTotal: 512 << 20,
+	maxFiles: 8192, maxDirectories: 4096,
 }
 
 type guestExportWriter struct {

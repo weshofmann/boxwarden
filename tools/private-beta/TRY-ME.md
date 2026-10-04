@@ -144,7 +144,11 @@ Inspect its `notes.txt`, `new.txt` and unchanged `reference.txt`; compare agains
 the intended edited bytes. The source should still contain its original two
 files. Export refuses a running sandbox or an existing destination. Returned
 guest files are data: inspect them before deliberately running anything.
-Transfers are explicit, bounded to 256 files / 16 MiB, not synchronization.
+Import supports 4096 files / 256 MiB total, with 64 MiB per file and 2048
+directories; stopped export supports 8192 files / 512 MiB total on workspace
+disks up to 4 GiB. Transfers remain explicit copies. See `support/source/docs/operations/projects.md` in this archive for selection
+preview and literal exclusions before importing dependency/build trees. Pin the printed preview digest with
+`--expected-digest` when importing the inspected selection.
 
 ## Controlled clipboard
 

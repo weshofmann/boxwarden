@@ -86,7 +86,7 @@ func TestCaptureSourceRejectsLinksUnsafeNamesAndSize(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := file.Truncate(4<<20 + 1); err != nil {
+			if err := file.Truncate(64<<20 + 1); err != nil {
 				t.Fatal(err)
 			}
 			if err := file.Close(); err != nil {

@@ -357,7 +357,7 @@ func TestProjectImportRetryResumesCapturedSelectionAndRetainsFailure(t *testing.
 
 func TestProjectRejectsMalformedInputsAndNonExportableSize(t *testing.T) {
 	for _, command := range [][]string{
-		{"project", "create", "--size-mib", "1025", "demo"},
+		{"project", "create", "--size-mib", "4097", "demo"},
 		{"project", "create", "--size-mib", "15", "demo"},
 		{"project", "open", "../demo"},
 		{"project", "import", "--source", "relative", "demo"},

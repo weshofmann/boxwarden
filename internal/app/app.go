@@ -676,7 +676,9 @@ func (c parsedCommand) requiresDomain() bool {
 
 func (c parsedCommand) requiresWorkspaceStorage() bool {
 	switch c.kind {
-	case commandProject, commandSessionStart, commandSessionRebuild, commandSessionDelete,
+	case commandProject:
+		return !c.project.preview
+	case commandSessionStart, commandSessionRebuild, commandSessionDelete,
 		commandWorkspaceCreate, commandWorkspaceAttach, commandWorkspaceDetach,
 		commandWorkspaceExport, commandWorkspaceExportResume,
 		commandWorkspaceImport, commandWorkspaceImportVerify, commandWorkspaceReconcile:

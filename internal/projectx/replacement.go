@@ -50,9 +50,11 @@ func (r Replacement) Next() Record {
 	next.Base = r.Base
 	next.BackendObject = r.BackendObject
 	next.RecipeIntentDigest = r.IntentDigest
-	next.Version = 1
-	if r.IntentDigest != "" {
-		next.Version = 2
+	if r.Before.Version != 3 {
+		next.Version = 1
+		if r.IntentDigest != "" {
+			next.Version = 2
+		}
 	}
 	return next
 }

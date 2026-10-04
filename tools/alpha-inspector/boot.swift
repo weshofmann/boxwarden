@@ -162,7 +162,7 @@ func bootProof(_ prepared: PreparedConfiguration) throws {
 
     let consolePump = SerialPump(input: prepared.consoleOutput.fileHandleForReading, output: nil, maximum: 256 * 1024)
     let exportPump = SerialPump(input: prepared.exportOutput.fileHandleForReading, output: .standardOutput,
-                                maximum: prepared.exportDisk == nil ? 64 * 1024 : 320 * 1024 * 1024)
+                                maximum: prepared.exportDisk == nil ? 64 * 1024 : 640 * 1024 * 1024)
     consolePump.start()
     exportPump.start()
     var stopAttempted = false

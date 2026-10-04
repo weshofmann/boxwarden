@@ -17,6 +17,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/backend/fake"
 	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/golden"
+	"github.com/weshofmann/boxwarden/internal/importx"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
 )
@@ -346,3 +347,35 @@ func (*panicReader) Read([]byte) (int, error) { panic("public command stdin was 
 type shortWriter struct{}
 
 func (shortWriter) Write(input []byte) (int, error) { return len(input) - 1, nil }
+
+func TestProductionImportResumeRejectsDifferentPinnedSnapshotBeforeGuestControl(t *testing.T) {
+	state, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(state, "source")
+	staging := filepath.Join(state, "imports")
+	for _, directory := range []string{source, staging} {
+		if err := os.Mkdir(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(source, "README.md"), []byte("synthetic\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const tx = "10213243-5465-4768-899a-bbccddeeff00"
+	if _, err := importx.CaptureSource(t.Context(), source, staging, tx); err != nil {
+		t.Fatal(err)
+	}
+	selection, err := importx.CanonicalSelection(importx.Selection{ExpectedDigest: strings.Repeat("b", 64)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = publicOptions(io.Discard).AlphaImport(t.Context(), config.Domain{ID: "alpha", StateRoot: state}, app.AlphaImportInput{TransactionID: tx, VolumeID: "00112233-4455-4677-8899-aabbccddeeff", SessionName: "dev", Resume: true, Selection: selection})
+	if err == nil || !strings.Contains(err.Error(), "differs from preview") {
+		t.Fatalf("wrong pinned retry reached guest control: %v", err)
+	}
+}

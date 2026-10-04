@@ -9,7 +9,7 @@ storage. Existing sessions are not adopted by name.
 Use a CGO-enabled Darwin ARM64 build, an enrolled private config, a healthy
 `doctor`, and the admitted Ubuntu Desktop ARM64 inputs. Keep adequate
 free space above the enforced storage reserve. The current interface supports
-the explicit `alpha` domain and 16–1024 MiB workspaces, matching the stopped
+the explicit `alpha` domain and 16–4096 MiB workspaces, matching the stopped
 export size limit. Recipe creation prepares Ubuntu once per matching preparation key and reuses
 qualified results thereafter. It never installs host tools.
 
@@ -91,8 +91,36 @@ golden registration is needed. An explicit `--base current` or registered base
 retains the legacy path and reports unverified guest support. Create opens the native Tart desktop;
 wait for `readiness: ready` before importing. Status reports live readiness,
 workspace, guest files path and next actions. Import copies a bounded private
-tree (at most 256 files and 16 MiB); later guest edits do not modify the source.
+tree (at most 4096 files, 2048 directories, 64 MiB per file and 256 MiB total); later guest edits do not modify the source.
 It is one initial selection per project, not synchronization.
+
+### Preview a larger selection
+
+Use a private source copy whose files already have owner-only access; Boxwarden
+never changes source permissions. Preview uses the same bounded walker and
+hashes as capture, with no snapshot, journal or guest operation. There are no
+implicit Git ignores: omit literal relative paths explicitly, including hidden
+paths such as `.git` and `.env`. Excluding a directory omits its entire subtree;
+excluded links are not followed. Missing, overlapping or wildcard exclusions
+are refused. Omit flags for paths your source does not contain.
+
+```sh
+bw project import preview --source "$SOURCE" \
+  --exclude node_modules --exclude dist --exclude .git --exclude .env
+# Set DIGEST to the printed selection digest after inspecting the file list.
+DIGEST=printed-lowercase-sha256
+bw project import --source "$SOURCE" \
+  --exclude node_modules --exclude dist --exclude .git --exclude .env \
+  --expected-digest "$DIGEST" myproject
+```
+
+The digest binds selected paths, sizes and contents. A later addition, removal
+or edit fails before snapshot publication; retry retains this pin and rechecks
+any retained snapshot. The pin is optional for a direct import without a prior
+preview. The first import saves its exact source and exclusions before capture;
+retry accepts no replacement selection flags. If the pinned source changed,
+restore that selection or create a new project for a different initial import.
+Guest edits after successful import remain independent of this host source.
 
 The printed guest files directory is below
 `/home/boxwarden/workspaces/project`. Open Terminal through Ubuntu's Show Apps.
@@ -257,7 +285,7 @@ initial import in the same running generation, then use:
 bw project import retry myproject
 ```
 
-The original capture/transaction is retained; a completed import refuses replay.
+The original source, exclusions, digest pin and capture/transaction are retained; a completed import refuses replay.
 Do not stop/rebuild or edit its guest selection while a pending import is being
 resolved. A changed generation or divergent guest content requires inspection.
 
@@ -309,3 +337,24 @@ bookmark, attachment record, source and returned files stayed unchanged.
 Both new sandboxes were left stopped with workspaces attached and exports
 available. Name collision, missing setup, running export and a synthetic
 storage identity mismatch were also refused; no host settings were changed.
+
+### Supported transfer bounds
+
+Projects allocate 16–4096 MiB workspace disks. Import admits 4096 files,
+2048 directories, 64 MiB per file and 256 MiB total selected bytes, with up to
+32 literal exclusions. Its existing depth (8), relative path (255 bytes) and
+safe component restrictions remain. Hidden selected names, links, hardlinks,
+special files, shared/mutable directories and non-private data are refused;
+copy into an appropriate private source rather than weakening those checks.
+
+Stopped export admits raw workspace disks up to 4 GiB and selected trees up to
+8192 files, 4096 directories, 256 MiB per file and 512 MiB total. Captured serial
+spooling is capped at 640 MiB. File contents stream through bounded buffers;
+raising payload limits does not allocate payload-sized memory. Upload batch
+metadata is separately capped at 64 MiB; SFTP packets and read chunks stay at
+64 KiB and 32 KiB. Storage reserve checks and existing helper/transfer timeouts
+still apply. These are supported bounds, not a guarantee that any source shape,
+workspace occupancy or slower host completes within the existing timeout.
+SFTP command echo is suppressed, but error diagnostics remain capped at 256 KiB;
+a retry with enough existing-directory errors can still hit that cap and fail
+before readback. It retains the same pending capture and does not assert success.

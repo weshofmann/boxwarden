@@ -27,11 +27,12 @@ boxwarden --config /absolute/config.json --domain alpha project COMMAND
 
 project list
 project setup|setup-update --source-root PATH --formatter-bundle PATH --iso PATH --go PATH
-project create [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] [--size-mib 16..1024] NAME
+project create [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] [--size-mib 16..4096] NAME
 project open|status|stop NAME
 project rebuild [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] NAME
 project rebuild retry NAME
-project import --source PRIVATE-DIRECTORY NAME
+project import preview --source PRIVATE-DIRECTORY [--exclude RELATIVE-PATH ...]
+project import --source PRIVATE-DIRECTORY [--exclude RELATIVE-PATH ...] [--expected-digest SHA256] NAME
 project import retry NAME
 project export --destination NEW-DIRECTORY NAME
 
