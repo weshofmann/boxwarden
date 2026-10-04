@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -102,26 +103,33 @@ func (j *projectJSON) Write(p []byte) (int, error) {
 	return original, nil
 }
 func projectJSONRequest(args []string) (string, bool) {
-	for i, a := range args {
-		if a != "project" || i+1 >= len(args) {
-			continue
-		}
-		operation := "project." + args[i+1]
-		if i+2 < len(args) && (args[i+2] == "retry" || args[i+2] == "preview" || args[i+2] == "list") {
-			operation += "." + args[i+2]
-		}
-		enabled := false
-		for _, flag := range args[i+2:] {
-			switch flag {
-			case "--json", "--json=true":
-				enabled = true
-			case "--json=false":
-				enabled = false
-			}
-		}
-		return operation, enabled
+	// Mirror the global argv grammar without configuration/domain admission.
+	// flag parsing consumes values (which may literally be "project" or "--json")
+	// and stops at the command, just as the ordinary public parser does.
+	set := flag.NewFlagSet("project JSON presentation", flag.ContinueOnError)
+	set.SetOutput(io.Discard)
+	set.String("config", "", "configuration")
+	set.String("domain", "", "domain")
+	if err := set.Parse(args); err != nil {
+		return "", false
 	}
-	return "", false
+	remaining := set.Args()
+	if len(remaining) < 2 || remaining[0] != "project" {
+		return "", false
+	}
+	// parseProject retains the flags it successfully parsed even when subsequent
+	// semantic validation fails, allowing those failures a structured envelope.
+	p, _ := parseProject(remaining[1:])
+	operation := "project." + p.operation
+	switch {
+	case p.preview:
+		operation += ".preview"
+	case p.exportList:
+		operation += ".list"
+	case p.retry:
+		operation += ".retry"
+	}
+	return operation, p.json
 }
 
 type projectSetupJSON struct {

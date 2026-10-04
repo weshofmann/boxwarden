@@ -282,3 +282,24 @@ func TestProjectJSONBoundsDetachedOutputAndRetainsTerminalError(t *testing.T) {
 		t.Fatal("oversized result leaked")
 	}
 }
+
+func TestProjectJSONDetectionUsesParsedFlagsNotLiteralValues(t *testing.T) {
+	for _, tc := range []struct {
+		args      []string
+		enabled   bool
+		operation string
+	}{
+		{[]string{"project", "import", "preview", "--exclude", "--json", "--source", "/private/source"}, false, "project.import.preview"},
+		{[]string{"project", "import", "preview", "--json", "--exclude", "--json=false", "--source", "/private/source"}, true, "project.import.preview"},
+		{[]string{"project", "status", "-json", "list"}, true, "project.status"},
+		{[]string{"project", "list", "--json=1"}, true, "project.list"},
+		{[]string{"project", "list", "--json", "--json=false"}, false, "project.list"},
+		{[]string{"--config", "project", "--domain", "alpha", "project", "list", "--json"}, true, "project.list"},
+		{[]string{"project", "create", "--json", "--size-mib", "0", "demo"}, true, "project.create"},
+	} {
+		operation, enabled := projectJSONRequest(tc.args)
+		if operation != tc.operation || enabled != tc.enabled {
+			t.Fatalf("%v => %s %v, want %s %v", tc.args, operation, enabled, tc.operation, tc.enabled)
+		}
+	}
+}
