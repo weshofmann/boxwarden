@@ -7,6 +7,11 @@ if [[ $# != 2 || ! $1 =~ ^0\.2\.[0-9]+-beta\.[1-9][0-9]*$ ]]; then
   exit 2
 fi
 version=$1
+app_bundle_id=${BOXWARDEN_APP_BUNDLE_ID:-org.boxwarden.project-manager}
+if [[ ${#app_bundle_id} -gt 255 || ! "$app_bundle_id" =~ ^[A-Za-z][A-Za-z0-9-]*(\.[A-Za-z0-9][A-Za-z0-9-]*)+$ ]]; then
+  echo 'BOXWARDEN_APP_BUNDLE_ID must be a reverse-DNS application identifier' >&2
+  exit 2
+fi
 output=$2
 if [[ -e "$output" || -L "$output" ]]; then
   echo 'output must not exist' >&2
@@ -54,7 +59,7 @@ fi
 )
 codesign --force --sign - "$package/bin/boxwarden"
 bash "$repo_root/host/clipboard-menu/build.sh" --app project-manager --cli "$package/bin/boxwarden" \
-  --output "$package/Boxwarden.app" --version "${version%-beta.*}" --build "${version##*.}"
+  --bundle-id "$app_bundle_id" --output "$package/Boxwarden.app" --version "${version%-beta.*}" --build "${version##*.}"
 cp "$repo_root/LICENSE" "$repo_root/NOTICE" "$package/"
 cp "$repo_root/tools/private-beta/TRY-ME.md" "$package/TRY-ME.md"
 cp "$repo_root/tools/private-beta/UPGRADING.md" "$package/UPGRADING.md"
@@ -83,11 +88,11 @@ NOTICE.md remain there. That patch was modified 2026-09-28; no N1 executable is
 shipped or installed by this package. Ubuntu, Tart, Softnet and Go compiler
 executables are external prerequisites, not bundled distributions.
 NOTICES
-python3 - "$package" "$version" "$revision" "$go_bin" <<'PY'
+python3 - "$package" "$version" "$revision" "$go_bin" "$app_bundle_id" <<'PY'
 import json, pathlib, subprocess, sys
 root = pathlib.Path(sys.argv[1])
 data = {"version": sys.argv[2], "revision": sys.argv[3], "platform": "darwin-arm64",
-        "cgo": True, "signing": "ad-hoc; not notarized",
+        "application_id": sys.argv[5], "cgo": True, "signing": "ad-hoc; not notarized",
         "go": subprocess.check_output([sys.argv[4], "version"], text=True).strip()}
 (root / "BUILD.json").write_text(json.dumps(data, indent=2) + "\n")
 PY

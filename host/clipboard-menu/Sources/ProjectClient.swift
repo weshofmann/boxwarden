@@ -5,6 +5,10 @@ final class ProjectClient {
   let executable: String; let config: String; let domain: String
   private let store: ProjectActivityStore
   private let lock = NSLock()
+  private let querySerial = NSLock()
+  private let queriesDrained = DispatchGroup()
+  private var queryGeneration: UInt64 = 0
+  private var queriesClosing = false
   private var owned: [UUID: ProjectOwnedProcess] = [:]
   init(executable: String, config: String, domain: String = "alpha", activityDirectory: URL? = nil) throws {
     guard ProjectCommand.validPath(executable), ProjectCommand.validPath(config), ProjectCommand.validToken(domain) else {
@@ -16,17 +20,22 @@ final class ProjectClient {
     store = try ProjectActivityStore(root: directory)
   }
   // Intended for a worker queue. Mutation lifetimes are never bounded by a UI timeout.
-  func query(_ command: ProjectCommand, timeout: TimeInterval = 30) throws -> ProjectResponse {
+  func query(_ command: ProjectCommand, timeout: TimeInterval = 30, queryToken: UInt64? = nil) throws -> ProjectResponse {
     guard !command.isMutation else { throw ProjectClientError.invalidRequest("Use asynchronous start for mutations") }
+    lock.lock(); let generation = queryToken ?? queryGeneration; lock.unlock()
+    querySerial.lock(); defer { querySerial.unlock() }
     let done = DispatchSemaphore(value: 0)
     let resultLock = NSLock()
     var result: ProjectOutcome?
-    let activity = try start(command, progress: { _ in }) { outcome in
+    let activity = try start(command, allowRetryAfterUnknown: false, queryGeneration: generation, progress: { _ in }) { outcome in
       resultLock.lock(); result = outcome; resultLock.unlock(); done.signal()
     }
     if done.wait(timeout: .now() + timeout) != .success {
       lock.lock(); let child = owned[activity.id]; lock.unlock()
       child?.interrupt()
+      // The worker stays responsible for waitpid until the exact owned child is
+      // reaped. A following refresh cannot launch over a timed-out query.
+      done.wait()
       throw ProjectClientError.process("Query timed out; refresh to rediscover backend state")
     }
     resultLock.lock(); let outcome = result; resultLock.unlock()
@@ -40,6 +49,16 @@ final class ProjectClient {
   func start(_ command: ProjectCommand, allowRetryAfterUnknown: Bool = false,
              progress: @escaping (ProjectEvent) -> Void = { _ in },
              completion: @escaping (ProjectOutcome) -> Void) throws -> ProjectActivity {
+    try start(command, allowRetryAfterUnknown: allowRetryAfterUnknown, queryGeneration: nil,
+              progress: progress, completion: completion)
+  }
+  private func start(_ command: ProjectCommand, allowRetryAfterUnknown: Bool, queryGeneration generation: UInt64?,
+                     progress: @escaping (ProjectEvent) -> Void,
+                     completion: @escaping (ProjectOutcome) -> Void) throws -> ProjectActivity {
+    if !command.isMutation {
+      lock.lock(); let admitted = !queriesClosing && (generation == nil || generation == queryGeneration); lock.unlock()
+      guard admitted else { throw ProjectClientError.process("Query superseded or frontend closing") }
+    }
     let arguments = try command.arguments(config: config, domain: domain)
     var record = ProjectActivityRecord(id: UUID(), executable: executable, config: config, domain: domain,
       operation: command.operation, projectName: command.projectName, arguments: arguments,
@@ -66,25 +85,54 @@ final class ProjectClient {
       }
       let output = try store.create(record)
       do {
-        let pid = try ProjectOwnedProcess.spawn(executable: executable, arguments: arguments, output: output)
-        record.pid = pid
-        if let identity = ProjectActivityRecord.identity(pid) { record.startSeconds = identity.0; record.startMicroseconds = identity.1 }
-        record.message = "CLI request running"
-        // A crash between spawn and this write leaves an unknown receipt, which
-        // still blocks replay. A remembered PID is never used for signalling.
+        // External activity lock acquisition stays outside the owner mutex.
+        // Spawn and registration are atomic with query cancellation admission.
+        lock.lock()
+        let launched: ProjectOwnedProcess
+        do {
+          if !command.isMutation {
+            guard !queriesClosing, generation == nil || generation == queryGeneration else {
+              throw ProjectClientError.process("Query superseded or frontend closing")
+            }
+          }
+          let pid = try ProjectOwnedProcess.spawn(executable: executable, arguments: arguments, output: output)
+          record.pid = pid
+          if let identity = ProjectActivityRecord.identity(pid) { record.startSeconds = identity.0; record.startMicroseconds = identity.1 }
+          record.message = "CLI request running"
+          // A crash between spawn and this write leaves an unknown receipt, which
+          // still blocks replay. A remembered PID is never used for signalling.
+          launched = ProjectOwnedProcess(record: record, output: output, store: store, progress: progress) { [self] outcome in
+            lock.lock(); owned.removeValue(forKey: record.id); lock.unlock()
+            completion(outcome)
+            if !record.mutation { queriesDrained.leave() }
+          }
+          owned[record.id] = launched
+          if !record.mutation { queriesDrained.enter() }
+          lock.unlock()
+        } catch { lock.unlock(); throw error }
         try? store.save(record)
-        return ProjectOwnedProcess(record: record, output: output, store: store, progress: progress) { [self] outcome in
-          lock.lock(); owned.removeValue(forKey: record.id); lock.unlock()
-          completion(outcome)
-        }
+        return launched
       } catch {
         Darwin.close(output); record.status = .failed; record.message = error.localizedDescription
         try store.save(record); throw error
       }
     }
-    lock.lock(); owned[record.id] = child; lock.unlock()
     child.begin()
     return record.activity(root: store.root)
+  }
+  // Cancellation affects only children launched by this live client. Retained
+  // activity identities are never signal targets, and mutations stay durable.
+  func queryToken() -> UInt64 { lock.lock(); defer { lock.unlock() }; return queryGeneration }
+  func cancelQueries() {
+    lock.lock(); queryGeneration &+= 1
+    let queries = owned.values.filter { !$0.isMutation }; lock.unlock()
+    queries.forEach { $0.interrupt() }
+  }
+  func disposeQueries(_ completion: @escaping () -> Void) {
+    lock.lock(); queriesClosing = true; queryGeneration &+= 1
+    let queries = owned.values.filter { !$0.isMutation }; lock.unlock()
+    queries.forEach { $0.interrupt() }
+    queriesDrained.notify(queue: .global(), execute: completion)
   }
   func acknowledgeUnknownActivity(_ id: UUID) throws {
     try store.withLock {
@@ -128,6 +176,7 @@ final class ProjectClient {
 
 private final class ProjectOwnedProcess: @unchecked Sendable {
   let operation: String
+  let isMutation: Bool
   private let queue = DispatchQueue(label: "boxwarden.project-client.child")
   private var record: ProjectActivityRecord
   private let output: Int32; private let store: ProjectActivityStore
@@ -137,7 +186,7 @@ private final class ProjectOwnedProcess: @unchecked Sendable {
   private let progress: (ProjectEvent) -> Void; private let completion: (ProjectOutcome) -> Void
   init(record: ProjectActivityRecord, output: Int32, store: ProjectActivityStore,
        progress: @escaping (ProjectEvent) -> Void, completion: @escaping (ProjectOutcome) -> Void) {
-    self.record = record; self.operation = record.operation; self.output = output; self.store = store
+    self.record = record; self.operation = record.operation; self.isMutation = record.mutation; self.output = output; self.store = store
     self.pid = record.pid!; self.progress = progress; self.completion = completion
   }
   static func spawn(executable: String, arguments: [String], output: Int32) throws -> pid_t {
@@ -168,6 +217,7 @@ private final class ProjectOwnedProcess: @unchecked Sendable {
   func interrupt() {
     queue.async { [self] in
       guard !reaped, !finished else { return }
+      guard !interrupted else { return }
       interrupted = true
       _ = kill(pid, SIGTERM)
       queue.asyncAfter(deadline: .now() + .seconds(1)) { [self] in

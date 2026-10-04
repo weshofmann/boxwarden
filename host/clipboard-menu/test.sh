@@ -24,6 +24,18 @@ swiftc -parse-as-library "$base/host/clipboard-menu/Sources/ProjectPresentation.
   "$base/host/clipboard-menu/Tests/ProjectPresentationTests.swift" -o "$temporary/presentation-tests"
 "$temporary/presentation-tests"
 bash "$base/host/clipboard-menu/test-project-client.sh"
+swiftc -parse-as-library "$base/host/clipboard-menu/Sources/MenuModel.swift" \
+  "$base/host/clipboard-menu/Sources/CLIClient.swift" \
+  "$base/host/clipboard-menu/Sources/ProjectProtocol.swift" \
+  "$base/host/clipboard-menu/Sources/ProjectActivity.swift" \
+  "$base/host/clipboard-menu/Sources/ProjectClient.swift" \
+  "$base/host/clipboard-menu/Tests/QueryLifecycleTests.swift" -o "$temporary/query-lifecycle-tests"
+swiftc -parse-as-library "$base/host/clipboard-menu/Sources/ProjectProtocol.swift" \
+  "$base/host/clipboard-menu/Sources/ProjectActivity.swift" \
+  "$base/host/clipboard-menu/Sources/ProjectClient.swift" \
+  "$base/host/clipboard-menu/Tests/ActivityLockTests.swift" -o "$temporary/activity-lock-tests"
+"$temporary/activity-lock-tests"
+"$temporary/query-lifecycle-tests"
 swiftc -warnings-as-errors -typecheck "$base/host/clipboard-menu/Sources/MenuModel.swift" \
   "$base/host/clipboard-menu/Sources/CLIClient.swift" "$base"/host/clipboard-menu/Sources/Project*.swift
 

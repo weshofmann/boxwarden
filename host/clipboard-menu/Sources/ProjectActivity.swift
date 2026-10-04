@@ -68,9 +68,15 @@ final class ProjectActivityStore {
   }
   deinit { Darwin.close(lockFD); Darwin.close(rootFD) }
   func withLock<T>(_ body: () throws -> T) throws -> T {
-    lock.lock(); defer { lock.unlock() }
+    guard lock.lock(before: Date().addingTimeInterval(0.1)) else {
+      throw ProjectClientError.busy("Command activity is busy; refresh before retry")
+    }
+    defer { lock.unlock() }
     guard Self.privateDirectory(rootFD), Self.privateFile(lockFD) else { throw ProjectClientError.activity("Activity root or lock permissions/ACLs are unsafe") }
-    guard flock(lockFD, LOCK_EX) == 0 else { throw ProjectClientError.activity("Cannot lock command activity") }
+    guard flock(lockFD, LOCK_EX | LOCK_NB) == 0 else {
+      if errno == EWOULDBLOCK || errno == EAGAIN { throw ProjectClientError.busy("Command activity is busy in another frontend; refresh before retry") }
+      throw ProjectClientError.activity("Cannot lock command activity")
+    }
     defer { _ = flock(lockFD, LOCK_UN) }
     return try body()
   }

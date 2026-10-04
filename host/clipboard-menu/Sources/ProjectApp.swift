@@ -6,6 +6,7 @@ import AppKit
 final class ProjectManagerApp: NSObject, NSApplicationDelegate {
   private var controller: ProjectWindowController!
   private var statusItem: NSStatusItem!
+  private var quitting = false
   static func main() {
     let app = NSApplication.shared
     let delegate = ProjectManagerApp()
@@ -31,7 +32,10 @@ final class ProjectManagerApp: NSObject, NSApplicationDelegate {
       index += 2
     }
     let cli = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/boxwarden").path
-    controller = ProjectWindowController(executable: cli, privatePasteboard: privateBoard)
+    let bundleID = Bundle.main.bundleIdentifier ?? "org.boxwarden.project-manager"
+    let activityDirectory = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent("Library/Application Support/" + bundleID + "/CommandActivity")
+    controller = ProjectWindowController(executable: cli, privatePasteboard: privateBoard, activityDirectory: activityDirectory)
     makeMenus()
     controller.showWindow(nil)
     NSApp.activate(ignoringOtherApps: true)
@@ -70,8 +74,7 @@ final class ProjectManagerApp: NSObject, NSApplicationDelegate {
   @objc private func showProjects(_ sender: Any?) { controller.showWindow(nil); NSApp.activate(ignoringOtherApps: true) }
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showProjects(nil); return true }
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    // CLI children use their own session and regular-file output. Closing this
-    // frontend never signals them, and it never stops the VM backend.
+    guard !quitting else { return .terminateLater }
     if controller?.hasActiveOperation == true {
       let alert = NSAlert()
       alert.messageText = "Quit while work continues?"
@@ -79,6 +82,9 @@ final class ProjectManagerApp: NSObject, NSApplicationDelegate {
       alert.addButton(withTitle: "Quit Boxwarden"); alert.addButton(withTitle: "Keep Open")
       if alert.runModal() != .alertFirstButtonReturn { return .terminateCancel }
     }
-    return .terminateNow
+    guard let controller else { return .terminateNow }
+    quitting = true
+    controller.shutdownQueries { sender.reply(toApplicationShouldTerminate: true) }
+    return .terminateLater
   }
 }

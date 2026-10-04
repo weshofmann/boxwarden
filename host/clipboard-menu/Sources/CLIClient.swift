@@ -15,6 +15,11 @@ final class CLIClient {
   let privateHostPasteboard: String?
   private let lock = NSLock()
   private let drained = DispatchGroup()
+  private let queriesDrained = DispatchGroup()
+  private let querySerial = NSLock()
+  private var queryGeneration: UInt64 = 0
+  private var queriesClosing = false
+  private var queryIDs = Set<UUID>()
   private var closing = false
   private var children: [UUID: RunningProcess] = [:]
   init(executable: String, config: String, deadlineSeconds: Double = 30, privateHostPasteboard: String? = nil) {
@@ -33,9 +38,13 @@ final class CLIClient {
       name.utf8.allSatisfy { (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 46 || $0 == 95 || $0 == 45 }
   }
 
-  private func register(_ child: RunningProcess) -> Bool {
+  private func register(_ child: RunningProcess, queryGeneration generation: UInt64? = nil) -> Bool {
     lock.lock(); defer { lock.unlock() }
     guard !closing else { return false }
+    if let generation {
+      guard !queriesClosing, generation == queryGeneration else { return false }
+      queryIDs.insert(child.id); queriesDrained.enter()
+    }
     children[child.id] = child
     drained.enter()
     return true
@@ -43,8 +52,22 @@ final class CLIClient {
   private func finished(_ id: UUID) {
     lock.lock()
     let removed = children.removeValue(forKey: id) != nil
+    let query = queryIDs.remove(id) != nil
     lock.unlock()
     if removed { drained.leave() }
+    if query { queriesDrained.leave() }
+  }
+  func queryToken() -> UInt64 { lock.lock(); defer { lock.unlock() }; return queryGeneration }
+  func cancelQueries() {
+    lock.lock(); queryGeneration &+= 1
+    let queries = queryIDs.compactMap { children[$0] }; lock.unlock()
+    queries.forEach { $0.cancel() }
+  }
+  func disposeQueries(_ completion: @escaping () -> Void) {
+    lock.lock(); queriesClosing = true; queryGeneration &+= 1
+    let queries = queryIDs.compactMap { children[$0] }; lock.unlock()
+    queries.forEach { $0.cancel() }
+    queriesDrained.notify(queue: .global(), execute: completion)
   }
   func shutdown(_ completion: @escaping () -> Void) {
     lock.lock(); closing = true; let owned = Array(children.values); lock.unlock()
@@ -52,8 +75,10 @@ final class CLIClient {
     drained.notify(queue: .global(), execute: completion)
   }
 
-  func discover(domain: String) throws -> [MenuTarget] {
+  func discover(domain: String, queryToken: UInt64? = nil) throws -> [MenuTarget] {
     guard Self.validPath(executable), Self.validPath(config), MenuTarget.validToken(domain) else { throw CLIError.invalidLocator }
+    lock.lock(); let generation = queryToken ?? queryGeneration; lock.unlock()
+    querySerial.lock(); defer { querySerial.unlock() }
     let done = DispatchSemaphore(value: 0)
     var response = Data()
     var result: TransferResult = .failed
@@ -61,7 +86,7 @@ final class CLIClient {
     let child = RunningProcess(id: id, readOutput: true, deadlineSeconds: deadlineSeconds) { [self] data, outcome in
       response = data; result = outcome; finished(id); done.signal()
     }
-    guard register(child) else { throw CLIError.processFailed }
+    guard register(child, queryGeneration: generation) else { throw CLIError.processFailed }
     child.start(executable: executable, arguments: ["--config", config, "--domain", domain, "clipboard", "targets"])
     done.wait()
     guard result == .success else { throw CLIError.processFailed }
