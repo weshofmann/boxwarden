@@ -30,6 +30,26 @@ import Darwin
     if case .list(let value) = try client.query(.list) {
       check(value.projects.isEmpty && value.setup.status == "missing", "typed setup state and fixed argv with closed environment")
     } else { check(false, "wrong response type") }
+    let boundedStore = try ProjectActivityStore(root: activity)
+    let originalReceipt = try boundedStore.records().first!
+    let oversizedReceipt = ProjectActivityRecord(id: UUID(), executable: cli.path, config: "/opt/config with spaces", domain: "alpha",
+      operation: "project.list", projectName: nil, arguments: [], mutation: false, startedAt: Date(),
+      status: .unknown, message: String(repeating: "x", count: 128 * 1024))
+    var createRejected = false, saveRejected = false
+    do { _ = try boundedStore.withLock { Darwin.close(try boundedStore.create(oversizedReceipt)) } } catch { createRejected = true }
+    var oversizedUpdate = originalReceipt; oversizedUpdate.message = oversizedReceipt.message
+    do { try boundedStore.withLock { try boundedStore.save(oversizedUpdate) } } catch { saveRejected = true }
+    check(createRejected && saveRejected, "oversized receipt rejected before create/save (create: \(createRejected), save: \(saveRejected))")
+    check(!FileManager.default.fileExists(atPath: activity.appendingPathComponent(oversizedReceipt.id.uuidString).path), "rejected receipt creates no directory that could poison discovery")
+    check(try boundedStore.records().first(where: { $0.id == originalReceipt.id })?.message == originalReceipt.message, "rejected update preserves the prior readable receipt")
+    for exclusions in [(0..<33).map { "excluded-" + String($0) }, [String(repeating: "a", count: 256)]] {
+      do { _ = try ProjectCommand.importPreview(source: "/opt/synthetic-source", exclusions: exclusions).arguments(config: "/opt/config with spaces", domain: "alpha"); check(false, "public exclusion count and byte bounds match Go admission") } catch {}
+    }
+    do {
+      try client.start(.importPreview(source: "/opt/synthetic-source", exclusions: (0..<256).map { String(repeating: "a", count: 600) + String($0) })) { _ in }
+      check(false, "oversized exclusion request rejected before receipt persistence and process launch")
+    } catch {}
+    if case .list = try client.query(.list) {} else { check(false, "normal query remains usable after rejected oversized receipt and request") }
     let project = #"{"name":"demo","base":"base","session_id":"session","backend_object":"object","state":"ready","management_ready":true,"diagnostic":"","observed_state":"running","backend_running":true,"workspace":{"id":"workspace","filesystem_uuid":"fs","size_bytes":536870912,"mount_path":"/workspace","initialized":true},"software":{"intent_digest":"digest","status":"complete","actions":[{"action_id":"a","phase":"install","state":"complete","generation":"g"}]},"import":{"status":"not_imported","id":"","guest_path":""},"replacement_pending":false,"available_actions":["open","status","stop","import","export"]}"#
     let openResult = "{\"version\":1,\"type\":\"result\",\"operation\":\"project.open\",\"data\":{\"project\":\(project)}}"
     func run(_ command: ProjectCommand) throws -> ProjectOutcome {
