@@ -10,7 +10,9 @@ import (
 	"syscall"
 	"unicode"
 
+	"github.com/weshofmann/boxwarden/internal/basebuild"
 	"github.com/weshofmann/boxwarden/internal/config"
+	"github.com/weshofmann/boxwarden/internal/execx"
 	"github.com/weshofmann/boxwarden/internal/projectx"
 	"github.com/weshofmann/boxwarden/internal/recipe"
 	"github.com/weshofmann/boxwarden/internal/workspaceformat"
@@ -40,6 +42,25 @@ func checkProjectSetup(ctx context.Context, selected config.Domain, setup projec
 	}
 	if err := checkProjectGoBinary(setup.GoBinary); err != nil {
 		return err
+	}
+	if setup.Version == 2 {
+		seed := basebuild.HostSeedBuilder{Runner: execx.OSRunner{MaxOutputBytes: 4096}, OpenSSLPath: setup.OpenSSLPath, OpenSSLSHA256: setup.OpenSSLSHA256, XorrisoPath: setup.XorrisoPath, XorrisoSHA256: setup.XorrisoSHA256}
+		if err := seed.CheckTools(); err != nil {
+			return fmt.Errorf("project recipe preparation tools are unavailable or changed; supply exact compatible tools through prepare-projects.sh: %w", err)
+		}
+		definition := filepath.Join(setup.SourceRoot, "guest", "ubuntu-24.04-arm64")
+		if _, err := recipe.GuestDefinitionDigest(definition); err != nil {
+			return fmt.Errorf("project guest support source is incomplete; use the complete extracted package: %w", err)
+		}
+		for _, filename := range []string{"v0.2-alpha-base.json", "v0.2-alpha-actions.json", "v0.2-alpha-chatgpt.json"} {
+			value, err := recipe.LoadRunnable(filepath.Join(setup.SourceRoot, "examples", filename))
+			if err != nil {
+				return fmt.Errorf("project recipe source %s: %w", filename, err)
+			}
+			if _, err := recipe.WithGuestSupport(value, definition); err != nil {
+				return fmt.Errorf("project guest support source: %w", err)
+			}
+		}
 	}
 	if err := recipe.VerifyISO(setup.ISOPath); err != nil {
 		return fmt.Errorf("project setup ISO %q is not the admitted pinned installer; supply --iso with Ubuntu 24.04.4 Desktop ARM64: %w", setup.ISOPath, err)

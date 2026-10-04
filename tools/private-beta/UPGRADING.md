@@ -1,5 +1,30 @@
 # Update a user-owned beta package beside the old package
 
+For beta.4 recipe-enabled setup, keep the new extracted package at its final
+path and run its `prepare-projects.sh --update` with the existing five asset
+arguments plus exact existing OpenSSL and xorriso executables. This admits and
+records the preparation tools; it changes no guest. New projects can then select
+`--recipe desktop|actions|chatgpt`. A stopped existing project can explicitly
+`project rebuild --recipe chatgpt NAME` to provision software and support on a
+new system while retaining its workspace. Later recipe-bound replacements use
+captured software intent by default. Ordinary open never updates helpers or
+reimports work. See [TRY-ME.md](TRY-ME.md) for the seven-argument setup and route.
+After selecting the new package and existing configuration/asset variables
+from that guide, use the recipe-enabled update:
+
+```sh
+bash "$PACKAGE/prepare-projects.sh" --update "$CONFIG" "$ISO" "$CHECKER" \
+  "$GO_BIN" "$ZSTD_BIN" "$OPENSSL_BIN" "$XORRISO_BIN"
+```
+
+Recipe-enabled setup/bookmarks use strict version2 records. Older beta packages
+may refuse those records; returning to an old binary is not a metadata rollback.
+Retain the old package and its independent configuration for the old trial.
+The legacy manual helper staging below applies to an older registered-base
+workflow, not the recipe-created/rebuilt systems.
+
+## Legacy registered-base update (five inputs)
+
 This updates the package and helper asset locators for an existing private
 configuration. It does not install Tart/Softnet, change host settings, reformat a
 workspace, reimport a project, or silently install guest helpers. Use a new package
@@ -69,13 +94,40 @@ CLIPBOARD_SOURCE=/absolute/new-private-clipboard-source
 bash "$PACKAGE/prepare-guest-clipboard.sh" "$GO_BIN" "$CLIPBOARD_SOURCE"
 ```
 
-Follow TRY-ME.md's **Controlled clipboard → An older prepared base** section:
-open the project, use its printed workspace UUID with public `workspace import`,
-check the imported checksums in the guest, and explicitly install the two guest
-helpers there. These are changes to your selected guest, not host deployment.
-Keep the old source and all import receipts. Ordinary project import is not used
-for this helper payload, so the project's original export selection is retained.
-Stop and reopen to establish a new exact management generation. Launch the new
+Open the project and use its printed workspace UUID with public `workspace
+import`. This keeps the project's original export selection:
+
+```sh
+bw project open myproject
+bw project status myproject
+VOLUME=printed-workspace-uuid
+bw workspace import --source "$CLIPBOARD_SOURCE" "$VOLUME" myproject
+```
+
+In Ubuntu Terminal, enter the exact **`remote:`** directory printed by import.
+Verify the imported files before explicitly installing the two guest helpers:
+
+```sh
+cd /home/boxwarden/workspaces/project/boxwarden-import-PRINTED-TRANSACTION-UUID
+sha256sum -c SHA256SUMS
+umask 077
+gzip -dc boxwarden-guest-bootstrap.gz > boxwarden-guest-bootstrap
+sha256sum -c BOOTSTRAP.sha256
+sudo -n install -o root -g root -m 0755 boxwarden-guest-bootstrap /usr/local/libexec/boxwarden-guest-bootstrap
+sudo -n install -o root -g root -m 0755 boxwarden-guest-clipboard.py /usr/local/libexec/boxwarden-guest-clipboard.py
+```
+
+Both checksums and installation commands must succeed. These change only the
+selected guest's system disk. Keep the old source and all import receipts.
+On the Mac, stop and reopen to establish a new exact management generation:
+
+```sh
+bw project stop myproject
+bw project open myproject
+bw project status myproject
+```
+
+Wait for management READY before testing clipboard transfer. Launch the new
 menu with the explicit configuration; quit an older copy manually if needed:
 
 ```sh
@@ -103,7 +155,7 @@ history file is refused before switching active setup: inspect the reported file
 and retain evidence rather than deleting it to bypass the check.
 
 Side-by-side files make the old executable available, but do **not** provide a
-transactional rollback of state or guest helpers. This increment preserves the
+transactional rollback of state or guest helpers. The legacy five-input route preserves the
 Version 1 setup/bookmark format and historical receipts, but returning to beta.2
 after newer operations is **not guaranteed or qualified**. Use the new executable
 to inspect/recover the existing state. Do not point an old executable at changed

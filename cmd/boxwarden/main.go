@@ -20,7 +20,6 @@ import (
 	"github.com/weshofmann/boxwarden/internal/execx"
 	"github.com/weshofmann/boxwarden/internal/hostx"
 	"github.com/weshofmann/boxwarden/internal/importx"
-	"github.com/weshofmann/boxwarden/internal/recipe"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/sessionruntime"
 	"github.com/weshofmann/boxwarden/internal/sshx"
@@ -110,10 +109,11 @@ func publicOptions(output io.Writer) app.Options {
 		SessionStopperFactory: func(loaded config.Config, selected config.Domain, path string) (app.SessionStopper, error) {
 			return sessionruntime.NewStarter(loaded, selected, path)
 		},
-		AlphaRebuild:          sessionruntime.Rebuild,
-		AlphaRebuildPrepare:   sessionruntime.PrepareRebuild,
-		AlphaRebuildCandidate: sessionruntime.CompleteRebuild,
-		AlphaDelete:           sessionruntime.Delete,
+		AlphaRebuild:                  sessionruntime.Rebuild,
+		AlphaRebuildPrepare:           sessionruntime.PrepareRebuild,
+		AlphaRebuildPrepareWithIntent: sessionruntime.PrepareRebuildWithIntent,
+		AlphaRebuildCandidate:         sessionruntime.CompleteRebuild,
+		AlphaDelete:                   sessionruntime.Delete,
 		AlphaAction: func(ctx context.Context, selected config.Domain, input app.AlphaActionInput) (session.ActionAttempt, error) {
 			controller, err := supervisor.NewExactActionController(filepath.Join(selected.StateRoot, "runtime"))
 			if err != nil {
@@ -163,7 +163,7 @@ func publicOptions(output io.Writer) app.Options {
 			if err != nil || admitted != selected {
 				return app.AlphaPrepared{}, fmt.Errorf("alpha preparation requires exact configured domain")
 			}
-			value, err := recipe.LoadRunnable(input.RecipePath)
+			value, err := loadPreparationRecipe(selected.StateRoot, input)
 			if err != nil {
 				return app.AlphaPrepared{}, fmt.Errorf("load alpha recipe: %w", err)
 			}
@@ -185,7 +185,11 @@ func publicOptions(output io.Writer) app.Options {
 			runner := execx.OSRunner{MaxOutputBytes: 1 << 20}
 			observer := tart.NewQualifiedObserver(runner, host.TartExecutable, host.TartHome)
 			components := alphaprep.BuildComponents{Runner: runner, Observer: observer, ScriptRunner: basebuild.OSOwnedScriptRunner{}, Launcher: basebuild.OSInstallerLauncher{},
-				OpenSSLPath: input.OpenSSLPath, OpenSSLSHA256: input.OpenSSLSHA256, XorrisoPath: input.XorrisoPath, XorrisoSHA256: input.XorrisoSHA256}
+				OpenSSLPath: input.OpenSSLPath, OpenSSLSHA256: input.OpenSSLSHA256, XorrisoPath: input.XorrisoPath, XorrisoSHA256: input.XorrisoSHA256,
+				Progress: func(phase basebuild.Phase) { fmt.Fprintf(output, "preparation: %s\n", phase) }}
+			if _, err := fmt.Fprintln(output, "preparation: checking prerequisites and reusable cache"); err != nil {
+				return app.AlphaPrepared{}, err
+			}
 			base, err := alphaprep.Prepare(ctx, loaded, selected, configPath, request, hostDoctor, caStore, components)
 			if err != nil {
 				return app.AlphaPrepared{}, err

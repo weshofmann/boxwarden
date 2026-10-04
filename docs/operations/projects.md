@@ -7,11 +7,11 @@ storage health: every operation checks the underlying records and backing
 storage. Existing sessions are not adopted by name.
 
 Use a CGO-enabled Darwin ARM64 build, an enrolled private config, a healthy
-`doctor`, and a registered prepared Ubuntu Desktop ARM64 base. Keep adequate
+`doctor`, and the admitted Ubuntu Desktop ARM64 inputs. Keep adequate
 free space above the enforced storage reserve. The current interface supports
 the explicit `alpha` domain and 16–1024 MiB workspaces, matching the stopped
-export size limit. It reuses a prepared base; creating a project does not rebuild
-Ubuntu or install host tools.
+export size limit. Recipe creation prepares Ubuntu once per matching preparation key and reuses
+qualified results thereafter. It never installs host tools.
 
 ## One setup
 
@@ -50,6 +50,26 @@ receipts. See the [side-by-side beta update guide](../../tools/private-beta/UPGR
 for package preparation, explicit guest helper updates, failure recovery and the
 limits on returning to an old version. Ordinary `project setup` remains create-only.
 
+## Recipe-enabled package setup
+
+The packaged beta's `prepare-projects.sh` accepts the five existing assets plus
+exact existing OpenSSL and xorriso executable paths. It probes their required
+capabilities before formatter preparation and records their SHA-256 pins once.
+Use that seven-argument route for recipe-enabled setup; see the package's
+[TRY-ME.md](../../tools/private-beta/TRY-ME.md). Legacy five-argument setup remains
+supported and selects registered bases until explicitly updated.
+
+`project create --recipe desktop|actions|chatgpt NAME` uses the existing recipe
+preparation/cache, captures full immutable intent, and provisions compatible
+Boxwarden support in the new system. Relevant preparation or guest definition
+changes produce a different cache key; once/startup-only intent changes can reuse
+the same prepared base while binding different post-start actions. Ordinary open
+uses captured intent without rereading recipe source or preparing/importing again.
+Management READY and software action completion are separately reported; a failed
+support action cannot establish working clipboard support. Inspect retained
+attempts with `session action list NAME`; uncertain effects require explicit
+recovery, never automatic replay.
+
 ## Create and explicitly import
 
 Choose a fresh name and a new absolute private source path outside domain state:
@@ -61,13 +81,14 @@ mkdir -m 700 "$SOURCE"
 printf 'Original host project.\n' > "$SOURCE/notes.txt"
 printf 'unchanged-reference-v1\n' > "$SOURCE/reference.txt"
 
-bw project create --base current --size-mib 64 myproject
+bw project create --recipe chatgpt --size-mib 64 myproject
 bw project status myproject
 bw project import --source "$SOURCE" myproject
 ```
 
-`--base current` uses the selected registered golden. You can instead give an
-explicit registered prepared-base name. Create opens the native Tart desktop;
+The selected recipe prepares/qualifies or reuses a base automatically; no manual
+golden registration is needed. An explicit `--base current` or registered base
+retains the legacy path and reports unverified guest support. Create opens the native Tart desktop;
 wait for `readiness: ready` before importing. Status reports live readiness,
 workspace, guest files path and next actions. Import copies a bounded private
 tree (at most 256 files and 16 MiB); later guest edits do not modify the source.
@@ -157,12 +178,13 @@ or hand-prepared bindings are needed.
 ## Replace a stopped project's disposable system
 
 Keep work in the independent workspace. To discard guest system-disk changes
-and clone a registered prepared base under the same project name:
+and restore its captured recipe with current compatible package support under
+the same project name (or explicitly choose `--recipe chatgpt`):
 
 ```sh
 bw project list
 bw project stop myproject
-bw project rebuild --base current myproject
+bw project rebuild myproject
 bw project status myproject
 bw project open myproject
 ```
@@ -174,9 +196,10 @@ workspace, then retires only the old system. Rebuild can leave the candidate
 running; `project open` reuses that candidate. The name, session ID, workspace
 UUID, filesystem identity, attachment and original import selection stay the
 same. Subsequent open/export use the new system binding. Workspace data is
-neither reformatted nor reimported. Guest packages, system files and settings
-created after the prepared base disappear; explicitly staged guest clipboard
-helpers may need to be staged again on the replacement.
+neither reformatted nor reimported. System-only edits disappear. Recipe software and support are restored from the
+qualified preparation; once/startup actions execute after durable cutover.
+Replacement of a recipe-bound project refuses `--base`, which could drop its
+software/support contract. Legacy projects retain their registered-base path.
 
 Rebuild requires a stopped project with no unfinished import. If preparation,
 boot, retirement or bookmark publication fails, keep the retained state and use:
@@ -185,7 +208,7 @@ boot, retirement or bookmark publication fails, keep the retained state and use:
 bw project rebuild retry myproject
 ```
 
-Retry uses the recorded candidate; do not supply another base. The immutable
+Retry uses the recorded candidate and recipe; do not supply another base or recipe. The immutable
 replacement history allows a retry to settle a final directory-sync failure.
 It cannot authorize rebuilding, starting or deleting a different system. List
 shows a pending replacement and its retry command. Unrelated or inconsistent

@@ -6,8 +6,8 @@ if [[ ${1:-} == --update ]]; then
   operation=setup-update
   shift
 fi
-if [[ $# != 5 ]]; then
-  echo 'usage: bash prepare-projects.sh [--update] /absolute/config.json /absolute/ubuntu.iso /absolute/e2fsck-static.deb /absolute/go /absolute/zstd' >&2
+if [[ $# != 5 && $# != 7 ]]; then
+  echo 'usage: bash prepare-projects.sh [--update] /absolute/config.json /absolute/ubuntu.iso /absolute/e2fsck-static.deb /absolute/go /absolute/zstd [/absolute/openssl /absolute/xorriso]' >&2
   exit 2
 fi
 package="$(cd "$(dirname "$0")" && pwd -P)"
@@ -32,8 +32,46 @@ if [[ ! -x "$zstd_bin" || -L "$zstd_bin" || $(basename "$zstd_bin") != zstd ]]; 
 fi
 export PATH="$(dirname "$go_bin"):$(dirname "$zstd_bin"):/usr/bin:/bin"
 export GOENV=off GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off
+setup_args=(--source-root "$package/support/source" --formatter-bundle "$package/formatter" --iso "$iso" --go "$go_bin")
+if [[ $# == 7 ]]; then
+  openssl_bin=$6
+  xorriso_bin=$7
+  for name in openssl xorriso; do
+    if [[ "$name" == openssl ]]; then path=$openssl_bin; else path=$xorriso_bin; fi
+    if [[ "$path" != /* || ! -f "$path" || ! -x "$path" || -L "$path" || $(basename "$path") != "$name" ]]; then
+      printf 'supply the exact existing non-symlink %s executable; no tool is installed automatically\n' "$name" >&2
+      exit 2
+    fi
+  done
+  printf 'Checking exact recipe preparation tools before formatter preparation...\n'
+  # Probe only synthetic input. Apple /usr/bin/openssl lacks this capability.
+  expected_probe='$6$boxwarden-prereq$bsvT6K3VcjFnqFANCjJcS./f/0oensl45IiNphHg.TT7aDUUsaKlss3qt2ek23fOdujPaG.Lttdp6kxOGRqq50'
+  if ! openssl_probe=$("$openssl_bin" passwd -6 -salt boxwarden-prerequisite synthetic-prerequisite) || [[ "$openssl_probe" != "$expected_probe" ]]; then
+    echo 'OpenSSL must support SHA-512 passwd (-6); supply an already-installed compatible openssl executable' >&2
+    exit 2
+  fi
+  if ! xorriso_probe=$("$xorriso_bin" -version 2>&1) || [[ ! "$xorriso_probe" =~ xorriso[[:space:]]version[[:space:]]*: ]]; then
+    echo 'xorriso -version did not report a usable xorriso; supply the exact already-installed executable' >&2
+    exit 2
+  fi
+  tool_hashes=$(python3 - "$openssl_bin" "$xorriso_bin" <<'PYHASH'
+import hashlib, sys
+values = []
+for path in sys.argv[1:]:
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    values.append(digest.hexdigest())
+print(" ".join(values))
+PYHASH
+)
+  read -r openssl_sha256 xorriso_sha256 <<< "$tool_hashes"
+  setup_args+=(--openssl "$openssl_bin" --openssl-sha256 "$openssl_sha256" --xorriso "$xorriso_bin" --xorriso-sha256 "$xorriso_sha256")
+fi
 formatter="$package/formatter"
 if [[ ! -e "$formatter" && ! -L "$formatter" ]]; then
+  printf 'Preparing formatter assets; pinned ISO/checker admission runs before extraction or compilation...\n'
   log=$(mktemp /private/tmp/boxwarden-beta-formatter.XXXXXX)
   candidate=""
   trap 'rm -f -- "$log"; if [[ -n "$candidate" ]]; then rm -rf -- "$candidate"; fi' EXIT
@@ -66,6 +104,9 @@ if rename(os.fsencode(sys.argv[1]), os.fsencode(sys.argv[2]), 0x4):
 PY
   candidate=""
   rm -rf -- "$prepared"
+  printf 'Formatter assets prepared.\n'
+else
+  printf 'Using prepared formatter assets.\n'
 fi
-"$package/bin/boxwarden" --config "$config" --domain alpha project "$operation" \
-  --source-root "$package/support/source" --formatter-bundle "$formatter" --iso "$iso" --go "$go_bin"
+printf 'Recording project %s...\n' "$operation"
+"$package/bin/boxwarden" --config "$config" --domain alpha project "$operation" "${setup_args[@]}"

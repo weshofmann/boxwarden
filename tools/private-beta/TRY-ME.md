@@ -1,11 +1,13 @@
 # Boxwarden 0.2 private beta — Apple Silicon Mac
 
 This archive targets an **already initialized** Mac with admitted Tart 2.32.1 /
-Softnet 0.19.0, private enrolled APFS storage and a stopped, generic prepared
-Ubuntu 24.04.4 Desktop ARM64 base. It does not install or upgrade host tools.
+Softnet 0.19.0, private enrolled APFS storage and the pinned Ubuntu 24.04.4
+Desktop ARM64 inputs. It does not install or upgrade host tools.
 One-time helper preparation/export also requires actual Go 1.27.0, Xcode
 Command Line Tools, system Python 3, an existing `zstd` executable, the pinned Ubuntu Desktop ARM64 ISO and
-`e2fsck-static_1.47.0-2.4~exp1ubuntu4.1_arm64.deb`. These are external assets.
+`e2fsck-static_1.47.0-2.4~exp1ubuntu4.1_arm64.deb`, plus an existing OpenSSL
+with SHA-512 `passwd -6` support and `xorriso`. These are external assets;
+Apple's `/usr/bin/openssl` does not provide the required preparation mode.
 
 Keep the extracted directory at its final absolute location. It contains the
 CLI, directly launchable clipboard app and a self-contained source checkout
@@ -17,13 +19,13 @@ claim download/Gatekeeper distribution acceptance; it does not bypass OS checks.
 ## Verify and configure once
 
 Verify the archive beside its checksum file with
-`shasum -a 256 -c boxwarden-0.2.0-beta.3-darwin-arm64.tar.gz.sha256`, then extract
+`shasum -a 256 -c boxwarden-0.2.0-beta.4-darwin-arm64.tar.gz.sha256`, then extract
 in a new private user-owned directory. In a **new terminal**, set these
 paths to your actual assets; no profile sourcing or private bindings is needed:
 
 ```sh
 umask 077
-PACKAGE=/absolute/boxwarden-0.2.0-beta.3-darwin-arm64
+PACKAGE=/absolute/boxwarden-0.2.0-beta.4-darwin-arm64
 cd "$PACKAGE"
 shasum -a 256 -c SHA256SUMS
 "$PACKAGE/bin/boxwarden" version
@@ -32,11 +34,12 @@ shasum -a 256 -c SHA256SUMS
 ENROLLED_CONFIG=/absolute/existing/enrolled/config.json
 CONFIG="$HOME/Library/Application Support/boxwarden-beta/config.json"
 STATE=/absolute/enrolled-apfs-volume/private-beta-state
-BASE=existing-stopped-prepared-base-name
 ISO=/absolute/ubuntu-24.04.4-desktop-arm64.iso
 CHECKER=/absolute/e2fsck-static_1.47.0-2.4~exp1ubuntu4.1_arm64.deb
 GO_BIN=/absolute/actual/go
 ZSTD_BIN=/absolute/actual/zstd
+OPENSSL_BIN=/absolute/actual/openssl
+XORRISO_BIN=/absolute/actual/xorriso
 mkdir -m 700 "$STATE"
 mkdir -p -m 700 "$(dirname "$CONFIG")"
 python3 - "$ENROLLED_CONFIG" "$CONFIG" "$STATE" <<'PY'
@@ -54,14 +57,13 @@ PY
 bw() { "$PACKAGE/bin/boxwarden" --config "$CONFIG" --domain alpha "$@"; }
 "$PACKAGE/bin/boxwarden" --config "$CONFIG" doctor
 bw domain init
-bw golden register "$BASE"
-bash "$PACKAGE/prepare-projects.sh" "$CONFIG" "$ISO" "$CHECKER" "$GO_BIN" "$ZSTD_BIN"
+bash "$PACKAGE/prepare-projects.sh" "$CONFIG" "$ISO" "$CHECKER" "$GO_BIN" "$ZSTD_BIN" "$OPENSSL_BIN" "$XORRISO_BIN"
 ```
 
 The new config preserves the existing toolchain/storage enrollment and creates
-an independent state root. Golden registration observes the stopped base; it
-does not alter it. Preparation creates a private local formatter bound to the
-new state root. Run it once, before creating projects. Identical setup retries
+an independent state root. Package preparation creates a private local formatter
+bound to the new state root and remembers the exact admitted preparation tools.
+Run it once, before creating projects. Identical setup retries
 are safe; different saved asset locators are refused. Keep this package and its
 formatter in place. Do not reuse an older demo's state root or change its setup.
 
@@ -76,7 +78,7 @@ SOURCE=/absolute/new-private-source
 mkdir -m 700 "$SOURCE"
 printf 'Original host project.\n' > "$SOURCE/notes.txt"
 printf 'unchanged-reference-v1\n' > "$SOURCE/reference.txt"
-bw project create --size-mib 64 myproject
+bw project create --recipe chatgpt --size-mib 64 myproject
 bw project list
 bw project status myproject
 bw project import --source "$SOURCE" myproject
@@ -88,7 +90,25 @@ snapshot: unavailable backing storage is an error, incomplete projects stay
 visible, and a running backend is READY only with a fresh exact supervisor check.
 The commands shown recheck their bindings before doing work.
 
-Create opens the native desktop. Wait for `readiness: ready` before importing.
+Recipes are `desktop` (Ubuntu tools), `actions` (phase demonstration), and
+`chatgpt` (the pinned graphical client and phase demonstration). Recipe-enabled
+setup defaults a bare create to `desktop`. The first matching preparation installs
+Ubuntu, requested software and compatible Boxwarden helpers, then qualifies a
+fresh clone. It may take tens of minutes; `preparation:` messages show its stages.
+A second `project create --recipe chatgpt anotherproject` reuses the same qualified
+preparation (`cache: reused`) and gets its own system/workspace. Software sources
+need network access during preparation; a failed attempt is retained and not
+admitted as a successful base. No manual golden registration or helper copying
+is needed.
+
+Create opens the native desktop. Wait for **`management-readiness: ready` and
+`actions: complete`** before treating software setup as complete; READY alone
+checks the management channel. The ChatGPT recipe opens its graphical application
+automatically; sign-in is optional and is not part of this walkthrough.
+On a fresh desktop, Ubuntu may show optional update/upgrade notices and a
+keyring creation dialog. For this credential-free trial, cancel keyring creation
+and dismiss the optional updater; no password or upgrade is needed to reach
+the application's sign-in screen.
 If a fresh observation expires, run `bw project open myproject` to re-establish
 readiness, then `bw project import retry myproject` for a recorded import. The
 retry keeps its original selection and transaction; do not create another import.
@@ -128,46 +148,16 @@ Transfers are explicit, bounded to 256 files / 16 MiB, not synchronization.
 
 ## Controlled clipboard
 
-### An older prepared base
+Recipe-created and recipe-rebuilt systems get their compatible helpers from the
+same prepared definition. A startup sanity check verifies installed helper pins,
+dependencies and the graphical session without reading clipboard contents.
+Actual support is demonstrated by an explicit transfer below. Management READY
+alone, or a successful guest check, is not attestation against malicious guest root.
 
-Older prepared bases may have working management SSH without the current guest
-clipboard adapter. On the already initialized Mac, prepare the two generic guest
-helpers from this package's source, then explicitly import them into a READY
-synthetic project. This changes that project's system disk; it does not change
-the registered base or any host component. Preparation requires the actual
-Go 1.27.0 executable and creates a new private source directory. The bootstrap
-is gzip-compressed to fit the existing 4 MiB per-file import limit; its
-uncompressed checksum is retained separately:
-
-```sh
-CLIPBOARD_SOURCE=/absolute/new-private-clipboard-source
-bash "$PACKAGE/prepare-guest-clipboard.sh" "$GO_BIN" "$CLIPBOARD_SOURCE"
-bw project open myproject
-bw project status myproject
-# Set VOLUME to the workspace UUID printed by project status.
-VOLUME=printed-workspace-uuid
-bw workspace import --source "$CLIPBOARD_SOURCE" "$VOLUME" myproject
-```
-
-Use the exact **`remote:`** directory printed by workspace import. In Ubuntu
-Terminal, enter that path and verify the imported files before installing them:
-
-```sh
-cd /home/boxwarden/workspaces/project/boxwarden-import-PRINTED-TRANSACTION-UUID
-sha256sum -c SHA256SUMS
-umask 077
-gzip -dc boxwarden-guest-bootstrap.gz > boxwarden-guest-bootstrap
-sha256sum -c BOOTSTRAP.sha256
-sudo -n install -o root -g root -m 0755 boxwarden-guest-bootstrap /usr/local/libexec/boxwarden-guest-bootstrap
-sudo -n install -o root -g root -m 0755 boxwarden-guest-clipboard.py /usr/local/libexec/boxwarden-guest-clipboard.py
-```
-
-Both checksums and installation commands must succeed. Then, in the Mac terminal,
-run `bw project stop myproject`, `bw project open myproject`, and
-`bw project status myproject`. Wait for READY before the clipboard test below.
-The restart lets the current helper bind clipboard operations to the new
-management generation. The installed helpers persist across ordinary stop/open;
-a different clone from the older base needs this preparation separately.
+The explicit `--base` legacy route still exists for existing registered bases;
+its guest support is unverified and it does not provision a recipe automatically.
+Use `--recipe` for the turnkey route. Existing guests and bases are never updated
+by ordinary open or package setup.
 
 ### Discover and transfer
 
@@ -207,18 +197,25 @@ stays disabled. Provider sign-in, cold-machine installation, power-loss
 recovery and complete network isolation are outside this walkthrough.
 
 To rebuild from a clean committed checkout on this Mac:
-`GO_BIN=/absolute/actual/go bash tools/private-beta/build.sh 0.2.0-beta.3 /absolute/new-output`.
+`GO_BIN=/absolute/actual/go bash tools/private-beta/build.sh 0.2.0-beta.4 /absolute/new-output`.
 This builds locally and publishes no release.
 
 ## Replace a disposable project system
 
-With a stopped named project, `bw project rebuild --base current NAME` clones
-the supported prepared base even if the base name is unchanged, retains the
+With a stopped recipe-bound project, `bw project rebuild NAME` uses its captured
+software intent and current package support definition. `bw project rebuild
+--recipe chatgpt NAME` explicitly selects a new recipe. Both clone a replacement
+even if the qualified preparation is reused, retain the
 same workspace and import selection, and rebinds later open/export to the new
 system. It boots the candidate before retiring the old system. If interrupted,
 use `bw project rebuild retry NAME` to continue the same candidate. `bw project
 list` shows retained projects and pending replacements. System-only changes
 are discarded; workspace contents remain untrusted and are not sanitized.
 See `support/source/docs/operations/projects.md` for the runnable sequence and
-failure behavior. Explicit guest clipboard helpers may require restaging on
-the replacement system.
+failure behavior. Requested software and compatible guest support are restored
+automatically on the new system; manual helper restaging is unnecessary. Once actions run for the
+new system, startup actions run for each new start generation. Repeated open on
+the same running generation reruns neither. If software setup fails after cutover,
+the replacement remains bound; inspect `session action list NAME` and its explicit
+recovery commands. Do not create another replacement merely to replay an uncertain
+action.

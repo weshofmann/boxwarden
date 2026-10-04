@@ -58,12 +58,14 @@ recipe_helper="${guest_dir}/recipe-prepare.py"
 chatgpt_installer="${guest_dir}/install-pinned-chatgpt.py"
 chatgpt_launcher="${guest_dir}/launch-chatgpt.py"
 clipboard_helper="${guest_dir}/clipboard.py"
+support_check="${guest_dir}/support-check.py"
 for required in "$helper" /boxwarden-artifacts/boxwarden-guest-bootstrap \
   "$finalizer" /boxwarden-artifacts/finalize-golden.sh \
   "$recipe_helper" /boxwarden-artifacts/recipe-prepare.py \
   "$chatgpt_installer" /boxwarden-artifacts/install-pinned-chatgpt.py \
   "$chatgpt_launcher" /boxwarden-artifacts/launch-chatgpt.py \
   "$clipboard_helper" /boxwarden-artifacts/clipboard.py \
+  "$support_check" /boxwarden-artifacts/support-check.py \
   "$preparation" /boxwarden-artifacts/recipe-prepare.json /autoinstall.yaml; do
   grep -Fxq -- "$required" "$log" || fail "ISO did not map ${required}"
 done
@@ -75,12 +77,20 @@ grep -Fq "'$(shasum -a 256 "$chatgpt_launcher" | awk '{print $1}')'" "$mapped" |
 grep -Fq "'$(shasum -a 256 "$preparation" | awk '{print $1}')'" "$mapped" || fail 'mapped autoinstall is not bound to recipe payload bytes'
 grep -Fq "'$(shasum -a 256 "$clipboard_helper" | awk '{print $1}')'" "$mapped" || fail 'mapped autoinstall is not bound to clipboard helper bytes'
 grep -Fq 'install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/clipboard.py /target/usr/local/libexec/boxwarden-guest-clipboard.py' "$mapped" || fail 'mapped autoinstall does not install fixed clipboard adapter'
+grep -Fq "'$(shasum -a 256 "$support_check" | awk '{print $1}')'" "$mapped" || fail 'mapped autoinstall is not bound to support checker bytes'
+grep -Fq 'install -o root -g root -m 0755 /cdrom/boxwarden-artifacts/support-check.py /target/usr/local/libexec/boxwarden-guest-support-check' "$mapped" || fail 'mapped autoinstall does not install fixed support checker'
 ! grep -Fq __BOXWARDEN_ "$mapped" || fail 'mapped autoinstall retains a build placeholder'
 
 sed '/__BOXWARDEN_FINALIZER_SHA256__/d' "$rendered" >"${test_dir}/missing-finalizer-lock"
 if PATH="${stub_bin}:${PATH}" BW_TEST_XORRISO_LOG="$log" BW_TEST_MAPPED_USER_DATA="$mapped" \
   bash "$remaster" "$source_iso" "${test_dir}/missing-finalizer-lock" "$preparation" "$output_iso" >"${test_dir}/bad.out" 2>&1; then
   fail 'remaster accepted a user-data definition without finalizer binding'
+fi
+
+sed '/__BOXWARDEN_SUPPORT_CHECK_SHA256__/d' "$rendered" >"${test_dir}/missing-support-lock"
+if PATH="${stub_bin}:${PATH}" BW_TEST_XORRISO_LOG="$log" BW_TEST_MAPPED_USER_DATA="$mapped" \
+  bash "$remaster" "$source_iso" "${test_dir}/missing-support-lock" "$preparation" "$output_iso" >"${test_dir}/bad.out" 2>&1; then
+  fail 'remaster accepted user-data without support checker binding'
 fi
 
 printf 'generic golden fake-ISO mapping checks passed\n'

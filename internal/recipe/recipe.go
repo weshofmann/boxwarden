@@ -139,20 +139,31 @@ func LoadRunnable(filename string) (Recipe, error) {
 	if err != nil {
 		return Recipe{}, err
 	}
+	if err := ValidateRunnable(value); err != nil {
+		return Recipe{}, err
+	}
+	return value, nil
+}
+
+// ValidateRunnable rechecks captured intent without rereading a mutable recipe file.
+func ValidateRunnable(value Recipe) error {
+	if err := value.validate(); err != nil {
+		return err
+	}
 	for _, step := range value.Steps {
 		if step.Phase != "prepare" && step.Phase != "once" && step.Phase != "startup" && step.Phase != "reconfigure" {
-			return Recipe{}, fmt.Errorf("recipe phase %q is unsupported until session execution is available", step.Phase)
+			return fmt.Errorf("recipe phase %q is unsupported until session execution is available", step.Phase)
 		}
 		if step.Phase != "prepare" {
 			if err := validateRunnableActionArgv(step.Argv); err != nil {
-				return Recipe{}, fmt.Errorf("recipe action %q: %w", step.ID, err)
+				return fmt.Errorf("recipe action %q: %w", step.ID, err)
 			}
 		}
 	}
 	if len(value.Launch) != 0 {
-		return Recipe{}, errors.New("recipe launch actions are unsupported until session execution is available")
+		return errors.New("recipe launch actions are unsupported until session execution is available")
 	}
-	return value, nil
+	return nil
 }
 
 func (r Recipe) validate() error {

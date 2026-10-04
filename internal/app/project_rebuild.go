@@ -15,7 +15,7 @@ import (
 )
 
 func rebuildProject(ctx context.Context, c parsedCommand, loaded config.Config, d config.Domain, r projectx.Record, o Options) error {
-	if o.AlphaRebuildCandidate == nil || o.AlphaRebuildPrepare == nil {
+	if o.AlphaRebuildCandidate == nil || (o.AlphaRebuildPrepare == nil && o.AlphaRebuildPrepareWithIntent == nil) {
 		return errors.New("admitted project rebuild driver is required")
 	}
 	intent, pendingErr := projectx.LoadReplacement(d.StateRoot, d.ID, r.Name)
@@ -42,16 +42,16 @@ func rebuildProject(ctx context.Context, c parsedCommand, loaded config.Config, 
 		}
 	}
 	if pendingErr != nil {
-		var base string
+		var base, candidateDigest string
 		if c.project.retry {
 			j, err := session.LoadRebuildJournal(d.StateRoot, d.ID, r.Name)
 			if err != nil {
 				return fmt.Errorf("no recoverable project candidate; inspect project status %s: %w", r.Name, err)
 			}
-			if j.SessionID != r.SessionID || j.OldBackend != r.BackendObject || j.OldRevision != r.Base || (j.Phase != session.RebuildReserved && j.Phase != session.RebuildCloned) {
+			if j.SessionID != r.SessionID || j.OldBackend != r.BackendObject || j.OldRevision != r.Base || j.OldIntentDigest != r.RecipeIntentDigest || (j.Phase != session.RebuildReserved && j.Phase != session.RebuildCloned) {
 				return errors.New("pending candidate differs from project binding; inspect session status before changing anything")
 			}
-			base = j.CandidateRevision
+			base, candidateDigest = j.CandidateRevision, j.CandidateIntentDigest
 		} else {
 			if _, err := boundProject(ctx, d, r); err != nil {
 				return err
@@ -66,7 +66,13 @@ func rebuildProject(ctx context.Context, c parsedCommand, loaded config.Config, 
 			if r.ImportID != "" && !r.Imported {
 				return fmt.Errorf("project has a pending import; finish project import retry %s before replacing the system", r.Name)
 			}
+			if r.RecipeIntentDigest != "" && c.project.baseExplicit {
+				return errors.New("recipe-bound replacement requires --recipe or its captured recipe; do not select --base")
+			}
 			base = c.project.base
+			if c.project.recipe != "" || r.RecipeIntentDigest != "" {
+				base = r.Base
+			}
 			if base == "current" {
 				g, err := golden.LoadCurrent(ctx, d)
 				if err != nil {
@@ -91,7 +97,38 @@ func rebuildProject(ctx context.Context, c parsedCommand, loaded config.Config, 
 		}
 		// Preparing owns all existing stopped-system and workspace-use admission.
 		// Its session journal survives even if the bookmark receipt write fails.
-		j, err := o.AlphaRebuildPrepare(ctx, loaded, d, c.configPath, r.Name, base)
+		if !c.project.retry && (c.project.recipe != "" || r.RecipeIntentDigest != "") {
+			setup, err := projectx.LoadSetup(d.StateRoot)
+			if err != nil {
+				return fmt.Errorf("project recipe setup missing; run package preparation first: %w", err)
+			}
+			if o.ProjectSetupCheck == nil {
+				return errors.New("project setup asset checker is required")
+			}
+			if err := o.ProjectSetupCheck(ctx, d, setup); err != nil {
+				return fmt.Errorf("project recipe replacement prerequisites: %w", err)
+			}
+			captured := ""
+			if c.project.recipe == "" {
+				captured = r.RecipeIntentDigest
+			}
+			base, candidateDigest, err = prepareProjectRecipe(ctx, c, loaded, d, setup, c.project.recipe, captured, o)
+			if err != nil {
+				return err
+			}
+		}
+		var j session.RebuildJournal
+		if candidateDigest != "" {
+			if o.AlphaRebuildPrepareWithIntent == nil {
+				return errors.New("admitted recipe replacement driver is required")
+			}
+			j, err = o.AlphaRebuildPrepareWithIntent(ctx, loaded, d, c.configPath, r.Name, base, candidateDigest)
+		} else {
+			if o.AlphaRebuildPrepare == nil {
+				return errors.New("admitted legacy replacement driver is required")
+			}
+			j, err = o.AlphaRebuildPrepare(ctx, loaded, d, c.configPath, r.Name, base)
+		}
 		if err != nil {
 			return fmt.Errorf("project candidate preparation incomplete; use project rebuild retry %s after inspecting session status: %w", r.Name, err)
 		}
@@ -111,7 +148,7 @@ func rebuildProject(ctx context.Context, c parsedCommand, loaded config.Config, 
 		return fmt.Errorf("project replacement incomplete; use project rebuild retry %s; workspace and import selection retained: %w", r.Name, err)
 	}
 	actual, err := session.LoadRecord(d.StateRoot, string(d.ID), r.Name)
-	if err != nil || actual != rebuilt || actual.ID != intent.Before.SessionID || actual.Name != session.Name(r.Name) || actual.Domain != d.ID || actual.Backend.Kind != "tart" || actual.Backend.ObjectID != intent.BackendObject || actual.GoldenRevision != intent.Base || actual.Mode != session.ModeClean || actual.RecipeIntentDigest != "" {
+	if err != nil || actual != rebuilt || actual.ID != intent.Before.SessionID || actual.Name != session.Name(r.Name) || actual.Domain != d.ID || actual.Backend.Kind != "tart" || actual.Backend.ObjectID != intent.BackendObject || actual.GoldenRevision != intent.Base || actual.Mode != session.ModeClean || actual.RecipeIntentDigest != intent.IntentDigest {
 		return fmt.Errorf("completed rebuild differs from exact project candidate: %v", err)
 	}
 	if _, err := boundProject(ctx, d, intent.Next()); err != nil {
@@ -123,6 +160,14 @@ func rebuildProject(ctx context.Context, c parsedCommand, loaded config.Config, 
 	}
 	if _, err := fmt.Fprintf(o.Output, "project system replaced: %s\nold system: %s\nnew system: %s\nworkspace retained; no reformat or reimport; workspace contents are not sanitized\n", r.Name, intent.Before.BackendObject, next.BackendObject); err != nil {
 		return err
+	}
+	if next.RecipeIntentDigest != "" {
+		// CompleteReplacement has durably published the new bookmark and removed
+		// the rebuild journal. Only now may the ordinary action service run.
+		if err := projectSessionCommand(ctx, c, "start", o); err != nil {
+			return fmt.Errorf("project replacement completed; software setup blocked; inspect session action list %s and use project open after resolving the recorded attempt: %w", next.Name, err)
+		}
+		return projectStatus(ctx, c, d, next, o)
 	}
 	return writeProject(o.Output, next)
 }
