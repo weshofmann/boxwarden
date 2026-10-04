@@ -529,7 +529,7 @@ func TestControlRejectsMissingExpiredOrOverlongRequestExpiry(t *testing.T) {
 	}{
 		{name: "missing"},
 		{name: "expired", expiresAt: timePointer(time.Now().Add(-time.Second))},
-		{name: "overlong", expiresAt: timePointer(time.Now().Add(controlIOTimeout + time.Second))},
+		{name: "overlong", expiresAt: timePointer(time.Now().Add(6 * time.Second))},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			binding := minimalRequest(t).Binding

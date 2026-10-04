@@ -294,6 +294,9 @@ Explicit acknowledgement is recorded separately from that outcome, without
 rewriting backend state or automatically retrying. Only a live export mutation child owned
 by the current frontend can receive an explicit interruption request; query
 cleanup never signals durable mutations or recovered identities.
+The supervisor gives fresh snapshot observations a separate five-second operation
+budget; the initial control frame remains capped at two seconds. Absolute expiry,
+reply reserve and rejection of late positive readiness remain in force.
 
 Import confirmation pins the displayed selection digest. Export and retry use
 public stopped-workspace operations and a new destination; revealing returned
