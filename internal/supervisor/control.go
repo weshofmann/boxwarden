@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/weshofmann/boxwarden/internal/guestproto"
+	"github.com/weshofmann/boxwarden/internal/importx"
 )
 
 // controlIOTimeout caps snapshot RPC expiry as well as bounded request/response
@@ -430,8 +431,8 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 }
 
 func validImportResult(spec ImportTransfer, result *ImportResult) bool {
-	return result != nil && result.Digest == spec.SourceDigest && result.FileCount > 0 && result.FileCount <= 256 &&
-		result.TotalBytes >= 0 && result.TotalBytes <= 16<<20 && result.RemotePath == spec.MountPath+"/boxwarden-import-"+spec.TransactionID
+	return result != nil && result.Digest == spec.SourceDigest && result.FileCount > 0 && result.FileCount <= importx.MaxFiles &&
+		result.TotalBytes >= 0 && result.TotalBytes <= importx.MaxTotalBytes && result.RemotePath == spec.MountPath+"/boxwarden-import-"+spec.TransactionID
 }
 
 func encodeControlActionReceipt(request guestproto.ActionRequest, receipt *guestproto.ActionReceipt) ([]byte, error) {

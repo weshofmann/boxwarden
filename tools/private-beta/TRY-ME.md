@@ -111,7 +111,10 @@ and dismiss the optional updater; no password or upgrade is needed to reach
 the application's sign-in screen.
 If a fresh observation expires, run `bw project open myproject` to re-establish
 readiness, then `bw project import retry myproject` for a recorded import. The
-retry keeps its original selection and transaction; do not create another import.
+retry keeps its original selection, transaction and running generation. Finish a
+pending import before stopping or upgrading that runtime: stop/start changes its
+generation, and retry then refuses the old transaction. Do not rewrite the
+journal or create another import over uncertain guest contents.
 Open Ubuntu Terminal through Show Apps. Enter the printed guest files directory
 under `/home/boxwarden/workspaces/project`; type the prefix
 `cd /home/boxwarden/workspaces/project/boxwarden-import-` and press Tab to complete
