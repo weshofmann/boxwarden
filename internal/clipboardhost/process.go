@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 )
 
@@ -46,7 +45,7 @@ func helperCommand(ctx context.Context, mode, name string) (*exec.Cmd, error) {
 	return cmd, nil
 }
 func validBoardName(name string) bool {
-	return name == "" || (len(name) <= 255 && strings.HasPrefix(name, "org.boxwarden.test.") && clipboardx.Validate([]byte(name)) == nil)
+	return name == "" || ValidatePrivateBoardName(name) == nil
 }
 
 type helperChild struct {

@@ -391,3 +391,16 @@ func TestProductionImportResumeRejectsDifferentPinnedSnapshotBeforeGuestControl(
 		t.Fatalf("wrong pinned retry reached guest control: %v", err)
 	}
 }
+
+func TestProductionPrivatePasteboardFactoryIsLazyAndStrict(t *testing.T) {
+	options := publicOptions(&bytes.Buffer{})
+	if options.PrivatePasteboardFactory == nil {
+		t.Fatal("private board route missing")
+	}
+	if board, err := options.PrivatePasteboardFactory(""); err == nil || board != nil {
+		t.Fatal("private factory selected general pasteboard")
+	}
+	if board, err := options.PrivatePasteboardFactory("org.boxwarden.test.synthetic"); err != nil || board == nil {
+		t.Fatalf("private board unavailable at lazy construction: %v", err)
+	}
+}

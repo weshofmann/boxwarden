@@ -60,6 +60,14 @@ Only push reads it and only pull writes it, after target admission. Copy uses st
 without host pasteboard access; paste uses stdout without it. Paste refuses a TTY
 unless --raw is explicit. Redirected output preserves exact bytes/newlines.
 
+For synthetic native UI verification, public push/pull accept the explicit
+`--private-host-pasteboard org.boxwarden.test.NAME` option. The name requires a
+nonempty ASCII letters/digits/dot/underscore/hyphen suffix and at most 255 bytes.
+This selects a private named board through the same bounded native helper after
+ordinary exact-target admission. Invalid names, missing adapters, and unavailable
+boards fail closed; there is no environment selection or general-board fallback.
+Copy/paste reject this option. The default explicit push/pull behavior is unchanged.
+
 Pre-commit invalid input, unsupported content, cancellation or stale target leaves
 the destination unchanged. For pull the commit point is successful AppKit write;
 for push/copy it is the guest selection claim. A lost acknowledgement after a
