@@ -19,3 +19,5 @@ swiftc -D MENU_TEST -parse-as-library -framework AppKit \
   "$base/host/clipboard-menu/Sources/MenuApp.swift" \
   "$base/host/clipboard-menu/Tests/MenuValidationTests.swift" -o "$temporary/menu-validation-tests"
 "$temporary/menu-validation-tests"
+
+bash "$base/host/clipboard-menu/test-project-client.sh"
