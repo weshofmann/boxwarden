@@ -153,7 +153,8 @@ private final class ProjectOwnedProcess: @unchecked Sendable {
       throw ProjectClientError.process("Cannot isolate CLI descriptors")
     }
     let argv = ([executable] + arguments).map { strdup($0) } + [nil]
-    let environment = ["PATH=/usr/bin:/bin", "LANG=en_US.UTF-8", "HOME=" + FileManager.default.homeDirectoryForCurrentUser.path].map { strdup($0) } + [nil]
+    let environmentStrings: [String] = ["PATH=/usr/bin:/bin", "LANG=en_US.UTF-8", "HOME=" + FileManager.default.homeDirectoryForCurrentUser.path]
+    let environment = environmentStrings.map { strdup($0) } + [nil]
     defer { argv.forEach { free($0) }; environment.forEach { free($0) } }
     var pid: pid_t = 0
     let code = argv.withUnsafeBufferPointer { a in environment.withUnsafeBufferPointer { e in
