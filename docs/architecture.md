@@ -253,3 +253,16 @@ and is checked again on a retained snapshot before transfer. The existing privat
 snapshot, pinned SFTP readback, journals and stopped export remain the transport.
 The current supported bounds and unchanged path/time/reserve constraints are
 listed in [named project operations](operations/projects.md#supported-transfer-bounds).
+
+## Read-only export transaction discovery
+
+`project export list NAME` uses the private project bookmark's workspace UUID
+to select existing validated export journals. This is an unlocked bounded
+metadata snapshot, independent of current backend readiness, workspace/session
+records or a pending replacement. It reports recorded phases/destinations and
+compares each journal with the current bookmark only to label historical bindings.
+It does not adopt a journal as live authority, inspect output, complete an atomic
+write, clear a pending marker or invoke recovery. Known private temporary writer
+files and transaction directories remain untouched; unexpected/corrupt metadata
+fails visibly without a partial success list. Existing explicit retry still
+re-admits the exact stopped binding, snapshot, helper lifetime and destination.
