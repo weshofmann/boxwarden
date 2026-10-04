@@ -67,7 +67,7 @@ func SaveSetup(stateRoot string, next Setup) error {
 			return err
 		}
 		if prior != next {
-			return fmt.Errorf("project setup is immutable")
+			return fmt.Errorf("project setup is immutable; use project setup-update for an explicit admitted locator change")
 		}
 		return syncProjectDirectory(dir)
 	}
@@ -208,11 +208,17 @@ func publish(dir *os.Root, name string, value any, expected os.FileInfo) error {
 		return err
 	}
 	raw = append(raw, '\n')
+	return publishRaw(dir, name, raw, expected)
+}
+
+// publishRaw preserves historical documents byte-for-byte through the same
+// private, exclusive publication and durability checks as current records.
+func publishRaw(dir *os.Root, name string, raw []byte, expected os.FileInfo) error {
 	if len(raw) > maxDocumentBytes {
 		return fmt.Errorf("project JSON exceeds 64 KiB")
 	}
 	var nonce [16]byte
-	if _, err = rand.Read(nonce[:]); err != nil {
+	if _, err := rand.Read(nonce[:]); err != nil {
 		return err
 	}
 	temporary := name + ".tmp-" + hex.EncodeToString(nonce[:])

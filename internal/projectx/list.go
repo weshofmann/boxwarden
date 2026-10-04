@@ -62,6 +62,11 @@ func List(stateRoot string, expectedDomain domain.ID) ([]Record, error) {
 			}
 			continue
 		}
+		if history, err := admitSetupHistory(dir, name); err != nil {
+			return nil, fmt.Errorf("project setup history %q: %w", name, err)
+		} else if history {
+			continue
+		}
 		if entry.IsDir() || !strings.HasSuffix(name, ".json") {
 			return nil, fmt.Errorf("unexpected project registry entry %q", name)
 		}
@@ -131,7 +136,7 @@ func projectListTemporary(d domain.ID, key string) bool {
 		}
 	}
 	key = prefix + ".json"
-	if key == setupName {
+	if key == setupName || canonicalSetupHistoryName(key) {
 		return true
 	}
 	if strings.HasPrefix(key, ".replacement-history-") {

@@ -30,6 +30,40 @@ class PackageInputTests(unittest.TestCase):
                 self.assertIn("version must be", result.stderr)
                 self.assertFalse(output.exists())
 
+    def test_setup_update_is_explicit_and_preserves_prepared_assets_on_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            package = root / "new-package"
+            (package / "bin").mkdir(parents=True)
+            (package / "formatter").mkdir()
+            marker = package / "formatter/manifest.json"
+            marker.write_text("existing-new-package-assets")
+            shutil.copy(SCRIPT.with_name("prepare-projects.sh"), package / "prepare-projects.sh")
+            cli = package / "bin/boxwarden"
+            cli.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$CAPTURE_ARGS"\nexit "${FIXTURE_EXIT:-0}"\n')
+            cli.chmod(0o700)
+            tools = root / "tools"
+            tools.mkdir()
+            for name in ("go", "zstd"):
+                path = tools / name
+                path.write_text('#!/bin/bash\nexit 0\n')
+                path.chmod(0o700)
+            inputs = [root / name for name in ("config", "iso", "checker")]
+            for path in inputs:
+                path.write_text("synthetic")
+            capture = root / "args"
+            env = dict(os.environ, CAPTURE_ARGS=str(capture))
+            args = ["bash", str(package / "prepare-projects.sh")]
+            values = [*map(str, inputs), str(tools / "go"), str(tools / "zstd")]
+            first = subprocess.run(args + values, env=env, capture_output=True, text=True)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(capture.read_text().splitlines()[5], "setup")
+            env["FIXTURE_EXIT"] = "74"
+            updated = subprocess.run(args + ["--update"] + values, env=env, capture_output=True, text=True)
+            self.assertEqual(updated.returncode, 74, updated.stderr)
+            self.assertEqual(capture.read_text().splitlines()[5], "setup-update")
+            self.assertEqual(marker.read_text(), "existing-new-package-assets")
+
     @unittest.skipUnless(os.uname().sysname == "Darwin", "Mac formatter publication")
     def test_failed_copy_can_retry_without_partial_final_bundle(self):
         with tempfile.TemporaryDirectory(dir="/private/tmp", prefix="boxwarden-beta-prep-test.") as temporary:

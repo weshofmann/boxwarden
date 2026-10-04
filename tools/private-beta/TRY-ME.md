@@ -17,13 +17,13 @@ claim download/Gatekeeper distribution acceptance; it does not bypass OS checks.
 ## Verify and configure once
 
 Verify the archive beside its checksum file with
-`shasum -a 256 -c boxwarden-0.2.0-beta.2-darwin-arm64.tar.gz.sha256`, then extract
+`shasum -a 256 -c boxwarden-0.2.0-beta.3-darwin-arm64.tar.gz.sha256`, then extract
 in a new private user-owned directory. In a **new terminal**, set these
 paths to your actual assets; no profile sourcing or private bindings is needed:
 
 ```sh
 umask 077
-PACKAGE=/absolute/boxwarden-0.2.0-beta.2-darwin-arm64
+PACKAGE=/absolute/boxwarden-0.2.0-beta.3-darwin-arm64
 cd "$PACKAGE"
 shasum -a 256 -c SHA256SUMS
 "$PACKAGE/bin/boxwarden" version
@@ -64,6 +64,10 @@ does not alter it. Preparation creates a private local formatter bound to the
 new state root. Run it once, before creating projects. Identical setup retries
 are safe; different saved asset locators are refused. Keep this package and its
 formatter in place. Do not reuse an older demo's state root or change its setup.
+
+For an explicit side-by-side update of an existing private configuration, see
+[UPGRADING.md](UPGRADING.md). Retain the old package and assets; preparation with
+`--update` switches admitted asset locators and preserves previous setup bytes.
 
 ## Create, import, edit and resume
 
@@ -115,7 +119,7 @@ RETURNED=/absolute/new-returned-directory
 bw project export --destination "$RETURNED" myproject
 ```
 
-Export prints **`host project files:`** with the actual returned directory.
+Export prints **`project files:`** with the actual returned directory.
 Inspect its `notes.txt`, `new.txt` and unchanged `reference.txt`; compare against
 the intended edited bytes. The source should still contain its original two
 files. Export refuses a running sandbox or an existing destination. Returned
@@ -199,11 +203,11 @@ Leave successful demos stopped for inspection.
 This is an experimental functional beta, not new security qualification.
 Existing vmnet-gateway exposure, shutdown uncertainty, transfer limits and
 untested Mac/guest environments remain. Automatic Tart clipboard/audio sharing
-stays disabled. Provider sign-in, cold-machine installation, rebuild, power-loss
+stays disabled. Provider sign-in, cold-machine installation, power-loss
 recovery and complete network isolation are outside this walkthrough.
 
 To rebuild from a clean committed checkout on this Mac:
-`GO_BIN=/absolute/actual/go bash tools/private-beta/build.sh 0.2.0-beta.1 /absolute/new-output`.
+`GO_BIN=/absolute/actual/go bash tools/private-beta/build.sh 0.2.0-beta.3 /absolute/new-output`.
 This builds locally and publishes no release.
 
 ## Replace a disposable project system
