@@ -21,7 +21,7 @@ func privateRoot(t *testing.T) string {
 	return root
 }
 func fixtureSetup() Setup {
-	return Setup{1, "/work/source", "/work/formatter", "/work/image.iso", "/usr/local/go/bin/go"}
+	return Setup{Version: 1, SourceRoot: "/work/source", FormatterBundle: "/work/formatter", ISOPath: "/work/image.iso", GoBinary: "/usr/local/go/bin/go"}
 }
 func fixtureRecord() Record {
 	return Record{Version: 1, Domain: "work", Name: "dev", Base: "golden", VolumeID: "00112233-4455-6677-8899-aabbccddeeff", FilesystemUUID: "11112233-4455-6677-8899-aabbccddeeff", SizeBytes: 16 << 20}

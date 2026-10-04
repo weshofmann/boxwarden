@@ -19,8 +19,11 @@ func validateRecord(d domain.ID, r Record) error {
 	if err := validateKey(d, r.Name); err != nil {
 		return err
 	}
-	if r.Version != 1 || r.Domain != d {
+	if (r.Version != 1 && r.Version != 2) || r.Domain != d {
 		return fmt.Errorf("invalid project version or domain")
+	}
+	if r.Version == 1 && r.RecipeIntentDigest != "" || r.Version == 2 && !lowerSHA256(r.RecipeIntentDigest) {
+		return fmt.Errorf("project version differs from recipe intent binding")
 	}
 	if err := backend.ValidateObjectID(r.Base); err != nil {
 		return fmt.Errorf("project base: %w", err)

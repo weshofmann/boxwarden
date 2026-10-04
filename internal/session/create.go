@@ -99,6 +99,23 @@ func (s *Service) CreateFreshFromRevision(ctx context.Context, rawName string, m
 	return FreshCreation{Record: record, Created: true}, nil
 }
 
+// CreateFreshFromRevisionWithIntent captures the immutable complete recipe
+// before cloning while preserving the create-only reservation contract. It
+// never resumes or adopts a pre-existing creating or stopped session.
+func (s *Service) CreateFreshFromRevisionWithIntent(ctx context.Context, rawName string, mode Mode, revision, digest string) (FreshCreation, error) {
+	if err := backend.ValidateObjectID(revision); err != nil {
+		return FreshCreation{}, fmt.Errorf("invalid explicit base revision: %w", err)
+	}
+	if !lowerSHA256(digest) {
+		return FreshCreation{}, fmt.Errorf("invalid recipe intent digest")
+	}
+	record, err := s.create(ctx, rawName, mode, revision, digest, true)
+	if err != nil {
+		return FreshCreation{}, err
+	}
+	return FreshCreation{Record: record, Created: true}, nil
+}
+
 func (s *Service) create(ctx context.Context, rawName string, mode Mode, revision, intentDigest string, freshOnly bool) (record Record, err error) {
 	if s == nil {
 		return Record{}, fmt.Errorf("session service is required")
