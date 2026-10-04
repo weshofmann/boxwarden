@@ -49,6 +49,21 @@ type Record struct {
 	ImportSource       string    `json:"import_source"`
 	Imported           bool      `json:"imported"`
 	RecipeIntentDigest string    `json:"recipe_intent_digest,omitempty"`
+	ImportSelection    string    `json:"import_selection,omitempty"`
+}
+
+// MarshalJSON keeps version1/2 byte shapes and writes every required version3
+// binding, including an empty recipe digest for a legacy prepared base.
+func (r Record) MarshalJSON() ([]byte, error) {
+	type document Record
+	if r.Version != 3 {
+		return json.Marshal(document(r))
+	}
+	return json.Marshal(struct {
+		document
+		RecipeIntentDigest string `json:"recipe_intent_digest"`
+		ImportSelection    string `json:"import_selection"`
+	}{document: document(r), RecipeIntentDigest: r.RecipeIntentDigest, ImportSelection: r.ImportSelection})
 }
 
 // SaveSetup creates an immutable profile. An identical retry completes any
@@ -144,9 +159,10 @@ func Save(stateRoot string, expectedDomain domain.ID, next Record) error {
 	if err != nil {
 		return err
 	}
-	if prior.Version != next.Version || prior.RecipeIntentDigest != next.RecipeIntentDigest || prior.Base != next.Base || prior.VolumeID != next.VolumeID || prior.FilesystemUUID != next.FilesystemUUID || prior.SizeBytes != next.SizeBytes ||
+	selectionUpgrade := (prior.Version == 1 || prior.Version == 2) && prior.ImportID == "" && next.Version == 3 && next.ImportID != ""
+	if prior.Version != next.Version && !selectionUpgrade || prior.RecipeIntentDigest != next.RecipeIntentDigest || prior.Base != next.Base || prior.VolumeID != next.VolumeID || prior.FilesystemUUID != next.FilesystemUUID || prior.SizeBytes != next.SizeBytes ||
 		prior.SessionID != "" && (prior.SessionID != next.SessionID || prior.BackendObject != next.BackendObject) ||
-		prior.ImportID != "" && (prior.ImportID != next.ImportID || prior.ImportSource != next.ImportSource) || prior.Initialized && !next.Initialized || prior.Imported && !next.Imported {
+		prior.ImportID != "" && (prior.ImportID != next.ImportID || prior.ImportSource != next.ImportSource || prior.ImportSelection != next.ImportSelection) || prior.Initialized && !next.Initialized || prior.Imported && !next.Imported {
 		return fmt.Errorf("project binding is immutable or receipt state regressed")
 	}
 	return publish(dir, next.Name+".json", next, info)
@@ -328,6 +344,16 @@ func decodeSetup(raw []byte, value *Setup) error {
 	return decodeVersionedDocument(raw, value, setupFields, []string{"openssl_path", "openssl_sha256", "xorriso_path", "xorriso_sha256"})
 }
 func decodeRecord(raw []byte, value *Record) error {
+	var header struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &header); err != nil {
+		return err
+	}
+	if header.Version == 3 {
+		fields := append(append([]string(nil), recordFields...), "recipe_intent_digest", "import_selection")
+		return decodeDocument(raw, value, fields)
+	}
 	return decodeVersionedDocument(raw, value, recordFields, []string{"recipe_intent_digest"})
 }
 

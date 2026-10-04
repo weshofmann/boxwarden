@@ -55,8 +55,8 @@ func validateImportJournal(j ImportJournal) error {
 	if j.Version != 1 || !validUUID(j.ID) || j.ID == "00000000-0000-0000-0000-000000000000" ||
 		!validUUID(j.SessionID) || !validSessionName(j.SessionName) || !validObjectID(j.BackendObject) ||
 		!validUUID(j.Generation) || !validUUID(j.VolumeID) || !validUUID(j.FilesystemUUID) ||
-		!validMountPath(j.MountPath) || !validSHA256(j.SourceDigest) || j.FileCount < 1 || j.FileCount > 256 ||
-		j.TotalBytes < 0 || j.TotalBytes > 16<<20 {
+		!validMountPath(j.MountPath) || !validSHA256(j.SourceDigest) || j.FileCount < 1 || j.FileCount > importx.MaxFiles ||
+		j.TotalBytes < 0 || j.TotalBytes > importx.MaxTotalBytes {
 		return fmt.Errorf("invalid import transaction binding")
 	}
 	if _, err := domain.Parse(string(j.Domain)); err != nil {

@@ -114,7 +114,7 @@ func TestRecordCreateLoadAndMonotonicUpdates(t *testing.T) {
 	}
 }
 func TestValidationRejectsUnsafeInput(t *testing.T) {
-	for name, mutate := range map[string]func(*Record){"version": func(r *Record) { r.Version = 2 }, "domain": func(r *Record) { r.Domain = "personal" }, "name": func(r *Record) { r.Name = "../dev" }, "base": func(r *Record) { r.Base = "../base" }, "UUID": func(r *Record) { r.VolumeID = strings.ToUpper(r.VolumeID) }, "small": func(r *Record) { r.SizeBytes = (16 << 20) - 1 }, "large": func(r *Record) { r.SizeBytes = (1 << 30) + 512 }, "unaligned": func(r *Record) { r.SizeBytes = (16 << 20) + 1 }, "halfReceipt": func(r *Record) { r.SessionID = r.VolumeID }, "initializedWithoutReceipt": func(r *Record) { r.Initialized = true }, "importedWithoutImport": func(r *Record) { r.Imported = true }, "invalidImport": func(r *Record) { r.ImportID = "no" }} {
+	for name, mutate := range map[string]func(*Record){"version": func(r *Record) { r.Version = 2 }, "domain": func(r *Record) { r.Domain = "personal" }, "name": func(r *Record) { r.Name = "../dev" }, "base": func(r *Record) { r.Base = "../base" }, "UUID": func(r *Record) { r.VolumeID = strings.ToUpper(r.VolumeID) }, "small": func(r *Record) { r.SizeBytes = (16 << 20) - 1 }, "large": func(r *Record) { r.SizeBytes = (4 << 30) + 512 }, "unaligned": func(r *Record) { r.SizeBytes = (16 << 20) + 1 }, "halfReceipt": func(r *Record) { r.SessionID = r.VolumeID }, "initializedWithoutReceipt": func(r *Record) { r.Initialized = true }, "importedWithoutImport": func(r *Record) { r.Imported = true }, "invalidImport": func(r *Record) { r.ImportID = "no" }} {
 		t.Run(name, func(t *testing.T) {
 			root := privateRoot(t)
 			r := fixtureRecord()

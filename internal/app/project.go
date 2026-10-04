@@ -13,6 +13,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/golden"
+	"github.com/weshofmann/boxwarden/internal/importx"
 	"github.com/weshofmann/boxwarden/internal/lock"
 	"github.com/weshofmann/boxwarden/internal/projectx"
 	"github.com/weshofmann/boxwarden/internal/session"
@@ -21,14 +22,15 @@ import (
 )
 
 const projectMount = "/home/boxwarden/workspaces/project"
-const projectUsage = "project list; project setup|setup-update --source-root PATH --formatter-bundle PATH --iso PATH --go PATH; project create [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] [--size-mib 16..1024] NAME; project open|status|stop NAME; project rebuild [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] NAME; project rebuild retry NAME; project import --source PRIVATE-DIRECTORY NAME; project import retry NAME; project export --destination NEW-DIRECTORY NAME; project export retry --transaction UUID NAME"
+const projectUsage = "project list; project setup|setup-update --source-root PATH --formatter-bundle PATH --iso PATH --go PATH; project create [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] [--size-mib 16..4096] NAME; project open|status|stop NAME; project rebuild [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] NAME; project rebuild retry NAME; project import preview --source PRIVATE-DIRECTORY [--exclude RELATIVE-PATH ...]; project import --source PRIVATE-DIRECTORY [--exclude RELATIVE-PATH ...] [--expected-digest SHA256] NAME; project import retry NAME; project export --destination NEW-DIRECTORY NAME; project export retry --transaction UUID NAME"
 
 type projectCommand struct {
-	operation, name, base, source, destination, recipe, transaction string
-	sizeMiB                                                         int64
-	setup                                                           projectx.Setup
-	retry                                                           bool
-	baseExplicit                                                    bool
+	operation, name, base, source, destination, recipe, transaction, selection string
+	preview                                                                    bool
+	sizeMiB                                                                    int64
+	setup                                                                      projectx.Setup
+	retry                                                                      bool
+	baseExplicit                                                               bool
 }
 
 func parseProject(args []string) (projectCommand, error) {
@@ -37,12 +39,18 @@ func parseProject(args []string) (projectCommand, error) {
 		return p, errors.New(projectUsage)
 	}
 	p.operation = args[0]
-	if (p.operation == "import" || p.operation == "rebuild" || p.operation == "export") && len(args) > 1 && args[1] == "retry" {
+	if p.operation == "import" && len(args) > 1 && args[1] == "preview" {
+		p.preview = true
+		args = append([]string{args[0]}, args[2:]...)
+	}
+	if !p.preview && (p.operation == "import" || p.operation == "rebuild" || p.operation == "export") && len(args) > 1 && args[1] == "retry" {
 		p.retry = true
 		args = append([]string{args[0]}, args[2:]...)
 	}
 	set := flag.NewFlagSet("project "+p.operation, flag.ContinueOnError)
 	set.SetOutput(io.Discard)
+	var excludes importExclusions
+	var expectedDigest string
 	switch p.operation {
 	case "setup", "setup-update":
 		p.setup.Version = 1
@@ -57,12 +65,14 @@ func parseProject(args []string) (projectCommand, error) {
 	case "create":
 		set.StringVar(&p.recipe, "recipe", "", "supported packaged recipe")
 		set.StringVar(&p.base, "base", "current", "registered prepared base or current")
-		set.Int64Var(&p.sizeMiB, "size-mib", 64, "workspace size in MiB, 16..1024")
+		set.Int64Var(&p.sizeMiB, "size-mib", 64, "workspace size in MiB, 16..4096")
 	case "rebuild":
 		set.StringVar(&p.recipe, "recipe", "", "selected software for the new system")
 		set.StringVar(&p.base, "base", "current", "registered prepared replacement base")
 	case "import":
 		set.StringVar(&p.source, "source", "", "explicit private source directory")
+		set.Var(&excludes, "exclude", "literal relative path or subtree to omit; repeat up to 32 times")
+		set.StringVar(&expectedDigest, "expected-digest", "", "pin the complete preview manifest SHA-256")
 	case "export":
 		if p.retry {
 			set.StringVar(&p.transaction, "transaction", "", "retained export transaction UUID")
@@ -116,6 +126,27 @@ func parseProject(args []string) (projectCommand, error) {
 		}
 		return p, nil
 	}
+	if p.operation == "import" {
+		if p.retry && set.NFlag() != 0 {
+			return p, errors.New("project import retry reuses the original selection; do not supply source, exclusions or digest")
+		}
+		if !p.retry {
+			if !cleanProjectPath(p.source) {
+				return p, errors.New("project import requires a clean absolute --source directory")
+			}
+			var err error
+			p.selection, err = importx.CanonicalSelection(importx.Selection{Excludes: excludes, ExpectedDigest: expectedDigest})
+			if err != nil {
+				return p, err
+			}
+		}
+		if p.preview {
+			if len(set.Args()) != 0 {
+				return p, errors.New("project import preview takes no project name")
+			}
+			return p, nil
+		}
+	}
 	if len(set.Args()) != 1 {
 		return p, errors.New(projectUsage)
 	}
@@ -127,20 +158,14 @@ func parseProject(args []string) (projectCommand, error) {
 		return p, errors.New("project rebuild retry reuses the recorded candidate; do not supply --base or --recipe")
 	}
 	if p.operation == "create" || p.operation == "rebuild" {
-		if p.operation == "create" && (p.sizeMiB < 16 || p.sizeMiB > 1024) {
-			return p, errors.New("project workspace size must be 16..1024 MiB for supported export")
+		if p.operation == "create" && (p.sizeMiB < 16 || p.sizeMiB > 4096) {
+			return p, errors.New("project workspace size must be 16..4096 MiB for supported export")
 		}
 		if p.base != "current" {
 			if err := backend.ValidateObjectID(p.base); err != nil {
 				return p, err
 			}
 		}
-	}
-	if p.operation == "import" && p.retry && p.source != "" {
-		return p, errors.New("project import retry reuses the original selection; do not supply --source")
-	}
-	if p.operation == "import" && !p.retry && !cleanProjectPath(p.source) {
-		return p, errors.New("project import requires a clean absolute --source directory")
 	}
 	if p.operation == "export" && p.retry && !alphaCreateUUID(p.transaction) {
 		return p, errors.New("project export retry requires --transaction with the retained canonical UUID")
@@ -164,6 +189,9 @@ func runProject(ctx context.Context, c parsedCommand, loaded config.Config, d co
 	p := c.project
 	if p.operation == "list" {
 		return listProjects(ctx, loaded, d, o)
+	}
+	if p.preview {
+		return previewProjectImport(ctx, p, o.Output)
 	}
 	scope := "project-" + string(d.ID) + "-" + p.name
 	if p.operation == "setup" || p.operation == "setup-update" {
@@ -468,12 +496,13 @@ func importProject(ctx context.Context, c parsedCommand, d config.Domain, r proj
 		if err != nil {
 			return err
 		}
-		r.ImportID, r.ImportSource = id, c.project.source
+		r.Version = 3
+		r.ImportID, r.ImportSource, r.ImportSelection = id, c.project.source, c.project.selection
 		if err := projectx.Save(d.StateRoot, d.ID, r); err != nil {
 			return err
 		}
 	}
-	input := AlphaImportInput{TransactionID: r.ImportID, SourcePath: r.ImportSource, VolumeID: r.VolumeID, SessionName: r.Name}
+	input := AlphaImportInput{TransactionID: r.ImportID, SourcePath: r.ImportSource, VolumeID: r.VolumeID, SessionName: r.Name, Selection: r.ImportSelection}
 	if c.project.retry {
 		_, journalErr := workspacex.LoadImportJournal(d.StateRoot, d.ID, r.ImportID)
 		if journalErr != nil && !errors.Is(journalErr, os.ErrNotExist) {

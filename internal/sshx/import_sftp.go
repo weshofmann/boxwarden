@@ -18,8 +18,10 @@ import (
 )
 
 const (
-	sftpPath              = "/usr/bin/sftp"
-	maxImportBatchBytes   = 1 << 20
+	sftpPath = "/usr/bin/sftp"
+	// At most 6144 admitted entries, each with two bounded 4096-byte paths,
+	// fit below this metadata-only cap. Payload files stream independently.
+	maxImportBatchBytes   = 64 << 20
 	maxImportTransferTime = 10 * time.Minute
 )
 
@@ -162,32 +164,43 @@ func sftpArguments(connection Connection) []string {
 }
 
 func importUploadBatch(snapshot importx.Snapshot, remote string) ([]byte, error) {
-	if !safeSFTPPath(snapshot.Directory) || !safeSFTPPath(remote) {
+	if len(snapshot.Entries) > importx.MaxFiles+importx.MaxDirectories || !safeSFTPPath(snapshot.Directory) || !safeSFTPPath(remote) {
 		return nil, fmt.Errorf("import path cannot be represented safely in SFTP batch")
 	}
 	var upload strings.Builder
+	var files, directories int
 	// macOS OpenSSH sftp accepts only `mkdir path`. Ignore an existing
 	// transaction directory on retry, then require that it is traversable.
-	upload.WriteString("-mkdir " + quoteSFTPPath(remote) + "\ncd " + quoteSFTPPath(remote) + "\n")
+	// @ suppresses batch command echo (which -q retains), preserving bounded
+	// diagnostics and required-command aborts. Only mkdir keeps the - prefix.
+	upload.WriteString("@-mkdir " + quoteSFTPPath(remote) + "\n@cd " + quoteSFTPPath(remote) + "\n")
 	for _, entry := range snapshot.Entries {
 		remotePath := remote + "/" + entry.Path
 		if !safeSFTPPath(remotePath) {
 			return nil, fmt.Errorf("unsafe import entry path")
 		}
 		if entry.Kind == "directory" {
-			upload.WriteString("-mkdir " + quoteSFTPPath(remotePath) + "\ncd " + quoteSFTPPath(remotePath) + "\n")
+			directories++
+			if directories > importx.MaxDirectories {
+				return nil, fmt.Errorf("import directory count exceeds bound")
+			}
+			upload.WriteString("@-mkdir " + quoteSFTPPath(remotePath) + "\n@cd " + quoteSFTPPath(remotePath) + "\n")
 			continue
 		}
 		if entry.Kind != "file" {
 			return nil, fmt.Errorf("invalid import entry kind")
 		}
+		files++
+		if files > importx.MaxFiles {
+			return nil, fmt.Errorf("import file count exceeds bound")
+		}
 		localSource := filepath.Join(snapshot.Directory, filepath.FromSlash(entry.Path))
 		if !safeSFTPPath(localSource) {
 			return nil, fmt.Errorf("unsafe local import path")
 		}
-		upload.WriteString("put -f " + quoteSFTPPath(localSource) + " " + quoteSFTPPath(remotePath) + "\n")
+		upload.WriteString("@put -f " + quoteSFTPPath(localSource) + " " + quoteSFTPPath(remotePath) + "\n")
 	}
-	upload.WriteString("quit\n")
+	upload.WriteString("@quit\n")
 	if upload.Len() > maxImportBatchBytes {
 		return nil, fmt.Errorf("SFTP batch exceeds bound")
 	}

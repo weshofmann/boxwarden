@@ -37,7 +37,7 @@ func TestSelectedExportStreamRoundTripsThroughHostReceiver(t *testing.T) {
 	}
 	output, err := exportx.Receive(context.Background(), io.NopCloser(bytes.NewReader(stream.Bytes())), exportx.Options{
 		Parent: parent, TransactionID: transaction, Selected: []string{"project/report.txt", "project"}, MaxChunkBytes: 1 << 20,
-		MaxFileBytes: 256 << 20, MaxTotalBytes: 256 << 20, MaxFiles: 4096,
+		MaxFileBytes: 256 << 20, MaxTotalBytes: 512 << 20, MaxFiles: 8192,
 		MaxDirectories: 4096, MinFreeBytes: 1,
 	})
 	if err != nil {
@@ -112,7 +112,7 @@ func TestExportStreamCannotPublishBeforeUnmountTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	options := exportx.Options{Parent: parent, TransactionID: tx, Selected: []string{"result.txt"}, MaxChunkBytes: 1 << 20,
-		MaxFileBytes: 256 << 20, MaxTotalBytes: 256 << 20, MaxFiles: 4096,
+		MaxFileBytes: 256 << 20, MaxTotalBytes: 512 << 20, MaxFiles: 8192,
 		MaxDirectories: 4096, MinFreeBytes: 1}
 	if _, err := exportx.Receive(context.Background(), io.NopCloser(bytes.NewReader(stream.Bytes())), options); err == nil {
 		t.Fatal("unterminated guest stream published")

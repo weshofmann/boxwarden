@@ -122,7 +122,7 @@ UI display: CI / verify
 ```
 
 It runs on all pull requests and pushes to `main`, with `contents: read`
-permissions, a 15-minute timeout, PR/ref-scoped concurrency cancellation, and
+permissions, a 25-minute timeout, PR/ref-scoped concurrency cancellation, and
 no repository secrets. It pins official actions to immutable commits:
 
 | Action | Release | Commit |

@@ -64,7 +64,7 @@ private func parseExportDisk(_ arguments: [String], transactionHex: String) thro
           arguments.allSatisfy({ !$0.isEmpty && $0.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }) }),
           let device = UInt64(arguments[0]), device > 0,
           let inode = UInt64(arguments[1]), inode > 0,
-          let bytes = Int64(arguments[2]), bytes >= 4096, bytes <= 1 << 30,
+          let bytes = Int64(arguments[2]), bytes >= 4096, bytes <= 4 << 30,
           bytes % 512 == 0 else {
         throw ProbeFailure.invalidExportIdentity
     }

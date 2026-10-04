@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,12 +23,12 @@ import (
 )
 
 const (
-	maxFiles       = 256
-	maxDirectories = 256
+	maxFiles       = MaxFiles
+	maxDirectories = MaxDirectories
 	maxDepth       = 8
 	maxPathBytes   = 255
-	maxFileBytes   = 4 << 20
-	maxTotalBytes  = 16 << 20
+	maxFileBytes   = MaxFileBytes
+	maxTotalBytes  = MaxTotalBytes
 	manifestName   = ".boxwarden-import-manifest.json"
 )
 
@@ -54,7 +53,19 @@ type Snapshot struct {
 // new private immutable-by-convention snapshot. Symlinks, hardlinks, special
 // files, mutable shared directories, and ambiguous names fail closed. A
 // caller must durably bind the returned digest and path before transfer.
-func CaptureSource(ctx context.Context, sourcePath, stagingParent, transactionID string) (snapshot Snapshot, err error) {
+func CaptureSource(ctx context.Context, sourcePath, stagingParent, transactionID string) (Snapshot, error) {
+	return CaptureSelectedSource(ctx, sourcePath, stagingParent, transactionID, Selection{})
+}
+
+// CaptureSelectedSource freezes only explicitly selected bytes. Digest pinning
+// happens before exclusive snapshot publication; a mismatch removes its partial
+// private capture and cannot strand a snapshot that retry would later adopt.
+func CaptureSelectedSource(ctx context.Context, sourcePath, stagingParent, transactionID string, selection Selection) (snapshot Snapshot, err error) {
+	exclusions, err := newExclusionState(selection)
+	if err != nil {
+		return Snapshot{}, err
+	}
+
 	if !validUUID(transactionID) || !canonicalAbsolute(sourcePath) || !canonicalAbsolute(stagingParent) || sourcePath == stagingParent {
 		return Snapshot{}, fmt.Errorf("invalid import source, staging parent, or transaction identity")
 	}
@@ -117,24 +128,13 @@ func CaptureSource(ctx context.Context, sourcePath, stagingParent, transactionID
 		if err != nil {
 			return err
 		}
-		if err := captureDirectory(guarded, source, stage, sourcePath, "", rootInfo, 0, &snapshot); err != nil {
+		if err := captureDirectory(guarded, source, stage, sourcePath, "", rootInfo, 0, &snapshot, exclusions); err != nil {
 			return err
 		}
-		if snapshot.FileCount == 0 {
-			return fmt.Errorf("import source has no regular files")
-		}
-		raw, err := json.Marshal(struct {
-			Version int     `json:"version"`
-			Entries []Entry `json:"entries"`
-		}{Version: 1, Entries: snapshot.Entries})
+		raw, err := selectionManifest(&snapshot, exclusions)
 		if err != nil {
 			return err
 		}
-		if len(raw)+1 > maxManifestBytes {
-			return fmt.Errorf("import manifest exceeds %d bytes", maxManifestBytes)
-		}
-		digest := sha256.Sum256(raw)
-		snapshot.Digest = hex.EncodeToString(digest[:])
 		manifest, err := stage.OpenFile(manifestName, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
 		if err != nil {
 			return err
@@ -235,7 +235,7 @@ func removePrivateTree(parent *os.Root, name string, expected os.FileInfo) error
 	return parent.Remove(name)
 }
 
-func captureDirectory(ctx context.Context, source, stage *os.Root, sourcePath, relative string, expected os.FileInfo, depth int, snapshot *Snapshot) error {
+func captureDirectory(ctx context.Context, source, stage *os.Root, sourcePath, relative string, expected os.FileInfo, depth int, snapshot *Snapshot, exclusions *exclusionState) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -255,7 +255,7 @@ func captureDirectory(ctx context.Context, source, stage *os.Root, sourcePath, r
 		directory.Close()
 		return fmt.Errorf("import source directory changed while opening: %v", err)
 	}
-	entries, readErr := directory.ReadDir(maxFiles + maxDirectories + 1)
+	entries, readErr := directory.ReadDir(maxFiles + maxDirectories + len(exclusions.selection.Excludes) + 1)
 	closeErr := directory.Close()
 	if readErr != nil && !errors.Is(readErr, io.EOF) {
 		return readErr
@@ -263,7 +263,7 @@ func captureDirectory(ctx context.Context, source, stage *os.Root, sourcePath, r
 	if closeErr != nil {
 		return closeErr
 	}
-	if len(entries) > maxFiles+maxDirectories {
+	if len(entries) > maxFiles+maxDirectories+len(exclusions.selection.Excludes) {
 		return fmt.Errorf("import source has too many entries")
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
@@ -272,12 +272,16 @@ func captureDirectory(ctx context.Context, source, stage *os.Root, sourcePath, r
 			return err
 		}
 		component := entry.Name()
-		if !validComponent(component) || component == manifestName {
-			return fmt.Errorf("unsafe import source name %q", component)
-		}
 		child := component
 		if relative != "" {
 			child = path.Join(relative, component)
+		}
+		// Excluded entries are never opened, admitted, or recursively enumerated.
+		if exclusions.exclude(child) {
+			continue
+		}
+		if !validComponent(component) || component == manifestName {
+			return fmt.Errorf("unsafe import source name %q", component)
 		}
 		if len(child) > maxPathBytes {
 			return fmt.Errorf("import source path exceeds %d bytes", maxPathBytes)
@@ -293,16 +297,20 @@ func captureDirectory(ctx context.Context, source, stage *os.Root, sourcePath, r
 			if depth == maxDepth || snapshot.DirectoryCount >= maxDirectories {
 				return fmt.Errorf("import source directory limit exceeded")
 			}
-			if err := stage.Mkdir(child, 0o700); err != nil {
-				return err
+			if stage != nil {
+				if err := stage.Mkdir(child, 0o700); err != nil {
+					return err
+				}
 			}
 			snapshot.DirectoryCount++
 			snapshot.Entries = append(snapshot.Entries, Entry{Path: child, Kind: "directory"})
-			if err := captureDirectory(ctx, source, stage, sourcePath, child, info, depth+1, snapshot); err != nil {
+			if err := captureDirectory(ctx, source, stage, sourcePath, child, info, depth+1, snapshot, exclusions); err != nil {
 				return err
 			}
-			if err := syncChildRoot(stage, child); err != nil {
-				return err
+			if stage != nil {
+				if err := syncChildRoot(stage, child); err != nil {
+					return err
+				}
 			}
 			continue
 		}
@@ -334,13 +342,18 @@ func copySourceFile(source, stage *os.Root, name string, initial os.FileInfo) (s
 	if err != nil || !os.SameFile(initial, opened) || !sameSourceInfo(initial, opened) {
 		return "", fmt.Errorf("import source file changed while opening: %v", err)
 	}
-	output, err := stage.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
-	if err != nil {
-		return "", err
-	}
-	defer output.Close()
+	var output *os.File
 	hasher := sha256.New()
-	if _, err := io.CopyN(io.MultiWriter(output, hasher), input, initial.Size()); err != nil {
+	var destination io.Writer = hasher
+	if stage != nil {
+		output, err = stage.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
+		if err != nil {
+			return "", err
+		}
+		defer output.Close()
+		destination = io.MultiWriter(output, hasher)
+	}
+	if _, err := io.CopyN(destination, input, initial.Size()); err != nil {
 		return "", err
 	}
 	var extra [1]byte
@@ -355,8 +368,10 @@ func copySourceFile(source, stage *os.Root, name string, initial os.FileInfo) (s
 	if err != nil || !os.SameFile(initial, pathInfo) || !sameSourceInfo(initial, pathInfo) {
 		return "", fmt.Errorf("import source path changed during capture: %v", err)
 	}
-	if err := output.Sync(); err != nil {
-		return "", err
+	if output != nil {
+		if err := output.Sync(); err != nil {
+			return "", err
+		}
 	}
 	return hex.EncodeToString(hasher.Sum(nil)), nil
 }

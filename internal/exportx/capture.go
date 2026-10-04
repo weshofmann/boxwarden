@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	maxInspectorStreamBytes  = 320 << 20
+	maxInspectorStreamBytes  = 640 << 20
 	maxInspectorLogBytes     = 16 << 10
 	inspectorDeadline        = 80 * time.Second
 	inspectorCleanupDeadline = 45 * time.Second

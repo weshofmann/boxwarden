@@ -19,7 +19,7 @@ import (
 )
 
 const maxExportJournalBytes = 64 << 10
-const maxAlphaExportVolumeBytes = 1 << 30
+const maxAlphaExportVolumeBytes = 4 << 30
 
 type ExportPhase string
 

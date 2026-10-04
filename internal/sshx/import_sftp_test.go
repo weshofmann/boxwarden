@@ -108,7 +108,7 @@ func TestSFTPImportBatchUsesQualifiedMacSyntax(t *testing.T) {
 		t.Fatal(err)
 	}
 	batch := string(upload)
-	if strings.Contains(batch, "mkdir -p") || strings.Contains(batch, "get -f ") || strings.Count(batch, "-mkdir ") != 2 || strings.Count(batch, "\ncd ") != 2 || strings.Count(batch, "put -f ") != 1 {
+	if strings.Contains(batch, "mkdir -p") || strings.Contains(batch, "get -f ") || strings.Count(batch, "-mkdir ") != 2 || strings.Count(batch, "\n@cd ") != 2 || strings.Count(batch, "put -f ") != 1 {
 		t.Fatalf("unsupported or non-checked SFTP mkdir syntax: %q", batch)
 	}
 }

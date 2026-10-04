@@ -103,7 +103,7 @@ func decodeExportRequest(raw []byte, transaction [16]byte) (guestExportRequest, 
 	}
 	if version != 1 || requestTransaction != hex.EncodeToString(transaction[:]) ||
 		!exportUUIDPattern.MatchString(result.FilesystemUUID) ||
-		result.DiskBytes < 4096 || result.DiskBytes > 1<<30 || result.DiskBytes%512 != 0 ||
+		result.DiskBytes < 4096 || result.DiskBytes > 4<<30 || result.DiskBytes%512 != 0 ||
 		len(result.Selected) == 0 || len(result.Selected) > 1024 {
 		return guestExportRequest{}, fmt.Errorf("export request is outside alpha policy")
 	}

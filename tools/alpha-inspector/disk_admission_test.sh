@@ -99,3 +99,30 @@ if grep -Fq 'probe accepts only' "$fixture_dir/export-control-stderr"; then
 fi
 
 echo 'export identity, transaction, hardlink, and parent-mode drift rejected; exact private control passed disk admission'
+
+# Sparse snapshots exercise the actual helper's export-size admission without
+# launching a VM or copying a multi-GiB payload. Missing boot artifacts stop
+# preflight after the exact disk/identity guards have run.
+python3 - "$fixture_dir/alpha-inspector" "$fixture_dir" "$snapshot" <<'PYTEST'
+import os
+import subprocess
+import sys
+
+helper, root, snapshot = sys.argv[1:]
+transaction = "0123456789abcdef0123456789abcdef"
+for size, accepted in [(1073742336, True), (4294967296, True),
+                       (4294967808, False), (4294967297, False)]:
+    os.truncate(snapshot, size)
+    info = os.stat(snapshot)
+    result = subprocess.run([helper, "preflight-export", root + "/missing-kernel",
+                             root + "/missing-initrd", snapshot, transaction,
+                             str(info.st_dev), str(info.st_ino), str(size)],
+                            capture_output=True, text=True)
+    rejected_size = "bounded size" in result.stderr
+    if accepted:
+        if rejected_size or "probe accepts only" in result.stderr or result.returncode == 0:
+            raise SystemExit(f"bounded export disk {size} did not reach missing-artifact preflight: {result.stderr}")
+    elif not rejected_size:
+        raise SystemExit(f"oversized or unaligned disk {size} escaped size admission: {result.stderr}")
+print("4 GiB sparse export admitted; above-cap and unaligned declarations rejected")
+PYTEST

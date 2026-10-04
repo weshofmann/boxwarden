@@ -5,6 +5,7 @@ import (
 
 	"github.com/weshofmann/boxwarden/internal/backend"
 	"github.com/weshofmann/boxwarden/internal/domain"
+	"github.com/weshofmann/boxwarden/internal/importx"
 	"github.com/weshofmann/boxwarden/internal/session"
 )
 
@@ -19,17 +20,23 @@ func validateRecord(d domain.ID, r Record) error {
 	if err := validateKey(d, r.Name); err != nil {
 		return err
 	}
-	if (r.Version != 1 && r.Version != 2) || r.Domain != d {
+	if (r.Version != 1 && r.Version != 2 && r.Version != 3) || r.Domain != d {
 		return fmt.Errorf("invalid project version or domain")
 	}
-	if r.Version == 1 && r.RecipeIntentDigest != "" || r.Version == 2 && !lowerSHA256(r.RecipeIntentDigest) {
+	if r.Version == 1 && r.RecipeIntentDigest != "" || r.Version == 2 && !lowerSHA256(r.RecipeIntentDigest) || r.Version == 3 && r.RecipeIntentDigest != "" && !lowerSHA256(r.RecipeIntentDigest) {
 		return fmt.Errorf("project version differs from recipe intent binding")
+	}
+	if r.Version != 3 && r.ImportSelection != "" || r.Version == 3 && (r.ImportSelection == "" || r.ImportID == "") {
+		return fmt.Errorf("project version differs from frozen import selection")
+	}
+	if _, err := importx.ParseSelection(r.ImportSelection); err != nil {
+		return fmt.Errorf("project import selection: %w", err)
 	}
 	if err := backend.ValidateObjectID(r.Base); err != nil {
 		return fmt.Errorf("project base: %w", err)
 	}
-	// The current workspace export cap is 1 GiB; projects must be exportable.
-	if !validUUID(r.VolumeID) || !validUUID(r.FilesystemUUID) || r.SizeBytes < 16<<20 || r.SizeBytes > 1<<30 || r.SizeBytes%512 != 0 {
+	// The current workspace export cap is 4 GiB; projects must be exportable.
+	if !validUUID(r.VolumeID) || !validUUID(r.FilesystemUUID) || r.SizeBytes < 16<<20 || r.SizeBytes > 4<<30 || r.SizeBytes%512 != 0 {
 		return fmt.Errorf("invalid project volume identity or size")
 	}
 	if (r.SessionID == "") != (r.BackendObject == "") {

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/weshofmann/boxwarden/internal/domain"
+	"github.com/weshofmann/boxwarden/internal/importx"
 	"github.com/weshofmann/boxwarden/internal/session"
 	"github.com/weshofmann/boxwarden/internal/sshx"
 	"github.com/weshofmann/boxwarden/internal/supervisor"
@@ -52,8 +53,8 @@ func (o *Owner) TransferImport(ctx context.Context, spec supervisor.ImportTransf
 	if err != nil {
 		return supervisor.ImportResult{}, err
 	}
-	if receipt.Digest != spec.SourceDigest || receipt.FileCount < 1 || receipt.FileCount > 256 ||
-		receipt.TotalBytes < 0 || receipt.TotalBytes > 16<<20 || receipt.FileCount != journal.FileCount || receipt.TotalBytes != journal.TotalBytes ||
+	if receipt.Digest != spec.SourceDigest || receipt.FileCount < 1 || receipt.FileCount > importx.MaxFiles ||
+		receipt.TotalBytes < 0 || receipt.TotalBytes > importx.MaxTotalBytes || receipt.FileCount != journal.FileCount || receipt.TotalBytes != journal.TotalBytes ||
 		receipt.RemotePath != spec.MountPath+"/boxwarden-import-"+spec.TransactionID {
 		return supervisor.ImportResult{}, fmt.Errorf("import readback receipt differs from exact transaction")
 	}

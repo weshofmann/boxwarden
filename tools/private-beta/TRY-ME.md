@@ -111,7 +111,10 @@ and dismiss the optional updater; no password or upgrade is needed to reach
 the application's sign-in screen.
 If a fresh observation expires, run `bw project open myproject` to re-establish
 readiness, then `bw project import retry myproject` for a recorded import. The
-retry keeps its original selection and transaction; do not create another import.
+retry keeps its original selection, transaction and running generation. Finish a
+pending import before stopping or upgrading that runtime: stop/start changes its
+generation, and retry then refuses the old transaction. Do not rewrite the
+journal or create another import over uncertain guest contents.
 Open Ubuntu Terminal through Show Apps. Enter the printed guest files directory
 under `/home/boxwarden/workspaces/project`; type the prefix
 `cd /home/boxwarden/workspaces/project/boxwarden-import-` and press Tab to complete
@@ -144,7 +147,11 @@ Inspect its `notes.txt`, `new.txt` and unchanged `reference.txt`; compare agains
 the intended edited bytes. The source should still contain its original two
 files. Export refuses a running sandbox or an existing destination. Returned
 guest files are data: inspect them before deliberately running anything.
-Transfers are explicit, bounded to 256 files / 16 MiB, not synchronization.
+Import supports 4096 files / 256 MiB total, with 64 MiB per file and 2048
+directories; stopped export supports 8192 files / 512 MiB total on workspace
+disks up to 4 GiB. Transfers remain explicit copies. See `support/source/docs/operations/projects.md` in this archive for selection
+preview and literal exclusions before importing dependency/build trees. Pin the printed preview digest with
+`--expected-digest` when importing the inspected selection.
 
 ## Controlled clipboard
 
