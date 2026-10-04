@@ -20,7 +20,7 @@ final class ProjectPresentation {
     refreshing = false
   }
   func beginRefresh() -> UUID? {
-    guard !refreshing, !configPath.isEmpty else { return nil }
+    guard !busy, !refreshing, !configPath.isEmpty else { return nil }
     let id = UUID()
     refreshID = id
     refreshing = true
@@ -40,6 +40,10 @@ final class ProjectPresentation {
   }
   func beginOperation() -> UUID? {
     guard !busy else { return nil }
+    // Keep the validated selection, but discard any observation begun before
+    // this effect. Its late callback must not replace operation state.
+    refreshID = nil
+    refreshing = false
     let id = UUID()
     operationID = id
     busy = true

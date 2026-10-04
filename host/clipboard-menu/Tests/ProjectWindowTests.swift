@@ -17,10 +17,10 @@ import AppKit
     controller.presentation.chooseConfiguration("/synthetic/config.json")
     let refresh = controller.presentation.beginRefresh()!
     controller.presentation.finishRefresh(refresh, names: ["one", "two"])
-    func project(_ state: String) -> ProjectRecord {
+    func project(_ state: String, actions: [String] = ["open", "stop"]) -> ProjectRecord {
       ProjectRecord(name: "one", base: "base", sessionId: "session", backendObject: "backend", state: state, managementReady: false, diagnostic: "", observedState: state, backendRunning: state == "running",
         workspace: ProjectWorkspace(id: "workspace", filesystemUuid: "filesystem", sizeBytes: 64 << 20, mountPath: "/workspace", initialized: true),
-        software: ProjectSoftware(intentDigest: "intent", status: "complete", actions: []), importState: ProjectImport(status: "not_imported", id: "", guestPath: ""), replacementPending: false, availableActions: ["open", "stop"])
+        software: ProjectSoftware(intentDigest: "intent", status: "complete", actions: []), importState: ProjectImport(status: "not_imported", id: "", guestPath: ""), replacementPending: false, availableActions: actions)
     }
     controller.projects = [project("running")]
     check(!controller.canReplaceSelectedProject, "running project must be stopped before replacement")
@@ -45,14 +45,15 @@ import AppKit
     try Data("#!/bin/sh\n/bin/sleep 1\nexit 1\n".utf8).write(to: cli)
     try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
     controller.client = try ProjectClient(executable: cli.path, config: "/synthetic/config.json", activityDirectory: root.appendingPathComponent("activity"))
-    controller.recoveredActivities = []; controller.recoveredBusy = false
+    controller.recoveredActivities = []; controller.recoveredBusy = false; controller.snapshotAvailable = true
     controller.run(.export(name: "one", destination: "/synthetic/new-export"))
     check(controller.cancelButton.isEnabled, "first live export immediately enables explicit interruption")
     let end = Date().addingTimeInterval(4)
     while controller.presentation.busy && Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
     check(!controller.presentation.busy, "synthetic command completed")
-    controller.allowUnknownRetry = true
+    controller.allowUnknownRetry = true; controller.snapshotAvailable = true
     controller.run(.open(name: "one"))
+    check(controller.presentation.busy, "synthetic second operation actually started from refreshed inventory")
     check(!controller.cancelButton.isEnabled, "previous export cannot enable interruption of another operation")
     let secondEnd = Date().addingTimeInterval(4)
     while controller.presentation.busy && Date() < secondEnd { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
@@ -103,6 +104,89 @@ import AppKit
     waitForFeedback()
     check(feedback.snapshotAvailable && feedback.statusLabel.stringValue.contains("refreshed") && feedback.progressLines.isEmpty, "valid config inventory replaces loading status without restoring old errors")
     check(feedbackDefaults.string(forKey: "SelectedConfiguration") == "/synthetic/valid.json", "real config activation remembers only the isolated selected config")
-    print("PASS: native activity selection and export interruption controls")
+    let actions = ProjectWindowController(executable: feedbackCLI.path, activityDirectory: root.appendingPathComponent("actions-activity"), defaults: feedbackDefaults)
+    actions.presentation.chooseConfiguration("/synthetic/actions.json")
+    let initial = actions.presentation.beginRefresh()!
+    actions.render()
+    check(!actions.createButton.isEnabled && !actions.importButton.isEnabled && !actions.openButton.isEnabled, "initial refresh cannot enable effects without inventory")
+    actions.presentation.finishRefresh(initial, names: ["one"])
+    actions.projects = [project("stopped", actions: ["open", "stop", "import", "export"])]
+    actions.setup = ProjectSetup(status: "ready", guidance: "")
+    let background = actions.presentation.beginRefresh()!
+    actions.render()
+    check(!actions.createButton.isEnabled && !actions.importButton.isEnabled && !actions.openButton.isEnabled, "unavailable snapshot remains disabled despite old project fields")
+    actions.snapshotAvailable = true; actions.render()
+    check(actions.createButton.isEnabled && actions.importButton.isEnabled && actions.openButton.isEnabled && actions.stopButton.isEnabled && actions.replaceButton.isEnabled, "validated snapshot keeps create/import/lifecycle/replacement available during background refresh")
+    menu.removeItem(newProject); newProject.target = actions; menu.addItem(newProject); menu.update()
+    check(newProject.isEnabled, "native menu accepts validated snapshot during background refresh")
+    actions.client = try ProjectClient(executable: feedbackCLI.path, config: "/synthetic/actions.json", activityDirectory: root.appendingPathComponent("actions-activity"))
+    func dismissActionSheet() {
+      if let sheet = actions.window?.attachedSheet { actions.window?.endSheet(sheet, returnCode: .cancel) }
+      let deadline = Date().addingTimeInterval(2)
+      while actions.window?.attachedSheet != nil && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+      check(actions.window?.attachedSheet == nil, "synthetic action sheet dismissed")
+    }
+    actions.createProject(nil)
+    check(actions.window?.attachedSheet != nil, "create handler opens its sheet during background refresh")
+    dismissActionSheet()
+    actions.importProject(nil)
+    check(actions.sheetController is ImportProjectController && actions.window?.attachedSheet != nil, "import handler opens exact selected-project sheet during background refresh")
+    actions.chooseConfiguration(nil)
+    check(actions.sheetController is ImportProjectController, "configuration chooser cannot replace an active import sheet")
+    dismissActionSheet()
+    actions.replaceSystem(nil)
+    check(actions.window?.attachedSheet != nil, "replacement handler opens its confirmation during background refresh")
+    dismissActionSheet()
+    actions.presentation.finishRefresh(background, names: [])
+    actions.projects = []; actions.snapshotAvailable = false; actions.render()
+    actions.createProject(nil); actions.importProject(nil)
+    check(actions.window?.attachedSheet == nil && !actions.createButton.isEnabled && !actions.importButton.isEnabled, "missing inventory refuses effect handlers and controls")
+
+    actions.run(.open(name: "one"))
+    check(!actions.presentation.busy && actions.activity == nil, "direct lifecycle handler refuses effects without a validated snapshot")
+
+    let raceCLI = root.appendingPathComponent("race-cli")
+    let firstQuery = root.appendingPathComponent("first-query"), releaseQuery = root.appendingPathComponent("release-query"), queryEnded = root.appendingPathComponent("query-ended"), mutationCalls = root.appendingPathComponent("mutation-calls")
+    let lateFailure = #"{"version":1,"type":"error","operation":"project.list","message":"late inventory failure","data":{"uncertain":false}}"#
+    let effectFailure = #"{"version":1,"type":"error","operation":"project.open","message":"synthetic effect failed","data":{"uncertain":false}}"#
+    let raceScript = """
+    #!/bin/sh
+    if [ "$6" = list ]; then
+      if [ ! -f '\(firstQuery.path)' ]; then
+        /usr/bin/touch '\(firstQuery.path)'
+        while [ ! -f '\(releaseQuery.path)' ]; do /bin/sleep 0.02; done
+        printf '%s\\n' '\(lateFailure)'
+        /usr/bin/touch '\(queryEnded.path)'
+        exit 3
+      fi
+      printf '%s\\n' '\(successEvent)'
+    else
+      printf '%s\\n' open >> '\(mutationCalls.path)'
+      printf '%s\\n' '\(effectFailure)'
+      exit 3
+    fi
+    """
+    try Data(raceScript.utf8).write(to: raceCLI)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: raceCLI.path)
+    let race = ProjectWindowController(executable: raceCLI.path, activityDirectory: root.appendingPathComponent("race-activity"), defaults: feedbackDefaults)
+    race.presentation.chooseConfiguration("/synthetic/race.json")
+    race.presentation.finishRefresh(race.presentation.beginRefresh()!, names: ["one"])
+    race.projects = [project("stopped")]; race.snapshotAvailable = true
+    race.client = try ProjectClient(executable: raceCLI.path, config: "/synthetic/race.json", activityDirectory: root.appendingPathComponent("race-activity"))
+    func spinUntil(_ condition: () -> Bool) {
+      let deadline = Date().addingTimeInterval(5)
+      while !condition() && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+      check(condition(), "controlled synthetic process reached expected checkpoint")
+    }
+    race.refreshProjects(nil); spinUntil { FileManager.default.fileExists(atPath: firstQuery.path) }
+    race.run(.open(name: "one")); race.run(.open(name: "one"))
+    spinUntil { !race.presentation.busy }
+    try Data().write(to: releaseQuery)
+    spinUntil { FileManager.default.fileExists(atPath: queryEnded.path) && !race.presentation.refreshing }
+    RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+    check(race.snapshotAvailable && race.statusLabel.stringValue == "synthetic effect failed" && !race.progressLines.contains(where: { $0.contains("late inventory failure") }), "late background query cannot overwrite completed operation outcome or validated inventory")
+    let recordedMutations = try String(contentsOf: mutationCalls, encoding: .utf8)
+    check(recordedMutations == "open\n", "repeated effect click during refresh starts exactly one command")
+    print("PASS: native activity controls, refresh feedback and background action availability")
   }
 }

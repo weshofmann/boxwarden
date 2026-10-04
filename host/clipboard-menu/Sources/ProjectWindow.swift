@@ -53,6 +53,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   var selectedProject: ProjectRecord? { projects.first { $0.name == presentation.selectedName } }
   var canReplaceSelectedProject: Bool { selectedProject?.observedState == "stopped" && selectedProject?.replacementPending == false && selectedProject?.availableActions.contains("inspect_session") == false }
   var hasActiveOperation: Bool { presentation.busy || recoveredBusy }
+  var readyToAct: Bool { !hasActiveOperation && snapshotAvailable }
 
   init(executable: String, privatePasteboard: String? = nil, activityDirectory: URL? = nil, defaults: UserDefaults = .standard) {
     self.executable = executable; self.privatePasteboard = privatePasteboard
@@ -238,17 +239,16 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   }
   func render() {
     let idle = !hasActiveOperation
-    let readyToAct = idle && !presentation.refreshing && snapshotAvailable
     chooseButton.isEnabled = idle
     createButton.isEnabled = readyToAct && setup?.status == "ready"
-    refreshButton.isEnabled = client != nil && !presentation.refreshing
+    refreshButton.isEnabled = client != nil && !presentation.busy && !presentation.refreshing
     table.isEnabled = idle
     let actions = Set(selectedProject?.availableActions ?? [])
     openButton.isEnabled = readyToAct && actions.contains("open")
     stopButton.isEnabled = readyToAct && actions.contains("stop")
     importButton.isEnabled = readyToAct && actions.contains("import")
     exportButton.isEnabled = readyToAct && actions.contains("export")
-    transactionsButton.isEnabled = client != nil && selectedProject != nil && !presentation.refreshing
+    transactionsButton.isEnabled = client != nil && selectedProject != nil && snapshotAvailable
     replaceButton.isEnabled = readyToAct && canReplaceSelectedProject
     importRetryButton.isEnabled = readyToAct && actions.contains("import_retry")
     replaceRetryButton.isEnabled = readyToAct && actions.contains("rebuild_retry")
@@ -304,7 +304,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     } catch { report(error.localizedDescription) }
   }
   func run(_ command: ProjectCommand) {
-    guard !hasActiveOperation, let client, let ticket = presentation.beginOperation() else { return }
+    guard readyToAct, let client, let ticket = presentation.beginOperation() else { return }
     activity = nil
     statusLabel.stringValue = command.operation + " in progress"
     appendProgress("Starting " + command.operation + " for " + (command.projectName ?? "selection"))
@@ -376,7 +376,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   @objc func pushClipboard(_ sender: Any?) { transferClipboard(.push) }
   @objc func pullClipboard(_ sender: Any?) { transferClipboard(.pull) }
   func transferClipboard(_ direction: TransferDirection) {
-    guard !hasActiveOperation, !presentation.refreshing, !unknownClipboard, let target = selectedClipboardTarget,
+    guard readyToAct, !unknownClipboard, let target = selectedClipboardTarget,
           let clipboardClient, let ticket = presentation.beginOperation() else { return }
     let request = TransferRequest(id: UUID(), target: target, direction: direction)
     let requestConfig = presentation.configPath

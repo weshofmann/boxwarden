@@ -21,7 +21,10 @@ import Foundation
     let update = ticket(state.beginRefresh(), "a new configuration or completed refresh permits a new observation")
     check(state.finishRefresh(update, names: ["first", "second"]), "refresh accepted")
     check(state.selectedName == "second", "refresh preserves operator's project")
-    let operation = ticket(state.beginOperation(), "idle state starts an operation")
+    let background = ticket(state.beginRefresh(), "background refresh starts from validated selection")
+    let operation = ticket(state.beginOperation(), "validated selection starts an operation during refresh")
+    check(!state.refreshing && !state.finishRefresh(background, names: ["stale"]), "operation invalidates pending inventory without changing target")
+    check(state.beginRefresh() == nil, "new refresh cannot race active operation")
     check(state.beginOperation() == nil, "repeated effect click is refused")
     state.select("first")
     check(state.selectedName == "second", "active operation retains visible target")
@@ -29,6 +32,9 @@ import Foundation
     check(state.busy, "unrelated completion cannot unlock actions")
     state.finishOperation(operation)
     check(!state.busy, "exact completion unlocks actions")
+    check(!state.finishRefresh(background, names: ["stale"]), "late inventory stays invalid after operation completion")
+    let following = ticket(state.beginRefresh(), "operation completion permits fresh inventory")
+    check(state.finishRefresh(following, names: ["first", "second"]), "new inventory accepted after operation")
 
     let draft = ImportConfirmation()
     draft.source = "/private/source"

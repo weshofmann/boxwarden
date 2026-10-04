@@ -2,7 +2,7 @@ import AppKit
 
 extension ProjectWindowController {
   @objc func createProject(_ sender: Any?) {
-    guard !hasActiveOperation, !presentation.refreshing, setup?.status == "ready", let window, window.attachedSheet == nil else { return }
+    guard readyToAct, setup?.status == "ready", let window, window.attachedSheet == nil else { return }
     let a = NSAlert(); a.messageText = "Create a project"
     a.informativeText = "Preparation can take several minutes. The workspace is independent of the disposable system disk. This window remains responsive while the CLI prepares and starts the desktop."
     let name = NSTextField(string: ""); name.placeholderString = "Project name, e.g. myproject"; name.setAccessibilityIdentifier("New project name")
@@ -19,7 +19,7 @@ extension ProjectWindowController {
     window.attachedSheet?.makeFirstResponder(name)
   }
   @objc func importProject(_ sender: Any?) {
-    guard !hasActiveOperation, selectedProject?.availableActions.contains("import") == true,
+    guard readyToAct, selectedProject?.availableActions.contains("import") == true,
           let p = selectedProject, let client, let window, window.attachedSheet == nil else { return }
     let sheet = ImportProjectController(project: p.name, client: client) { [weak self] confirmed in
       guard let self else { return }
@@ -29,7 +29,7 @@ extension ProjectWindowController {
     window.beginSheet(sheet.window!) { [weak self] _ in self?.sheetController = nil }
   }
   @objc func exportProject(_ sender: Any?) {
-    guard !hasActiveOperation, let p = selectedProject, p.availableActions.contains("export"), let window, window.attachedSheet == nil else { return }
+    guard readyToAct, let p = selectedProject, p.availableActions.contains("export"), let window, window.attachedSheet == nil else { return }
     let panel = NSSavePanel(); panel.title = "Export Stopped Project"; panel.prompt = "Export"
     panel.nameFieldLabel = "New export folder:"
     panel.nameFieldStringValue = p.name + "-returned-" + String(Int(Date().timeIntervalSince1970))
@@ -53,7 +53,7 @@ extension ProjectWindowController {
     sheet.load()
   }
   @objc func replaceSystem(_ sender: Any?) {
-    guard !hasActiveOperation, !presentation.refreshing, canReplaceSelectedProject, let p = selectedProject, let window, window.attachedSheet == nil else { return }
+    guard readyToAct, canReplaceSelectedProject, let p = selectedProject, let window, window.attachedSheet == nil else { return }
     let a = NSAlert(); a.alertStyle = .warning; a.messageText = "Replace the system for \(p.name)?"
     a.informativeText = "This discards system-local files, installed applications and running processes. The independent workspace \(p.workspace.id) and its files are retained. The project is stopped. Boxwarden prepares the selected recipe and starts its replacement. Export important work first."
     let recipe = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 240, height: 28)); recipe.addItems(withTitles: ["desktop", "actions", "chatgpt"]); recipe.setAccessibilityIdentifier("Replacement recipe")
