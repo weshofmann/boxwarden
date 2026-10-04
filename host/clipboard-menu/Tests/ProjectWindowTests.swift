@@ -56,6 +56,53 @@ import AppKit
     check(!controller.cancelButton.isEnabled, "previous export cannot enable interruption of another operation")
     let secondEnd = Date().addingTimeInterval(4)
     while controller.presentation.busy && Date() < secondEnd { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+    let feedbackCLI = root.appendingPathComponent("feedback-cli")
+    func feedbackScript(_ body: String) throws {
+      try Data(("#!/bin/sh\n" + body).utf8).write(to: feedbackCLI)
+      try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: feedbackCLI.path)
+    }
+    let failureEvent = #"{"version":1,"type":"error","operation":"project.list","message":"synthetic storage missing","data":{"uncertain":false}}"#
+    let successEvent = #"{"version":1,"type":"result","operation":"project.list","data":{"setup":{"status":"ready","guidance":""},"projects":[]}}"#
+    try feedbackScript("printf '%s\\n' '\(failureEvent)'\nexit 3\n")
+    let defaultsName = "org.boxwarden.test.refresh-" + UUID().uuidString
+    let feedbackDefaults = UserDefaults(suiteName: defaultsName)!
+    defer { feedbackDefaults.removePersistentDomain(forName: defaultsName) }
+    let feedback = ProjectWindowController(executable: feedbackCLI.path, activityDirectory: root.appendingPathComponent("feedback-activity"), defaults: feedbackDefaults)
+    feedback.presentation.chooseConfiguration("/synthetic/broken.json")
+    feedback.client = try ProjectClient(executable: feedbackCLI.path, config: "/synthetic/broken.json", activityDirectory: root.appendingPathComponent("feedback-activity"))
+    func waitForFeedback() {
+      let deadline = Date().addingTimeInterval(5)
+      while feedback.presentation.refreshing && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+      check(!feedback.presentation.refreshing, "synthetic feedback refresh completed")
+    }
+    feedback.refreshProjects(nil); waitForFeedback()
+    let firstError = feedback.statusLabel.stringValue
+    check(!feedback.snapshotAvailable && feedback.progressLines.count == 1, "first refresh failure visible once")
+    feedback.refreshProjects(nil); waitForFeedback()
+    check(feedback.statusLabel.stringValue == firstError && feedback.progressLines.count == 1, "identical automatic refresh errors do not flood progress")
+    try feedbackScript("printf '%s\\n' '\(successEvent)'\n")
+    feedback.refreshProjects(nil); waitForFeedback()
+    check(feedback.snapshotAvailable && feedback.statusLabel.stringValue != firstError && feedback.progressLines.last?.contains("available") == true, "successful inventory clears current refresh error and reports recovery")
+    feedback.report("Stopped synthetic project.")
+    let outcomeLogCount = feedback.progressLines.count
+    feedback.refreshProjects(nil); waitForFeedback()
+    check(feedback.statusLabel.stringValue == "Stopped synthetic project." && feedback.progressLines.count == outcomeLogCount, "routine successful refresh preserves operation outcome without new log noise")
+    try feedbackScript("printf '%s\\n' '\(failureEvent)'\nexit 3\n")
+    feedback.refreshProjects(nil); waitForFeedback()
+    check(feedback.progressLines.count == outcomeLogCount + 1, "same error after recovery represents a new outage")
+    feedback.report("Explicit export completed.")
+    try feedbackScript("printf '%s\\n' '\(successEvent)'\n")
+    feedback.refreshProjects(nil); waitForFeedback()
+    check(feedback.statusLabel.stringValue == "Explicit export completed." && feedback.progressLines.last?.contains("available") == true, "recovery preserves a newer operation outcome while recording inventory recovery")
+    try feedbackScript("printf '%s\\n' '\(failureEvent)'\nexit 3\n")
+    feedback.refreshProjects(nil); waitForFeedback()
+    check(feedback.statusLabel.stringValue == firstError, "real refresh failure present before switching configuration")
+    try feedbackScript("printf '%s\\n' '\(successEvent)'\n")
+    feedback.useConfiguration("/synthetic/valid.json")
+    check(feedback.progressLines.isEmpty && feedback.progressText.string.isEmpty && !feedback.statusLabel.stringValue.contains("unavailable"), "config switch immediately clears obsolete errors and old progress")
+    waitForFeedback()
+    check(feedback.snapshotAvailable && feedback.statusLabel.stringValue.contains("refreshed") && feedback.progressLines.isEmpty, "valid config inventory replaces loading status without restoring old errors")
+    check(feedbackDefaults.string(forKey: "SelectedConfiguration") == "/synthetic/valid.json", "real config activation remembers only the isolated selected config")
     print("PASS: native activity selection and export interruption controls")
   }
 }

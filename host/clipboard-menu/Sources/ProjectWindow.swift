@@ -5,7 +5,9 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   let executable: String
   let privatePasteboard: String?
   let presentation = ProjectPresentation()
-  let pendingClipboard = ClipboardPending()
+  let pendingClipboard: ClipboardPending
+  let activityDirectory: URL?
+  let defaults: UserDefaults
   var sheetController: NSWindowController?
   var preferredSelection: String?
   var client: ProjectClient?
@@ -21,6 +23,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   var refreshTimer: Timer?
   var activityTimer: Timer?
   var progressLines: [String] = []
+  var lastRefreshFailure: String?
   let table = NSTableView()
   let configLabel = NSTextField(labelWithString: "Choose an initialized Boxwarden configuration to begin.")
   let detail = NSTextField(wrappingLabelWithString: "Projects will appear here after a configuration is selected.")
@@ -51,8 +54,10 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   var canReplaceSelectedProject: Bool { selectedProject?.observedState == "stopped" && selectedProject?.replacementPending == false && selectedProject?.availableActions.contains("inspect_session") == false }
   var hasActiveOperation: Bool { presentation.busy || recoveredBusy }
 
-  init(executable: String, privatePasteboard: String? = nil) {
+  init(executable: String, privatePasteboard: String? = nil, activityDirectory: URL? = nil, defaults: UserDefaults = .standard) {
     self.executable = executable; self.privatePasteboard = privatePasteboard
+    self.activityDirectory = activityDirectory; self.defaults = defaults
+    self.pendingClipboard = ClipboardPending(defaults: defaults)
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1020, height: 790), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
     window.title = "Boxwarden Projects"
     window.minSize = NSSize(width: 940, height: 740)
@@ -134,7 +139,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     for v in [header, configLabel, setupLabel, body, progressHeader, log, limitations] { v.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true }
   }
   func restoreConfiguration(override: String?) {
-    if let path = override ?? UserDefaults.standard.string(forKey: "SelectedConfiguration"), ProjectCommand.validPath(path) { useConfiguration(path) }
+    if let path = override ?? defaults.string(forKey: "SelectedConfiguration"), ProjectCommand.validPath(path) { useConfiguration(path) }
     refreshTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
       guard let self, !self.hasActiveOperation, self.window?.attachedSheet == nil else { return }
       self.refreshProjects(nil)
@@ -162,14 +167,16 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   func useConfiguration(_ path: String) {
     guard !hasActiveOperation else { return }
     do {
-      let next = try ProjectClient(executable: executable, config: path)
+      let next = try ProjectClient(executable: executable, config: path, activityDirectory: activityDirectory)
       presentation.chooseConfiguration(path)
       client = next; clipboardClient = CLIClient(executable: executable, config: path, privateHostPasteboard: privatePasteboard)
       projects = []; clipboardTargets = []; setup = nil; snapshotAvailable = false
       lastExport = nil; activity = nil; recoveredActivities = []; preferredSelection = nil; allowUnknownRetry = false
+      lastRefreshFailure = nil; progressLines.removeAll(); progressText.string = ""
+      statusLabel.stringValue = "Refreshing selected configuration…"
       unknownClipboard = pendingClipboard.request(config: path) != nil
       if unknownClipboard { report("A previous explicit clipboard transfer has an unknown outcome. No payload was retained. Review the target before permitting another transfer.") }
-      UserDefaults.standard.set(path, forKey: "SelectedConfiguration")
+      defaults.set(path, forKey: "SelectedConfiguration")
       configLabel.stringValue = "Configuration: " + path
       try recoverActivity()
       refreshProjects(nil)
@@ -188,6 +195,13 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
           guard let self, self.presentation.finishRefresh(ticket, names: list.projects.map(\.name)) else { return }
           self.projects = list.projects; self.setup = list.setup; self.clipboardTargets = targets
           self.snapshotAvailable = true
+          if let failure = self.lastRefreshFailure {
+            self.lastRefreshFailure = nil
+            let recovered = "Configuration and storage available. Project inventory refreshed."
+            self.appendProgress(recovered)
+            if self.statusLabel.stringValue == failure { self.statusLabel.stringValue = recovered }
+          }
+          if self.statusLabel.stringValue == "Refreshing selected configuration…" { self.statusLabel.stringValue = "Project inventory refreshed." }
           if let preferred = self.preferredSelection { self.presentation.select(preferred); self.preferredSelection = nil }
           self.table.reloadData(); self.selectVisibleRow(); self.render()
         }
@@ -195,7 +209,11 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
         DispatchQueue.main.async { [weak self] in
           guard let self, self.presentation.finishRefresh(ticket, names: []) else { return }
           self.projects = []; self.clipboardTargets = []; self.snapshotAvailable = false; self.setup = nil
-          self.table.reloadData(); self.report("Configuration or storage unavailable. Mount the configured storage and verify this configuration was initialized. " + error.localizedDescription)
+          self.table.reloadData()
+          let message = "Configuration or storage unavailable. Mount the configured storage and verify this configuration was initialized. " + error.localizedDescription
+          self.statusLabel.stringValue = message
+          if self.lastRefreshFailure != message { self.lastRefreshFailure = message; self.appendProgress(message) }
+          self.render()
         }
       }
     }

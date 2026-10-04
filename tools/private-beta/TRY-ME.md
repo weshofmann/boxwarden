@@ -19,20 +19,20 @@ claim download/Gatekeeper distribution acceptance; it does not bypass OS checks.
 ## Verify and configure once
 
 Verify the archive beside its checksum file with
-`shasum -a 256 -c boxwarden-0.2.0-beta.10-darwin-arm64.tar.gz.sha256`, then extract
+`shasum -a 256 -c boxwarden-0.2.0-beta.11-darwin-arm64.tar.gz.sha256`, then extract
 in a new private user-owned directory. In a **new terminal**, set these
 paths to your actual assets; no profile sourcing or private bindings is needed:
 
 ```sh
 umask 077
-PACKAGE=/absolute/boxwarden-0.2.0-beta.10-darwin-arm64
+PACKAGE=/absolute/boxwarden-0.2.0-beta.11-darwin-arm64
 cd "$PACKAGE"
 shasum -a 256 -c SHA256SUMS
 "$PACKAGE/bin/boxwarden" version
 "$PACKAGE/bin/boxwarden" help
 
 ENROLLED_CONFIG=/absolute/existing/enrolled/config.json
-CONFIG="$HOME/Library/Application Support/boxwarden-beta/config.json"
+CONFIG=/absolute/private-config-volume/boxwarden-beta/config.json
 STATE=/absolute/enrolled-apfs-volume/private-beta-state
 ISO=/absolute/ubuntu-24.04.4-desktop-arm64.iso
 CHECKER=/absolute/e2fsck-static_1.47.0-2.4~exp1ubuntu4.1_arm64.deb
@@ -59,6 +59,12 @@ bw() { "$PACKAGE/bin/boxwarden" --config "$CONFIG" --domain alpha "$@"; }
 bw domain init
 bash "$PACKAGE/prepare-projects.sh" "$CONFIG" "$ISO" "$CHECKER" "$GO_BIN" "$ZSTD_BIN" "$OPENSSL_BIN" "$XORRISO_BIN"
 ```
+
+Keep `CONFIG` on a different filesystem from the enrolled workspace backing
+storage. The config contains the trusted volume identity used to admit that
+storage; placing both on the same filesystem is refused. Use the mounted private
+config volume that already holds your enrolled config, with a new file name.
+`STATE` remains on the enrolled backing filesystem.
 
 The new config preserves the existing toolchain/storage enrollment and creates
 an independent state root. Package preparation creates a private local formatter
@@ -268,7 +274,7 @@ stays disabled. Provider sign-in, cold-machine installation, power-loss
 recovery and complete network isolation are outside this walkthrough.
 
 To rebuild from a clean committed checkout on this Mac:
-`GO_BIN=/absolute/actual/go bash tools/private-beta/build.sh 0.2.0-beta.10 /absolute/new-output`.
+`GO_BIN=/absolute/actual/go bash tools/private-beta/build.sh 0.2.0-beta.11 /absolute/new-output`.
 This builds locally and publishes no release.
 
 ## Replace a disposable project system
