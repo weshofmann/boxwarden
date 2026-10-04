@@ -1,0 +1,104 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+
+if [[ $# != 2 || ! $1 =~ ^0\.2\.[0-9]+-beta\.[1-9][0-9]*$ ]]; then
+  echo 'version must be 0.2.N-beta.N; usage: GO_BIN=/absolute/go bash tools/private-beta/build.sh VERSION NEW-OUTPUT-DIRECTORY' >&2
+  exit 2
+fi
+version=$1
+output=$2
+if [[ -e "$output" || -L "$output" ]]; then
+  echo 'output must not exist' >&2
+  exit 2
+fi
+if [[ "$output" != /* || ! -d "$(dirname "$output")" ]]; then
+  echo 'output requires an absolute path with an existing parent' >&2
+  exit 2
+fi
+if [[ $(uname -s) != Darwin || $(uname -m) != arm64 ]]; then
+  echo 'build requires an Apple Silicon Mac with Xcode Command Line Tools' >&2
+  exit 1
+fi
+go_bin=${GO_BIN:?set GO_BIN to the actual absolute Go executable}
+if [[ "$go_bin" != /* || ! -x "$go_bin" || -L "$go_bin" || $(basename "$go_bin") != go ]]; then
+  echo 'GO_BIN must be the actual absolute Go executable, not a shim' >&2
+  exit 2
+fi
+repo_root="$(cd "$(dirname "$0")/../.." && pwd -P)"
+if [[ -n $(git -C "$repo_root" status --porcelain --untracked-files=all) ]]; then
+  echo 'commit the clean source before packaging' >&2
+  exit 1
+fi
+revision=$(git -C "$repo_root" rev-parse HEAD)
+export PATH="$(dirname "$go_bin"):/usr/bin:/bin"
+export GOENV=off GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off
+export CGO_ENABLED=1 GOOS=darwin GOARCH=arm64
+mkdir -m 700 "$output"
+temporary=$(mktemp -d /private/tmp/boxwarden-beta-build.XXXXXX)
+trap 'rm -rf -- "$temporary"' EXIT
+export GOCACHE="$temporary/gocache" GOMODCACHE="$temporary/modcache"
+name="boxwarden-$version-darwin-arm64"
+package="$output/$name"
+mkdir -p "$package/bin" "$package/support" "$package/notices"
+git clone --quiet --depth 1 --no-local --no-checkout "$repo_root" "$package/support/source"
+git -C "$package/support/source" checkout --quiet --detach "$revision"
+git -C "$package/support/source" remote remove origin
+if [[ $(git -C "$package/support/source" rev-parse HEAD) != "$revision" || -n $(git -C "$package/support/source" status --porcelain --untracked-files=all) ]]; then
+  echo 'packaged source is not the exact clean revision' >&2
+  exit 1
+fi
+(
+  cd "$package/support/source"
+  "$go_bin" build -trimpath -ldflags "-X main.buildVersion=$version -X main.buildRevision=$revision" -o "$package/bin/boxwarden" ./cmd/boxwarden
+)
+codesign --force --sign - "$package/bin/boxwarden"
+bash "$repo_root/host/clipboard-menu/build.sh" --cli "$package/bin/boxwarden" \
+  --output "$package/Boxwarden Clipboard.app" --version "${version%-beta.*}" --build "${version##*.}"
+cp "$repo_root/LICENSE" "$repo_root/NOTICE" "$package/"
+cp "$repo_root/tools/private-beta/TRY-ME.md" "$package/TRY-ME.md"
+cp "$repo_root/tools/private-beta/prepare-projects.sh" "$package/prepare-projects.sh"
+cp "$repo_root/tools/private-beta/prepare-guest-clipboard.sh" "$package/prepare-guest-clipboard.sh"
+goroot=$("$go_bin" env GOROOT)
+cp "$goroot/LICENSE" "$package/notices/Go-LICENSE"
+cp "$goroot/PATENTS" "$package/notices/Go-PATENTS"
+for module in crypto net sys text; do
+  cp "$goroot/src/vendor/golang.org/x/$module/LICENSE" "$package/notices/Go-x-$module-LICENSE"
+  cp "$goroot/src/vendor/golang.org/x/$module/PATENTS" "$package/notices/Go-x-$module-PATENTS"
+done
+# Preserve embedded runtime attributions as well as the standard-library license.
+for source in math/log.go math/atan.go crypto/internal/fips140/aes/aes_generic.go; do
+  cp "$goroot/src/$source" "$package/notices/Go-${source##*/}"
+done
+cat > "$package/notices/README.txt" <<'NOTICES'
+Boxwarden is Apache-2.0; see ../LICENSE and ../NOTICE.
+The CLI, app-bundled CLI and tracked Linux guest bootstrap incorporate Go code.
+Go and its vendored source licenses and patent grants are retained here.
+The app dynamically uses macOS AppKit/Foundation and system Swift libraries;
+these operating-system frameworks are not redistributed in this archive.
+support/source is a complete shallow source checkout, not an installed toolchain.
+Its historical tools/n1-softnet patch is separately AGPL-3.0; its LICENSE and
+NOTICE.md remain there. That patch was modified 2026-09-28; no N1 executable is
+shipped or installed by this package. Ubuntu, Tart, Softnet and Go compiler
+executables are external prerequisites, not bundled distributions.
+NOTICES
+python3 - "$package" "$version" "$revision" "$go_bin" <<'PY'
+import json, pathlib, subprocess, sys
+root = pathlib.Path(sys.argv[1])
+data = {"version": sys.argv[2], "revision": sys.argv[3], "platform": "darwin-arm64",
+        "cgo": True, "signing": "ad-hoc; not notarized",
+        "go": subprocess.check_output([sys.argv[4], "version"], text=True).strip()}
+(root / "BUILD.json").write_text(json.dumps(data, indent=2) + "\n")
+PY
+chmod -R go-rwx "$package"
+(
+  cd "$package"
+  find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 shasum -a 256 > SHA256SUMS
+  shasum -a 256 -c SHA256SUMS > /dev/null
+)
+COPYFILE_DISABLE=1 tar -czf "$output/$name.tar.gz" -C "$output" "$name"
+(
+  cd "$output"
+  shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+)
+printf 'archive: %s\nrevision: %s\n' "$output/$name.tar.gz" "$revision"

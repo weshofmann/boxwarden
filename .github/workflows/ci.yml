@@ -47,6 +47,8 @@ jobs:
         run: |
           python3 guest/ubuntu-24.04-arm64/tests/clipboard_test.py
           bash host/clipboard-menu/test.sh
+          python3 host/clipboard-menu/Tests/build_test.py
+          python3 tools/private-beta/package_test.py
           python3 tools/n1-qualification/listener_test.py
           python3 tools/n1-qualification/followup_tcp_verdict_test.py
           python3 tools/n1-qualification/clipboard_diagnostic_test.py
@@ -80,6 +82,7 @@ jobs:
         if: ${{ hashFiles('go.mod') != '' }}
         shell: bash
         run: |
+          GO_BIN="$(command -v go)" python3 tools/private-beta/guest_clipboard_test.py
           python3 guest/ubuntu-24.04-arm64/tests/recipe_prepare_test.py
           python3 tools/alpha-inspector/fixture_contract_test.py
           python3 tools/alpha-inspector/kernel_image_test.py
