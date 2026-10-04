@@ -19,7 +19,8 @@ jobs:
     # Keep the deterministic source suite on a hosted Apple Silicon runner;
     # real Tart/Softnet and destructive lifecycle qualification stay local.
     runs-on: macos-26
-    timeout-minutes: 15
+    # Full boundary fixtures run in ordinary, race and tagged suites.
+    timeout-minutes: 25
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
