@@ -57,6 +57,10 @@ type SessionStopper interface {
 
 type SessionStopperFactory func(config.Config, config.Domain, string) (SessionStopper, error)
 
+type AlphaRebuildCandidateFunc func(context.Context, config.Config, config.Domain, string, session.RebuildJournal) (session.Record, error)
+
+type AlphaRebuildPrepareFunc func(context.Context, config.Config, config.Domain, string, string, string) (session.RebuildJournal, error)
+
 type AlphaRebuildFunc func(context.Context, config.Config, config.Domain, string, string, string, string) (session.Record, error)
 type AlphaDeleteFunc func(context.Context, config.Config, config.Domain, string) error
 
@@ -107,6 +111,8 @@ type Options struct {
 	SessionStopperFactory    SessionStopperFactory
 	StatusSnapshotFactory    StatusSnapshotFactory
 	AlphaPrepare             AlphaPrepareFunc
+	AlphaRebuildCandidate    AlphaRebuildCandidateFunc
+	AlphaRebuildPrepare      AlphaRebuildPrepareFunc
 	AlphaRebuild             AlphaRebuildFunc
 	AlphaDelete              AlphaDeleteFunc
 	AlphaWorkspaceCreate     AlphaWorkspaceCreateFunc
