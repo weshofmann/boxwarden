@@ -194,6 +194,18 @@ func TestProductionAlphaPrepareReportsPlannedIdentityBeforeHostAdmission(t *test
 	if err == nil || !strings.Contains(output.String(), "preparation-attempt: alpha-attempt-") || !strings.Contains(output.String(), "planned-candidate: boxwarden-alpha-base-") {
 		t.Fatalf("planned identity not reported before unavailable host: %v, %q", err, output.String())
 	}
+	output.Reset()
+	options = publicOptions(app.ProjectOutput([]string{"project", "create", "--json", "example"}, &output))
+	_, err = options.AlphaPrepare(context.Background(), loaded, selected, configPath, app.AlphaPrepareInput{RecipePath: recipePath, ISOPath: filepath.Join(root, "installer.iso"), GuestDefinitionRoot: filepath.Join(root, "guest")})
+	if err == nil {
+		t.Fatal("fixture unexpectedly admitted host")
+	}
+	for _, line := range strings.Split(strings.TrimSpace(output.String()), "\n") {
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil || event["type"] != "progress" || event["operation"] != "project.create" {
+			t.Fatalf("production callback bypassed JSON: %q %v", line, err)
+		}
+	}
 }
 
 func TestProductionBackendFactoryRejectsMissingHostAndUnselectedDomain(t *testing.T) {
@@ -377,5 +389,18 @@ func TestProductionImportResumeRejectsDifferentPinnedSnapshotBeforeGuestControl(
 	_, _, err = publicOptions(io.Discard).AlphaImport(t.Context(), config.Domain{ID: "alpha", StateRoot: state}, app.AlphaImportInput{TransactionID: tx, VolumeID: "00112233-4455-4677-8899-aabbccddeeff", SessionName: "dev", Resume: true, Selection: selection})
 	if err == nil || !strings.Contains(err.Error(), "differs from preview") {
 		t.Fatalf("wrong pinned retry reached guest control: %v", err)
+	}
+}
+
+func TestProductionPrivatePasteboardFactoryIsLazyAndStrict(t *testing.T) {
+	options := publicOptions(&bytes.Buffer{})
+	if options.PrivatePasteboardFactory == nil {
+		t.Fatal("private board route missing")
+	}
+	if board, err := options.PrivatePasteboardFactory(""); err == nil || board != nil {
+		t.Fatal("private factory selected general pasteboard")
+	}
+	if board, err := options.PrivatePasteboardFactory("org.boxwarden.test.synthetic"); err != nil || board == nil {
+		t.Fatalf("private board unavailable at lazy construction: %v", err)
 	}
 }

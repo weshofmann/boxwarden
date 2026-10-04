@@ -44,7 +44,7 @@ func main() {
 	}
 
 	publicCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	options := publicOptions(os.Stdout)
+	options := publicOptions(app.ProjectOutput(os.Args[1:], os.Stdout))
 	input := &clipboardInput{source: os.Stdin}
 	options.Input = input
 	clipboardOutput := &clipboardOutput{source: os.Stdout}
@@ -67,9 +67,10 @@ func publicOptions(output io.Writer) app.Options {
 	hostInitializer := hostx.NewSystemInitializer()
 	hostDoctor := hostx.NewSystemDoctor()
 	return app.Options{
-		ProjectSetupCheck: checkProjectSetup,
-		OutputTerminal:    clipboardTerminal(os.Stdout),
-		Pasteboard:        clipboardhost.New(),
+		ProjectSetupCheck:        checkProjectSetup,
+		OutputTerminal:           clipboardTerminal(os.Stdout),
+		Pasteboard:               clipboardhost.New(),
+		PrivatePasteboardFactory: clipboardhost.NewPrivate,
 		ClipboardTransferFactory: func(ctx context.Context, loaded config.Config, selected config.Domain) (app.ClipboardTransfer, error) {
 			admitted, err := loaded.Domain(string(selected.ID))
 			if err != nil || admitted != selected {

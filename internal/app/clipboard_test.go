@@ -114,3 +114,81 @@ func TestClipboardViewerExplicitConfigWorksWithoutHome(t *testing.T) {
 		t.Fatalf("closed environment explicit locator failed: %v calls=%d", err, fake.calls)
 	}
 }
+
+func TestClipboardPrivatePasteboardFlagIsExplicitAndPushPullOnly(t *testing.T) {
+	for _, mode := range []string{"push", "pull"} {
+		for _, args := range [][]string{{"clipboard", mode, "dev", "--private-host-pasteboard", "org.boxwarden.test.native-123"}, {"clipboard", mode, "--private-host-pasteboard=org.boxwarden.test.native-123", "dev"}} {
+			if _, err := parseCommand(append([]string{"--domain", "work"}, args...), Options{}); err != nil {
+				t.Fatalf("private synthetic board rejected %v: %v", args, err)
+			}
+		}
+	}
+	for _, name := range []string{"", "general", "org.boxwarden.test.", "org.boxwarden.test.fake\n", "org.boxwarden.test.fake\x00", "org.boxwarden.production.fake"} {
+		if _, err := parseCommand([]string{"--domain", "work", "clipboard", "push", "--private-host-pasteboard", name, "dev"}, Options{}); err == nil {
+			t.Fatalf("unsafe private name accepted: %q", name)
+		}
+	}
+	for _, mode := range []string{"copy", "paste"} {
+		if _, err := parseCommand([]string{"--domain", "work", "clipboard", mode, "--private-host-pasteboard", "org.boxwarden.test.native-123", "dev"}, Options{}); err == nil {
+			t.Fatalf("board accepted on %s", mode)
+		}
+	}
+}
+
+type clipboardBoardWitness struct{ label string }
+
+func (*clipboardBoardWitness) ReadText(context.Context) ([]byte, error) {
+	panic("unexpected pasteboard read")
+}
+func (*clipboardBoardWitness) WriteText(context.Context, []byte) (clipboardx.Outcome, error) {
+	panic("unexpected pasteboard write")
+}
+
+type clipboardBoardRecorder struct {
+	board clipboardx.Pasteboard
+	calls int
+}
+
+func (f *clipboardBoardRecorder) Execute(_ context.Context, _ string, _ clipboardx.Request, _ io.Reader, _ io.Writer, board clipboardx.Pasteboard) (clipboardx.Outcome, error) {
+	f.board = board
+	f.calls++
+	return clipboardx.Committed, nil
+}
+
+func TestClipboardPrivatePasteboardRoutesWithoutGeneralFallback(t *testing.T) {
+	path, _ := writeDomainFixture(t, "work")
+	for _, mode := range []string{"push", "pull"} {
+		t.Run(mode, func(t *testing.T) {
+			privateBoard, generalBoard := &clipboardBoardWitness{"private"}, &clipboardBoardWitness{"general"}
+			out := &bytes.Buffer{}
+			transfer := &clipboardBoardRecorder{}
+			opts := Options{Output: out, Pasteboard: generalBoard, ClipboardTransferFactory: func(context.Context, config.Config, config.Domain) (ClipboardTransfer, error) { return transfer, nil }, PrivatePasteboardFactory: func(name string) (clipboardx.Pasteboard, error) {
+				if name != "org.boxwarden.test.synthetic" {
+					t.Fatal("board retargeted")
+				}
+				return privateBoard, nil
+			}}
+			args := []string{"--config", path, "--domain", "work", "clipboard", mode, "--private-host-pasteboard", "org.boxwarden.test.synthetic", "dev"}
+			if err := Run(t.Context(), args, opts); err != nil || transfer.calls != 1 || transfer.board != privateBoard || out.Len() != 0 {
+				t.Fatalf("private route failed: %v %#v", err, transfer)
+			}
+			transfer.calls = 0
+			opts.PrivatePasteboardFactory = nil
+			if err := Run(t.Context(), args, opts); err != clipboardx.ErrRequest || transfer.calls != 0 {
+				t.Fatalf("missing factory fell back: %v", err)
+			}
+			opts.PrivatePasteboardFactory = func(string) (clipboardx.Pasteboard, error) { return nil, clipboardx.ErrUnavailable }
+			if err := Run(t.Context(), args, opts); err != clipboardx.ErrRequest || transfer.calls != 0 {
+				t.Fatalf("failed board fell back: %v", err)
+			}
+			opts.Env = []string{"BOXWARDEN_PRIVATE_PASTEBOARD=org.boxwarden.test.ambient"}
+			opts.PrivatePasteboardFactory = func(string) (clipboardx.Pasteboard, error) {
+				t.Fatal("ambient environment selected private board")
+				return nil, nil
+			}
+			if err := Run(t.Context(), []string{"--config", path, "--domain", "work", "clipboard", mode, "dev"}, opts); err != nil || transfer.calls != 1 || transfer.board != generalBoard {
+				t.Fatalf("default route changed: %v", err)
+			}
+		})
+	}
+}

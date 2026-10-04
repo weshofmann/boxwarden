@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/weshofmann/boxwarden/internal/backend"
+	"github.com/weshofmann/boxwarden/internal/clipboardhost"
 	"github.com/weshofmann/boxwarden/internal/clipboardx"
 	"github.com/weshofmann/boxwarden/internal/config"
 	"github.com/weshofmann/boxwarden/internal/golden"
@@ -99,6 +100,7 @@ type Options struct {
 	ClipboardOutput               io.Writer
 	OutputTerminal                bool
 	Pasteboard                    clipboardx.Pasteboard
+	PrivatePasteboardFactory      func(string) (clipboardx.Pasteboard, error)
 	ConfigPath                    string
 	Env                           []string
 	Observer                      backend.Observer
@@ -126,6 +128,9 @@ type Options struct {
 	AlphaAction                   AlphaActionFunc
 	AlphaAutomatic                AlphaAutomaticFunc
 	Output                        io.Writer
+	projectJSON                   *projectJSON
+	projectObservation            *backend.Observation
+	projectSessionSnapshot        *session.Record
 	// storageCheck is an identity source for synthetic command tests. Production
 	// uses the pinned APFS check when this is nil.
 	storageCheck  func(hostidentity.StorageExpectation) error
@@ -143,7 +148,29 @@ func DefaultConfigPath() (string, error) {
 
 // Run executes one Boxwarden command. Commands that own domain state require an
 // explicit domain; host-global commands deliberately do not select one.
-func Run(ctx context.Context, args []string, options Options) error {
+func Run(ctx context.Context, args []string, options Options) (runErr error) {
+	if operation, jsonMode := projectJSONRequest(args); jsonMode && options.projectJSON == nil && options.Output != nil {
+		stream, ok := options.Output.(*projectJSON)
+		if !ok {
+			stream = &projectJSON{output: options.Output, operation: operation}
+		}
+		options.Output, options.projectJSON = stream, stream
+		defer func() {
+			if runErr != nil {
+				runErr = errors.Join(runErr, stream.emit("error", runErr.Error(), map[string]any{"uncertain": true}))
+				return
+			}
+			if stream.data == nil {
+				runErr = errors.New("structured command returned no terminal receipt")
+				runErr = errors.Join(runErr, stream.emit("error", runErr.Error(), map[string]any{"uncertain": true}))
+				return
+			}
+			runErr = stream.emit("result", "", stream.data)
+			if runErr != nil {
+				runErr = errors.Join(runErr, stream.emit("error", runErr.Error(), map[string]any{"uncertain": true}))
+			}
+		}()
+	}
 	command, err := parseCommand(args, options)
 	if err != nil {
 		return err
@@ -201,7 +228,11 @@ func Run(ctx context.Context, args []string, options Options) error {
 		}
 	}
 	if command.kind == commandProject {
-		return runProject(ctx, command, loaded, selectedDomain, options)
+		err := runProject(ctx, command, loaded, selectedDomain, options)
+		if err == nil && options.projectJSON != nil {
+			finishProjectJSON(ctx, command, loaded, selectedDomain, options)
+		}
+		return err
 	}
 
 	switch command.kind {
@@ -259,7 +290,17 @@ func Run(ctx context.Context, args []string, options Options) error {
 		if out == nil {
 			out = options.Output
 		}
-		_, err = transfer.Execute(ctx, command.name, command.clipboard, options.Input, out, options.Pasteboard)
+		board := options.Pasteboard
+		if command.privatePasteboard != "" {
+			if options.PrivatePasteboardFactory == nil {
+				return clipboardx.ErrRequest
+			}
+			board, err = options.PrivatePasteboardFactory(command.privatePasteboard)
+			if err != nil || board == nil {
+				return clipboardx.ErrRequest
+			}
+		}
+		_, err = transfer.Execute(ctx, command.name, command.clipboard, options.Input, out, board)
 		return err
 	case commandClipboardTargets:
 		return writeClipboardTargets(ctx, options.Output, loaded, selectedDomain, options.Observer, options.StatusSnapshotFactory)
@@ -668,6 +709,7 @@ type parsedCommand struct {
 	expectedAPFSUUID     string
 	outputConfigPath     string
 	project              projectCommand
+	privatePasteboard    string
 }
 
 func (c parsedCommand) requiresDomain() bool {
@@ -728,7 +770,7 @@ func normalizeClipboardFlags(args []string) ([]string, error) {
 		switch name {
 		case "raw":
 			flags = append(flags, token)
-		case "expected-session-id", "expected-backend-kind", "expected-backend-object", "expected-generation":
+		case "expected-session-id", "expected-backend-kind", "expected-backend-object", "expected-generation", "private-host-pasteboard":
 			flags = append(flags, token)
 			if !inline {
 				index++
@@ -814,6 +856,7 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		clipboardSet := flag.NewFlagSet("clipboard", flag.ContinueOnError)
 		clipboardSet.SetOutput(io.Discard)
 		request := clipboardx.Request{Mode: clipboardx.Mode(remaining[1])}
+		privateBoard := clipboardSet.String("private-host-pasteboard", "", "explicit org.boxwarden.test.* synthetic pasteboard (push/pull only)")
 		clipboardSet.BoolVar(&request.Raw, "raw", false, "allow text output to terminal")
 		clipboardSet.StringVar(&request.Target.SessionID, "expected-session-id", "", "exact launch session")
 		clipboardSet.StringVar(&request.Target.BackendKind, "expected-backend-kind", "", "exact launch backend kind")
@@ -827,6 +870,18 @@ func parseCommand(args []string, options Options) (parsedCommand, error) {
 		case clipboardx.Push, clipboardx.Pull, clipboardx.Copy, clipboardx.Paste:
 		default:
 			return parsedCommand{}, clipboardx.ErrRequest
+		}
+		privateBoardSet := false
+		clipboardSet.Visit(func(f *flag.Flag) {
+			if f.Name == "private-host-pasteboard" {
+				privateBoardSet = true
+			}
+		})
+		if privateBoardSet {
+			if (request.Mode != clipboardx.Push && request.Mode != clipboardx.Pull) || clipboardhost.ValidatePrivateBoardName(*privateBoard) != nil {
+				return parsedCommand{}, clipboardx.ErrRequest
+			}
+			base.privatePasteboard = *privateBoard
 		}
 		if request.Raw && request.Mode != clipboardx.Paste {
 			return parsedCommand{}, clipboardx.ErrRequest

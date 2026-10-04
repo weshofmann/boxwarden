@@ -27,6 +27,7 @@ const projectUsage = "project list; project setup|setup-update --source-root PAT
 type projectCommand struct {
 	operation, name, base, source, destination, recipe, transaction, selection string
 	preview, exportList                                                        bool
+	json                                                                       bool
 	sizeMiB                                                                    int64
 	setup                                                                      projectx.Setup
 	retry                                                                      bool
@@ -55,6 +56,7 @@ func parseProject(args []string) (projectCommand, error) {
 	set.SetOutput(io.Discard)
 	var excludes importExclusions
 	var expectedDigest string
+	set.BoolVar(&p.json, "json", false, "versioned JSONL events")
 	switch p.operation {
 	case "setup", "setup-update":
 		p.setup.Version = 1
@@ -133,7 +135,7 @@ func parseProject(args []string) (projectCommand, error) {
 		return p, nil
 	}
 	if p.operation == "import" {
-		if p.retry && set.NFlag() != 0 {
+		if p.retry && projectEffectFlags(set) != 0 {
 			return p, errors.New("project import retry reuses the original selection; do not supply source, exclusions or digest")
 		}
 		if !p.retry {
@@ -160,7 +162,7 @@ func parseProject(args []string) (projectCommand, error) {
 	if _, err := session.ParseName(p.name); err != nil {
 		return p, err
 	}
-	if p.operation == "rebuild" && p.retry && set.NFlag() != 0 {
+	if p.operation == "rebuild" && p.retry && projectEffectFlags(set) != 0 {
 		return p, errors.New("project rebuild retry reuses the recorded candidate; do not supply --base or --recipe")
 	}
 	if p.operation == "create" || p.operation == "rebuild" {
@@ -194,12 +196,21 @@ func runProject(ctx context.Context, c parsedCommand, loaded config.Config, d co
 	}
 	p := c.project
 	if p.operation == "list" {
+		if o.projectJSON != nil {
+			return listProjectsJSON(ctx, loaded, d, o)
+		}
 		return listProjects(ctx, loaded, d, o)
 	}
 	if p.preview {
+		if o.projectJSON != nil {
+			return previewProjectImportJSON(ctx, p, o.projectJSON)
+		}
 		return previewProjectImport(ctx, p, o.Output)
 	}
 	if p.exportList {
+		if o.projectJSON != nil {
+			return listProjectExportsJSON(ctx, d, p.name, o.projectJSON)
+		}
 		return listProjectExports(ctx, d, p.name, o.Output)
 	}
 	scope := "project-" + string(d.ID) + "-" + p.name
@@ -281,6 +292,11 @@ func runProject(ctx context.Context, c parsedCommand, loaded config.Config, d co
 }
 
 func projectSessionCommand(ctx context.Context, c parsedCommand, op string, o Options) error {
+	if op == "start" {
+		if err := projectProgress(o, "Starting the sandbox and checking management readiness"); err != nil {
+			return err
+		}
+	}
 	return Run(ctx, []string{"--config", c.configPath, "--domain", c.domain, "session", op, c.project.name}, o)
 }
 
@@ -359,6 +375,9 @@ func createProject(ctx context.Context, c parsedCommand, loaded config.Config, d
 	if err := projectx.Create(d.StateRoot, d.ID, r); err != nil {
 		return err
 	}
+	if err := projectProgress(o, "Creating the exact sandbox clone"); err != nil {
+		return err
+	}
 	var fresh session.FreshCreation
 	service := session.NewService(d, o.Observer, o.Creator)
 	if intentDigest != "" {
@@ -394,6 +413,9 @@ func initializeProject(ctx context.Context, c parsedCommand, d config.Domain, r 
 		}
 		if o.AlphaWorkspaceCreate == nil {
 			return errors.New("managed workspace formatter is required")
+		}
+		if err := projectProgress(o, "Formatting the managed workspace"); err != nil {
+			return err
 		}
 		_, err = o.AlphaWorkspaceCreate(ctx, d, c.configPath, AlphaWorkspaceCreateInput{VolumeID: r.VolumeID, FilesystemUUID: r.FilesystemUUID, SizeBytes: r.SizeBytes, BundlePath: setup.FormatterBundle, SourceRoot: setup.SourceRoot})
 		if err != nil {
@@ -455,6 +477,10 @@ func projectStatus(ctx context.Context, c parsedCommand, d config.Domain, r proj
 }
 
 func writeProject(out io.Writer, r projectx.Record) error {
+	if stream, ok := out.(*projectJSON); ok {
+		receipt := r
+		stream.record = &receipt
+	}
 	if r.RecipeIntentDigest != "" {
 		if _, err := fmt.Fprintf(out, "project recipe intent: %s\nsoftware setup: inspect actions in session status; management READY alone does not confirm software or clipboard\n", r.RecipeIntentDigest); err != nil {
 			return err
@@ -527,6 +553,9 @@ func importProject(ctx context.Context, c parsedCommand, d config.Domain, r proj
 			input.Resume, input.SourcePath = true, ""
 		}
 	}
+	if err := projectProgress(o, "Transferring the frozen import selection and checking readback"); err != nil {
+		return err
+	}
 	journal, receipt, err := o.AlphaImport(ctx, d, input)
 	if err != nil {
 		return fmt.Errorf("project import incomplete; retained selection, no automatic reimport; use project import retry %s: %w", r.Name, err)
@@ -581,6 +610,9 @@ func exportProject(ctx context.Context, c parsedCommand, loaded config.Config, d
 	if err := validAlphaExportInput(input); err != nil {
 		return err
 	}
+	if err := projectProgress(o, "Exporting selected files from the exact stopped workspace"); err != nil {
+		return err
+	}
 	journal, published, err := o.AlphaExport(ctx, d, input, o.Observer)
 	if err != nil {
 		return projectExportFailure(r, journal.ID, err)
@@ -588,9 +620,20 @@ func exportProject(ctx context.Context, c parsedCommand, loaded config.Config, d
 	if journal.Phase != workspacex.ExportPublished || !projectExportMatches(journal, d, r) || journal.DestinationParent != destination {
 		return errors.New("project export receipt differs from exact project binding and selection")
 	}
+	captureProjectExport(o, r, journal, published)
 	if err := writeAlphaExport(o.Output, d, journal, published); err != nil {
 		return err
 	}
 	_, err = fmt.Fprintf(o.Output, "project files: %s\n", filepath.Join(published, selection))
 	return err
+}
+
+func projectEffectFlags(set *flag.FlagSet) int {
+	count := 0
+	set.Visit(func(f *flag.Flag) {
+		if f.Name != "json" {
+			count++
+		}
+	})
+	return count
 }
