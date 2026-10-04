@@ -20,4 +20,15 @@ swiftc -D MENU_TEST -parse-as-library -framework AppKit \
   "$base/host/clipboard-menu/Tests/MenuValidationTests.swift" -o "$temporary/menu-validation-tests"
 "$temporary/menu-validation-tests"
 
+swiftc -parse-as-library "$base/host/clipboard-menu/Sources/ProjectPresentation.swift" \
+  "$base/host/clipboard-menu/Tests/ProjectPresentationTests.swift" -o "$temporary/presentation-tests"
+"$temporary/presentation-tests"
 bash "$base/host/clipboard-menu/test-project-client.sh"
+swiftc -warnings-as-errors -typecheck "$base/host/clipboard-menu/Sources/MenuModel.swift" \
+  "$base/host/clipboard-menu/Sources/CLIClient.swift" "$base"/host/clipboard-menu/Sources/Project*.swift
+
+swiftc -D PROJECT_APP_TEST -parse-as-library -framework AppKit \
+  "$base/host/clipboard-menu/Sources/MenuModel.swift" "$base/host/clipboard-menu/Sources/CLIClient.swift" \
+  "$base"/host/clipboard-menu/Sources/Project*.swift \
+  "$base/host/clipboard-menu/Tests/ProjectWindowTests.swift" -o "$temporary/window-tests"
+"$temporary/window-tests"

@@ -37,6 +37,25 @@ import Foundation
     let child = client.transfer(request) { outcome in result = outcome; done.signal() }
     check(child != nil, "transfer process started")
     check(done.wait(timeout: .now() + .seconds(5)) == .success && result == .success, "transfer uses exact vector with no ambient secret")
+    let privateScript = """
+    #!/bin/sh
+    [ "${16}" = --private-host-pasteboard ] && [ "${17}" = org.boxwarden.test.native-fixture ] || exit 41
+    [ "$6" = push ] || [ "$6" = pull ] || exit 42
+    printf 'discarded synthetic payload\\n'
+    """
+    try! Data(privateScript.utf8).write(to: cli)
+    let privateClient = CLIClient(executable: cli.path, config: "/opt/config with spaces", privateHostPasteboard: "org.boxwarden.test.native-fixture")
+    for direction: TransferDirection in [.push, .pull] {
+      let completed = DispatchSemaphore(value: 0)
+      var privateResult: TransferResult = .failed
+      let transfer = TransferRequest(id: UUID(), target: targets[0], direction: direction)
+      let process = privateClient.transfer(transfer) { privateResult = $0; completed.signal() }
+      check(process != nil && completed.wait(timeout: .now() + .seconds(5)) == .success && privateResult == .success, "explicit private board reaches both transfer directions without fallback")
+    }
+    for invalid in ["", "general", "org.boxwarden.test.", "org.boxwarden.test.bad\nboard"] {
+      let invalidClient = CLIClient(executable: cli.path, config: "/opt/config with spaces", privateHostPasteboard: invalid)
+      check(invalidClient.transfer(request) { _ in } == nil, "invalid private board cannot start a transfer")
+    }
     try! Data("#!/bin/sh\ntrap '' TERM\nexec /bin/sleep 60\n".utf8).write(to: cli)
     let hanging = CLIClient(executable: cli.path, config: "/opt/config with spaces", deadlineSeconds: 0.2)
     let cancelDone = DispatchSemaphore(value: 0)

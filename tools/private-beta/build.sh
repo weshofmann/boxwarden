@@ -53,8 +53,8 @@ fi
   "$go_bin" build -trimpath -ldflags "-X main.buildVersion=$version -X main.buildRevision=$revision" -o "$package/bin/boxwarden" ./cmd/boxwarden
 )
 codesign --force --sign - "$package/bin/boxwarden"
-bash "$repo_root/host/clipboard-menu/build.sh" --cli "$package/bin/boxwarden" \
-  --output "$package/Boxwarden Clipboard.app" --version "${version%-beta.*}" --build "${version##*.}"
+bash "$repo_root/host/clipboard-menu/build.sh" --app project-manager --cli "$package/bin/boxwarden" \
+  --output "$package/Boxwarden.app" --version "${version%-beta.*}" --build "${version##*.}"
 cp "$repo_root/LICENSE" "$repo_root/NOTICE" "$package/"
 cp "$repo_root/tools/private-beta/TRY-ME.md" "$package/TRY-ME.md"
 cp "$repo_root/tools/private-beta/UPGRADING.md" "$package/UPGRADING.md"

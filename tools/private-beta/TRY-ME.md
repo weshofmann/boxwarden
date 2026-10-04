@@ -10,7 +10,7 @@ with SHA-512 `passwd -6` support and `xorriso`. These are external assets;
 Apple's `/usr/bin/openssl` does not provide the required preparation mode.
 
 Keep the extracted directory at its final absolute location. It contains the
-CLI, directly launchable clipboard app and a self-contained source checkout
+CLI, native project manager and a self-contained source checkout
 for existing managed helper admission. No development worktree is required.
 `BUILD.json` records revision/version; `SHA256SUMS` covers the shipped files.
 Signatures are **ad-hoc, not Developer ID/notarized**. This local beta does not
@@ -19,13 +19,13 @@ claim download/Gatekeeper distribution acceptance; it does not bypass OS checks.
 ## Verify and configure once
 
 Verify the archive beside its checksum file with
-`shasum -a 256 -c boxwarden-0.2.0-beta.4-darwin-arm64.tar.gz.sha256`, then extract
+`shasum -a 256 -c boxwarden-0.2.0-beta.9-darwin-arm64.tar.gz.sha256`, then extract
 in a new private user-owned directory. In a **new terminal**, set these
 paths to your actual assets; no profile sourcing or private bindings is needed:
 
 ```sh
 umask 077
-PACKAGE=/absolute/boxwarden-0.2.0-beta.4-darwin-arm64
+PACKAGE=/absolute/boxwarden-0.2.0-beta.9-darwin-arm64
 cd "$PACKAGE"
 shasum -a 256 -c SHA256SUMS
 "$PACKAGE/bin/boxwarden" version
@@ -70,6 +70,53 @@ formatter in place. Do not reuse an older demo's state root or change its setup.
 For an explicit side-by-side update of an existing private configuration, see
 [UPGRADING.md](UPGRADING.md). Retain the old package and assets; preparation with
 `--update` switches admitted asset locators and preserves previous setup bytes.
+
+## Use the native project manager
+
+Open **Boxwarden.app** in this directory. Click **Choose Configuration…** and
+select your initialized JSON configuration. The app remembers this choice
+without modifying the file. It currently manages the `alpha` domain.
+
+1. Click **New Project…**; enter a name, choose `desktop`, `actions` or `chatgpt`,
+   and select a workspace size. Keep the window open to watch actual CLI progress.
+   The first matching recipe preparation can take tens of minutes. A second
+   matching project reuses its qualified base but has an independent workspace.
+2. Select a project. **Open Desktop** starts or resumes it; **Stop** stops it.
+   Check both management readiness and software state before using the guest.
+3. Click **Import Project…**, choose a private source directory, and enter any
+   explicit relative exclusions (comma separated). **Preview Selection** shows
+   selected paths, sizes and digest. **Confirm Import** pins that exact selection;
+   changing either field requires another preview. The app does not fix permissions,
+   add exclusions or alter the source. Finish a pending import before stopping.
+4. Edit files inside the imported directory shown in the project details. Keep
+   important files on that independent workspace. Stop/open retains their contents.
+5. Stop the project, click **Export Project…**, and choose a new folder name.
+   **Reveal Export in Finder** opens the returned files after success. Export
+   refuses an existing destination and never runs the returned guest files.
+6. **Export Transactions…** lists retained public records. After an interrupted
+   export, keep the project stopped, inspect the listed destination, then use
+   **Retry Selected Export…** when available. Retry rechecks the original binding
+   and destination; uncertain helper lifetime or populated output remains refused.
+
+**HOST → GUEST** and **GUEST → HOST** act only on the displayed exact project
+target, after your explicit click. They do not log clipboard contents. No automatic
+Tart clipboard or audio sharing is enabled. Automated verification uses a named
+private pasteboard, never the general Mac clipboard.
+
+Stop the project first. **Replace System…** is a secondary, confirmed action. It discards system-local
+files and applications and retains the independent workspace. Select the intended
+recipe and confirm only after reviewing that loss. **Resume Replacement** continues
+an existing recorded replacement through the backend.
+
+Quitting closes the frontend while guests and active project commands continue.
+Reopen it to rediscover state. A process that finished after the frontend closed
+may have no retained exit receipt: the app reports an unknown outcome, rather than
+claiming success or replaying it. Refresh and inspect transactions before explicitly
+continuing. Retained command activity is private, non-secret metadata under
+`~/Library/Application Support/org.boxwarden.project-manager/CommandActivity`.
+
+The CLI remains independently usable; the following commands exercise the same
+operations for operators who prefer Terminal.
 
 ## Create, import, edit and resume
 
@@ -186,15 +233,15 @@ by ordinary open or package setup.
 ### Discover and transfer
 
 ```sh
-open -a "$PACKAGE/Boxwarden Clipboard.app" --args --config "$CONFIG"
+open -a "$PACKAGE/Boxwarden.app" --args --config "$CONFIG"
 bw project open myproject
 bw clipboard targets
 ```
 
-Quit an already running Clipboard utility before launching with another config.
-Its menu discovers sessions from the config; select the READY sandbox explicitly.
-Opening the menu and choosing a target do not read either clipboard. **Push and
-Pull use the general Mac clipboard only after an explicit operator click.**
+Select the intended project in the project manager. Its clipboard target must
+be ready. **HOST → GUEST** and **GUEST → HOST** use the general Mac clipboard only
+after your explicit click. Opening the app, refreshing and selecting a project
+read readiness metadata only.
 To test synthetic guest clipboard text without accessing the Mac clipboard:
 
 ```sh
@@ -221,7 +268,7 @@ stays disabled. Provider sign-in, cold-machine installation, power-loss
 recovery and complete network isolation are outside this walkthrough.
 
 To rebuild from a clean committed checkout on this Mac:
-`GO_BIN=/absolute/actual/go bash tools/private-beta/build.sh 0.2.0-beta.4 /absolute/new-output`.
+`GO_BIN=/absolute/actual/go bash tools/private-beta/build.sh 0.2.0-beta.9 /absolute/new-output`.
 This builds locally and publishes no release.
 
 ## Replace a disposable project system

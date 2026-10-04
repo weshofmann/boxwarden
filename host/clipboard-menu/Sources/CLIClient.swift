@@ -12,18 +12,25 @@ final class CLIClient {
   let executable: String
   let config: String
   let deadlineSeconds: Double
+  let privateHostPasteboard: String?
   private let lock = NSLock()
   private let drained = DispatchGroup()
   private var closing = false
   private var children: [UUID: RunningProcess] = [:]
-  init(executable: String, config: String, deadlineSeconds: Double = 30) {
+  init(executable: String, config: String, deadlineSeconds: Double = 30, privateHostPasteboard: String? = nil) {
     self.executable = executable; self.config = config; self.deadlineSeconds = deadlineSeconds
+    self.privateHostPasteboard = privateHostPasteboard
   }
 
   static func validPath(_ path: String) -> Bool {
     path.hasPrefix("/") && path.utf8.count <= 4096 &&
     !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) &&
     URL(fileURLWithPath: path).standardizedFileURL.path == path
+  }
+
+  static func validPrivatePasteboard(_ name: String) -> Bool {
+    name.hasPrefix("org.boxwarden.test.") && name.utf8.count > "org.boxwarden.test.".utf8.count && name.utf8.count <= 255 &&
+      name.utf8.allSatisfy { (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 46 || $0 == 95 || $0 == 45 }
   }
 
   private func register(_ child: RunningProcess) -> Bool {
@@ -76,12 +83,15 @@ final class CLIClient {
 
   func transfer(_ request: TransferRequest, completion: @escaping (TransferResult) -> Void) -> RunningProcess? {
     guard Self.validPath(executable), Self.validPath(config), request.target.isValid, request.target.available else { return nil }
+    if let board = privateHostPasteboard, !Self.validPrivatePasteboard(board) { return nil }
+    var arguments = request.arguments(config: config)
+    if let board = privateHostPasteboard { arguments += ["--private-host-pasteboard", board] }
     let id = UUID()
     let child = RunningProcess(id: id, readOutput: false, deadlineSeconds: deadlineSeconds) { [self] _, result in
       completion(result); finished(id)
     }
     guard register(child) else { return nil }
-    child.start(executable: executable, arguments: request.arguments(config: config))
+    child.start(executable: executable, arguments: arguments)
     return child
   }
 }

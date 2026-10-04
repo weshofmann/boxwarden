@@ -128,10 +128,10 @@ bw project status myproject
 ```
 
 Wait for management READY before testing clipboard transfer. Launch the new
-menu with the explicit configuration; quit an older copy manually if needed:
+project manager with the explicit configuration; quit an older copy manually if needed:
 
 ```sh
-open -n -a "$PACKAGE/Boxwarden Clipboard.app" --args --config "$CONFIG"
+open -n -a "$PACKAGE/Boxwarden.app" --args --config "$CONFIG"
 bw clipboard targets
 ```
 

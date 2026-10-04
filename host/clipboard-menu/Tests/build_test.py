@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build interface checks; never launch the app or access a pasteboard."""
 import os
+import hashlib
 from pathlib import Path
 import plistlib
 import subprocess
@@ -32,9 +33,16 @@ class BuildInterfaceTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertFalse(self.marker.exists(), "invalid request started a compiler")
 
+    def test_project_app_is_regular_native_window_with_separate_identity(self):
+        with (self.script.parent / "ProjectInfo.plist").open("rb") as handle:
+            info = plistlib.load(handle)
+        self.assertEqual(info["CFBundleExecutable"], "Boxwarden Projects")
+        self.assertEqual(info["CFBundleIdentifier"], "org.boxwarden.project-manager")
+        self.assertFalse(info.get("LSUIElement", False))
+
     def test_malformed_arguments_fail_before_build(self):
         for arguments in (["--unknown"], ["--cli"], ["--output"], ["--version"],
-                          ["--build"], ["--version", "v0.2.0"],
+                          ["--build"], ["--app", "unknown"], ["--version", "v0.2.0"],
                           ["--version", "0.02.0"], ["--version", "0.2"],
                           ["--build", "-1"], ["--build", "1.2"],
                           ["--output", "relative.app"], ["--cli", "relative-cli"]):
@@ -82,22 +90,29 @@ class BuildInterfaceTests(unittest.TestCase):
         self.refused(["--cli", str(cli), "--output", str(self.root / "Intel.app")])
 
     def test_signed_cli_is_preserved_in_versioned_custom_app(self):
+        self.check_packaged_cli("clipboard")
+
+    def test_project_window_preserves_cli_on_case_insensitive_filesystem(self):
+        self.check_packaged_cli("project-manager")
+
+    def check_packaged_cli(self, app_kind):
         cli = self.compiled_cli()
         original = cli.read_bytes()
         output = self.root / "New App.app"
         # No go exists in this path: supplied CLI packaging must not rebuild it.
-        result = subprocess.run(["/bin/bash", str(self.script), "--cli", str(cli),
+        result = subprocess.run(["/bin/bash", str(self.script), "--app", app_kind, "--cli", str(cli),
                                  "--output", str(output), "--version", "0.2.0-beta.1+fixture",
                                  "--build", "7"], env=dict(os.environ, PATH="/usr/bin:/bin"),
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), str(output))
-        self.assertEqual((output / "Contents/MacOS/boxwarden").read_bytes(), original)
+        self.assertEqual(hashlib.sha256((output / "Contents/MacOS/boxwarden").read_bytes()).hexdigest(), hashlib.sha256(original).hexdigest())
         self.assertEqual(cli.read_bytes(), original)
         with (output / "Contents/Info.plist").open("rb") as handle:
             info = plistlib.load(handle)
         self.assertEqual(info["CFBundleShortVersionString"], "0.2.0-beta.1+fixture")
         self.assertEqual(info["CFBundleVersion"], "7")
+        self.assertNotEqual(info["CFBundleExecutable"].lower(), "boxwarden")
         subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(output)],
                        check=True, capture_output=True)
 

@@ -266,3 +266,32 @@ write, clear a pending marker or invoke recovery. Known private temporary writer
 files and transaction directories remain untouched; unexpected/corrupt metadata
 fails visibly without a partial success list. Existing explicit retry still
 re-admits the exact stopped binding, snapshot, helper lifetime and destination.
+
+## Native project frontend (private beta)
+
+`host/clipboard-menu` builds a regular AppKit project window alongside the
+legacy clipboard-only utility. It selects an existing configuration and invokes
+the bundled Go CLI with fixed argument vectors and a closed environment. The
+window currently manages the experimental `alpha` project workflow. Versioned
+[project JSON](project-json-contract.md) supplies typed state and transfer
+receipts; human progress text is displayed but never parsed for decisions.
+Admission, exact ownership, locks, lifecycle and recovery remain in Go.
+
+The frontend retains private command activity (argv, bounded JSONL output,
+process identity and exit receipt), not guest data or credentials. macOS ACL,
+ancestry, owner, symlink and mode checks protect that local metadata. A detached
+CLI survives frontend quit. Reopen observes its exact PID/start identity but
+never signals a recovered PID; an absent exit receipt remains an unknown outcome.
+Explicit acknowledgement is recorded separately from that outcome, without
+rewriting backend state or automatically retrying. Only a live export child owned
+by the current frontend can receive an explicit interruption request.
+
+Import confirmation pins the displayed selection digest. Export and retry use
+public stopped-workspace operations and a new destination; revealing returned
+files in Finder is explicit and does not execute them. Clipboard buttons pin the
+exact discovered session/backend/generation and retain no payload. An unfinished
+clipboard request leaves only target/direction uncertainty metadata on reopen.
+Automated tests use explicitly named private pasteboards. System replacement is
+secondary and confirmed, with system-local loss and workspace retention stated
+before invoking the existing backend operation. No daemon, network service,
+host share or new host privilege is introduced.

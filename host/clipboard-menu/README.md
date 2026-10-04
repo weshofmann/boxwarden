@@ -1,4 +1,30 @@
-# Boxwarden Clipboard menu utility
+# Native Boxwarden apps
+
+The project manager reuses the existing CLI process boundary and native clipboard
+controls. Build it with:
+
+```sh
+bash host/clipboard-menu/test.sh
+bash host/clipboard-menu/build.sh --app project-manager
+open .build/Boxwarden.app
+```
+
+Choose an initialized configuration in the window. See
+[the private beta guide](../../tools/private-beta/TRY-ME.md#use-the-native-project-manager)
+for create, import preview, stop/resume, export/recovery and system replacement.
+The app uses versioned project JSON; the Go backend remains responsible for
+admission, locks, lifecycle and recovery. Private command activity records allow
+reopening without implicitly canceling or replaying a request. Recovered PIDs
+are never signaled. Missing exit receipts are reported as unknown outcomes.
+The app manages `alpha`; the CLI and legacy clipboard utility retain their
+existing domain support.
+
+The automated private-pasteboard entry point is
+`"Boxwarden.app/Contents/MacOS/Boxwarden Projects" --config /absolute/config.json --private-pasteboard org.boxwarden.test.UNIQUE`.
+That named board is visibly identified and never falls back to the general board.
+Tests use synthetic child commands; actual GUI acceptance is separate.
+
+## Legacy clipboard-only utility
 
 Build the directly launchable macOS app from this checkout:
 
