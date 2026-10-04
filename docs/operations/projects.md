@@ -289,10 +289,12 @@ The original source, exclusions, digest pin and capture/transaction are retained
 Do not stop/rebuild or edit its guest selection while a pending import is being
 resolved. A changed generation or divergent guest content requires inspection.
 
-For an interrupted stopped export, take the transaction UUID from its error:
+For an interrupted stopped export, discover retained transactions by project:
 
 ```sh
-bw project export retry --transaction UUID-FROM-ERROR myproject
+bw project export list myproject
+# Choose the printed transaction with the intended destination and recorded phase.
+bw project export retry --transaction UUID-FROM-LIST myproject
 ```
 
 Retry uses the saved project assets and the original private destination. A
@@ -304,10 +306,18 @@ helper lifetime still require inspection and are never silently overwritten or
 cleaned up. An already-published journal directs you to inspect its destination.
 A stop, rebuild or setup update is not a transfer-recovery command.
 
-If failure occurred before a transaction was returned, inspect the retained
-destination and choose a new destination for another export. If the
-process died without printing its UUID, retain its private journals for
-operator diagnosis; there is currently no public export transaction listing.
+Listing reads validated private journal metadata without observing the backend,
+checking readiness, acquiring project locks, opening destinations or invoking
+recovery. It shows recorded phases and paths, including published locations,
+and labels a different backend or selection as historical. A recorded phase
+is not proof of current filesystem state, helper lifetime or successful recovery.
+Corrupt or unsafe registry entries fail visibly; no partial list is presented as
+complete. Enumeration is capped at 4096 registry entries and 1024 journals.
+
+If failure occurred before a journal was retained, listing can be empty. Inspect
+the retained destination and choose a new destination for another export.
+Losing a printed UUID alone does not require reading private JSON: use the list
+command above, including after restarting the CLI.
 The underlying `workspace export resume` remains available for independently
 retained snapshots after a project has changed owner; the named-project wrapper
 requires the transaction to match the current stopped project exactly.

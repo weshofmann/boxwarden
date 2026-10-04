@@ -153,6 +153,23 @@ disks up to 4 GiB. Transfers remain explicit copies. See `support/source/docs/op
 preview and literal exclusions before importing dependency/build trees. Pin the printed preview digest with
 `--expected-digest` when importing the inspected selection.
 
+## Find an interrupted export
+
+After Ctrl-C, wait for the command to return and keep the sandbox stopped:
+
+```sh
+bw project export list myproject
+bw project export retry --transaction UUID-FROM-LIST myproject
+```
+
+Choose the listed transaction with your intended destination. List shows only
+recorded journal metadata; it does not retry, repair, inspect the destination or
+assert that a recorded phase proves success. A historical binding needs
+inspection. Retry rechecks its exact binding and retained resources; partial
+copies abort without publishing, while a complete snapshot can resume to its
+original private destination. Uncertain helper lifetime or existing output is
+still refused. Published entries show the recorded returned path to inspect.
+
 ## Controlled clipboard
 
 Recipe-created and recipe-rebuilt systems get their compatible helpers from the

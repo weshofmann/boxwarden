@@ -34,7 +34,9 @@ project rebuild retry NAME
 project import preview --source PRIVATE-DIRECTORY [--exclude RELATIVE-PATH ...]
 project import --source PRIVATE-DIRECTORY [--exclude RELATIVE-PATH ...] [--expected-digest SHA256] NAME
 project import retry NAME
+project export list NAME
 project export --destination NEW-DIRECTORY NAME
+project export retry --transaction UUID NAME
 
 clipboard targets                       explicit --domain required
 clipboard copy NAME                     synthetic/text stdin → guest

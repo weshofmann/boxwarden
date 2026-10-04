@@ -22,11 +22,11 @@ import (
 )
 
 const projectMount = "/home/boxwarden/workspaces/project"
-const projectUsage = "project list; project setup|setup-update --source-root PATH --formatter-bundle PATH --iso PATH --go PATH; project create [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] [--size-mib 16..4096] NAME; project open|status|stop NAME; project rebuild [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] NAME; project rebuild retry NAME; project import preview --source PRIVATE-DIRECTORY [--exclude RELATIVE-PATH ...]; project import --source PRIVATE-DIRECTORY [--exclude RELATIVE-PATH ...] [--expected-digest SHA256] NAME; project import retry NAME; project export --destination NEW-DIRECTORY NAME; project export retry --transaction UUID NAME"
+const projectUsage = "project list; project setup|setup-update --source-root PATH --formatter-bundle PATH --iso PATH --go PATH; project create [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] [--size-mib 16..4096] NAME; project open|status|stop NAME; project rebuild [--recipe desktop|actions|chatgpt | --base current|REGISTERED-BASE] NAME; project rebuild retry NAME; project import preview --source PRIVATE-DIRECTORY [--exclude RELATIVE-PATH ...]; project import --source PRIVATE-DIRECTORY [--exclude RELATIVE-PATH ...] [--expected-digest SHA256] NAME; project import retry NAME; project export list NAME; project export --destination NEW-DIRECTORY NAME; project export retry --transaction UUID NAME"
 
 type projectCommand struct {
 	operation, name, base, source, destination, recipe, transaction, selection string
-	preview                                                                    bool
+	preview, exportList                                                        bool
 	sizeMiB                                                                    int64
 	setup                                                                      projectx.Setup
 	retry                                                                      bool
@@ -39,11 +39,15 @@ func parseProject(args []string) (projectCommand, error) {
 		return p, errors.New(projectUsage)
 	}
 	p.operation = args[0]
+	if p.operation == "export" && len(args) > 1 && args[1] == "list" {
+		p.exportList = true
+		args = append([]string{args[0]}, args[2:]...)
+	}
 	if p.operation == "import" && len(args) > 1 && args[1] == "preview" {
 		p.preview = true
 		args = append([]string{args[0]}, args[2:]...)
 	}
-	if !p.preview && (p.operation == "import" || p.operation == "rebuild" || p.operation == "export") && len(args) > 1 && args[1] == "retry" {
+	if !p.preview && !p.exportList && (p.operation == "import" || p.operation == "rebuild" || p.operation == "export") && len(args) > 1 && args[1] == "retry" {
 		p.retry = true
 		args = append([]string{args[0]}, args[2:]...)
 	}
@@ -74,7 +78,9 @@ func parseProject(args []string) (projectCommand, error) {
 		set.Var(&excludes, "exclude", "literal relative path or subtree to omit; repeat up to 32 times")
 		set.StringVar(&expectedDigest, "expected-digest", "", "pin the complete preview manifest SHA-256")
 	case "export":
-		if p.retry {
+		if p.exportList {
+			// Listing takes only a name, never another selection or destination.
+		} else if p.retry {
 			set.StringVar(&p.transaction, "transaction", "", "retained export transaction UUID")
 		} else {
 			set.StringVar(&p.destination, "destination", "", "new host destination")
@@ -170,7 +176,7 @@ func parseProject(args []string) (projectCommand, error) {
 	if p.operation == "export" && p.retry && !alphaCreateUUID(p.transaction) {
 		return p, errors.New("project export retry requires --transaction with the retained canonical UUID")
 	}
-	if p.operation == "export" && !p.retry && !cleanProjectPath(p.destination) {
+	if p.operation == "export" && !p.retry && !p.exportList && !cleanProjectPath(p.destination) {
 		return p, errors.New("project export requires a clean absolute --destination directory")
 	}
 	return p, nil
@@ -192,6 +198,9 @@ func runProject(ctx context.Context, c parsedCommand, loaded config.Config, d co
 	}
 	if p.preview {
 		return previewProjectImport(ctx, p, o.Output)
+	}
+	if p.exportList {
+		return listProjectExports(ctx, d, p.name, o.Output)
 	}
 	scope := "project-" + string(d.ID) + "-" + p.name
 	if p.operation == "setup" || p.operation == "setup-update" {
