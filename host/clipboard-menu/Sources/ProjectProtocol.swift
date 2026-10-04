@@ -71,8 +71,8 @@ enum ProjectCommand: Equatable {
     return prefix + args
   }
   private static func sourceArguments(_ source: String, _ exclusions: [String]) throws -> [String] {
-    guard validPath(source), exclusions.count <= 256,
-          exclusions.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 4096 && !$0.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) }) else {
+    guard validPath(source), exclusions.count <= 32,
+          exclusions.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 255 && !$0.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) }) else {
       throw ProjectClientError.invalidRequest("Invalid source or exclusions")
     }
     return ["--source", source] + exclusions.flatMap { ["--exclude", $0] }

@@ -39,6 +39,7 @@ final class ProjectActivityStore {
   private let lockFD: Int32
   private let lock = NSLock()
   static let maximumOutput = 8 * 1024 * 1024
+  static let maximumRecord = 128 * 1024
   init(root: URL) throws {
     guard ProjectCommand.validPath(root.path), root.path != "/" else { throw ProjectClientError.activity("Invalid activity directory") }
     self.root = root
@@ -83,6 +84,8 @@ final class ProjectActivityStore {
     return fd
   }
   func create(_ record: ProjectActivityRecord) throws -> Int32 {
+    // Reject before mkdir: an unreadable receipt must never poison discovery.
+    _ = try encodedRecord(record)
     guard mkdirat(rootFD, record.id.uuidString, 0o700) == 0 else { throw ProjectClientError.activity("Cannot create command receipt") }
     try save(record)
     let fd = try directory(record.id); defer { Darwin.close(fd) }
@@ -93,8 +96,13 @@ final class ProjectActivityStore {
     }
     return output
   }
-  func save(_ record: ProjectActivityRecord) throws {
+  private func encodedRecord(_ record: ProjectActivityRecord) throws -> Data {
     let data = try JSONEncoder().encode(record)
+    guard data.count <= Self.maximumRecord else { throw ProjectClientError.activity("Command receipt exceeds its 128 KiB limit") }
+    return data
+  }
+  func save(_ record: ProjectActivityRecord) throws {
+    let data = try encodedRecord(record)
     let fd = try directory(record.id); defer { Darwin.close(fd) }
     let existing = openat(fd, "record.json", O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
     if existing >= 0 {
@@ -125,7 +133,7 @@ final class ProjectActivityStore {
     return try names.filter { $0 != ".lock" }.map { name in
       guard let id = UUID(uuidString: name), id.uuidString == name else { throw ProjectClientError.activity("Unrecognized command activity entry") }
       let fd = try directory(id); defer { Darwin.close(fd) }
-      let record = try JSONDecoder().decode(ProjectActivityRecord.self, from: readFile(fd, "record.json", maximum: 128 * 1024))
+      let record = try JSONDecoder().decode(ProjectActivityRecord.self, from: readFile(fd, "record.json", maximum: Self.maximumRecord))
       guard record.id == id else { throw ProjectClientError.activity("Mismatched command receipt") }
       return record
     }
