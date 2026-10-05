@@ -185,7 +185,7 @@ func InspectSetup(ctx context.Context, path string, o Options) SetupInspection {
 		return fail("project_setup_invalid", "Project assets are missing, changed, or incompatible; explicitly update the saved setup.", []string{"inspect_project_setup", "attended_project_setup"}, err)
 	}
 	r.SetupVersion = setup.Version
-	r.RecipePreparationAvailable = setup.Version == 2
+	r.RecipePreparationAvailable = setup.Version == 2 || setup.Version == 3
 	r.Status = "ready"
 	r.SelectionAcceptable = true
 	r.Guidance = "Alpha project setup prerequisites are admitted. Prepared bases and live project readiness are checked by their operations."

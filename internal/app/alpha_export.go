@@ -14,15 +14,15 @@ import (
 )
 
 type AlphaExportInput struct {
-	VolumeID, DestinationParent   string
-	Selected                      []string
-	SourceRoot, ISOPath, GoBinary string
+	VolumeID, DestinationParent                      string
+	Selected                                         []string
+	SourceRoot, ISOPath, GoBinary, PrebuiltResources string
 }
 
 type AlphaExportFunc func(context.Context, config.Domain, AlphaExportInput, backend.Observer) (workspacex.ExportJournal, string, error)
 
 type AlphaExportResumeInput struct {
-	TransactionID, SourceRoot, ISOPath, GoBinary string
+	TransactionID, SourceRoot, ISOPath, GoBinary, PrebuiltResources string
 }
 
 type AlphaExportResumeFunc func(context.Context, config.Domain, AlphaExportResumeInput, backend.Observer) (workspacex.ExportJournal, string, error)
@@ -39,12 +39,15 @@ func validAlphaExportInput(input AlphaExportInput) error {
 	if input.VolumeID == "" || len(input.Selected) == 0 || len(input.Selected) > 1024 {
 		return errors.New("workspace export requires a volume and selected paths")
 	}
-	for _, path := range []string{input.DestinationParent, input.SourceRoot, input.ISOPath, input.GoBinary} {
+	for _, path := range []string{input.DestinationParent, input.SourceRoot, input.ISOPath} {
 		if !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.ContainsAny(path, "\r\n\x00") {
 			return errors.New("workspace export paths must be clean and absolute")
 		}
 	}
-	if filepath.Base(input.GoBinary) != "go" {
+	if err := validExportBuildInputs(input.GoBinary, input.PrebuiltResources); err != nil {
+		return err
+	}
+	if input.PrebuiltResources == "" && filepath.Base(input.GoBinary) != "go" {
 		return errors.New("workspace export requires an exact Go executable path")
 	}
 	for _, path := range input.Selected {
@@ -71,12 +74,15 @@ func validAlphaExportResumeInput(input AlphaExportResumeInput) error {
 			}
 		}
 	}
-	for _, path := range []string{input.SourceRoot, input.ISOPath, input.GoBinary} {
+	for _, path := range []string{input.SourceRoot, input.ISOPath} {
 		if !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.ContainsAny(path, "\r\n\x00") {
 			return errors.New("workspace export resume paths must be clean and absolute")
 		}
 	}
-	if filepath.Base(input.GoBinary) != "go" {
+	if err := validExportBuildInputs(input.GoBinary, input.PrebuiltResources); err != nil {
+		return err
+	}
+	if input.PrebuiltResources == "" && filepath.Base(input.GoBinary) != "go" {
 		return errors.New("workspace export resume requires an exact Go executable path")
 	}
 	return nil
@@ -93,4 +99,20 @@ func writeAlphaExport(output io.Writer, selected config.Domain, journal workspac
 	}
 	_, err := fmt.Fprintf(output, "domain: %s\ntransaction: %s\nexport: %s\n", selected.ID, journal.ID, published)
 	return err
+}
+
+// A saved setup selects one build mechanism; ambiguous or relative input fails
+// before export intent reserves or attaches a workspace.
+func validExportBuildInputs(goBinary, resources string) error {
+	if (goBinary == "") == (resources == "") {
+		return errors.New("export requires exactly one runtime compiler or prebuilt resources path")
+	}
+	path := goBinary
+	if resources != "" {
+		path = resources
+	}
+	if !cleanProjectPath(path) {
+		return errors.New("export build input must be clean and absolute")
+	}
+	return nil
 }

@@ -230,3 +230,30 @@ backend, healthy serial drain, bound pin, current short no-extension certificate
 strict read-only management probe, and time-zone agreement. Missing or stale
 evidence is non-ready. Status does not renew credentials, repair state, or
 adopt an unowned process.
+
+## Packaged formatter binding
+
+Packaged first run adds a versioned host-only binding record for the reusable
+signed formatter. This record is created by the admitted Go host for one new
+configuration, never supplied by a guest. Go requires exact canonical bytes,
+private one-link ownership/mode/ACL checks, the complete seven-file digest
+inventory, clean source provenance, fixed Ubuntu/checker pins, a valid runner
+signature and the sole virtualization entitlement. The signed Swift runner
+independently bounds and no-follow opens that record, verifies canonical JSON
+and private ancestry, and compares its root/domain with the exact disk path and
+creating journal. Existing raw file/device/inode/size/marker/filesystem UUID,
+private metadata and journal checks still precede attachment; stop/report and
+host filesystem/identity checks still precede qualification.
+
+The generic packaged template has no managed record and cannot pass formatter
+bundle admission. Its runner accepts only the versioned managed-bound protocol;
+synthetic and legacy argv cannot turn it into a generic disk formatter. The
+legacy compiled-root/domain bundle remains independently accepted under its
+original artifact count and binding-source checks. The development operator
+remains trusted; this seam grants no new guest access to host paths or helpers.
+
+Above the immediate private formatter/state anchors, ancestor traversal permits
+no ACL or solely macOS's exact `group:everyone deny delete` entry. This denial
+grants no access; inherited flags, extra entries, any grants, writable modes,
+symlinks and foreign owners fail. Private anchors and files still permit no ACL.
+Go setup/formatter checks and native Swift admission enforce the same distinction.

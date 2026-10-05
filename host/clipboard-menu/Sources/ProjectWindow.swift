@@ -48,6 +48,11 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   let clipboardLabel = NSTextField(wrappingLabelWithString: "Clipboard target: none")
   let progressText = NSTextView()
   let spinner = NSProgressIndicator()
+  var firstRunTargets: [NSObject] = []
+  var firstRunButton: NSButton!
+  var firstRunClient: ProjectClient?
+  var firstRunChoice = UUID()
+  var offerFirstProject = false
   var chooseButton: NSButton!
   var createButton: NSButton!
   var refreshButton: NSButton!
@@ -106,20 +111,21 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   func constructWindow() {
     guard let content = window?.contentView else { return }
     let title = NSTextField(labelWithString: "Boxwarden Projects"); title.font = .boldSystemFont(ofSize: 23)
-    chooseButton = button("Choose Configuration…", #selector(chooseConfiguration(_:)))
+    firstRunButton = button("Set up Boxwarden…", #selector(setUpBoxwarden(_:)))
+    chooseButton = button("Use Existing Configuration…", #selector(chooseConfiguration(_:)))
     createButton = button("New Project…", #selector(createProject(_:)))
     refreshButton = button("Refresh", #selector(refreshProjects(_:)))
     prepareButton = button("Prepare Project Assets…", #selector(prepareProjectAssets(_:)))
     helpButton = button("Setup Help…", #selector(showSetupHelp(_:)))
     diagnosticsButton = button("Show Details", #selector(toggleDiagnostics(_:)))
     let header = stack([title, NSView(), createButton, refreshButton])
-    let configurationRow = stack([configLabel, NSView(), chooseButton])
+    let configurationRow = stack([configLabel, NSView(), firstRunButton, chooseButton])
     configLabel.lineBreakMode = .byTruncatingMiddle; configLabel.isSelectable = true
     configLabel.textColor = .secondaryLabelColor
     setupLabel.textColor = .labelColor
     setupActions = stack([prepareButton, helpButton])
     let name = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name")); name.title = "Project"; name.width = 155
-    let state = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("state")); state.title = "State"; state.width = 80
+    let state = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("state")); state.title = "State"; state.width = 105
     table.addTableColumn(name); table.addTableColumn(state)
     table.dataSource = self; table.delegate = self; table.rowHeight = 30
     table.allowsMultipleSelection = false; table.setAccessibilityIdentifier("Projects")
@@ -141,7 +147,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     let right = stack([detail, stack([openButton, stopButton]), stack([importButton, exportButton]), transactionsButton,
       clipboardLabel, stack([pushButton, pullButton]), clipNote, recoveryActions], vertical: true)
     let body = stack([listScroll, right]); body.alignment = .top
-    listScroll.widthAnchor.constraint(equalToConstant: 235).isActive = true
+    listScroll.widthAnchor.constraint(equalToConstant: 270).isActive = true
     listScroll.heightAnchor.constraint(equalTo: body.heightAnchor).isActive = true
     body.heightAnchor.constraint(greaterThanOrEqualToConstant: 235).isActive = true
     right.widthAnchor.constraint(greaterThanOrEqualToConstant: 420).isActive = true
@@ -173,7 +179,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     render()
   }
   func restoreConfiguration(override: String?) {
-    if let path = override ?? defaults.string(forKey: "SelectedConfiguration"), ProjectCommand.validPath(path) { useConfiguration(path) }
+    if let path = override ?? defaults.string(forKey: "PendingFirstRunConfiguration") ?? defaults.string(forKey: "SelectedConfiguration"), ProjectCommand.validPath(path) { useConfiguration(path) }
     refreshTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
       guard let self, !self.hasActiveOperation, self.window?.attachedSheet == nil else { return }
       self.refreshProjects(nil)
@@ -244,6 +250,10 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
                 if !inspection.selectionAcceptable {
                   if presentation.configPath.isEmpty { setupInspection = inspection }
                   try restoreActiveClients()
+                  if presentation.configPath.isEmpty, defaults.string(forKey: "PendingFirstRunConfiguration") == path,
+                     let previous = defaults.string(forKey: "SelectedConfiguration"), previous != path, ProjectCommand.validPath(previous) {
+                    DispatchQueue.main.async { [weak self] in self?.useConfiguration(previous) }
+                  }
                   report(inspection.title + ". " + inspection.guidance + (presentation.configPath.isEmpty ? "" : " The previous configuration is still selected."))
                   return
                 }
@@ -253,11 +263,15 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
                 lastExport = nil; activity = nil; recoveredActivities = []; preferredSelection = nil; allowUnknownRetry = false
                 lastRefreshFailure = nil
                 defaults.set(path, forKey: "SelectedConfiguration")
+                if defaults.string(forKey: "PendingFirstRunConfiguration") == path { defaults.removeObject(forKey: "PendingFirstRunConfiguration") }
                 configLabel.stringValue = "Configuration: " + path
                 try restoreActiveClients()
                 statusLabel.stringValue = inspection.status == "ready" ? "Refreshing selected configuration…" : inspection.guidance
                 switchingConfiguration = false
-                if inspection.status == "ready" { refreshProjects(nil) }
+                if inspection.status == "ready" {
+                  offerFirstProject = defaults.string(forKey: "FirstRunCreateProjectConfiguration") == path
+                  refreshProjects(nil)
+                }
               } catch {
                 try? restoreActiveClients()
                 report("Unable to check this configuration. " + error.localizedDescription + (presentation.configPath.isEmpty ? "" : " The previous configuration is still selected."))
@@ -288,10 +302,23 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     presentation.cancelRefresh()
     snapshotAvailable = false
     validationClient?.cancelQueries()
+    firstRunChoice = UUID()
+    if let firstRunClient { queryRetirement.enter(); firstRunClient.disposeQueries { [self] in queryRetirement.leave() } }
     queryRetirement.enter()
     drainQueries(project: client, clipboard: clipboardClient) { [self] in queryRetirement.leave() }
     queryRetirement.notify(queue: .main, execute: completion)
     render()
+  }
+  func retireFirstRunQueries(_ previous: ProjectClient) {
+    queryRetirement.enter()
+    previous.disposeQueries { [self] in queryRetirement.leave() }
+  }
+  func adoptFirstRunClient(_ candidate: ProjectClient) {
+    presentation.cancelRefresh()
+    let previous = client, previousClipboard = clipboardClient
+    client = candidate; clipboardClient = nil
+    queryRetirement.enter()
+    drainQueries(project: previous, clipboard: previousClipboard) { [self] in queryRetirement.leave() }
   }
   private func cancelObservation() { client?.cancelQueries(); clipboardClient?.cancelQueries() }
   @objc func refreshProjects(_ sender: Any?) {
@@ -336,6 +363,10 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
           if self.statusLabel.stringValue == "Refreshing selected configuration…" { self.statusLabel.stringValue = "Project inventory refreshed." }
           if let preferred = self.preferredSelection { self.presentation.select(preferred); self.preferredSelection = nil }
           self.table.reloadData(); self.selectVisibleRow(); self.render()
+          if self.offerFirstProject && self.setupInspection?.status == "ready" && !self.hasActiveOperation && self.window?.attachedSheet == nil {
+            self.offerFirstProject = false; self.defaults.removeObject(forKey: "FirstRunCreateProjectConfiguration")
+            if list.projects.isEmpty { self.createProject(nil) }
+          }
         }
       } catch {
         DispatchQueue.main.async { [weak self] in
@@ -370,10 +401,12 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   }
   func render() {
     let idle = !closing && !hasActiveOperation
+    firstRunButton.isEnabled = idle && !switchingConfiguration
+    firstRunButton.isHidden = !presentation.configPath.isEmpty
     chooseButton.isEnabled = idle
     createButton.isEnabled = readyToAct && setup?.status == "ready" && setupInspection?.recipePreparationAvailable != false
     prepareButton.isEnabled = idle && !switchingConfiguration && setupInspection?.selectionAcceptable == true && ["domain_uninitialized", "project_setup_missing"].contains(setupInspection?.status ?? "")
-    prepareButton.isHidden = setupInspection?.status == "ready"
+    prepareButton.isHidden = presentation.configPath.isEmpty || setupInspection?.status == "ready"
     helpButton.isHidden = setupInspection?.status == "ready" && setupInspection?.recipePreparationAvailable != false
     setupActions.isHidden = prepareButton.isHidden && helpButton.isHidden
     importRetryButton.isHidden = !(selectedProject?.availableActions.contains("import_retry") ?? false)
@@ -400,7 +433,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
       setupLabel.stringValue = "Creating \(activity.projectName ?? "project"). First preparation may take tens of minutes; progress appears below."
     } else if let inspection = setupInspection {
       setupLabel.stringValue = inspection.status == "ready" ? (inspection.recipePreparationAvailable == false ? "Existing project setup is ready. Recipe creation requires an explicit setup update; see Setup Help." : "Project setup is ready. Create a project or select one below.") : inspection.title + ". " + inspection.guidance
-    } else { setupLabel.stringValue = "Start setup: choose your Boxwarden configuration, then prepare project assets. Setup Help explains the first host initialization." }
+    } else { setupLabel.stringValue = "Start setup: create a Boxwarden configuration and prepare project assets, or use an existing configuration." }
     if let p = selectedProject {
       let state = p.observedState ?? p.state
       let next: String
@@ -504,7 +537,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   func recoverActivity() throws {
     guard let client else { return }
     let activities = try client.recoverActivities()
-    let relevant = activities.filter { !["setup.inspect", "project.list", "project.status", "project.import.preview", "project.export.list"].contains($0.operation) }
+    let relevant = activities.filter { !["setup.inspect", "setup.plan", "project.list", "project.status", "project.import.preview", "project.export.list"].contains($0.operation) }
     recoveredActivities = relevant
     recoveredBusy = relevant.contains { $0.status == .running }
     if !presentation.busy { activity = chooseVisibleActivity() }

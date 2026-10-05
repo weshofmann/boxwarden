@@ -505,3 +505,9 @@ func TestInspectorBuilderCleanupRequiresProvenLifetime(t *testing.T) {
 func shellBuilderFixtureQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
+
+func TestPrebuiltInspectorCannotUseAbsentResourceInventory(t *testing.T) {
+	if bundle, err := BuildAdmittedPrebuiltExportInspectorBundle(context.Background(), "/missing/state", "work", "00112233-4455-6677-8899-aabbccddeeff", "/missing/source", "/missing/iso", "/missing/resources"); err == nil || bundle.Path != "" {
+		t.Fatalf("missing immutable resources admitted: %+v %v", bundle, err)
+	}
+}

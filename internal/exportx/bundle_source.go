@@ -39,7 +39,7 @@ func inspectorSourceInputs(ctx context.Context, root string) (inspectorSourceIde
 	}
 	runner := execx.OSRunner{MaxOutputBytes: 16 << 10, MaxStdinBytes: 0}
 	run := func(args ...string) (string, error) {
-		result, err := runner.Run(ctx, execx.Command{Path: "/usr/bin/git", Args: append([]string{"-C", root}, args...),
+		result, err := runner.Run(ctx, execx.Command{Path: "/usr/bin/git", Args: append([]string{"--no-optional-locks", "-C", root}, args...),
 			Env: []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C"}})
 		if err != nil || result.Truncated {
 			return "", fmt.Errorf("inspector source Git check failed: %v", err)

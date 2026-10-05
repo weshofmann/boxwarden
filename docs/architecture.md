@@ -307,3 +307,35 @@ Automated tests use explicitly named private pasteboards. System replacement is
 secondary and confirmed, with system-local loss and workspace retention stated
 before invoking the existing backend operation. No daemon, network service,
 host share or new host privilege is introduced.
+
+## Packaged first-run support
+
+New setup profiles use version 3 with an explicit `prebuilt_resources` root,
+no runtime Go compiler, and the existing exact OpenSSL/xorriso recipe bindings.
+Version 1/2 setup schemas and their compiled formatter bindings remain accepted.
+The app retains a clean source checkout, CLI and immutable support assets under
+`Contents/Resources/Boxwarden`; moving the app preserves those inputs. Pinned
+ISO/checker extraction, Linux Go helper compilation and signed Swift runner
+compilation happen during package construction. Source inventory, input pins,
+artifact digests and sole virtualization entitlements are admitted before use.
+
+A generic formatter template cannot authorize attachment. First run copies its
+six assets into the new configuration's private assets directory and adds a
+canonical private `managed-binding.json` (`version: 1`, exact state root and
+domain). Formatter manifest version 2 (`binding_mode: runtime-v1`) binds all
+seven files and that exact root/domain. Go admits the complete bundle and sends
+one fixed `run-managed-bound` argv, including the binding record path. The
+reusable signed Swift runner only accepts that bounded managed protocol; it
+independently admits the record and target ancestry, then repeats the existing
+private raw identity, size, marker, filesystem UUID and creating journal checks.
+Legacy manifest version 1 retains its exact six artifacts, generated
+`binding.swift` and original compiled binding protocol.
+
+Prebuilt inspector support keeps per-export journal-derived requests. The
+existing private staging/lifetime/locking path copies admitted immutable kernel,
+original initrd, guest helper and signed inspector, appends the exact request
+with the existing cpio assembler, and produces the existing request-bound
+manifest. Source inventory, fixed kernel pins, byte-exact initrd prefix/entries,
+request, signatures, snapshot identity and post-stop checks remain enforced.
+Assembly needs system helpers, but no Go compiler, Swift compiler or zstd.
+No VM is started by support construction, admission or setup preparation.

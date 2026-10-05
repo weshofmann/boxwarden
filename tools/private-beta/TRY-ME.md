@@ -1,101 +1,84 @@
-# Boxwarden 0.2 private beta — Apple Silicon Mac
+# Boxwarden private beta — first project on Apple Silicon
 
-For an explicitly selected N1 candidate archive, read `N1-CANDIDATE.txt` and
-`support/source/docs/v0.2/n1/current-beta.md` first. Its pinned candidate
-toolchain needs separate approved deployment; the stock initialization below
-does not provide candidate admission. Inspect `bin/boxwarden build-info --json`
-and `BUILD.json` for the compiled selection.
+Keep the extracted package at its final location. Its app contains the CLI,
+source and prebuilt workspace helpers needed for future creation and export.
+Do not delete a package while a saved setup still refers to its resources.
+This local beta is ad-hoc signed, not notarized.
 
-This archive targets an **already initialized** Mac with admitted Tart 2.32.1 /
-Softnet 0.19.0, private enrolled APFS storage and the pinned Ubuntu 24.04.4
-Desktop ARM64 inputs. It does not install or upgrade host tools.
-One-time helper preparation/export also requires actual Go 1.27.0, Xcode
-Command Line Tools, system Python 3, an existing `zstd` executable, the pinned Ubuntu Desktop ARM64 ISO and
-`e2fsck-static_1.47.0-2.4~exp1ubuntu4.1_arm64.deb`, plus an existing OpenSSL
-with SHA-512 `passwd -6` support and `xorriso`. These are external assets;
-Apple's `/usr/bin/openssl` does not provide the required preparation mode.
+## Before you start
 
-Keep the extracted directory at its final absolute location. It contains the
-CLI, native project manager and a self-contained source checkout
-for existing managed helper admission. No development worktree is required.
-`BUILD.json` records revision/version; `SHA256SUMS` covers the shipped files.
-Signatures are **ad-hoc, not Developer ID/notarized**. This local beta does not
-claim download/Gatekeeper distribution acceptance; it does not bypass OS checks.
+The Mac needs its qualified stock Tart 2.32.1 / Softnet 0.19.0 installation,
+Apple Command Line Tools (Git/Python support), compatible installed OpenSSL
+with SHA-512 `passwd -6` and xorriso, and a private writable APFS data volume.
+The app checks the existing installation and discovers the preparation tools;
+it never installs, upgrades or repairs them. First-run configuration on an
+initialized host is different from a clean-Mac tool installation. Missing or
+incompatible tools require the existing **attended** procedure in
+[support/source/docs/operations/init-and-doctor.md](support/source/docs/operations/init-and-doctor.md).
+Do not change volume permissions or host tools merely to bypass a failed check.
+Cold first-project preparation also needs room for two installer images, the
+initial workspace and a stopping margin above the existing storage floor. For
+this ISO and a volume up to 200 GiB, setup requires about 28.4 GiB free; larger
+volumes keep the existing 10% floor. Review Setup reports the actual requirement.
+This estimate does not replace the runtime reserve guard.
 
-## Verify and configure once
+Have the Ubuntu **24.04.4 Desktop ARM64** ISO available. Setup verifies SHA-256
+`c2610520bf582976839a1724c669e1cfed0547427be5a0ad12d457b92b46ffbe`.
+No compiler, checker-package picker, source checkout locator or setup download
+is needed at runtime. The first recipe build still installs Ubuntu and may
+retrieve its pinned software inputs; its progress reports the actual stages.
 
-Verify the archive beside its checksum file with
-`shasum -a 256 -c boxwarden-0.2.0-beta.18-darwin-arm64.tar.gz.sha256`, then extract
-in a new private user-owned directory. In a **new terminal**, set these
-paths to your actual assets; no profile sourcing or private bindings is needed:
+## Set up through the app
 
-```sh
-umask 077
-PACKAGE=/absolute/boxwarden-0.2.0-beta.18-darwin-arm64
-cd "$PACKAGE"
-shasum -a 256 -c SHA256SUMS
-"$PACKAGE/bin/boxwarden" version
-"$PACKAGE/bin/boxwarden" help
+1. Open **Boxwarden.app**. Choose **Set up Boxwarden…**. To reuse an existing
+   admitted setup instead, choose **Use Existing Configuration…**.
+2. Choose a data directory and the Ubuntu ISO. The available-locations menu
+   recommends mounted private APFS volumes. Existing entries are counted and
+   preserved. Unsupported storage displays its reason; select a supported
+   alternative rather than altering an existing volume. The backend derives
+   paths and UUIDs and keeps configuration on the Mac's separate filesystem.
+3. Choose **Review Setup**. Review locations, existing contents, headroom and
+   prerequisite results. **Create Setup & Prepare** is the one confirmation
+   that permits the new configuration and helper assets to be written.
+4. Watch actual preparation progress. When ready, choose **Create your first
+   project**, enter a new name, select **Ubuntu desktop**, and create it.
+   The first recipe may take tens of minutes. Its native desktop opens when
+   ready. No provider account or credentials are needed for the desktop recipe.
+5. Quit and reopen the same app. It remembers the admitted setup. Choose
+   **New Project…** to create another independent project; matching recipe
+   preparation is reused without repeating setup.
 
-ENROLLED_CONFIG=/absolute/existing/enrolled/config.json
-CONFIG=/absolute/private-config-volume/boxwarden-beta/config.json
-STATE=/absolute/enrolled-apfs-volume/private-beta-state
-ISO=/absolute/ubuntu-24.04.4-desktop-arm64.iso
-CHECKER=/absolute/e2fsck-static_1.47.0-2.4~exp1ubuntu4.1_arm64.deb
-GO_BIN=/absolute/actual/go
-ZSTD_BIN=/absolute/actual/zstd
-OPENSSL_BIN=/absolute/actual/openssl
-XORRISO_BIN=/absolute/actual/xorriso
-mkdir -m 700 "$STATE"
-mkdir -p -m 700 "$(dirname "$CONFIG")"
-python3 - "$ENROLLED_CONFIG" "$CONFIG" "$STATE" <<'PY'
-import json, os, sys
-with open(sys.argv[1]) as source:
-    config = json.load(source)
-alpha = dict(config["domains"]["alpha"])
-alpha["state_root"] = sys.argv[3]
-config["domains"] = {"alpha": alpha}
-fd = os.open(sys.argv[2], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-with os.fdopen(fd, "w") as destination:
-    json.dump(config, destination, indent=2)
-    destination.write("\n")
-PY
-bw() { "$PACKAGE/bin/boxwarden" --config "$CONFIG" --domain alpha "$@"; }
-"$PACKAGE/bin/boxwarden" --config "$CONFIG" doctor
-bw domain init
-bash "$PACKAGE/prepare-projects.sh" "$CONFIG" "$ISO" "$CHECKER" "$GO_BIN" "$ZSTD_BIN" "$OPENSSL_BIN" "$XORRISO_BIN"
+```text
+Fresh launch → Data location + ISO → Review → Confirm setup
+             → Create first project → Desktop → Stop → Open Desktop
 ```
 
-Keep `CONFIG` on a different filesystem from the enrolled workspace backing
-storage. The config contains the trusted volume identity used to admit that
-storage; placing both on the same filesystem is refused. Use the mounted private
-config volume that already holds your enrolled config, with a new file name.
-`STATE` remains on the enrolled backing filesystem.
+Cancel before confirmation writes no configuration. Once a confirmed operation
+starts, quitting the app does not cancel it or stop the guest. Reopening checks
+retained activity and the candidate configuration. Unknown results remain
+unknown: inspect the displayed state before explicitly retrying. **Prepare
+Project Assets…** offers packaged preparation with an ISO choice; **Advanced
+Existing Setup…** retains manual input selection for legacy setups. A partial
+formatter or invalid saved setup is retained for inspection, never overwritten.
 
-The new config preserves the existing toolchain/storage enrollment and creates
-an independent state root. Package preparation creates a private local formatter
-bound to the new state root and remembers the exact admitted preparation tools.
-Run it once, before creating projects. Identical setup retries
-are safe; different saved asset locators are refused. Keep this package and its
-formatter in place. Do not reuse an older demo's state root or change its setup.
+## Optional Terminal access
 
-For an isolated side-by-side test application, build with
-`BOXWARDEN_APP_BUNDLE_ID=org.boxwarden.project-manager.your-test` in addition to
-`GO_BIN`. `BUILD.json` records the application identifier. That app gets its own
-remembered configuration and command-activity directory; choose a fresh initialized
-configuration to isolate its guests as well. Omitting the identifier preserves the
-normal application identity and preferences. Keep an isolated package under its
-original identifier when reopening unfinished work.
+For the same configured project operations, copy the configuration path shown
+by the app, then use the bundled CLI:
 
-For an explicit side-by-side update of an existing private configuration, see
-[UPGRADING.md](UPGRADING.md). Retain the old package and assets; preparation with
-`--update` switches admitted asset locators and preserves previous setup bytes.
+```sh
+PACKAGE=/absolute/extracted-package
+CONFIG=/absolute/configuration-shown-in-the-app.json
+bw() { "$PACKAGE/bin/boxwarden" --config "$CONFIG" --domain alpha "$@"; }
+```
+
+For existing setup updates, see [UPGRADING.md](UPGRADING.md). A separately selected
+N1 candidate remains a separate approved host deployment; this stock walkthrough
+does not install or promote N1. Inspect `BUILD.json` for the package selection.
 
 ## Use the native project manager
 
-Open **Boxwarden.app** in this directory. Click **Choose Configuration…** and
-select your private JSON configuration. The app validates the configuration and storage before remembering this choice
-without modifying the file. Invalid choices leave a previous valid selection intact. Typed setup messages distinguish unavailable storage, host initialization and missing project assets. **Setup Help…** explains the attended first-host step; **Prepare Project Assets…** selects the existing ISO, checker and build tools and invokes this package's managed preparation. Saved assets are remembered only after successful admission. It currently manages the `alpha` domain.
+The manager remembers an admitted configuration after setup. **Use Existing Configuration…** validates a separately supplied configuration before switching; an invalid choice preserves the previous usable selection. The manager currently uses the `alpha` domain.
 
 1. Click **New Project…**; enter a name, choose Ubuntu desktop, desktop with action examples, or desktop with the ChatGPT client,
    and select a workspace size. Keep the window open to watch actual CLI progress.
@@ -201,7 +184,7 @@ bw project status myproject
 
 Check the three files again in the guest. Open resumes the same sandbox and
 workspace; repeated open does not clone or reimport. From another new terminal,
-set `PACKAGE` and `CONFIG` and define `bw` as above; those are the only routine
+set `PACKAGE` and `CONFIG` and define `bw` below; those are the only routine
 setup values needed. For a second independent project, use another name and
 another private source directory with the same commands.
 
@@ -291,8 +274,17 @@ untested Mac/guest environments remain. Automatic Tart clipboard/audio sharing
 stays disabled. Provider sign-in, cold-machine installation, power-loss
 recovery and complete network isolation are outside this walkthrough.
 
-To rebuild from a clean committed checkout on this Mac:
-`GO_BIN=/absolute/actual/go bash tools/private-beta/build.sh 0.2.0-beta.18 /absolute/new-output`.
+To rebuild from a clean committed checkout on this Mac, use the pinned ISO and
+static-checker package documented in
+[PREBUILT-SUPPORT.md](notices/PREBUILT-SUPPORT.md):
+
+```sh
+GO_BIN=/absolute/actual/go \
+BOXWARDEN_SUPPORT_ISO=/absolute/ubuntu-24.04.4-desktop-arm64.iso \
+BOXWARDEN_SUPPORT_CHECKER_DEB=/absolute/e2fsck-static.deb \
+bash tools/private-beta/build.sh 0.2.0-beta.19 /absolute/new-output stock
+```
+
 This builds locally and publishes no release.
 
 ## Replace a disposable project system

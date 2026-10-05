@@ -89,9 +89,20 @@ WARNING
 fi
 bash "$repo_root/host/clipboard-menu/build.sh" --app project-manager --cli "$package/bin/boxwarden" \
   --bundle-id "$app_bundle_id" --network-policy "$selection" --output "$package/Boxwarden.app" --version "${version%-beta.*}" --build "${version##*.}"
+# Retain all required source and reusable helpers when the app is moved alone.
+# The copied CLI has the same signature as Contents/MacOS/boxwarden.
+app_support="$package/Boxwarden.app/Contents/Resources/Boxwarden"
+mkdir -p "$app_support/bin" "$app_support/support"
+cp "$package/bin/boxwarden" "$app_support/bin/boxwarden"
+cp "$package/support/source/tools/private-beta/prepare-projects.sh" "$app_support/prepare-projects.sh"
+cp -R "$package/support/source" "$app_support/support/source"
+bash "$app_support/support/source/tools/private-beta/build_support.sh" \
+  "$app_support/support/source" "${BOXWARDEN_SUPPORT_ISO:?set the pinned build-time Ubuntu ARM64 ISO}" \
+  "${BOXWARDEN_SUPPORT_CHECKER_DEB:?set the pinned build-time static checker deb}" "$app_support/support/resources"
 cp "$repo_root/LICENSE" "$repo_root/NOTICE" "$package/"
 cp "$repo_root/tools/private-beta/TRY-ME.md" "$package/TRY-ME.md"
 cp "$repo_root/tools/private-beta/UPGRADING.md" "$package/UPGRADING.md"
+cp "$package/TRY-ME.md" "$package/UPGRADING.md" "$package/BUILD.json" "$app_support/"
 cp "$repo_root/tools/private-beta/prepare-projects.sh" "$package/prepare-projects.sh"
 cp "$repo_root/tools/private-beta/prepare-guest-clipboard.sh" "$package/prepare-guest-clipboard.sh"
 goroot=$("$go_bin" env GOROOT)
@@ -114,10 +125,21 @@ these operating-system frameworks are not redistributed in this archive.
 support/source is a complete shallow source checkout, not an installed toolchain.
 Its historical tools/n1-softnet patch is separately AGPL-3.0; its LICENSE and
 NOTICE.md remain there. That patch was modified 2026-09-28; no N1 executable is
-shipped or installed by this package. Ubuntu, Tart, Softnet and Go compiler
-executables are external prerequisites, not bundled distributions.
+shipped or installed by this package. Tart, Softnet and Go compiler
+executables are not redistributed. Pinned Linux kernel/initrd and static e2fsck
+resources are bundled; see PREBUILT-SUPPORT.md for provenance and licenses.
 NOTICES
+cp "$repo_root/tools/private-beta/PREBUILT-SUPPORT.md" "$package/notices/PREBUILT-SUPPORT.md"
+# Retain the original upstream checker copyright from the admitted package.
+ar -p "$BOXWARDEN_SUPPORT_CHECKER_DEB" data.tar.zst | bsdtar -xOf - ./usr/share/doc/e2fsck-static/copyright > "$package/notices/e2fsprogs-copyright"
+cp -R "$package/notices" "$app_support/notices"
+cp "$package/LICENSE" "$package/NOTICE" "$app_support/"
+# Re-sign after adding resources. The two VZ helpers retain their individual
+# signatures and sole virtualization entitlement; app signing adds no grants.
 chmod -R go-rwx "$package"
+codesign --force --sign - "$package/Boxwarden.app"
+codesign --verify --strict "$package/Boxwarden.app"
+
 (
   cd "$package"
   find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 shasum -a 256 > SHA256SUMS

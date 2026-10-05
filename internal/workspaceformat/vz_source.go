@@ -18,7 +18,7 @@ func cleanSourceCommit(ctx context.Context, root string) (string, error) {
 	}
 	runner := execx.OSRunner{MaxOutputBytes: 8 << 10, MaxStdinBytes: 0}
 	run := func(args ...string) (string, error) {
-		result, err := runner.Run(ctx, execx.Command{Path: "/usr/bin/git", Args: append([]string{"-C", root}, args...),
+		result, err := runner.Run(ctx, execx.Command{Path: "/usr/bin/git", Args: append([]string{"--no-optional-locks", "-C", root}, args...),
 			Env: []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C"}})
 		if err != nil || result.Truncated {
 			return "", fmt.Errorf("formatter source git check failed: %v", err)

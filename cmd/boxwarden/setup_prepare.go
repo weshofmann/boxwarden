@@ -24,6 +24,16 @@ import (
 // prepareSetup is an explicit operator action. It invokes only the source-bound
 // package helper, never host initialization, privilege installation, or a guest.
 func prepareSetup(ctx context.Context, path string, input app.SetupPrepareInput, out io.Writer) (app.SetupInspection, bool, error) {
+	if input.Prebuilt {
+		resolved, _, err := preflightFirstRunResources(ctx, app.FirstRunInput{PackageRoot: input.PackageRoot, ISOPath: input.ISOPath})
+		if err != nil {
+			return app.SetupInspection{}, false, err
+		}
+		input = resolved
+	}
+	if input.PrebuiltResources != "" {
+		return preparePrebuiltSetup(ctx, path, input, out)
+	}
 	fail := func(err error) (app.SetupInspection, bool, error) { return app.SetupInspection{}, false, err }
 	executable, err := os.Executable()
 	if err != nil {

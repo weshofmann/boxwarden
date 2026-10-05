@@ -15,6 +15,7 @@ import (
 
 	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/execx"
+	"github.com/weshofmann/boxwarden/internal/privateacl"
 )
 
 const (
@@ -36,12 +37,26 @@ type vzBundleDocument struct {
 	ISOSHA256          string            `json:"iso_sha256"`
 	CheckerDebSHA256   string            `json:"checker_deb_sha256"`
 	Files              map[string]string `json:"files"`
+	BindingMode        string            `json:"binding_mode,omitempty"`
 	ManagedStateRoot   string            `json:"managed_state_root"`
 	ManagedDomain      string            `json:"managed_domain"`
 	RunnerEntitlements map[string]bool   `json:"runner_entitlements"`
 }
 
-type vzBundle struct{ runner, kernel, initrd string }
+type vzBundle struct{ runner, kernel, initrd, binding string }
+
+const runtimeBindingSource = "// Boxwarden managed runtime binding v1\n"
+
+type runtimeBindingDocument struct {
+	Version   int    `json:"version"`
+	StateRoot string `json:"state_root"`
+	Domain    string `json:"domain"`
+}
+
+func managedRuntimeBinding(root string, selected domain.ID) []byte {
+	raw, _ := json.Marshal(runtimeBindingDocument{1, root, string(selected)})
+	return append(raw, '\n')
+}
 
 func managedBindingSource(root string, selected domain.ID) string {
 	return "import Foundation\nfunc managedStateRoot() -> String? {\n" +
@@ -141,11 +156,32 @@ func admitVZBundle(ctx context.Context, path, stateRoot string, selected domain.
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return vzBundle{}, fmt.Errorf("formatter manifest has trailing content")
 	}
-	if manifest.Version != 1 || !lowerHex(sourceCommit, 40) || manifest.SourceCommit != sourceCommit ||
+	if (manifest.Version != 1 && manifest.Version != 2) || !lowerHex(sourceCommit, 40) || manifest.SourceCommit != sourceCommit ||
 		manifest.ISOSHA256 != pins.iso || manifest.CheckerDebSHA256 != pins.deb ||
 		manifest.ManagedStateRoot != stateRoot || manifest.ManagedDomain != string(selected) ||
 		len(manifest.RunnerEntitlements) != 1 || !manifest.RunnerEntitlements["com.apple.security.virtualization"] {
 		return vzBundle{}, fmt.Errorf("formatter bundle does not bind the admitted source and managed state")
+	}
+	if manifest.Version == 1 && manifest.BindingMode != "" || manifest.Version == 2 && manifest.BindingMode != "runtime-v1" {
+		return vzBundle{}, fmt.Errorf("formatter binding mode differs from version")
+	}
+
+	if manifest.Version == 2 {
+		rootInfo, err := os.Lstat(stateRoot)
+		if err != nil {
+			return vzBundle{}, err
+		}
+		if err := privateDirectory(rootInfo); err != nil {
+			return vzBundle{}, err
+		}
+		if err := checkPrivateACL(stateRoot, rootInfo); err != nil {
+			return vzBundle{}, err
+		}
+		for _, anchor := range []string{stateRoot, path} {
+			if err := privateacl.CheckAncestorChain(filepath.Dir(anchor)); err != nil {
+				return vzBundle{}, fmt.Errorf("runtime formatter ancestry: %w", err)
+			}
+		}
 	}
 	limits := map[string]struct {
 		mode os.FileMode
@@ -157,6 +193,12 @@ func admitVZBundle(ctx context.Context, path, stateRoot string, selected domain.
 		"e2fsck.static":        {0o600, 16 << 20},
 		"alpha-formatter-host": {0o700, 16 << 20},
 		"binding.swift":        {0o600, 4096},
+	}
+	if manifest.Version == 2 {
+		limits["managed-binding.json"] = struct {
+			mode os.FileMode
+			max  int64
+		}{0o600, 4096}
 	}
 	if len(manifest.Files) != len(limits) || manifest.Files["kernel-image"] != pins.kernel || manifest.Files["e2fsck.static"] != pins.checker {
 		return vzBundle{}, fmt.Errorf("formatter bundle artifact pins differ")
@@ -173,8 +215,11 @@ func admitVZBundle(ctx context.Context, path, stateRoot string, selected domain.
 		if actual != expected {
 			return vzBundle{}, fmt.Errorf("formatter bundle artifact %q digest differs", name)
 		}
-		if name == "binding.swift" && string(contents) != managedBindingSource(stateRoot, selected) {
+		if name == "binding.swift" && (manifest.Version == 1 && string(contents) != managedBindingSource(stateRoot, selected) || manifest.Version == 2 && string(contents) != runtimeBindingSource) {
 			return vzBundle{}, fmt.Errorf("formatter signed binding source differs")
+		}
+		if name == "managed-binding.json" && !bytes.Equal(contents, managedRuntimeBinding(stateRoot, selected)) {
+			return vzBundle{}, fmt.Errorf("formatter runtime binding differs from exact managed state")
 		}
 	}
 	vmRunner := filepath.Join(path, "alpha-formatter-host")
@@ -196,5 +241,9 @@ func admitVZBundle(ctx context.Context, path, stateRoot string, selected domain.
 	if err := json.Unmarshal([]byte(converted.Stdout), &actualEntitlements); err != nil || len(actualEntitlements) != 1 || !actualEntitlements["com.apple.security.virtualization"] {
 		return vzBundle{}, fmt.Errorf("formatter runner has unexpected entitlements")
 	}
-	return vzBundle{runner: vmRunner, kernel: filepath.Join(path, "kernel-image"), initrd: filepath.Join(path, "formatter-initrd")}, nil
+	binding := ""
+	if manifest.Version == 2 {
+		binding = filepath.Join(path, "managed-binding.json")
+	}
+	return vzBundle{binding: binding, runner: vmRunner, kernel: filepath.Join(path, "kernel-image"), initrd: filepath.Join(path, "formatter-initrd")}, nil
 }

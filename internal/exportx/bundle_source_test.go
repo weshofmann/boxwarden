@@ -1,12 +1,14 @@
 package exportx
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestInspectorSourcePinsIgnoreDocsOnlyCommitButRejectSourceDrift(t *testing.T) {
@@ -41,6 +43,22 @@ func TestInspectorSourcePinsIgnoreDocsOnlyCommitButRejectSourceDrift(t *testing.
 	first, err := inspectorSourceInputs(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	index, err := os.ReadFile(filepath.Join(root, ".git", "index"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Now().Add(2 * time.Minute)
+	if err := os.Chtimes(filepath.Join(root, "tools/alpha-inspector/guest/main.go"), stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := inspectorSourceInputs(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(filepath.Join(root, ".git", "index"))
+	if err != nil || !bytes.Equal(index, after) {
+		t.Fatalf("inspector admission rewrote sealed Git index: %v", err)
 	}
 	write("docs/progress.md", "second\n")
 	if _, err := inspectorSourceInputs(context.Background(), root); err == nil {

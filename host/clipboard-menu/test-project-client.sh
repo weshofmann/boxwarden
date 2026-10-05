@@ -8,3 +8,9 @@ swiftc -parse-as-library "$base/host/clipboard-menu/Sources/ProjectProtocol.swif
   "$base/host/clipboard-menu/Sources/ProjectClient.swift" \
   "$base/host/clipboard-menu/Tests/ProjectClientTests.swift" -o "$temporary/tests"
 "$temporary/tests"
+
+swiftc -parse-as-library "$base/host/clipboard-menu/Sources/ProjectProtocol.swift" \
+  "$base/host/clipboard-menu/Sources/ProjectActivity.swift" \
+  "$base/host/clipboard-menu/Sources/ProjectClient.swift" \
+  "$base/host/clipboard-menu/Tests/ProjectFirstRunTests.swift" -o "$temporary/first-run-tests"
+"$temporary/first-run-tests"

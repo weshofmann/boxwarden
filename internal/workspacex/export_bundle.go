@@ -18,6 +18,7 @@ import (
 	"github.com/weshofmann/boxwarden/internal/domain"
 	"github.com/weshofmann/boxwarden/internal/exportx"
 	"github.com/weshofmann/boxwarden/internal/lock"
+	"github.com/weshofmann/boxwarden/internal/workspaceformat"
 )
 
 const inspectorBuildDeadline = 5 * time.Minute
@@ -71,15 +72,33 @@ func BuildAdmittedExportInspectorBundle(ctx context.Context, stateRoot string, d
 
 func buildAdmittedExportInspectorBundle(ctx context.Context, stateRoot string, domainID domain.ID, transactionID, sourceRoot, isoPath, goBinary string,
 	build exportInspectorBundleBuilder, admit exportInspectorBundleAdmitter) (bundle PreparedInspectorBundle, err error) {
+	return buildAdmittedExportInspectorBundleMode(ctx, stateRoot, domainID, transactionID, sourceRoot, isoPath, goBinary, build, admit, false)
+}
+
+func BuildAdmittedPrebuiltExportInspectorBundle(ctx context.Context, stateRoot string, domainID domain.ID, transactionID, sourceRoot, isoPath, resourcesRoot string) (PreparedInspectorBundle, error) {
+	if _, err := workspaceformat.CheckPrebuiltSupport(ctx, sourceRoot, resourcesRoot); err != nil {
+		return PreparedInspectorBundle{}, err
+	}
+	builder := func(ctx context.Context, source, iso, request, _, output string) (string, error) {
+		return runTrustedPrebuiltInspectorBuilder(ctx, source, iso, request, resourcesRoot, output)
+	}
+	return buildAdmittedExportInspectorBundleMode(ctx, stateRoot, domainID, transactionID, sourceRoot, isoPath, "", builder, exportx.AdmitInspectorBundle, true)
+}
+
+func buildAdmittedExportInspectorBundleMode(ctx context.Context, stateRoot string, domainID domain.ID, transactionID, sourceRoot, isoPath, goBinary string, build exportInspectorBundleBuilder, admit exportInspectorBundleAdmitter, prebuilt bool) (bundle PreparedInspectorBundle, err error) {
 	if _, parseErr := domain.Parse(string(domainID)); parseErr != nil || !validUUID(transactionID) || build == nil || admit == nil {
 		return bundle, fmt.Errorf("invalid inspector build transaction: %v", parseErr)
 	}
-	for _, input := range []string{sourceRoot, isoPath, goBinary} {
+	inputs := []string{sourceRoot, isoPath}
+	if !prebuilt {
+		inputs = append(inputs, goBinary)
+	}
+	for _, input := range inputs {
 		if !filepath.IsAbs(input) || filepath.Clean(input) != input || strings.ContainsAny(input, "\r\n\x00") {
 			return bundle, fmt.Errorf("inspector build inputs must be clean absolute paths")
 		}
 	}
-	if filepath.Base(goBinary) != "go" {
+	if !prebuilt && filepath.Base(goBinary) != "go" {
 		return bundle, fmt.Errorf("inspector build requires an explicit Go executable")
 	}
 	held, err := lock.Acquire(ctx, stateRoot, "export-"+string(domainID)+"-"+transactionID)
@@ -227,14 +246,19 @@ func exactPreparedInspectorBundlePath(path, parent string) error {
 // The executable is a tracked, clean-source build script with positional argv
 // elements. This explicit Bash invocation cannot be replaced by guest input;
 // both stdout and stderr are bounded and never include request bytes.
+func runTrustedPrebuiltInspectorBuilder(ctx context.Context, sourceRoot, isoPath, requestPath, resourcesRoot, outputDir string) (string, error) {
+	return runInspectorBuilder(ctx, sourceRoot, []string{isoPath, requestPath, outputDir, resourcesRoot}, []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C", "TMPDIR=" + outputDir}, outputDir)
+}
 func runTrustedInspectorBuilder(ctx context.Context, sourceRoot, isoPath, requestPath, goBinary, outputDir string) (string, error) {
 	info, err := os.Lstat(goBinary)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
 		return "", fmt.Errorf("explicit Go executable is not regular and executable: %v", err)
 	}
+	return runInspectorBuilder(ctx, sourceRoot, []string{isoPath, requestPath, outputDir}, []string{"PATH=" + filepath.Dir(goBinary) + ":/usr/bin:/bin", "LANG=C", "LC_ALL=C", "TMPDIR=" + outputDir}, outputDir)
+}
+func runInspectorBuilder(ctx context.Context, sourceRoot string, args, env []string, outputDir string) (string, error) {
 	script := filepath.Join(sourceRoot, "tools", "alpha-inspector", "prepare_export_bundle.sh")
-	stdout, stderr, err := runExportBuilderProcess(ctx, script, []string{isoPath, requestPath, outputDir},
-		[]string{"PATH=" + filepath.Dir(goBinary) + ":/usr/bin:/bin", "LANG=C", "LC_ALL=C", "TMPDIR=" + outputDir})
+	stdout, stderr, err := runExportBuilderProcess(ctx, script, args, env)
 	if err != nil {
 		return "", fmt.Errorf("inspector builder failed: %w; stderr: %s", err, stderr)
 	}

@@ -5,17 +5,21 @@ extension ProjectWindowController {
     let alert = NSAlert()
     let updateNeeded = setupInspection?.status == "project_setup_invalid" || setupInspection?.recipePreparationAvailable == false && setupInspection?.status == "ready"
     alert.messageText = updateNeeded ? "Update the saved project assets explicitly" : "Set up Boxwarden on this Mac"
-    alert.informativeText = "Choose a private Boxwarden JSON configuration outside the workspace backing filesystem. Connect its configured storage first.\n\nOn a new Mac, host tool initialization needs your attended authentication. Use the bundled quickstart for that explicit step; this app does not install or repair privileged tools.\n\nOnce the configuration and host tools are admitted, Prepare Project Assets selects the Ubuntu installer, checker package and existing build tools. No provider sign-in is required."
+    alert.informativeText = "Choose a private Boxwarden JSON configuration outside the workspace backing filesystem. Connect its configured storage first.\n\nOn a new Mac, host tool initialization needs your attended authentication. Use the bundled quickstart for that explicit step; this app does not install or repair privileged tools.\n\nOnce the configuration and host tools are admitted, Prepare Project Assets verifies the Ubuntu installer and packaged workspace helpers. No provider sign-in is required."
+    if presentation.configPath.isEmpty { alert.informativeText = "Choose Set up Boxwarden to select a data location and Ubuntu ARM64 installer, review the plan, and create your configuration. Use Existing Configuration selects an existing setup. Host tools require attended initialization before preparation; the app checks their admission and reports missing prerequisites." }
     if updateNeeded { alert.informativeText = "The existing setup remains selected. Recipe creation and system replacement need version-2 recipe assets. Use the bundled upgrade instructions to perform an explicit setup update; existing asset locators are not silently replaced. Existing projects remain discoverable." }
     alert.addButton(withTitle: updateNeeded ? "Open Upgrade Instructions" : "Open Bundled Quickstart"); alert.addButton(withTitle: "Close")
     if alert.runModal() == .alertFirstButtonReturn {
-      let package = Bundle.main.bundleURL.deletingLastPathComponent()
+      let package = URL(fileURLWithPath: firstRunPackageRoot)
       NSWorkspace.shared.open(package.appendingPathComponent(updateNeeded ? "UPGRADING.md" : "TRY-ME.md"))
     }
   }
-  @objc func prepareProjectAssets(_ sender: Any?) {
+  @objc func prepareAdvancedProjectAssets(_ sender: Any?) {
     guard !closing, !switchingConfiguration, !hasActiveOperation, let client,
           setupInspection?.selectionAcceptable == true, window?.attachedSheet == nil else { return }
+    // The legacy helper writes formatter files beside the package. Use the
+    // outer extracted directory so advanced preparation cannot alter the app's
+    // sealed Resources. Moving the app alone retains the normal prebuilt route.
     let package = Bundle.main.bundleURL.deletingLastPathComponent().path
     let fields = ["Ubuntu ARM64 desktop ISO", "ARM64 e2fsck checker package", "Go executable", "zstd executable", "OpenSSL executable", "xorriso executable"]
     let saved = defaults.stringArray(forKey: "ValidatedPreparationInputs") ?? []

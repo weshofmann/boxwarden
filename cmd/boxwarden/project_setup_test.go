@@ -124,3 +124,14 @@ func TestProjectSetupHonorsCancellation(t *testing.T) {
 		t.Fatalf("canceled setup admission error = %v", err)
 	}
 }
+
+func TestPrebuiltProjectSetupDoesNotRequireGo(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	os.Mkdir(source, 0700)
+	setup := projectx.Setup{Version: 3, SourceRoot: source, FormatterBundle: filepath.Join(root, "formatter"), ISOPath: filepath.Join(root, "missing.iso"), PrebuiltResources: filepath.Join(root, "missing.resources")}
+	err := checkProjectSetup(context.Background(), config.Domain{ID: "work", StateRoot: filepath.Join(root, "state")}, setup)
+	if err == nil || strings.Contains(err.Error(), "--go") {
+		t.Fatalf("prebuilt setup demanded compiler: %v", err)
+	}
+}

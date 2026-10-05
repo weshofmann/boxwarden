@@ -11,6 +11,18 @@ import (
 
 // Missing the prepare route would prevent native onboarding from driving the
 // admitted package helper without a terminal or parsing its human output.
+func TestPackagedPreparationDoesNotRequestBuildToolPaths(t *testing.T) {
+	var out bytes.Buffer
+	called := false
+	err := Run(t.Context(), []string{"--config", "/new/config.json", "setup", "prepare", "--json", "--package", "/package", "--iso", "/ubuntu.iso", "--prebuilt"}, Options{Output: &out, SetupPrepare: func(_ context.Context, path string, input SetupPrepareInput, _ io.Writer) (SetupInspection, bool, error) {
+		called = path == "/new/config.json" && input.Prebuilt && input.GoBinary == "" && input.ISOPath == "/ubuntu.iso"
+		return SetupInspection{Version: 1, Scope: "alpha_project_setup", Status: "ready"}, true, nil
+	}})
+	if err != nil || !called {
+		t.Fatalf("packaged preparation = %v, called=%v", err, called)
+	}
+}
+
 func TestSetupPrepareUsesStructuredEvents(t *testing.T) {
 	var out bytes.Buffer
 	args := []string{"--config", "/config.json", "setup", "prepare", "--json", "--package", "/package", "--iso", "/ubuntu.iso", "--checker", "/checker.deb", "--go", "/tool/go", "--zstd", "/tool/zstd", "--openssl", "/tool/openssl", "--xorriso", "/tool/xorriso"}
