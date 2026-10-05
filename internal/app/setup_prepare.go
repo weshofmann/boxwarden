@@ -8,13 +8,18 @@ import (
 )
 
 type SetupPrepareInput struct {
-	PackageRoot string
-	ISOPath     string
-	CheckerPath string
-	GoBinary    string
-	ZstdBinary  string
-	OpenSSLPath string
-	XorrisoPath string
+	// BootstrapBytes is derived from the verified ISO by the production adapter;
+	// it is never supplied as a CLI override.
+	BootstrapBytes    uint64
+	Prebuilt          bool
+	PrebuiltResources string
+	PackageRoot       string
+	ISOPath           string
+	CheckerPath       string
+	GoBinary          string
+	ZstdBinary        string
+	OpenSSLPath       string
+	XorrisoPath       string
 }
 
 type SetupPrepareFunc func(context.Context, string, SetupPrepareInput, io.Writer) (SetupInspection, bool, error)
@@ -58,6 +63,7 @@ func runSetupPrepare(ctx context.Context, args []string, o Options) (handled boo
 	flags := flag.NewFlagSet("setup prepare", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	jsonMode := flags.Bool("json", false, "structured output")
+	flags.BoolVar(&input.Prebuilt, "prebuilt", false, "use verified packaged support and discover existing tools")
 	flags.StringVar(&input.PackageRoot, "package", "", "extracted current package")
 	flags.StringVar(&input.ISOPath, "iso", "", "pinned Ubuntu installer")
 	flags.StringVar(&input.CheckerPath, "checker", "", "pinned e2fsck package")
@@ -71,7 +77,17 @@ func runSetupPrepare(ctx context.Context, args []string, o Options) (handled boo
 	if !*jsonMode || len(flags.Args()) != 0 {
 		return true, errors.New("setup prepare requires --json and explicit package/iso/checker/go/zstd/openssl/xorriso paths")
 	}
-	for _, v := range []string{input.PackageRoot, input.ISOPath, input.CheckerPath, input.GoBinary, input.ZstdBinary, input.OpenSSLPath, input.XorrisoPath} {
+	required := []string{input.PackageRoot, input.ISOPath}
+	if input.Prebuilt {
+		for _, v := range []string{input.CheckerPath, input.GoBinary, input.ZstdBinary, input.OpenSSLPath, input.XorrisoPath} {
+			if v != "" {
+				return true, errors.New("packaged preparation discovers tools; do not combine --prebuilt with manual build inputs")
+			}
+		}
+	} else {
+		required = append(required, input.CheckerPath, input.GoBinary, input.ZstdBinary, input.OpenSSLPath, input.XorrisoPath)
+	}
+	for _, v := range required {
 		if v == "" {
 			return true, errors.New("setup prepare requires every asset path")
 		}

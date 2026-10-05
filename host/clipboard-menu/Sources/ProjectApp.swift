@@ -51,7 +51,7 @@ final class ProjectManagerApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     appItem.submenu = appMenu
     let fileItem = NSMenuItem(); main.addItem(fileItem)
     let file = NSMenu(title: "File")
-    let choose = file.addItem(withTitle: "Choose Configuration…", action: #selector(ProjectWindowController.chooseConfiguration(_:)), keyEquivalent: "o"); choose.target = controller
+    let choose = file.addItem(withTitle: "Use Existing Configuration…", action: #selector(ProjectWindowController.chooseConfiguration(_:)), keyEquivalent: "o"); choose.target = controller
     let create = file.addItem(withTitle: "New Project…", action: #selector(ProjectWindowController.createProject(_:)), keyEquivalent: "n"); create.target = controller
     let refresh = file.addItem(withTitle: "Refresh", action: #selector(ProjectWindowController.refreshProjects(_:)), keyEquivalent: "r"); refresh.target = controller
     fileItem.submenu = file

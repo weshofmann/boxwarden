@@ -7,6 +7,125 @@ private func managedStateRoot() -> String? { nil }
 private func managedDomain() -> String? { nil }
 #endif
 
+
+private struct RuntimeBinding: Decodable {
+    let version: Int
+    let stateRoot: String
+    let domain: String
+
+    enum CodingKeys: String, CodingKey {
+        case version, domain
+        case stateRoot = "state_root"
+    }
+}
+
+private func admitRuntimeBinding(_ path: String) throws -> RuntimeBinding {
+    guard lexicallyCleanAbsolute(path),
+          URL(fileURLWithPath: path).lastPathComponent == "managed-binding.json" else {
+        throw FormatterFailure.invalidRequest
+    }
+    try admitPrivateAncestry(URL(fileURLWithPath: path).deletingLastPathComponent().path)
+    let before = try metadata(path)
+    guard before.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+          before.st_mode & 0o777 == 0o600, before.st_uid == getuid(),
+          before.st_nlink == 1, before.st_size > 0, before.st_size <= 4096 else {
+        throw FormatterFailure.unsafeDisk("runtime binding metadata")
+    }
+    try requireNoExtendedACL(path, before)
+    let descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+    guard descriptor >= 0 else { throw FormatterFailure.unsafeDisk("runtime binding open") }
+    let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+    defer { try? handle.close() }
+    var opened = stat()
+    guard fstat(descriptor, &opened) == 0,
+          opened.st_dev == before.st_dev, opened.st_ino == before.st_ino,
+          opened.st_size == before.st_size else {
+        throw FormatterFailure.unsafeDisk("runtime binding changed")
+    }
+    let bytes = try handle.read(upToCount: 4097) ?? Data()
+    let after = try metadata(path)
+    guard bytes.count == before.st_size,
+          after.st_dev == before.st_dev, after.st_ino == before.st_ino,
+          after.st_size == before.st_size, after.st_mode == before.st_mode,
+          after.st_uid == before.st_uid, after.st_nlink == 1 else {
+        throw FormatterFailure.unsafeDisk("runtime binding changed while reading")
+    }
+    try requireNoExtendedACL(path, after)
+    guard let binding = try? JSONDecoder().decode(RuntimeBinding.self, from: bytes),
+          binding.version == 1, lexicallyCleanAbsolute(binding.stateRoot),
+          binding.domain.range(of: "^[a-z][a-z0-9]{0,62}$", options: .regularExpression) != nil else {
+        throw FormatterFailure.invalidRequest
+    }
+    // Reconstruct Go's canonical JSON encoding. Exact bytes reject duplicate,
+    // unknown, aliased and trailing JSON independently of JSONDecoder.
+    func quoted(_ value: String) throws -> String {
+        let raw = try JSONSerialization.data(withJSONObject: value,
+                                            options: [.fragmentsAllowed, .withoutEscapingSlashes])
+        guard let text = String(data: raw, encoding: .utf8) else {
+            throw FormatterFailure.invalidRequest
+        }
+        return text.replacingOccurrences(of: "<", with: "\\u003c")
+            .replacingOccurrences(of: ">", with: "\\u003e")
+            .replacingOccurrences(of: "&", with: "\\u0026")
+            .replacingOccurrences(of: "\u{2028}", with: "\\u2028")
+            .replacingOccurrences(of: "\u{2029}", with: "\\u2029")
+    }
+    let expected = "{\"version\":1,\"state_root\":" + (try quoted(binding.stateRoot)) +
+        ",\"domain\":" + (try quoted(binding.domain)) + "}\n"
+    guard bytes == Data(expected.utf8) else { throw FormatterFailure.invalidRequest }
+    return binding
+}
+
+// The macOS default ancestor entry denies deletion without granting access.
+// Accept only its exact native representation, with no additional entries or
+// inheritance flags. Private anchors and files still require no ACL.
+private func requireSafeAncestorACL(_ path: String, _ admitted: stat) throws {
+    errno = 0
+    if let acl = acl_get_file(path, ACL_TYPE_EXTENDED) {
+        defer { acl_free(UnsafeMutableRawPointer(acl)) }
+        var length: ssize_t = 0
+        guard let text = acl_to_text(acl, &length) else {
+            throw FormatterFailure.unsafeDisk("ancestor ACL inspection failed")
+        }
+        defer { acl_free(UnsafeMutableRawPointer(text)) }
+        let expected = "!#acl 1\ngroup:ABCDEFAB-CDEF-ABCD-EFAB-CDEF0000000C:everyone:12:deny:delete\n"
+        guard length == expected.utf8.count, length <= 256,
+              String(cString: text) == expected else {
+            throw FormatterFailure.unsafeDisk("unsafe extended ACL on ancestor")
+        }
+    } else if errno != ENOENT {
+        throw FormatterFailure.unsafeDisk("ancestor ACL inspection failed")
+    }
+    let after = try metadata(path)
+    guard after.st_dev == admitted.st_dev, after.st_ino == admitted.st_ino,
+          after.st_mode == admitted.st_mode, after.st_uid == admitted.st_uid,
+          after.st_gid == admitted.st_gid, after.st_nlink == admitted.st_nlink else {
+        throw FormatterFailure.unsafeDisk("ancestor changed during ACL inspection")
+    }
+}
+
+private func admitPrivateAncestry(_ path: String) throws {
+    var current = path
+    while current != "/" {
+        let info = try metadata(current)
+        guard info.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR),
+              info.st_mode & 0o022 == 0,
+              info.st_uid == getuid() || info.st_uid == 0 else {
+            throw FormatterFailure.unsafeDisk("runtime binding ancestry")
+        }
+        if current == path {
+            try requireNoExtendedACL(current, info)
+        } else {
+            try requireSafeAncestorACL(current, info)
+        }
+        current = URL(fileURLWithPath: current).deletingLastPathComponent().path
+    }
+    let parent = try metadata(path)
+    guard parent.st_mode & 0o777 == 0o700, parent.st_uid == getuid() else {
+        throw FormatterFailure.unsafeDisk("runtime binding private parent")
+    }
+}
+
 enum FormatterFailure: Error, CustomStringConvertible {
     case usage
     case unsafeDisk(String)
@@ -38,10 +157,27 @@ struct FormatterArguments {
     let transaction: String
     let filesystemUUID: String
     let marker: String
+    let boundRoot: String?
+    let boundDomain: String?
 
     init(_ arguments: [String]) throws {
+        #if MANAGED_RUNTIME
+        guard arguments.count == 12,
+              ["preflight-managed-bound", "run-managed-bound"].contains(arguments[1]) else {
+            throw FormatterFailure.invalidRequest
+        }
+        let binding = try admitRuntimeBinding(arguments[11])
+        boundRoot = binding.stateRoot
+        boundDomain = binding.domain
+        #else
         guard arguments.count == 11,
-              ["preflight", "preflight-run", "run", "preflight-managed", "run-managed"].contains(arguments[1]),
+              ["preflight", "preflight-run", "run", "preflight-managed", "run-managed"].contains(arguments[1]) else {
+            throw FormatterFailure.invalidRequest
+        }
+        boundRoot = managedStateRoot()
+        boundDomain = managedDomain()
+        #endif
+        guard
               let device = UInt64(arguments[5]),
               let inode = UInt64(arguments[6]),
               let size = Int64(arguments[7]),
@@ -235,8 +371,8 @@ private func admitCreatingJournal(_ arguments: FormatterArguments) throws -> (Fi
           journal.identity?.inode == arguments.inode else {
         throw FormatterFailure.unsafeDisk("creating journal does not bind this exact format")
     }
-    if arguments.command == "preflight-managed" || arguments.command == "run-managed" {
-        guard journal.domain == managedDomain() else {
+    if arguments.command == "preflight-managed" || arguments.command == "run-managed" || arguments.command == "preflight-managed-bound" || arguments.command == "run-managed-bound" {
+        guard journal.domain == arguments.boundDomain else {
             throw FormatterFailure.unsafeDisk("creating journal domain differs from signed binding")
         }
     }
@@ -259,8 +395,11 @@ func prepareFormatter(_ arguments: FormatterArguments) throws -> PreparedFormatt
         guard isFreshSyntheticRoot(rootPath) else {
             throw FormatterFailure.unsafeDisk("run target is outside a fresh synthetic probe root")
         }
-    } else if arguments.command == "preflight-managed" || arguments.command == "run-managed" {
-        guard rootPath == managedStateRoot() else {
+    } else if arguments.command == "preflight-managed" || arguments.command == "run-managed" || arguments.command == "preflight-managed-bound" || arguments.command == "run-managed-bound" {
+        #if MANAGED_RUNTIME
+        try admitPrivateAncestry(rootPath)
+        #endif
+        guard rootPath == arguments.boundRoot else {
             throw FormatterFailure.unsafeDisk("run target differs from signed managed state root")
         }
     }
@@ -357,7 +496,7 @@ private struct PreflightEvidence: Encodable {
 do {
     let arguments = try FormatterArguments(CommandLine.arguments)
     let prepared = try prepareFormatter(arguments)
-    if arguments.command != "run" && arguments.command != "run-managed" {
+    if arguments.command != "run" && arguments.command != "run-managed" && arguments.command != "run-managed-bound" {
         let vm = VZVirtualMachine(configuration: prepared.configuration)
         guard vm.state == .stopped, vm.networkDevices.isEmpty else {
             throw FormatterFailure.unexpectedConfiguration

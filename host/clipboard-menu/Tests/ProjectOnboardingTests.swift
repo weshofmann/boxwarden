@@ -22,6 +22,16 @@ import AppKit
     let defaults = UserDefaults(suiteName: suite)!
     defer { defaults.removePersistentDomain(forName: suite) }
     let window = ProjectWindowController(executable: cli.path, activityDirectory: root.appendingPathComponent("activity"), defaults: defaults)
+    func buttons(_ view: NSView) -> [NSButton] {
+      (view as? NSButton).map { [$0] } ?? view.subviews.flatMap(buttons)
+    }
+    check(buttons(window.window!.contentView!).contains { $0.title == "Set up Boxwarden…" && $0.isEnabled }, "fresh launch offers configuration creation through native setup")
+    check(buttons(window.window!.contentView!).contains { $0.title == "Use Existing Configuration…" }, "fresh launch distinguishes existing setup from first setup")
+    window.setUpBoxwarden(nil)
+    check(window.preparationCompletion != nil, "native setup opens the bounded two-selection wizard")
+    window.preparationCompletion?.cancel(nil)
+    check(defaults.string(forKey: "PendingFirstRunConfiguration") == nil && defaults.string(forKey: "SelectedConfiguration") == nil, "cancelling first setup never publishes a candidate preference")
+    check(window.window?.attachedSheet == nil, "cancellation closes the setup wizard")
     window.useConfiguration("/synthetic/good.json")
     func wait(_ predicate: () -> Bool) {
       let end = Date().addingTimeInterval(8)
@@ -51,6 +61,14 @@ import AppKit
     wait { !window.switchingConfiguration }
     check(try store.records().filter { $0.operation == "setup.inspect" }.count >= before + 2, "A to B to A validates the final selection after reaping the cancelled first check")
     check(!window.statusLabel.stringValue.contains("Unable to check this configuration"), "final A is accepted rather than consuming a cancelled earlier A")
+    defaults.set("/synthetic/bad.json", forKey: "PendingFirstRunConfiguration")
+    let restored = ProjectWindowController(executable: cli.path, activityDirectory: root.appendingPathComponent("restored-activity"), defaults: defaults)
+    restored.restoreConfiguration(override: nil)
+    wait { restored.presentation.configPath == "/synthetic/good.json" && restored.snapshotAvailable }
+    check(defaults.string(forKey: "PendingFirstRunConfiguration") == "/synthetic/bad.json", "invalid pending candidate remains inspectable without replacing usable prior selection")
+    var restoredDrained = false
+    restored.shutdownQueries { restoredDrained = true }
+    wait { restoredDrained }
     var drained = false
     window.shutdownQueries { drained = true }
     wait { drained }

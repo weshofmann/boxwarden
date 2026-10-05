@@ -18,7 +18,14 @@ type Inspector interface {
 // opened filesystem object described by expected. The caller must also check
 // type, owner, mode, link count, and its own os.Root/file identity as needed.
 func Check(path string, expected os.FileInfo, inspector Inspector) error {
-	if !filepath.IsAbs(path) || filepath.Clean(path) != path || expected == nil || inspector == nil {
+	if inspector == nil {
+		return fmt.Errorf("ACL inspector is required")
+	}
+	return checkACL(path, expected, inspector.HasExtendedACL)
+}
+
+func checkACL(path string, expected os.FileInfo, inspect func(string) (bool, error)) error {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path || expected == nil || inspect == nil {
 		return fmt.Errorf("ACL admission requires canonical absolute path, exact file identity, and inspector")
 	}
 	before, err := os.Lstat(path)
@@ -28,7 +35,7 @@ func Check(path string, expected os.FileInfo, inspector Inspector) error {
 	if before.Mode()&os.ModeSymlink != 0 || !os.SameFile(before, expected) || !sameSecurityMetadata(before, expected) {
 		return fmt.Errorf("path identity changed before ACL check")
 	}
-	hasACL, inspectErr := inspector.HasExtendedACL(path)
+	hasACL, inspectErr := inspect(path)
 	after, statErr := os.Lstat(path)
 	if statErr != nil {
 		return fmt.Errorf("inspect path after ACL check: %w", statErr)
@@ -51,5 +58,8 @@ func sameSecurityMetadata(a, b os.FileInfo) bool {
 	}
 	aStat, aOK := a.Sys().(*syscall.Stat_t)
 	bStat, bOK := b.Sys().(*syscall.Stat_t)
-	return aOK && bOK && aStat.Uid == bStat.Uid && aStat.Gid == bStat.Gid && aStat.Nlink == bStat.Nlink
+	// Directory link counts reflect child-directory membership, not extra
+	// hardlink access to this object. Concurrent safe child creation must not
+	// invalidate an otherwise stable ancestor. Preserve the count for files.
+	return aOK && bOK && aStat.Uid == bStat.Uid && aStat.Gid == bStat.Gid && (a.IsDir() || aStat.Nlink == bStat.Nlink)
 }

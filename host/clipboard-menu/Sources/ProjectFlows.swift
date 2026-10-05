@@ -3,7 +3,7 @@ import AppKit
 extension ProjectWindowController {
   @objc func createProject(_ sender: Any?) {
     guard readyToAct, createButton.isEnabled, setup?.status == "ready", let window, window.attachedSheet == nil else { return }
-    let a = NSAlert(); a.messageText = "Create a project"
+    let a = NSAlert(); a.messageText = projects.isEmpty ? "Create your first project" : "Create a project"
     a.informativeText = "Preparation can take several minutes. The workspace is independent of the disposable system disk. This window remains responsive while the CLI prepares and starts the desktop."
     let name = NSTextField(string: ""); name.placeholderString = "Project name, e.g. myproject"; name.setAccessibilityIdentifier("New project name")
     let recipe = NSPopUpButton(); recipe.addItems(withTitles: ["Ubuntu desktop", "Desktop + action examples", "Desktop + ChatGPT client"]); recipe.setAccessibilityIdentifier("Recipe")
@@ -57,7 +57,7 @@ extension ProjectWindowController {
     let a = NSAlert(); a.alertStyle = .warning; a.messageText = "Replace the system for \(p.name)?"
     a.informativeText = "This discards system-local files, installed applications and running processes. The independent workspace and its files are retained. The project is stopped. Boxwarden prepares the selected recipe and starts its replacement. Export important work first."
     let recipe = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 240, height: 28)); recipe.addItems(withTitles: ["desktop", "actions", "chatgpt"]); recipe.setAccessibilityIdentifier("Replacement recipe")
-    a.accessoryView = recipe; a.addButton(withTitle: "Cancel"); a.addButton(withTitle: "Replace System")
+    a.accessoryView = stack([NSTextField(labelWithString: "Recipe"), recipe], vertical: true); a.addButton(withTitle: "Cancel"); a.addButton(withTitle: "Replace System")
     a.beginSheetModal(for: window) { [weak self] response in
       guard response == .alertSecondButtonReturn, let recipe = recipe.titleOfSelectedItem else { return }
       self?.run(.rebuild(name: p.name, recipe: recipe))

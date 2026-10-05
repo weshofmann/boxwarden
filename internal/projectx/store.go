@@ -24,15 +24,16 @@ const setupName = ".setup.json"
 var syncProjectDirectory = syncDirectory
 
 type Setup struct {
-	Version         int    `json:"version"`
-	SourceRoot      string `json:"source_root"`
-	FormatterBundle string `json:"formatter_bundle"`
-	ISOPath         string `json:"iso_path"`
-	GoBinary        string `json:"go_binary"`
-	OpenSSLPath     string `json:"openssl_path,omitempty"`
-	OpenSSLSHA256   string `json:"openssl_sha256,omitempty"`
-	XorrisoPath     string `json:"xorriso_path,omitempty"`
-	XorrisoSHA256   string `json:"xorriso_sha256,omitempty"`
+	Version           int    `json:"version"`
+	SourceRoot        string `json:"source_root"`
+	FormatterBundle   string `json:"formatter_bundle"`
+	ISOPath           string `json:"iso_path"`
+	GoBinary          string `json:"go_binary"`
+	PrebuiltResources string `json:"prebuilt_resources,omitempty"`
+	OpenSSLPath       string `json:"openssl_path,omitempty"`
+	OpenSSLSHA256     string `json:"openssl_sha256,omitempty"`
+	XorrisoPath       string `json:"xorriso_path,omitempty"`
+	XorrisoSHA256     string `json:"xorriso_sha256,omitempty"`
 }
 type Record struct {
 	Version            int       `json:"version"`
@@ -341,6 +342,15 @@ func decodeVersionedDocument(raw []byte, value any, legacy, additions []string) 
 	return decodeDocument(raw, value, fields)
 }
 func decodeSetup(raw []byte, value *Setup) error {
+	var header struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &header); err != nil {
+		return err
+	}
+	if header.Version == 3 {
+		return decodeDocument(raw, value, append(append([]string(nil), setupFields...), "openssl_path", "openssl_sha256", "xorriso_path", "xorriso_sha256", "prebuilt_resources"))
+	}
 	return decodeVersionedDocument(raw, value, setupFields, []string{"openssl_path", "openssl_sha256", "xorriso_path", "xorriso_sha256"})
 }
 func decodeRecord(raw []byte, value *Record) error {
@@ -418,8 +428,15 @@ func canonicalPath(path string) bool {
 	return filepath.IsAbs(path) && filepath.Clean(path) == path && len(path) <= 4096 && !strings.ContainsAny(path, "\x00\r\n")
 }
 func validateSetup(s Setup) error {
-	if (s.Version != 1 && s.Version != 2) || !canonicalPath(s.SourceRoot) || !canonicalPath(s.FormatterBundle) || !canonicalPath(s.ISOPath) || !canonicalPath(s.GoBinary) || filepath.Base(s.GoBinary) != "go" {
+	if (s.Version != 1 && s.Version != 2 && s.Version != 3) || !canonicalPath(s.SourceRoot) || !canonicalPath(s.FormatterBundle) || !canonicalPath(s.ISOPath) {
 		return fmt.Errorf("invalid project setup version or canonical paths")
+	}
+	if s.Version == 3 {
+		if s.GoBinary != "" || !canonicalPath(s.PrebuiltResources) {
+			return fmt.Errorf("prebuilt setup requires resources and no runtime Go compiler")
+		}
+	} else if !canonicalPath(s.GoBinary) || filepath.Base(s.GoBinary) != "go" || s.PrebuiltResources != "" {
+		return fmt.Errorf("legacy setup requires Go and cannot contain prebuilt resources")
 	}
 	if s.Version == 1 {
 		if s.OpenSSLPath != "" || s.OpenSSLSHA256 != "" || s.XorrisoPath != "" || s.XorrisoSHA256 != "" {

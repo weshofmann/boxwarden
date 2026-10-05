@@ -33,6 +33,8 @@ func TestSliceCPolicyRejectsDiscardedAndDeferredMechanisms(t *testing.T) {
 		{"workspace preparation cannot admit SSH pin", "internal/workspacex/prepare_start.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
 		{"export snapshot cannot admit SSH pin", "internal/workspacex/export_copy.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
 		{"export recovery cannot admit SSH pin", "internal/workspacex/export_recover.go", `package workspacex; func f() { _, _ = pins.Admit(nil, nil, nil) }`, "unauthorized Slice C call"},
+		{"support manifest wrong path", "internal/workspaceformat/other.go", `package workspaceformat; type supportManifest struct{ Version int }`, "ownership record"},
+		{"support cannot persist owner manifest", "internal/workspaceformat/prebuilt.go", `package workspaceformat; type OwnerManifest struct{ Token string }`, "ownership record"},
 		{"export cannot persist owner manifest", "internal/exportx/other.go", `package exportx; type OwnerManifest struct{ Token string }`, "ownership record"},
 		{"composite readiness publication", "internal/app/start.go", `package app; type Snapshot struct{ PinPresent bool }; var _ = Snapshot{PinPresent: true}`, "deferred readiness publication"},
 		{"assigned readiness publication", "internal/lifecycle/start.go", `package lifecycle; type Snapshot struct{ ZoneMatches bool }; func f(s *Snapshot) { s.ZoneMatches = true }`, "deferred readiness publication"},
@@ -149,6 +151,7 @@ func f(request protocol.SerialRequest) protocol.SerialResult {
 		{"managed create formatter admission", "internal/workspacex/create_managed.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
 		{"deleted workspace retention formatter admission", "internal/workspacex/delete.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
 		{"stopped import verification formatter admission", "internal/workspacex/import_verify.go", `package workspacex; import "github.com/weshofmann/boxwarden/internal/workspaceformat"; func f() { _, _, _ = workspaceformat.Admit("", workspaceformat.Request{}) }`},
+		{"prebuilt support artifact manifest", "internal/workspaceformat/prebuilt.go", `package workspaceformat; type supportManifest struct{ Version int }`},
 		{"inspector artifact manifest", "internal/exportx/bundle.go", `package exportx; type inspectorBundleManifest struct{ Version int }`},
 		{"qualification libproc", "internal/qualification/adr024/proc.go", "package adr024\n/* #cgo LDFLAGS: -lproc\n#include <libproc.h> */\nimport \"C\""},
 	}
@@ -369,7 +372,7 @@ func (p *sliceBPolicy) inspect(path string, source []byte) {
 			if isOwnershipRecordName(name) {
 				p.add(path, "ownership record", value.Name.Name)
 			}
-			if strings.Contains(name, "manifest") && !manifestFoundationPath(path) && !(path == "internal/exportx/bundle.go" && value.Name.Name == "inspectorBundleManifest") {
+			if strings.Contains(name, "manifest") && !manifestFoundationPath(path) && !artifactManifestPath(path, value.Name.Name) {
 				p.add(path, "ownership record", value.Name.Name)
 			}
 		case *ast.BasicLit:
@@ -585,6 +588,12 @@ func isAlternatePTYImport(importPath string) bool {
 		}
 	}
 	return base == "pty" || base == "go-pty" || base == "conpty" || strings.HasSuffix(base, "-pty")
+}
+
+// Artifact inventories bind immutable bytes; they do not persist runtime
+// process ownership. Exempt only these exact declarations, never a package.
+func artifactManifestPath(path, name string) bool {
+	return path == "internal/exportx/bundle.go" && name == "inspectorBundleManifest" || path == "internal/workspaceformat/prebuilt.go" && name == "supportManifest"
 }
 
 func manifestFoundationPath(path string) bool {

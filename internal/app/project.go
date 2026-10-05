@@ -64,6 +64,7 @@ func parseProject(args []string) (projectCommand, error) {
 		set.StringVar(&p.setup.FormatterBundle, "formatter-bundle", "", "admitted private formatter bundle")
 		set.StringVar(&p.setup.ISOPath, "iso", "", "admitted Ubuntu Desktop ARM64 ISO")
 		set.StringVar(&p.setup.GoBinary, "go", "", "absolute Go executable")
+		set.StringVar(&p.setup.PrebuiltResources, "prebuilt-resources", "", "verified packaged support resources")
 		set.StringVar(&p.setup.OpenSSLPath, "openssl", "", "exact SHA-512 crypt executable")
 		set.StringVar(&p.setup.OpenSSLSHA256, "openssl-sha256", "", "exact SHA-256")
 		set.StringVar(&p.setup.XorrisoPath, "xorriso", "", "exact ISO remaster executable")
@@ -103,6 +104,9 @@ func parseProject(args []string) (projectCommand, error) {
 			p.setup.Version = 2
 		}
 	})
+	if p.setup.PrebuiltResources != "" {
+		p.setup.Version = 3
+	}
 	if p.recipe != "" {
 		if _, err := projectRecipeFile(p.recipe); err != nil {
 			return p, err
@@ -121,15 +125,19 @@ func parseProject(args []string) (projectCommand, error) {
 		if len(set.Args()) != 0 {
 			return p, errors.New(projectUsage)
 		}
-		for _, path := range []string{p.setup.SourceRoot, p.setup.FormatterBundle, p.setup.ISOPath, p.setup.GoBinary} {
+		for _, path := range []string{p.setup.SourceRoot, p.setup.FormatterBundle, p.setup.ISOPath} {
 			if !cleanProjectPath(path) {
 				return p, errors.New("project setup requires four clean absolute asset paths")
 			}
 		}
-		if filepath.Base(p.setup.GoBinary) != "go" {
+		if p.setup.Version == 3 {
+			if !cleanProjectPath(p.setup.PrebuiltResources) || p.setup.GoBinary != "" {
+				return p, errors.New("prebuilt setup requires a clean resources path and no runtime compiler")
+			}
+		} else if !cleanProjectPath(p.setup.GoBinary) || filepath.Base(p.setup.GoBinary) != "go" {
 			return p, errors.New("project setup requires an exact Go executable")
 		}
-		if p.setup.Version == 2 && (!cleanProjectPath(p.setup.OpenSSLPath) || filepath.Base(p.setup.OpenSSLPath) != "openssl" || !lowerSHA(p.setup.OpenSSLSHA256) || !cleanProjectPath(p.setup.XorrisoPath) || filepath.Base(p.setup.XorrisoPath) != "xorriso" || !lowerSHA(p.setup.XorrisoSHA256)) {
+		if (p.setup.Version == 2 || p.setup.Version == 3) && (!cleanProjectPath(p.setup.OpenSSLPath) || filepath.Base(p.setup.OpenSSLPath) != "openssl" || !lowerSHA(p.setup.OpenSSLSHA256) || !cleanProjectPath(p.setup.XorrisoPath) || filepath.Base(p.setup.XorrisoPath) != "xorriso" || !lowerSHA(p.setup.XorrisoSHA256)) {
 			return p, errors.New("recipe setup requires both exact OpenSSL/xorriso paths and lowercase SHA-256 digests")
 		}
 		return p, nil
@@ -334,7 +342,7 @@ func createProject(ctx context.Context, c parsedCommand, loaded config.Config, d
 	}
 	base := p.base
 	intentDigest := ""
-	if p.recipe == "" && setup.Version == 2 && !p.baseExplicit {
+	if p.recipe == "" && (setup.Version == 2 || setup.Version == 3) && !p.baseExplicit {
 		p.recipe = "desktop"
 	}
 	if p.recipe != "" {
@@ -606,7 +614,7 @@ func exportProject(ctx context.Context, c parsedCommand, loaded config.Config, d
 		return fmt.Errorf("export requires a new destination: %w", err)
 	}
 	selection := "boxwarden-import-" + r.ImportID
-	input := AlphaExportInput{VolumeID: r.VolumeID, DestinationParent: destination, Selected: []string{selection}, SourceRoot: setup.SourceRoot, ISOPath: setup.ISOPath, GoBinary: setup.GoBinary}
+	input := AlphaExportInput{VolumeID: r.VolumeID, DestinationParent: destination, Selected: []string{selection}, SourceRoot: setup.SourceRoot, ISOPath: setup.ISOPath, GoBinary: setup.GoBinary, PrebuiltResources: setup.PrebuiltResources}
 	if err := validAlphaExportInput(input); err != nil {
 		return err
 	}

@@ -1,20 +1,23 @@
 #!/bin/bash
 set -euo pipefail
 umask 077
+# Imports must never write into the retained signed source checkout.
+export PYTHONDONTWRITEBYTECODE=1
 
 # Prepare private source artifacts for one export transaction. This does not
 # launch a VM, attach a managed disk, or publish files to the destination.
-if [[ "$#" != 3 || ! -f "$1" || ! -f "$2" || ! -d "$3" ]]; then
+if [[ ( "$#" != 3 && "$#" != 4 ) || ! -f "$1" || ! -f "$2" || ! -d "$3" ]]; then
   echo 'usage: prepare_export_bundle.sh <verified Ubuntu 24.04.4 ARM64 ISO> <private journal-derived request.json> <preallocated empty private output directory>' >&2
   exit 2
 fi
 iso=$1
 request=$2
 output_dir=$3
+prebuilt=${4-}
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/../.." && pwd)"
 qualification=production
-if [[ -n "$(git -C "$repo_root" status --porcelain --untracked-files=all)" ]]; then
+if [[ -n "$(git --no-optional-locks -C "$repo_root" status --porcelain --untracked-files=all)" ]]; then
   if [[ "${BOXWARDEN_ALPHA_BUNDLE_TEST_ONLY:-}" != 1 ]]; then
     echo 'the alpha worktree must be committed before preparing an export inspector bundle' >&2
     exit 1
@@ -89,6 +92,25 @@ with os.fdopen(out_fd, "wb") as output:
     os.fsync(output.fileno())
 PY
 
+if [[ -n "$prebuilt" ]]; then
+  python3 - "$repo_root" "$prebuilt" "$output_dir" <<'PYPREBUILT'
+import os
+from pathlib import Path
+import shutil
+import sys
+sys.path.insert(0,str(Path(sys.argv[1])/'tools/private-beta'))
+from support_resources import verify, digest
+source,resources,output=map(Path,sys.argv[1:])
+m=verify(source,resources)
+(output/'casper').mkdir(mode=0o700)
+for name in ('casper/vmlinuz','casper/initrd','kernel-image','alpha-probe','alpha-inspector'):
+    path=resources/'inspector'/name
+    shutil.copyfile(path,output/name,follow_symlinks=False)
+    (output/name).chmod(0o400 if name.startswith('casper/') else 0o700 if name.startswith('alpha-') else 0o600)
+    if digest(output/name)!=m['files']['inspector/'+name]:raise ValueError('prebuilt inspector changed while copying')
+PYPREBUILT
+  python3 "$script_dir/pack_initramfs.py" "$output_dir/casper/initrd" "$output_dir/alpha-probe" "$output_dir/inspector-initrd" "$output_dir/request.json"
+else
 bsdtar -xf "$iso" -C "$output_dir" casper/vmlinuz casper/initrd
 python3 "$script_dir/kernel_image.py" \
   "$output_dir/casper/vmlinuz" "$output_dir/kernel-image" \
@@ -110,6 +132,8 @@ TMPDIR="$output_dir/tmp" swiftc -module-cache-path "$output_dir/swift-cache" \
 codesign --force --sign - --entitlements "$script_dir/virtualization.entitlements" \
   "$output_dir/alpha-inspector"
 codesign --verify --strict "$output_dir/alpha-inspector"
+
+fi
 
 python3 - "$output_dir" "$repo_root" "$source_commit" "$expected_iso" "$qualification" <<'PY'
 import hashlib

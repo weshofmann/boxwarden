@@ -141,6 +141,10 @@ func (v VZFormatter) FormatAndVerify(ctx context.Context, request FormatRequest)
 		Args: []string{"run-managed", bundle.kernel, bundle.initrd, request.DiskPath,
 			fmt.Sprint(request.Identity.Device), fmt.Sprint(request.Identity.Inode), fmt.Sprint(request.SizeBytes),
 			transaction, request.FilesystemUUID, request.Marker}}
+	if bundle.binding != "" {
+		command.Args[0] = "run-managed-bound"
+		command.Args = append(command.Args, bundle.binding)
+	}
 	result, err := runner.Run(runCtx, command)
 	if err != nil {
 		return FormatEvidence{}, fmt.Errorf("isolated formatter did not exit cleanly: %w", err)

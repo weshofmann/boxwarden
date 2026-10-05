@@ -15,7 +15,7 @@ The object has `version: 1`, `scope: "alpha_project_setup"`, `config_path`,
 (stable action identifiers). `diagnostic` is optional secondary detail and must
 never be parsed to classify a result. Domain identity failure diagnostics are
 not serialized. `setup_version` is present when an admitted setup is ready;
-`recipe_preparation_available` is true only for its version-2 recipe inputs.
+`recipe_preparation_available` is true for its version-2 or version-3 recipe inputs.
 
 | Status | Meaning |
 | --- | --- |
@@ -85,3 +85,47 @@ trusted operator action: package ownership and source binding do not provide
 cryptographic provenance against another process with the operator's authority.
 No real host installation or VM qualification is implied by synthetic adapter
 tests.
+
+
+## New configuration and packaged first run
+
+The native wizard calls read-only `setup plan --json --setup-id UUID --package
+ROOT [--data-location PATH] [--iso PATH]`. Its version-1
+`alpha_first_run` result reports compatible mounted alternatives, observed
+storage identity/headroom/existing entry count, exact new targets, prerequisites,
+and a SHA-256 plan digest when ready. An incomplete plan never writes a config.
+
+`setup create --json` takes the same complete inputs plus `--expected-digest`.
+It derives a fresh private host Data configuration and a new alpha state root
+under the selected separate APFS directory; no existing config is copied.
+Creation repeats planning, pins existing directory identities, creates absent
+components exclusively, uses the existing enrolled-config publisher, then
+explicitly initializes alpha and prepares the packaged resources. Stale plans
+and collisions fail before writes. Failures after any mkdir/publication retain
+uncertainty and exact target guidance. There is no automatic destructive replay.
+
+Version-3 project setup retains prebuilt resources rather than a runtime Go
+compiler. Runtime preparation binds the signed formatter to the exact new
+root/domain; stopped export assembles the existing inspector request from the
+admitted immutable template. Exact source/asset hashes and existing workspace,
+journal, disk and helper admission remain authoritative. Runtime discovery is
+a finite search of already installed canonical OpenSSL/xorriso files followed
+by capability and exact-byte checks. No package manager or automatic download
+is invoked by setup. The package pins and checks Linux inputs at build time.
+
+An explicit packaged preparation retry is `--config PATH setup prepare --json
+--package ROOT --iso ISO --prebuilt`. It refuses ambiguous manual tool inputs,
+existing formatter targets and invalid/existing saved setup; partial state must
+be inspected rather than silently replaced. Legacy explicit inputs still work.
+
+Private anchors/files continue to require no extended ACL. Traversed ancestors
+may carry only macOS's exact sole `group:everyone deny delete` entry, which grants
+no access; writable, foreign-owned, symlinked, additional/inherited or otherwise
+unverifiable ancestors are refused consistently before planning and runtime use.
+
+Native candidate preferences are recorded only after confirmation; selecting an
+admitted new configuration replaces the previous remembered choice. Failed or
+unknown candidates retain inspectable activity and preserve a usable prior choice.
+The wizard never invokes privileged init. Missing/incompatible host tooling is
+reported for the existing attended initialization/diagnosis procedure. Synthetic
+cold-host tests are not evidence of a real clean-Mac installation.

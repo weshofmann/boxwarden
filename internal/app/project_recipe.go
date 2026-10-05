@@ -27,7 +27,7 @@ func projectRecipeFile(name string) (string, error) {
 }
 
 func prepareProjectRecipe(ctx context.Context, c parsedCommand, loaded config.Config, d config.Domain, setup projectx.Setup, name, captured string, o Options) (string, string, error) {
-	if setup.Version != 2 {
+	if setup.Version != 2 && setup.Version != 3 {
 		return "", "", errors.New("recipe preparation prerequisites are missing; rerun this package's prepare-projects.sh with the exact OpenSSL and xorriso executables")
 	}
 	if o.AlphaPrepare == nil {

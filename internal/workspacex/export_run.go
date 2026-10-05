@@ -26,6 +26,21 @@ func ExportSelectedWorkspace(ctx context.Context, stateRoot string, domainID dom
 	return completeSelectedWorkspace(ctx, stateRoot, domainID, journal, sourceRoot, isoPath, goBinary)
 }
 
+func ExportSelectedWorkspacePrebuilt(ctx context.Context, stateRoot string, domainID domain.ID, volumeID, destinationParent string, selected []string, observer backend.Observer, sourceRoot, isoPath, resourcesRoot string) (journal ExportJournal, published string, err error) {
+	journal, err = CreateExportSnapshot(ctx, stateRoot, domainID, volumeID, destinationParent, selected, observer)
+	if err != nil {
+		return journal, "", err
+	}
+	return completeSelectedWorkspacePrebuilt(ctx, stateRoot, domainID, journal, sourceRoot, isoPath, resourcesRoot)
+}
+func completeSelectedWorkspacePrebuilt(ctx context.Context, stateRoot string, domainID domain.ID, journal ExportJournal, sourceRoot, isoPath, resourcesRoot string) (ExportJournal, string, error) {
+	bundle, err := BuildAdmittedPrebuiltExportInspectorBundle(ctx, stateRoot, domainID, journal.ID, sourceRoot, isoPath, resourcesRoot)
+	if err != nil {
+		return journal, "", fmt.Errorf("export %s prebuilt bundle: %w", journal.ID, err)
+	}
+	return completeSelectedWorkspaceWithBundle(ctx, stateRoot, domainID, journal, bundle, sourceRoot)
+}
+
 type exportContinuation func(context.Context, string, domain.ID, ExportJournal, string, string, string) (ExportJournal, string, error)
 
 // ResumeSelectedWorkspace safely aborts an interrupted copy, or clears an
@@ -33,6 +48,12 @@ type exportContinuation func(context.Context, string, domain.ID, ExportJournal, 
 // copies never publish output: the caller may start a new export afterward.
 // Existing receiver destinations remain ambiguous and are never overwritten.
 func ResumeSelectedWorkspace(ctx context.Context, stateRoot string, domainID domain.ID, transactionID, sourceRoot, isoPath, goBinary string, observer backend.Observer) (ExportJournal, string, error) {
+	return resumeSelectedWorkspaceWithMode(ctx, stateRoot, domainID, transactionID, sourceRoot, isoPath, goBinary, observer, completeSelectedWorkspace)
+}
+func ResumeSelectedWorkspacePrebuilt(ctx context.Context, stateRoot string, domainID domain.ID, transactionID, sourceRoot, isoPath, resourcesRoot string, observer backend.Observer) (ExportJournal, string, error) {
+	return resumeSelectedWorkspaceWithMode(ctx, stateRoot, domainID, transactionID, sourceRoot, isoPath, resourcesRoot, observer, completeSelectedWorkspacePrebuilt)
+}
+func resumeSelectedWorkspaceWithMode(ctx context.Context, stateRoot string, domainID domain.ID, transactionID, sourceRoot, isoPath, goBinary string, observer backend.Observer, finish exportContinuation) (ExportJournal, string, error) {
 	journal, err := loadExportJournal(stateRoot, domainID, transactionID)
 	if err != nil {
 		return ExportJournal{}, "", err
@@ -60,7 +81,7 @@ func ResumeSelectedWorkspace(ctx context.Context, stateRoot string, domainID dom
 			return journal, "", nil
 		}
 	}
-	return resumeSelectedWorkspace(ctx, stateRoot, domainID, transactionID, sourceRoot, isoPath, goBinary, completeSelectedWorkspace)
+	return resumeSelectedWorkspace(ctx, stateRoot, domainID, transactionID, sourceRoot, isoPath, goBinary, finish)
 }
 
 func resumeSelectedWorkspace(ctx context.Context, stateRoot string, domainID domain.ID, transactionID, sourceRoot, isoPath, goBinary string, finish exportContinuation) (ExportJournal, string, error) {

@@ -10,3 +10,7 @@ type OSInspector struct{}
 func (OSInspector) HasExtendedACL(string) (bool, error) {
 	return false, fmt.Errorf("private ACL inspection is unsupported on Linux")
 }
+
+func (OSInspector) HasUnsafeAncestorACL(string) (bool, error) {
+	return true, fmt.Errorf("ancestor ACL inspection is unsupported on Linux")
+}

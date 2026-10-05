@@ -27,6 +27,11 @@ func vzFixtureBundle(t *testing.T, root string) (string, formatterPins) {
 	if err := os.Mkdir(bundle, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	canonical, err := filepath.EvalSymlinks(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle = canonical
 	pins := formatterPins{iso: strings.Repeat("1", 64), deb: strings.Repeat("2", 64)}
 	files := make(map[string]string)
 	for name, body := range map[string]string{
@@ -170,5 +175,124 @@ func TestVZFormatterRejectsRunnerThatDoesNotProveVMStopped(t *testing.T) {
 	journal, err := ReadJournal(root, testRequest())
 	if err != nil || journal.State != StateFailed {
 		t.Fatalf("non-stopped result did not retain failed journal: %+v, %v", journal, err)
+	}
+}
+
+func runtimeFormatterTestRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(testRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func vzRuntimeFixtureBundle(t *testing.T, root string) (string, formatterPins) {
+	t.Helper()
+	path, pins := vzFixtureBundle(t, root)
+	raw, err := os.ReadFile(filepath.Join(path, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m vzBundleDocument
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	m.Version = 2
+	m.BindingMode = "runtime-v1"
+	for name, body := range map[string][]byte{"managed-binding.json": managedRuntimeBinding(root, "work"), "binding.swift": []byte(runtimeBindingSource)} {
+		if err := os.WriteFile(filepath.Join(path, name), body, 0600); err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(body)
+		m.Files[name] = hex.EncodeToString(sum[:])
+	}
+	body, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "manifest.json"), body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path, pins
+}
+func TestVZFormatterRuntimeBundleBindsExactPrivateRecord(t *testing.T) {
+	root := runtimeFormatterTestRoot(t)
+	path, pins := vzRuntimeFixtureBundle(t, root)
+	calls := 0
+	f := VZFormatter{StateRoot: root, Domain: "work", BundlePath: path, pins: pins, sourceCommit: fixtureSourceCommit, runner: vzRunnerFunc(func(_ context.Context, c execx.Command) (execx.Result, error) {
+		calls++
+		if c.Path == "/usr/bin/plutil" {
+			return execx.Result{Stdout: `{"com.apple.security.virtualization":true}`}, nil
+		}
+		return execx.Result{}, nil
+	})}
+	if err := f.Check(t.Context()); err != nil {
+		t.Fatalf("valid runtime binding rejected: %v", err)
+	}
+	calls = 0
+	body := managedRuntimeBinding(root, "other")
+	if err := os.WriteFile(filepath.Join(path, "managed-binding.json"), body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(path, "manifest.json"))
+	var m vzBundleDocument
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(body)
+	m.Files["managed-binding.json"] = hex.EncodeToString(sum[:])
+	raw, _ = json.Marshal(m)
+	if err := os.WriteFile(filepath.Join(path, "manifest.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Check(t.Context()); err == nil || calls != 0 {
+		t.Fatalf("foreign binding reached signatures: %v %d", err, calls)
+	}
+}
+func TestVZFormatterRuntimeLaunchPassesFixedPrivateBinding(t *testing.T) {
+	root := runtimeFormatterTestRoot(t)
+	path, pins := vzRuntimeFixtureBundle(t, root)
+	called := false
+	f := VZFormatter{StateRoot: root, Domain: "work", BundlePath: path, pins: pins, sourceCommit: fixtureSourceCommit, syntheticLegacyForTests: true}
+	f.runner = vzRunnerFunc(func(_ context.Context, c execx.Command) (execx.Result, error) {
+		switch c.Path {
+		case "/usr/bin/codesign":
+			return execx.Result{}, nil
+		case "/usr/bin/plutil":
+			return execx.Result{Stdout: `{"com.apple.security.virtualization":true}`}, nil
+		case filepath.Join(path, "alpha-formatter-host"):
+			called = true
+			if len(c.Args) != 11 || c.Args[0] != "run-managed-bound" || c.Args[10] != filepath.Join(path, "managed-binding.json") || c.Args[3] != filepath.Join(root, "volumes", testVolumeID+".raw") {
+				t.Fatalf("runtime argv lost exact binding: %#v", c.Args)
+			}
+			if err := writeExt4Header(c.Args[3], testFSUUID); err != nil {
+				return execx.Result{}, err
+			}
+			return execx.Result{Stdout: fmt.Sprintf(`{"version":1,"transaction":%q,"vm_stopped":true,"runtime_network_devices":0,"storage_devices":1,"storage_read_only":false,"serial_ports":2,"socket_devices":0,"shared_directory_devices":0,"observed_uuid":%q,"whole_device":true,"filesystem_clean":true}`, c.Args[7], testFSUUID) + "\n"}, nil
+		}
+		t.Fatalf("unexpected command: %+v", c)
+		return execx.Result{}, nil
+	})
+	if _, err := Create(t.Context(), root, testRequest(), f); err != nil || !called {
+		t.Fatalf("runtime format failed: %v called=%v", err, called)
+	}
+}
+
+func TestRuntimeFormatterRejectsWritableAncestorBeforeSignatureAdmission(t *testing.T) {
+	parent := runtimeFormatterTestRoot(t)
+	root := filepath.Join(parent, "state")
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	bundle, pins := vzRuntimeFixtureBundle(t, root)
+	if err := os.Chmod(parent, 0777); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(parent, 0700)
+	called := false
+	f := VZFormatter{StateRoot: root, Domain: "work", BundlePath: bundle, pins: pins, sourceCommit: fixtureSourceCommit, runner: vzRunnerFunc(func(context.Context, execx.Command) (execx.Result, error) { called = true; return execx.Result{}, nil })}
+	if err := f.Check(t.Context()); err == nil || called {
+		t.Fatalf("writable runtime ancestor reached signatures: %v called=%v", err, called)
 	}
 }

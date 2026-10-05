@@ -3,6 +3,8 @@
 package hostidentity
 
 import (
+	"os"
+	"path/filepath"
 	"syscall"
 	"testing"
 )
@@ -33,5 +35,44 @@ func TestMountedPathRaceDoesNotAttributeUUIDToOldFSID(t *testing.T) {
 	}
 	if !sameMountedFilesystem(old, old) {
 		t.Fatal("same pinned filesystem rejected")
+	}
+}
+
+func TestMountedMetadataHandleKeepsIdentityWithoutDirectoryRead(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "reference.txt"), []byte("synthetic"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := openMountedVolumeMetadata(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.Stat(); err != nil {
+		t.Fatalf("metadata unavailable: %v", err)
+	}
+	if _, err := Observe(file); err != nil {
+		t.Fatalf("pinned APFS identity unavailable: %v", err)
+	}
+	if names, err := file.Readdirnames(1); err == nil || len(names) != 0 {
+		t.Fatalf("metadata handle allowed directory contents: %v,%v", names, err)
+	}
+}
+
+func TestMountedMetadataHandleRejectsSymlinkAndNonDirectory(t *testing.T) {
+	root := t.TempDir()
+	regular := filepath.Join(root, "reference.txt")
+	if err := os.WriteFile(regular, []byte("synthetic"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(root, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{link, regular} {
+		if file, err := openMountedVolumeMetadata(path); err == nil {
+			file.Close()
+			t.Fatalf("unsafe metadata target admitted: %s", path)
+		}
 	}
 }

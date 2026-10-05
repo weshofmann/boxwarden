@@ -67,8 +67,10 @@ func publicOptions(output io.Writer) app.Options {
 	hostInitializer := hostx.NewSystemInitializer()
 	hostDoctor := hostx.NewSystemDoctor()
 	return app.Options{
-		SetupPrepare:      prepareSetup,
-		ProjectSetupCheck: checkProjectSetup,
+		SetupPrepare:        prepareSetup,
+		SetupFirstRunPlan:   planFirstRun,
+		SetupFirstRunCreate: createFirstRun,
+		ProjectSetupCheck:   checkProjectSetup,
 		DomainSetupCheck: func(ctx context.Context, loaded config.Config, selected config.Domain) (bool, error) {
 			configured := make([]sshx.Domain, 0, len(loaded.Domains()))
 			for _, d := range loaded.Domains() {
@@ -207,10 +209,16 @@ func publicOptions(output io.Writer) app.Options {
 			return app.AlphaPrepared{Base: base, IntentDigest: digest}, nil
 		},
 		AlphaExport: func(ctx context.Context, selected config.Domain, input app.AlphaExportInput, observer backend.Observer) (workspacex.ExportJournal, string, error) {
+			if input.PrebuiltResources != "" {
+				return workspacex.ExportSelectedWorkspacePrebuilt(ctx, selected.StateRoot, selected.ID, input.VolumeID, input.DestinationParent, input.Selected, observer, input.SourceRoot, input.ISOPath, input.PrebuiltResources)
+			}
 			return workspacex.ExportSelectedWorkspace(ctx, selected.StateRoot, selected.ID, input.VolumeID,
 				input.DestinationParent, input.Selected, observer, input.SourceRoot, input.ISOPath, input.GoBinary)
 		},
 		AlphaExportResume: func(ctx context.Context, selected config.Domain, input app.AlphaExportResumeInput, observer backend.Observer) (workspacex.ExportJournal, string, error) {
+			if input.PrebuiltResources != "" {
+				return workspacex.ResumeSelectedWorkspacePrebuilt(ctx, selected.StateRoot, selected.ID, input.TransactionID, input.SourceRoot, input.ISOPath, input.PrebuiltResources, observer)
+			}
 			return workspacex.ResumeSelectedWorkspace(ctx, selected.StateRoot, selected.ID, input.TransactionID,
 				input.SourceRoot, input.ISOPath, input.GoBinary, observer)
 		},

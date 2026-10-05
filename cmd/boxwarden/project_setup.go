@@ -29,6 +29,12 @@ func checkProjectSetup(ctx context.Context, selected config.Domain, setup projec
 		{"source-root", setup.SourceRoot}, {"formatter-bundle", setup.FormatterBundle},
 		{"iso", setup.ISOPath}, {"go", setup.GoBinary},
 	} {
+		if setup.Version == 3 && input.flag == "go" {
+			if input.path != "" {
+				return fmt.Errorf("prebuilt setup cannot select runtime Go")
+			}
+			continue
+		}
 		if !canonicalProjectSetupPath(input.path) {
 			return fmt.Errorf("project setup --%s requires a clean absolute path", input.flag)
 		}
@@ -40,10 +46,14 @@ func checkProjectSetup(ctx context.Context, selected config.Domain, setup projec
 	if !source.IsDir() {
 		return errors.New("project setup source checkout must be a directory; supply --source-root with a clean committed checkout")
 	}
-	if err := checkProjectGoBinary(setup.GoBinary); err != nil {
+	if setup.Version == 3 {
+		if _, err := workspaceformat.CheckPrebuiltSupport(ctx, setup.SourceRoot, setup.PrebuiltResources); err != nil {
+			return fmt.Errorf("project prebuilt support admission: %w", err)
+		}
+	} else if err := checkProjectGoBinary(setup.GoBinary); err != nil {
 		return err
 	}
-	if setup.Version == 2 {
+	if setup.Version == 2 || setup.Version == 3 {
 		seed := basebuild.HostSeedBuilder{Runner: execx.OSRunner{MaxOutputBytes: 4096}, OpenSSLPath: setup.OpenSSLPath, OpenSSLSHA256: setup.OpenSSLSHA256, XorrisoPath: setup.XorrisoPath, XorrisoSHA256: setup.XorrisoSHA256}
 		if err := seed.CheckTools(); err != nil {
 			return fmt.Errorf("project recipe preparation tools are unavailable or changed; supply exact compatible tools through prepare-projects.sh: %w", err)

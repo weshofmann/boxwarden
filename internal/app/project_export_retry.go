@@ -53,7 +53,7 @@ func retryProjectExport(ctx context.Context, c parsedCommand, loaded config.Conf
 	if err != nil || s.IntendedState != session.StateStopped || !observed.Exists || observed.ObjectID != r.BackendObject || observed.State != backend.ObjectStopped {
 		return fmt.Errorf("project export retry requires the exact stopped sandbox; use project stop %s first: %v", r.Name, err)
 	}
-	input := AlphaExportResumeInput{TransactionID: initial.ID, SourceRoot: setup.SourceRoot, ISOPath: setup.ISOPath, GoBinary: setup.GoBinary}
+	input := AlphaExportResumeInput{TransactionID: initial.ID, SourceRoot: setup.SourceRoot, ISOPath: setup.ISOPath, GoBinary: setup.GoBinary, PrebuiltResources: setup.PrebuiltResources}
 	if err := validAlphaExportResumeInput(input); err != nil {
 		return err
 	}

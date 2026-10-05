@@ -146,6 +146,32 @@ chmod 700 "$2"
             self.assertFalse((package / "BUILD.json").exists())
             self.assertFalse((package / "Boxwarden.app").exists())
 
+    def test_immutable_support_builder_receives_app_contained_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=pathlib.Path(temporary); repo,tools,go=self.build_boundary_fixture(root)
+            native=repo/'host/clipboard-menu/build.sh';native.parent.mkdir(parents=True)
+            native.write_text('#!/bin/bash\nwhile [[ "$1" != --output ]]; do shift; done\nmkdir -p "$2/Contents/MacOS"\n')
+            shutil.copy(SCRIPT.with_name('prepare-projects.sh'),repo/'tools/private-beta/prepare-projects.sh')
+            helper=repo/'tools/private-beta/build_support.sh'
+            helper.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$SUPPORT_ARGS"\nexit 73\n')
+            subprocess.run(['git','-C',str(repo),'add','.'],check=True)
+            subprocess.run(['git','-C',str(repo),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','support fixture'],check=True)
+            cli=root/'compiled-cli'
+            cli.write_text('#!/bin/bash\nprintf \'%s\\n\' \'{"network_policy":{"build":"stock"}}\'\n')
+            go.write_text('#!/bin/bash\nif [[ "$1" == version ]]; then echo fixture;exit;fi\nwhile [[ "$1" != -o ]]; do shift;done\ncp "$COMPILED_CLI" "$2"\nchmod 700 "$2"\n')
+            codesign=tools/'codesign';codesign.write_text('#!/bin/bash\nexit 0\n');codesign.chmod(0o700)
+            zstd=tools/'zstd';zstd.write_text('#!/bin/bash\nexit 0\n');zstd.chmod(0o700)
+            env=dict(os.environ,GO_BIN=str(go),BOXWARDEN_SUPPORT_ZSTD=str(zstd),BOXWARDEN_SUPPORT_ISO=str(root/'input.iso'),BOXWARDEN_SUPPORT_CHECKER_DEB=str(root/'checker.deb'),SUPPORT_ARGS=str(root/'support-args'),COMPILED_CLI=str(cli),PATH=str(tools)+os.pathsep+os.environ['PATH'])
+            result=subprocess.run(['bash',str(repo/'tools/private-beta/build.sh'),'0.2.0-beta.1',str(root/'out')],env=env,capture_output=True,text=True)
+            self.assertEqual(result.returncode,73,result.stderr)
+            args=(root/'support-args').read_text().splitlines()
+            app=root/'out/boxwarden-0.2.0-beta.1-darwin-arm64/Boxwarden.app/Contents/Resources/Boxwarden'
+            self.assertEqual(args,[str(app/'support/source'),env['BOXWARDEN_SUPPORT_ISO'],env['BOXWARDEN_SUPPORT_CHECKER_DEB'],str(app/'support/resources')])
+            self.assertTrue((app/'bin/boxwarden').is_file())
+            self.assertTrue((app/'prepare-projects.sh').is_file())
+            self.assertEqual((app/'prepare-projects.sh').read_bytes(),SCRIPT.with_name('prepare-projects.sh').read_bytes())
+            self.assertTrue((app/'support/source/.git').is_dir())
+
     def test_invalid_application_identifier_fails_before_staging(self):
         with tempfile.TemporaryDirectory() as temporary:
             for identifier in ("../escape", "bad id", "org..test", "org." + "a" * 256):
