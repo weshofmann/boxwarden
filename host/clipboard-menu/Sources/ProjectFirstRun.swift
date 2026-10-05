@@ -53,6 +53,7 @@ extension ProjectWindowController {
       }
       guard !reviewing, ProjectCommand.validPath(data.stringValue), ProjectCommand.validPath(iso.stringValue) else { details.string = "Choose a data directory and an Ubuntu installer before reviewing."; return }
       reviewing = true; review.isEnabled = false
+      details.string = "Reviewing the data location, host tools and verified Ubuntu installer… Large installer checks can take time. Cancel remains available."
       let input = NativeFirstRunInput(setupID: setupID, dataLocation: data.stringValue, packageRoot: self.firstRunPackageRoot, isoPath: iso.stringValue)
       self.inspectFirstRun(input, choice: choice) { [weak self] result in
         guard let self else { return }
