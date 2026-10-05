@@ -22,6 +22,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   var preparationCompletion: PreparationCompletion?
   var prepareButton: NSButton!
   var helpButton: NSButton!
+  var setupActions: NSStackView!
   var diagnosticsButton: NSButton!
   var diagnosticsViews: [NSView] = []
   var diagnosticsVisible = false
@@ -115,7 +116,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     configLabel.lineBreakMode = .byTruncatingMiddle; configLabel.isSelectable = true
     configLabel.textColor = .secondaryLabelColor
     setupLabel.textColor = .labelColor
-    let setupActions = stack([prepareButton, helpButton])
+    setupActions = stack([prepareButton, helpButton])
     let name = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name")); name.title = "Project"; name.width = 155
     let state = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("state")); state.title = "State"; state.width = 80
     table.addTableColumn(name); table.addTableColumn(state)
@@ -372,6 +373,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     prepareButton.isEnabled = idle && !switchingConfiguration && setupInspection?.selectionAcceptable == true && ["domain_uninitialized", "project_setup_missing"].contains(setupInspection?.status ?? "")
     prepareButton.isHidden = setupInspection?.status == "ready"
     helpButton.isHidden = setupInspection?.status == "ready" && setupInspection?.recipePreparationAvailable != false
+    setupActions.isHidden = prepareButton.isHidden && helpButton.isHidden
     importRetryButton.isHidden = !(selectedProject?.availableActions.contains("import_retry") ?? false)
     replaceRetryButton.isHidden = !(selectedProject?.availableActions.contains("rebuild_retry") ?? false)
     refreshButton.isEnabled = !closing && client != nil && !presentation.busy && !presentation.refreshing

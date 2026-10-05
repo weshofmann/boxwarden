@@ -17,6 +17,32 @@ import AppKit
     check(controller.limitations.stringValue.contains("Network policy unidentified"), "missing or unknown policy cannot imply containment")
     check(controller.window!.minSize.width <= 780 && controller.window!.minSize.height <= 540, "project window supports a smaller usable Mac window")
     check(controller.setupLabel.stringValue.contains("setup"), "fresh launch explains the setup step in ordinary language")
+    func setupInspection(_ status: String, recipePreparationAvailable: Bool) throws -> SetupInspection {
+      let json = """
+      {"version":1,"scope":"alpha_project_setup","status":"\(status)","configPath":"/synthetic/config.json","configValid":true,"selectionAcceptable":true,"guidance":"Ready","nextActions":[],"recipePreparationAvailable":\(recipePreparationAvailable)}
+      """
+      return try JSONDecoder().decode(SetupInspection.self, from: Data(json.utf8))
+    }
+    controller.window!.setContentSize(NSSize(width: 760, height: 540))
+    controller.setupInspection = try setupInspection("ready", recipePreparationAvailable: true)
+    controller.render()
+    controller.window!.contentView!.layoutSubtreeIfNeeded()
+    let rootStack = controller.window!.contentView!.subviews.first as! NSStackView
+    let setupActions = rootStack.arrangedSubviews[3]
+    let body = rootStack.arrangedSubviews[4]
+    let readyGap = controller.setupLabel.frame.minY - body.frame.maxY
+    check(setupActions.isHidden && abs(readyGap - 8) < 1 && body.frame.height >= 235,
+      "ready setup collapses its empty action row and keeps the project body usable at minimum window size")
+    controller.setupInspection = try setupInspection("project_setup_missing", recipePreparationAvailable: true)
+    controller.render()
+    controller.window!.contentView!.layoutSubtreeIfNeeded()
+    let missingGap = setupActions.frame.minY - body.frame.maxY
+    check(!setupActions.isHidden && abs(missingGap - 8) < 1 && body.frame.height >= 235,
+      "missing setup keeps preparation actions adjacent to a usable project body at minimum window size")
+    controller.setupInspection = nil
+    controller.window!.setContentSize(NSSize(width: 960, height: 660))
+    controller.render()
+    controller.window!.contentView!.layoutSubtreeIfNeeded()
     let menu = NSMenu(title: "File")
     let newProject = NSMenuItem(title: "New Project", action: #selector(ProjectWindowController.createProject(_:)), keyEquivalent: "n")
     newProject.target = controller; menu.addItem(newProject); menu.update()

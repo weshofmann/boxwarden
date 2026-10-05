@@ -25,13 +25,13 @@ claim download/Gatekeeper distribution acceptance; it does not bypass OS checks.
 ## Verify and configure once
 
 Verify the archive beside its checksum file with
-`shasum -a 256 -c boxwarden-0.2.0-beta.16-darwin-arm64.tar.gz.sha256`, then extract
+`shasum -a 256 -c boxwarden-0.2.0-beta.17-darwin-arm64.tar.gz.sha256`, then extract
 in a new private user-owned directory. In a **new terminal**, set these
 paths to your actual assets; no profile sourcing or private bindings is needed:
 
 ```sh
 umask 077
-PACKAGE=/absolute/boxwarden-0.2.0-beta.16-darwin-arm64
+PACKAGE=/absolute/boxwarden-0.2.0-beta.17-darwin-arm64
 cd "$PACKAGE"
 shasum -a 256 -c SHA256SUMS
 "$PACKAGE/bin/boxwarden" version
@@ -125,8 +125,9 @@ private pasteboard, never the general Mac clipboard.
 
 The box icon in the menu bar offers **Show Projects** and both explicit clipboard directions for the selected project. Opening that menu does not inspect clipboard text or initiate a transfer.
 
-Stop the project first. **Show Details** exposes **Replace System…** is a secondary, confirmed action. It discards system-local
-files and applications and retains the independent workspace. Select the intended
+Stop the project first. Click **Show Details**, then **Replace System…**. This
+secondary action asks for confirmation because it discards system-local files
+and applications while retaining the independent workspace. Select the intended
 recipe and confirm only after reviewing that loss. **Resume Replacement** continues
 an existing recorded replacement through the backend.
 
@@ -291,7 +292,7 @@ stays disabled. Provider sign-in, cold-machine installation, power-loss
 recovery and complete network isolation are outside this walkthrough.
 
 To rebuild from a clean committed checkout on this Mac:
-`GO_BIN=/absolute/actual/go bash tools/private-beta/build.sh 0.2.0-beta.16 /absolute/new-output`.
+`GO_BIN=/absolute/actual/go bash tools/private-beta/build.sh 0.2.0-beta.17 /absolute/new-output`.
 This builds locally and publishes no release.
 
 ## Replace a disposable project system
