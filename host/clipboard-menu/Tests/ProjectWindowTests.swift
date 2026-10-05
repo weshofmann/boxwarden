@@ -9,7 +9,12 @@ import AppKit
     func activity(_ name: String, _ status: ProjectActivityStatus) -> ProjectActivity {
       ProjectActivity(id: UUID(), directory: URL(fileURLWithPath: "/private/tmp"), operation: "project.open", projectName: name, startedAt: Date(), status: status, message: "synthetic")
     }
-    let controller = ProjectWindowController(executable: "/synthetic/boxwarden")
+    let candidate = ProjectWindowController(executable: "/synthetic/boxwarden", networkPolicy: "n1candidate")
+    check(candidate.limitations.stringValue.contains("N1 candidate") && candidate.limitations.stringValue.contains("not host-qualified") && !candidate.limitations.stringValue.contains("Stock networking"), "candidate is identified without claiming live qualification")
+    let stock = ProjectWindowController(executable: "/synthetic/boxwarden", networkPolicy: "stock")
+    check(stock.limitations.stringValue.contains("gateway services"), "stock still explains gateway exposure")
+    let controller = ProjectWindowController(executable: "/synthetic/boxwarden", networkPolicy: "unknown")
+    check(controller.limitations.stringValue.contains("Network policy unidentified"), "missing or unknown policy cannot imply containment")
     let menu = NSMenu(title: "File")
     let newProject = NSMenuItem(title: "New Project", action: #selector(ProjectWindowController.createProject(_:)), keyEquivalent: "n")
     newProject.target = controller; menu.addItem(newProject); menu.update()

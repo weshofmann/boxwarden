@@ -1,5 +1,6 @@
-"""Portable package refusal checks; successful archive is exercised on the Mac."""
+"""Package refusal and orchestration checks; real archives are exercised on the Mac."""
 import hashlib
+import json
 import pathlib
 import os
 import shutil
@@ -11,6 +12,140 @@ SCRIPT = pathlib.Path(__file__).with_name("build.sh")
 
 
 class PackageInputTests(unittest.TestCase):
+    def test_unknown_network_selection_fails_before_staging(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            for selection in ("", "n1", "N1candidate", "-tags=n1candidate", "stock extra"):
+                with self.subTest(selection=selection):
+                    output = pathlib.Path(temporary) / "new"
+                    result = subprocess.run(["bash", str(SCRIPT), "0.2.0-beta.1", str(output), selection],
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn("selection must be stock or n1candidate", result.stderr)
+                    self.assertFalse(output.exists())
+
+    def build_boundary_fixture(self, root):
+        repo = root / "source"
+        scripts = repo / "tools/private-beta"
+        scripts.mkdir(parents=True)
+        shutil.copy(SCRIPT, scripts / "build.sh")
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=Fixture", "-c",
+                        "user.email=fixture@example.invalid", "commit", "-qm", "fixture"], check=True)
+        tools = root / "tools"
+        tools.mkdir()
+        go = tools / "go"
+        go.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$CAPTURE_ARGS"\nexit 73\n')
+        go.chmod(0o700)
+        uname = tools / "uname"
+        uname.write_text('#!/bin/bash\ncase "$1" in -s) echo Darwin;; -m) echo arm64;; *) exit 72;; esac\n')
+        uname.chmod(0o700)
+        return repo, tools, go
+
+    def test_selection_controls_exact_go_build_arguments_and_package_name(self):
+        # Stop at the compiler boundary: this proves orchestration, not a
+        # successful archive. Actual packages still require native verification.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            repo, tools, go = self.build_boundary_fixture(root)
+            for selection in (None, "stock", "n1candidate"):
+                with self.subTest(selection=selection):
+                    output = root / (selection or "default")
+                    capture = root / "args"
+                    env = dict(os.environ, GO_BIN=str(go), CAPTURE_ARGS=str(capture),
+                               PATH=str(tools) + os.pathsep + os.environ["PATH"])
+                    args = ["bash", str(repo / "tools/private-beta/build.sh"), "0.2.0-beta.1", str(output)]
+                    if selection is not None:
+                        args.append(selection)
+                    result = subprocess.run(args, env=env, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 73, result.stderr)
+                    captured = capture.read_text().splitlines()
+                    name = "boxwarden-0.2.0-beta.1-darwin-arm64"
+                    if selection == "n1candidate":
+                        name += "-n1candidate"
+                        self.assertEqual(captured[captured.index("-tags") + 1], "n1candidate")
+                    else:
+                        self.assertNotIn("-tags", captured)
+                    self.assertEqual(captured[captured.index("-o") + 1], str(output / name / "bin/boxwarden"))
+                    self.assertEqual(captured[-1], "./cmd/boxwarden")
+
+    def test_compiled_policy_identity_and_bundle_id_reach_native_builder(self):
+        # Fake only compiler/signature/native work; run the real packaging
+        # orchestration and validate its published metadata before native build.
+        for selection, override in ((None, None), ("stock", None),
+                                    ("n1candidate", None), ("n1candidate", "org.example.review")):
+            with self.subTest(selection=selection, override=override), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                repo, tools, go = self.build_boundary_fixture(root)
+                native = repo / "host/clipboard-menu/build.sh"
+                native.parent.mkdir(parents=True)
+                native.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$NATIVE_ARGS"\nexit 73\n')
+                subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+                subprocess.run(["git", "-C", str(repo), "-c", "user.name=Fixture", "-c",
+                                "user.email=fixture@example.invalid", "commit", "-qm", "native fixture"], check=True)
+                build = selection or "stock"
+                policy = {"build": build, "description": "N1 candidate; not host-qualified" if build == "n1candidate" else "stock ADR 015; permits gateway service access",
+                          "softnet_version": "0.19.0-boxwarden-n1.1" if build == "n1candidate" else "0.19.0",
+                          "softnet_executable_sha256": "064206d28d82b86093244114f44f726f4f5967575a9b298a7123bf0beb740ef0" if build == "n1candidate" else "ab333619fc8bd7277837545e49a771baa994c01c3e8c14904ae4cc4c1f37269e",
+                          "softnet_archive_sha256": "e06a722dfc9ab998f99144adc88ff9b03cd3356d1d1b62cb3c692cd4731b458e" if build == "n1candidate" else "1612e1296834aae0b6389650c7c5190add1ee8d71474e328691e67679ecda53c",
+                          "block_target": "@boxwarden-host-containment" if build == "n1candidate" else ""}
+                cli = root / "compiled-cli"
+                cli.write_text('#!/bin/bash\n[[ "$*" == "build-info --json" ]] || exit 72\ncat <<\'JSON\'\n' + json.dumps({"network_policy": policy}) + '\nJSON\n')
+                go.write_text('#!/bin/bash\nif [[ "$1" == version ]]; then echo "go version fixture"; exit; fi\nwhile [[ "$1" != -o ]]; do shift; done\ncp "$COMPILED_CLI" "$2"\nchmod 700 "$2"\n')
+                codesign = tools / "codesign"
+                codesign.write_text('#!/bin/bash\nexit 0\n')
+                codesign.chmod(0o700)
+                output = root / "output"
+                env = dict(os.environ, GO_BIN=str(go), COMPILED_CLI=str(cli), NATIVE_ARGS=str(root / "native-args"),
+                           PATH=str(tools) + os.pathsep + os.environ["PATH"])
+                env.pop("BOXWARDEN_APP_BUNDLE_ID", None)
+                if override:
+                    env["BOXWARDEN_APP_BUNDLE_ID"] = override
+                args = ["bash", str(repo / "tools/private-beta/build.sh"), "0.2.0-beta.1", str(output)]
+                if selection is not None:
+                    args.append(selection)
+                result = subprocess.run(args, env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 73, result.stderr)
+                native_args = (root / "native-args").read_text().splitlines()
+                app_id = override or "org.boxwarden.project-manager" + (".n1candidate" if build == "n1candidate" else "")
+                self.assertEqual(native_args[native_args.index("--bundle-id") + 1], app_id)
+                self.assertIn("--network-policy", native_args)
+                self.assertEqual(native_args[native_args.index("--network-policy") + 1], build)
+                package = next(output.iterdir())
+                metadata = json.loads((package / "BUILD.json").read_text())
+                self.assertEqual(metadata["network_policy"], policy)
+                self.assertEqual(metadata["application_id"], app_id)
+                warning = package / "N1-CANDIDATE.txt"
+                self.assertEqual(warning.exists(), build == "n1candidate")
+                if warning.exists():
+                    self.assertIn("not host-qualified", warning.read_text())
+                    self.assertIn("No N1 executable", warning.read_text())
+
+    def test_compiled_selection_mismatch_stops_before_native_build(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            repo, tools, go = self.build_boundary_fixture(root)
+            go.write_text("""#!/bin/bash
+while [[ "$1" != -o ]]; do shift; done
+cat > "$2" <<'CLI'
+#!/bin/bash
+printf '%s\\n' '{"network_policy":{"build":"stock"}}'
+CLI
+chmod 700 "$2"
+""")
+            codesign = tools / "codesign"
+            codesign.write_text('#!/bin/bash\nexit 0\n')
+            codesign.chmod(0o700)
+            output = root / "output"
+            env = dict(os.environ, GO_BIN=str(go), PATH=str(tools) + os.pathsep + os.environ["PATH"])
+            result = subprocess.run(["bash", str(repo / "tools/private-beta/build.sh"), "0.2.0-beta.1",
+                                     str(output), "n1candidate"], env=env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("compiled network policy does not match requested selection", result.stderr)
+            package = next(output.iterdir())
+            self.assertFalse((package / "BUILD.json").exists())
+            self.assertFalse((package / "Boxwarden.app").exists())
+
     def test_invalid_application_identifier_fails_before_staging(self):
         with tempfile.TemporaryDirectory() as temporary:
             for identifier in ("../escape", "bad id", "org..test", "org." + "a" * 256):

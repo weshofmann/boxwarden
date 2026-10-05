@@ -45,7 +45,7 @@ class BuildInterfaceTests(unittest.TestCase):
                           ["--build"], ["--bundle-id"], ["--bundle-id", "bad id"],
                           ["--bundle-id", "../escape"], ["--bundle-id", "org..boxwarden"],
                           ["--bundle-id", "org.test", "--bundle-id", "org.other"],
-                          ["--app", "unknown"], ["--version", "v0.2.0"],
+                          ["--app", "unknown"], ["--network-policy", "unknown"], ["--network-policy", "stock", "--network-policy", "n1candidate"], ["--version", "v0.2.0"],
                           ["--version", "0.02.0"], ["--version", "0.2"],
                           ["--build", "-1"], ["--build", "1.2"],
                           ["--output", "relative.app"], ["--cli", "relative-cli"]):
@@ -103,12 +103,17 @@ class BuildInterfaceTests(unittest.TestCase):
         with (self.script.parent / "ProjectInfo.plist").open("rb") as handle:
             self.assertEqual(plistlib.load(handle)["CFBundleIdentifier"], "org.boxwarden.project-manager")
 
-    def check_packaged_cli(self, app_kind, bundle_id=None):
+    def test_candidate_policy_is_visible_in_packaged_app(self):
+        self.check_packaged_cli("project-manager", network_policy="n1candidate")
+
+    def check_packaged_cli(self, app_kind, bundle_id=None, network_policy=None):
         cli = self.compiled_cli()
         original = cli.read_bytes()
         output = self.root / "New App.app"
         # No go exists in this path: supplied CLI packaging must not rebuild it.
         extra = ["--bundle-id", bundle_id] if bundle_id else []
+        if network_policy:
+            extra += ["--network-policy", network_policy]
         result = subprocess.run(["/bin/bash", str(self.script), *extra, "--app", app_kind, "--cli", str(cli),
                                  "--output", str(output), "--version", "0.2.0-beta.1+fixture",
                                  "--build", "7"], env=dict(os.environ, PATH="/usr/bin:/bin"),
@@ -121,6 +126,7 @@ class BuildInterfaceTests(unittest.TestCase):
             info = plistlib.load(handle)
         self.assertEqual(info["CFBundleShortVersionString"], "0.2.0-beta.1+fixture")
         self.assertEqual(info["CFBundleVersion"], "7")
+        self.assertEqual(info["BoxwardenNetworkPolicy"], network_policy or "stock")
         if bundle_id:
             self.assertEqual(info["CFBundleIdentifier"], bundle_id)
         self.assertNotEqual(info["CFBundleExecutable"].lower(), "boxwarden")

@@ -1,5 +1,11 @@
 # Boxwarden 0.2 private beta — Apple Silicon Mac
 
+For an explicitly selected N1 candidate archive, read `N1-CANDIDATE.txt` and
+`support/source/docs/v0.2/n1/current-beta.md` first. Its pinned candidate
+toolchain needs separate approved deployment; the stock initialization below
+does not provide candidate admission. Inspect `bin/boxwarden build-info --json`
+and `BUILD.json` for the compiled selection.
+
 This archive targets an **already initialized** Mac with admitted Tart 2.32.1 /
 Softnet 0.19.0, private enrolled APFS storage and the pinned Ubuntu 24.04.4
 Desktop ARM64 inputs. It does not install or upgrade host tools.
