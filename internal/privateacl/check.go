@@ -58,5 +58,8 @@ func sameSecurityMetadata(a, b os.FileInfo) bool {
 	}
 	aStat, aOK := a.Sys().(*syscall.Stat_t)
 	bStat, bOK := b.Sys().(*syscall.Stat_t)
-	return aOK && bOK && aStat.Uid == bStat.Uid && aStat.Gid == bStat.Gid && aStat.Nlink == bStat.Nlink
+	// Directory link counts reflect child-directory membership, not extra
+	// hardlink access to this object. Concurrent safe child creation must not
+	// invalidate an otherwise stable ancestor. Preserve the count for files.
+	return aOK && bOK && aStat.Uid == bStat.Uid && aStat.Gid == bStat.Gid && (a.IsDir() || aStat.Nlink == bStat.Nlink)
 }

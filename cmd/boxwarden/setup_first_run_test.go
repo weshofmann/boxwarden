@@ -334,3 +334,21 @@ func TestFirstRunPrerequisiteFailuresAndCancellationDoNotWrite(t *testing.T) {
 		})
 	}
 }
+
+func TestFirstRunHostOverlapIsADataLocationError(t *testing.T) {
+	input, d := firstRunFixture(t)
+	d.host = func(context.Context, string, string) (config.Host, hostx.Report, string, error) {
+		return config.Host{}, hostx.Report{Status: hostx.Drifted, Findings: []hostx.Finding{{Code: "paths.overlap", Remedy: "correct version-2 host configuration"}}}, "", nil
+	}
+	d.resources = func(context.Context, app.FirstRunInput) (app.SetupPrepareInput, string, error) {
+		t.Fatal("overlapping location reached resource preparation")
+		return app.SetupPrepareInput{}, "", nil
+	}
+	plan, _, _, err := buildFirstRunPlan(context.Background(), input, d)
+	if err != nil || plan.Status != "data_location_inadmissible" || plan.ExpectedDigest != "" || !strings.Contains(plan.Guidance, "Tart") || strings.Contains(plan.Guidance, "attended host setup") {
+		t.Fatalf("overlap guidance=%#v,%v", plan, err)
+	}
+	if _, err := os.Lstat(plan.StateRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("overlapping location created state: %v", err)
+	}
+}

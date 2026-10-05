@@ -113,3 +113,53 @@ func TestCheckRejectsSymlinkOrNoncanonicalPath(t *testing.T) {
 		t.Fatal("noncanonical path accepted")
 	}
 }
+
+func TestDirectoryChildCreationDoesNotChangeACLAdmission(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private")
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspector := inspectorFunc(func(string) (bool, error) { return false, os.Mkdir(filepath.Join(path, "synthetic-child"), 0700) })
+	if err := Check(path, info, inspector); err != nil {
+		t.Fatalf("unchanged private directory rejected after child creation: %v", err)
+	}
+}
+
+func TestRegularFileHardlinkCreationChangesACLAdmission(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private")
+	if err := os.WriteFile(path, []byte("synthetic"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspector := inspectorFunc(func(string) (bool, error) { return false, os.Link(path, path+"-link") })
+	if err := Check(path, info, inspector); err == nil {
+		t.Fatal("regular-file link-count change accepted")
+	}
+}
+
+func TestDirectoryReplacementStillChangesACLAdmission(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private")
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspector := inspectorFunc(func(string) (bool, error) {
+		if err := os.Rename(path, path+"-old"); err != nil {
+			return false, err
+		}
+		return false, os.Mkdir(path, 0700)
+	})
+	if err := Check(path, info, inspector); err == nil {
+		t.Fatal("replacement directory accepted")
+	}
+}

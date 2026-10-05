@@ -264,3 +264,9 @@ contents on unrelated mounted volumes. Every distinct APFS filesystem remains
 in the inventory; errors and duplicate UUIDs fail closed. Descriptor APFS/FSID
 checks bracket UUID observation. Selected storage anchors keep their existing
 access and admission requirements; no privacy permission is bypassed.
+
+ACL pathname inspection brackets the same filesystem object, type, owner, group
+and permission mode. Regular-file link counts must also remain stable. Directory
+link counts reflect child-directory membership and may change during ordinary
+concurrent activity; they do not replace object identity or ACL admission. Child
+creation is therefore not treated as an ancestor identity/security change.

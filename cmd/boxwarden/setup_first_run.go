@@ -141,6 +141,11 @@ func buildFirstRunPlan(ctx context.Context, input app.FirstRunInput, d firstRunD
 		plan.Prerequisites = append(plan.Prerequisites, finding.Code+": "+finding.Remedy)
 	}
 	if err != nil || report.Status != hostx.Healthy {
+		for _, finding := range report.Findings {
+			if finding.Code == "paths.overlap" {
+				return fail("data_location_inadmissible", "The planned data directory overlaps host-managed paths. Choose a private APFS data location outside the Tart runtime directory and tool installation paths.", err)
+			}
+		}
 		status := "host_tools_incompatible"
 		if report.Status == hostx.Missing {
 			status = "host_tools_uninitialized"
