@@ -2,12 +2,18 @@
 set -euo pipefail
 umask 077
 
-if [[ $# != 2 || ! $1 =~ ^0\.2\.[0-9]+-beta\.[1-9][0-9]*$ ]]; then
-  echo 'version must be 0.2.N-beta.N; usage: GO_BIN=/absolute/go bash tools/private-beta/build.sh VERSION NEW-OUTPUT-DIRECTORY' >&2
+if [[ ( $# != 2 && $# != 3 ) || ! $1 =~ ^0\.2\.[0-9]+-beta\.[1-9][0-9]*$ ]]; then
+  echo 'version must be 0.2.N-beta.N; usage: GO_BIN=/absolute/go bash tools/private-beta/build.sh VERSION NEW-OUTPUT-DIRECTORY [stock|n1candidate]' >&2
   exit 2
 fi
 version=$1
-app_bundle_id=${BOXWARDEN_APP_BUNDLE_ID:-org.boxwarden.project-manager}
+selection=${3-stock}
+case "$selection" in
+  stock) build_args=(build -trimpath); name_suffix=""; default_bundle_id=org.boxwarden.project-manager ;;
+  n1candidate) build_args=(build -trimpath -tags n1candidate); name_suffix=-n1candidate; default_bundle_id=org.boxwarden.project-manager.n1candidate ;;
+  *) echo 'selection must be stock or n1candidate' >&2; exit 2 ;;
+esac
+app_bundle_id=${BOXWARDEN_APP_BUNDLE_ID:-$default_bundle_id}
 if [[ ${#app_bundle_id} -gt 255 || ! "$app_bundle_id" =~ ^[A-Za-z][A-Za-z0-9-]*(\.[A-Za-z0-9][A-Za-z0-9-]*)+$ ]]; then
   echo 'BOXWARDEN_APP_BUNDLE_ID must be a reverse-DNS application identifier' >&2
   exit 2
@@ -43,7 +49,7 @@ mkdir -m 700 "$output"
 temporary=$(mktemp -d /private/tmp/boxwarden-beta-build.XXXXXX)
 trap 'rm -rf -- "$temporary"' EXIT
 export GOCACHE="$temporary/gocache" GOMODCACHE="$temporary/modcache"
-name="boxwarden-$version-darwin-arm64"
+name="boxwarden-$version-darwin-arm64$name_suffix"
 package="$output/$name"
 mkdir -p "$package/bin" "$package/support" "$package/notices"
 git clone --quiet --depth 1 --no-local --no-checkout "$repo_root" "$package/support/source"
@@ -55,11 +61,34 @@ if [[ $(git -C "$package/support/source" rev-parse HEAD) != "$revision" || -n $(
 fi
 (
   cd "$package/support/source"
-  "$go_bin" build -trimpath -ldflags "-X main.buildVersion=$version -X main.buildRevision=$revision" -o "$package/bin/boxwarden" ./cmd/boxwarden
+  "$go_bin" "${build_args[@]}" -ldflags "-X main.buildVersion=$version -X main.buildRevision=$revision" -o "$package/bin/boxwarden" ./cmd/boxwarden
 )
 codesign --force --sign - "$package/bin/boxwarden"
+# Read the selected pins from the exact signed CLI being distributed, rather
+# than duplicating the host-admission constants in the packaging script.
+"$package/bin/boxwarden" build-info --json > "$temporary/build-info.json"
+python3 - "$package" "$version" "$revision" "$go_bin" "$app_bundle_id" "$selection" "$temporary/build-info.json" <<'PY'
+import json, pathlib, subprocess, sys
+root = pathlib.Path(sys.argv[1])
+policy = json.loads(pathlib.Path(sys.argv[7]).read_text())["network_policy"]
+if policy["build"] != sys.argv[6]:
+    raise SystemExit("compiled network policy does not match requested selection")
+data = {"version": sys.argv[2], "revision": sys.argv[3], "platform": "darwin-arm64",
+        "application_id": sys.argv[5], "cgo": True, "signing": "ad-hoc; not notarized",
+        "go": subprocess.check_output([sys.argv[4], "version"], text=True).strip(),
+        "network_policy": policy}
+(root / "BUILD.json").write_text(json.dumps(data, indent=2) + "\n")
+PY
+if [[ "$selection" == n1candidate ]]; then
+  cat > "$package/N1-CANDIDATE.txt" <<'WARNING'
+N1 candidate; not host-qualified. This archive selects the pinned N1 Softnet
+identity recorded in BUILD.json. No N1 executable is shipped or installed.
+Do not treat this package as host containment or real-VM qualification evidence.
+Privileged installation and host qualification require separate explicit approval.
+WARNING
+fi
 bash "$repo_root/host/clipboard-menu/build.sh" --app project-manager --cli "$package/bin/boxwarden" \
-  --bundle-id "$app_bundle_id" --output "$package/Boxwarden.app" --version "${version%-beta.*}" --build "${version##*.}"
+  --bundle-id "$app_bundle_id" --network-policy "$selection" --output "$package/Boxwarden.app" --version "${version%-beta.*}" --build "${version##*.}"
 cp "$repo_root/LICENSE" "$repo_root/NOTICE" "$package/"
 cp "$repo_root/tools/private-beta/TRY-ME.md" "$package/TRY-ME.md"
 cp "$repo_root/tools/private-beta/UPGRADING.md" "$package/UPGRADING.md"
@@ -88,14 +117,6 @@ NOTICE.md remain there. That patch was modified 2026-09-28; no N1 executable is
 shipped or installed by this package. Ubuntu, Tart, Softnet and Go compiler
 executables are external prerequisites, not bundled distributions.
 NOTICES
-python3 - "$package" "$version" "$revision" "$go_bin" "$app_bundle_id" <<'PY'
-import json, pathlib, subprocess, sys
-root = pathlib.Path(sys.argv[1])
-data = {"version": sys.argv[2], "revision": sys.argv[3], "platform": "darwin-arm64",
-        "application_id": sys.argv[5], "cgo": True, "signing": "ad-hoc; not notarized",
-        "go": subprocess.check_output([sys.argv[4], "version"], text=True).strip()}
-(root / "BUILD.json").write_text(json.dumps(data, indent=2) + "\n")
-PY
 chmod -R go-rwx "$package"
 (
   cd "$package"

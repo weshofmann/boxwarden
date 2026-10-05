@@ -27,6 +27,7 @@ and candidate builds reject each other's Softnet identities; there is no runtime
 override. A possible PR #16 merge preserves this explicit candidate build and
 the stock default; it does not enable N1 in the working installation.
 
+- [Current beta packaging and next bounded comparison](current-beta.md)
 - [Decision and limits](design.md)
 - [Observed acceptance matrix](matrix.md)
 - [Review findings and resolutions](review-ledger.md)

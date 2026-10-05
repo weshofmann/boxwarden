@@ -27,6 +27,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   var activityTimer: Timer?
   var progressLines: [String] = []
   var lastRefreshFailure: String?
+  let limitations = NSTextField(wrappingLabelWithString: "")
   let table = NSTableView()
   let configLabel = NSTextField(labelWithString: "Choose an initialized Boxwarden configuration to begin.")
   let detail = NSTextField(wrappingLabelWithString: "Projects will appear here after a configuration is selected.")
@@ -58,7 +59,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   var hasActiveOperation: Bool { presentation.busy || recoveredBusy }
   var readyToAct: Bool { !closing && !switchingConfiguration && !hasActiveOperation && snapshotAvailable }
 
-  init(executable: String, privatePasteboard: String? = nil, activityDirectory: URL? = nil, defaults: UserDefaults = .standard) {
+  init(executable: String, privatePasteboard: String? = nil, activityDirectory: URL? = nil, defaults: UserDefaults = .standard, networkPolicy: String? = Bundle.main.object(forInfoDictionaryKey: "BoxwardenNetworkPolicy") as? String) {
     self.executable = executable; self.privatePasteboard = privatePasteboard
     self.activityDirectory = activityDirectory; self.defaults = defaults
     self.pendingClipboard = ClipboardPending(defaults: defaults)
@@ -67,6 +68,13 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     window.minSize = NSSize(width: 940, height: 740)
     window.center()
     super.init(window: window)
+    let notice: String
+    switch networkPolicy {
+    case "stock": notice = "Stock networking permits guest access to gateway services; complete guest-to-host isolation is not claimed."
+    case "n1candidate": notice = "N1 candidate · not host-qualified. IPv4 host-service containment requires separate live validation; DHCP/DNS infrastructure remains reachable."
+    default: notice = "Network policy unidentified. Inspect the bundled CLI with build-info --json before use."
+    }
+    limitations.stringValue = "Experimental private beta · alpha projects. Workspace files survive ordinary stop/start; processes do not. No live host shares. " + notice
     constructWindow()
     render()
   }
@@ -133,7 +141,6 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     progressText.textContainerInset = NSSize(width: 6, height: 6)
     let log = NSScrollView(); log.documentView = progressText; log.hasVerticalScroller = true
     log.borderType = .bezelBorder; log.heightAnchor.constraint(greaterThanOrEqualToConstant: 105).isActive = true
-    let limitations = NSTextField(wrappingLabelWithString: "Experimental private beta · alpha projects. Workspace files survive ordinary stop/start; processes do not. No live host shares. Stock networking permits guest access to gateway services; complete guest-to-host isolation is not claimed.")
     limitations.font = .systemFont(ofSize: 11); limitations.textColor = .secondaryLabelColor
     let root = stack([header, configLabel, setupLabel, body, progressHeader, log,
                       stack([revealButton, inspectUnknownButton]), limitations], vertical: true)

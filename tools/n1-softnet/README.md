@@ -58,3 +58,7 @@ classified as host-local. Interface-directed broadcasts are derived only
 from valid `IFF_BROADCAST` netmasks. Broadcast topology of arbitrary remote
 subnets cannot be inferred. IPv6 guest traffic and IPv6-only upstream remain
 unsupported. DHCP, DNS proxy, vmnet and hypervisor parsers remain exposed.
+
+Current beta packaging and the bounded next live comparison are described in
+[the current-beta guide](../../docs/v0.2/n1/current-beta.md). That integration
+does not turn historical host trials into qualification of a new beta.

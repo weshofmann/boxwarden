@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/weshofmann/boxwarden/internal/hostx"
 )
 
 // Set by the private-beta build. Development builds remain identifiable.
@@ -11,6 +14,25 @@ var buildRevision = "unknown"
 
 // Information commands do not load configuration or construct host adapters.
 func runInfo(args []string, out io.Writer) (bool, error) {
+	if len(args) == 2 && args[0] == "build-info" && args[1] == "--json" {
+		policy := "stock"
+		if hostx.SoftnetBlockTarget != "" {
+			policy = "n1candidate"
+		}
+		// Compiled selection is inspectable without admission or live host claims.
+		data := struct {
+			Version       string            `json:"version"`
+			Revision      string            `json:"revision"`
+			NetworkPolicy map[string]string `json:"network_policy"`
+		}{buildVersion, buildRevision, map[string]string{
+			"build": policy, "description": hostx.NetworkPolicyBuild,
+			"softnet_version":           hostx.SoftnetVersion,
+			"softnet_executable_sha256": hostx.SoftnetExecutableSHA256,
+			"softnet_archive_sha256":    hostx.SoftnetArchiveSHA256,
+			"block_target":              hostx.SoftnetBlockTarget,
+		}}
+		return true, json.NewEncoder(out).Encode(data)
+	}
 	if len(args) != 1 {
 		return false, nil
 	}
@@ -22,6 +44,7 @@ func runInfo(args []string, out io.Writer) (bool, error) {
 		_, err := fmt.Fprintln(out, `Boxwarden — graphical projects on an initialized Apple Silicon Mac
 
 boxwarden version
+boxwarden build-info --json
 boxwarden --config /absolute/config.json doctor
 boxwarden --config /absolute/config.json --domain alpha project COMMAND
 

@@ -8,6 +8,7 @@ app_kind="clipboard"
 version=""
 build=""
 bundle_id=""
+network_policy=""
 fail() { echo "$*" >&2; exit 1; }
 while [[ $# -gt 0 ]]; do
   [[ $# -ge 2 && -n "$2" ]] || fail "expected a value for $1"
@@ -17,6 +18,7 @@ while [[ $# -gt 0 ]]; do
     --output) [[ "$custom_output" == false ]] || fail "duplicate --output"; output="$2"; custom_output=true ;;
     --version) [[ -z "$version" ]] || fail "duplicate --version"; version="$2" ;;
     --build) [[ -z "$build" ]] || fail "duplicate --build"; build="$2" ;;
+    --network-policy) [[ -z "$network_policy" && ( "$2" == stock || "$2" == n1candidate ) ]] || fail "--network-policy requires stock or n1candidate once"; network_policy="$2" ;;
     --bundle-id) [[ -z "$bundle_id" ]] || fail "duplicate --bundle-id"; bundle_id="$2" ;;
     *) fail "unknown argument: $1" ;;
   esac
@@ -49,6 +51,7 @@ trap 'rm -rf "$stage"' EXIT
 app="$stage/$app_name.app"
 mkdir -p "$app/Contents/MacOS"
 cp "$base/host/clipboard-menu/$plist" "$app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :BoxwardenNetworkPolicy string ${network_policy:-stock}" "$app/Contents/Info.plist"
 if [[ -n "$bundle_id" ]]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_id" "$app/Contents/Info.plist"
 fi
