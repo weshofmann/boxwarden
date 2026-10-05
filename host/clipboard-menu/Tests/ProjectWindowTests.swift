@@ -50,11 +50,74 @@ import AppKit
     controller.presentation.chooseConfiguration("/synthetic/config.json")
     let refresh = controller.presentation.beginRefresh()!
     controller.presentation.finishRefresh(refresh, names: ["one", "two"])
-    func project(_ state: String, actions: [String] = ["open", "stop"]) -> ProjectRecord {
+    func project(_ state: String, actions: [String] = ["open", "stop"], imported: Bool = false) -> ProjectRecord {
       ProjectRecord(name: "one", base: "base", sessionId: "session", backendObject: "backend", state: state, managementReady: false, diagnostic: "", observedState: state, backendRunning: state == "running",
         workspace: ProjectWorkspace(id: "workspace", filesystemUuid: "filesystem", sizeBytes: 64 << 20, mountPath: "/workspace", initialized: true),
-        software: ProjectSoftware(intentDigest: "intent", status: "complete", actions: []), importState: ProjectImport(status: "not_imported", id: "", guestPath: ""), replacementPending: false, availableActions: actions)
+        software: ProjectSoftware(intentDigest: "intent", status: "complete", actions: []), importState: ProjectImport(status: imported ? "complete" : "not_imported", id: imported ? "transaction" : "", guestPath: imported ? "/workspace/import" : ""), replacementPending: false, availableActions: actions)
     }
+    let layoutController = controller
+    let originalLayoutState = (layoutController.window!.contentView!.frame.size, layoutController.setupInspection, layoutController.setup, layoutController.projects, layoutController.snapshotAvailable, layoutController.recoveredBusy, layoutController.statusLabel.stringValue, layoutController.presentation.selectedName)
+    func descendants(of view: NSView) -> [NSView] {
+      view.subviews.flatMap { [$0] + descendants(of: $0) }
+    }
+    func assertRightColumnContained(_ state: String, size: NSSize, inspection: SetupInspection?, selected: ProjectRecord?) {
+      layoutController.window!.setContentSize(size)
+      layoutController.setupInspection = inspection
+      layoutController.setup = inspection?.status == "ready" ? ProjectSetup(status: "ready", guidance: "") : nil
+      layoutController.projects = selected.map { [$0] } ?? []
+      layoutController.snapshotAvailable = inspection != nil
+      layoutController.recoveredBusy = state.contains("recovered")
+      if layoutController.recoveredBusy { layoutController.statusLabel.stringValue = "preparation: qualifying" }
+      layoutController.presentation.select(selected?.name)
+      let content = layoutController.window!.contentView!
+      let root = content.subviews.first as! NSStackView
+      let body = root.arrangedSubviews[4] as! NSStackView
+      let right = body.arrangedSubviews[1] as! NSStackView
+      for _ in 0..<3 { layoutController.render(); content.layoutSubtreeIfNeeded() }
+      if selected?.importState.status == "complete" {
+        let guidance = layoutController.detail.stringValue.components(separatedBy: "\n").dropFirst().first ?? ""
+        check(guidance.contains("export") && !guidance.localizedCaseInsensitiveContains("import"),
+          "stopped completed-import guidance only describes its available export action")
+      }
+      if state.contains("recovered") {
+        let recoveryActions = right.arrangedSubviews.last!
+        check(recoveryActions.isHidden,
+          "recovered busy state removes the empty retry-action row from the right column")
+      }
+      let views = [right] + descendants(of: right)
+      let tolerance: CGFloat = 1
+      for (index, view) in views.enumerated() {
+        let bodyFrame = view.convert(view.bounds, to: body)
+        let contentFrame = view.convert(view.bounds, to: content)
+        check(body.bounds.insetBy(dx: -tolerance, dy: -tolerance).contains(bodyFrame),
+          "\(state) right-column view \(index) frame \(NSStringFromRect(bodyFrame)) escapes body \(NSStringFromRect(body.bounds)) at \(Int(size.width))×\(Int(size.height))")
+        check(content.bounds.insetBy(dx: -tolerance, dy: -tolerance).contains(contentFrame),
+          "\(state) right-column view \(index) frame \(NSStringFromRect(contentFrame)) escapes content \(NSStringFromRect(content.bounds)) at \(Int(size.width))×\(Int(size.height))")
+      }
+    }
+    layoutController.activity = ProjectActivity(id: UUID(), directory: URL(fileURLWithPath: "/private/tmp"), operation: "project.create", projectName: "synthetic-new-project", startedAt: Date(), status: .running, message: "preparation: installing")
+    layoutController.recoveredBusy = true
+    layoutController.render()
+    check(layoutController.setupLabel.stringValue.contains("Creating synthetic-new-project") && !layoutController.setupLabel.stringValue.contains("Create a project"),
+      "creation progress replaces the contradictory create-another-project guidance")
+    layoutController.activity = nil; layoutController.recoveredBusy = false
+    let readyInspection = try setupInspection("ready", recipePreparationAvailable: true)
+    for size in [NSSize(width: 960, height: 660), NSSize(width: 760, height: 540)] {
+      assertRightColumnContained("fresh", size: size, inspection: nil, selected: nil)
+      assertRightColumnContained("ready-empty", size: size, inspection: readyInspection, selected: nil)
+      assertRightColumnContained("ready-empty-recovered", size: size, inspection: readyInspection, selected: nil)
+      assertRightColumnContained("selected", size: size, inspection: readyInspection,
+        selected: project("stopped", actions: ["open", "stop", "export"], imported: true))
+    }
+    layoutController.setupInspection = originalLayoutState.1
+    layoutController.setup = originalLayoutState.2
+    layoutController.projects = originalLayoutState.3
+    layoutController.snapshotAvailable = originalLayoutState.4
+    layoutController.recoveredBusy = originalLayoutState.5
+    layoutController.statusLabel.stringValue = originalLayoutState.6
+    layoutController.presentation.select(originalLayoutState.7)
+    layoutController.window!.setContentSize(originalLayoutState.0)
+    layoutController.render()
     controller.projects = [project("running")]
     check(!controller.canReplaceSelectedProject, "running project must be stopped before replacement")
     controller.projects = [project("unknown")]

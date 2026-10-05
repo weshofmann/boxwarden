@@ -19,7 +19,7 @@ extension ProjectWindowController {
     let package = Bundle.main.bundleURL.deletingLastPathComponent().path
     let fields = ["Ubuntu ARM64 desktop ISO", "ARM64 e2fsck checker package", "Go executable", "zstd executable", "OpenSSL executable", "xorriso executable"]
     let saved = defaults.stringArray(forKey: "ValidatedPreparationInputs") ?? []
-    let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 450), styleMask: [.titled], backing: .buffered, defer: false)
+    let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 540), styleMask: [.titled], backing: .buffered, defer: false)
     sheet.title = "Prepare Project Assets"
     let root = NSStackView(); root.orientation = .vertical; root.alignment = .leading; root.spacing = 10
     root.translatesAutoresizingMaskIntoConstraints = false
@@ -37,7 +37,11 @@ extension ProjectWindowController {
       // Buttons carry only this sheet's field through their menu action closure.
       let picker = PreparationPicker(field: field, parent: sheet)
       preparationPickers.append(picker); pick.target = picker; pick.action = #selector(PreparationPicker.choose(_:))
-      root.addArrangedSubview(row); inputs.append(field)
+      let heading = NSTextField(labelWithString: label)
+      heading.font = .systemFont(ofSize: 11, weight: .medium)
+      let selection = NSStackView(views: [heading, row])
+      selection.orientation = .vertical; selection.alignment = .leading; selection.spacing = 2
+      root.addArrangedSubview(selection); inputs.append(field)
     }
     let actions = NSStackView(); actions.spacing = 8
     let cancel = NSButton(title: "Cancel", target: nil, action: nil)

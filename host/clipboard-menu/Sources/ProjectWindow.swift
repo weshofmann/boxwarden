@@ -59,6 +59,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   var replaceButton: NSButton!
   var importRetryButton: NSButton!
   var replaceRetryButton: NSButton!
+  var recoveryActions: NSStackView!
   var pushButton: NSButton!
   var pullButton: NSButton!
   var cancelButton: NSButton!
@@ -136,15 +137,16 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     pullButton = button("Guest → Host", #selector(pullClipboard(_:)))
     let clipNote = NSTextField(wrappingLabelWithString: "Text transfers only when you choose a direction. No automatic sharing.")
     clipNote.font = .systemFont(ofSize: 11); clipNote.textColor = .secondaryLabelColor
-    let recovery = stack([importRetryButton, replaceRetryButton])
+    recoveryActions = stack([importRetryButton, replaceRetryButton])
     let right = stack([detail, stack([openButton, stopButton]), stack([importButton, exportButton]), transactionsButton,
-      clipboardLabel, stack([pushButton, pullButton]), clipNote, recovery], vertical: true)
+      clipboardLabel, stack([pushButton, pullButton]), clipNote, recoveryActions], vertical: true)
     let body = stack([listScroll, right]); body.alignment = .top
     listScroll.widthAnchor.constraint(equalToConstant: 235).isActive = true
     listScroll.heightAnchor.constraint(equalTo: body.heightAnchor).isActive = true
     body.heightAnchor.constraint(greaterThanOrEqualToConstant: 235).isActive = true
     right.widthAnchor.constraint(greaterThanOrEqualToConstant: 420).isActive = true
-    detail.widthAnchor.constraint(equalTo: right.widthAnchor).isActive = true
+    detail.leadingAnchor.constraint(equalTo: right.leadingAnchor).isActive = true
+    detail.trailingAnchor.constraint(equalTo: right.trailingAnchor, constant: -4).isActive = true
     spinner.style = .spinning; spinner.controlSize = .small; spinner.isDisplayedWhenStopped = false
     cancelButton = button("Interrupt Export", #selector(interruptExport(_:)))
     inspectUnknownButton = button("Review Unknown Outcome…", #selector(reviewUnknown(_:)))
@@ -376,6 +378,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     setupActions.isHidden = prepareButton.isHidden && helpButton.isHidden
     importRetryButton.isHidden = !(selectedProject?.availableActions.contains("import_retry") ?? false)
     replaceRetryButton.isHidden = !(selectedProject?.availableActions.contains("rebuild_retry") ?? false)
+    recoveryActions.isHidden = importRetryButton.isHidden && replaceRetryButton.isHidden
     refreshButton.isEnabled = !closing && client != nil && !presentation.busy && !presentation.refreshing
     table.isEnabled = idle
     let actions = Set(selectedProject?.availableActions ?? [])
@@ -393,18 +396,27 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     revealButton.isEnabled = lastExport != nil
     inspectUnknownButton.isEnabled = idle && ((activity?.status == .unknown && activity?.acknowledgedAt == nil) || unknownClipboard)
     if switchingConfiguration || hasActiveOperation || presentation.refreshing { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
-    if let inspection = setupInspection {
+    if hasActiveOperation, let activity, activity.operation == "project.create" {
+      setupLabel.stringValue = "Creating \(activity.projectName ?? "project"). First preparation may take tens of minutes; progress appears below."
+    } else if let inspection = setupInspection {
       setupLabel.stringValue = inspection.status == "ready" ? (inspection.recipePreparationAvailable == false ? "Existing project setup is ready. Recipe creation requires an explicit setup update; see Setup Help." : "Project setup is ready. Create a project or select one below.") : inspection.title + ". " + inspection.guidance
     } else { setupLabel.stringValue = "Start setup: choose your Boxwarden configuration, then prepare project assets. Setup Help explains the first host initialization." }
     if let p = selectedProject {
       let state = p.observedState ?? p.state
       let next: String
       if p.replacementPending { next = "System replacement is interrupted. Review Details or resume the recorded replacement." }
-      else if state == "stopped" { next = "Open Desktop starts this project again. You can import or export files while it is stopped." }
+      else if state == "stopped" {
+        next = p.availableActions.contains("import")
+          ? "Open Desktop starts this project again. You can import or export files while it is stopped."
+          : "Open Desktop starts this project again. You can export files while it is stopped."
+      }
       else if p.managementReady { next = "Desktop is running. Stop the project before exporting files or replacing its system." }
       else { next = "The project is \(state). Management is not ready; refresh or inspect Details before continuing." }
       detail.stringValue = "\(p.name)\n\(next)\nWorkspace: \(p.workspace.sizeBytes >> 20) MiB · files survive stop/start\n" + (p.importState.guestPath.isEmpty ? p.workspace.mountPath : "Imported files: " + p.importState.guestPath)
-      if diagnosticsVisible { detail.stringValue += "\nSystem: \(p.backendObject)\nWorkspace ID: \(p.workspace.id)\nSoftware: \(p.software.status)\n\(p.diagnostic)" }
+      if diagnosticsVisible {
+        let software = state == "stopped" && p.software.status == "unavailable" ? "Not checked while stopped" : p.software.status
+        detail.stringValue += "\nSystem: \(p.backendObject)\nWorkspace ID: \(p.workspace.id)\nSoftware: \(software)\n\(p.diagnostic)"
+      }
       clipboardLabel.stringValue = "Clipboard target: alpha / \(p.name)" + (selectedClipboardTarget == nil ? " — unavailable" : " — ready") + (privatePasteboard == nil ? "" : " · synthetic private pasteboard")
     } else {
       detail.stringValue = projects.isEmpty && snapshotAvailable ? "No projects in this configuration. Create a project after setup is ready." : "Select a project to inspect its workspace and current state."
@@ -430,11 +442,11 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   @objc func revealExport(_ sender: Any?) { if let path = lastExport { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) } }
   @objc func interruptExport(_ sender: Any?) {
     guard let activity, client?.cancelActiveActivity(activity.id) == true else { return }
-    report("Interruption requested. Waiting for the CLI outcome; the destination may be uncertain. Keep the project stopped and inspect Export Transactions before recovery.")
+    report("Interruption requested. Waiting for the CLI outcome; the destination may be uncertain. Keep the project stopped and choose Exports & Recovery before recovery.")
   }
   @objc func reviewUnknown(_ sender: Any?) {
     guard (activity?.status == .unknown && activity?.acknowledgedAt == nil) || unknownClipboard else { return }
-    var message = "Refresh projects and inspect the destination or Export Transactions. Acknowledgement preserves the unknown outcome and allows later explicit commands; the backend still checks locks, retained intent and exact resources. Nothing is replayed automatically."
+    var message = "Refresh projects and inspect the destination or choose Exports & Recovery. Acknowledgement preserves the unknown outcome and allows later explicit commands; the backend still checks locks, retained intent and exact resources. Nothing is replayed automatically."
     if unknownClipboard, let pending = pendingClipboard.request(config: presentation.configPath) {
       message += "\nPrevious clipboard request: alpha / \(pending["project"] ?? "unknown") — \(pending["direction"] ?? "unknown direction"). Its destination outcome is unknown; no payload was retained."
     }
