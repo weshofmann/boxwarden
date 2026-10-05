@@ -115,10 +115,13 @@ is unexplained and it is not containment evidence.
 Both new projects and workspaces are stopped and retained. All 30 pre-existing
 Tart objects kept their stopped/data inventory; reading the approved base can
 advance its access metadata. Exact hash-checked cleanup `--check` passed using
-`/usr/bin/python3`; attended candidate removal and post-removal stock checks
-are pending. No merge, release or promotion occurred. After removal, the
-candidate cannot start without its exact admitted installation; no stock
-fallback or automatic reinstall is implied.
+`/usr/bin/python3`, followed by the owner’s attended removal with that same
+interpreter. Independent post-removal verification confirmed the exact candidate
+digest tree absent; stock doctor healthy; stock bytes, parent identities/modes,
+operator group, protected inventory and both stopped workspace images preserved.
+The earlier beta.14 handoff and returned project also passed their checks again.
+No merge, release or promotion occurred. The candidate cannot start without its
+exact admitted installation; no stock fallback or automatic reinstall is implied.
 
 For the public project workflow, use the [named-project guide](../../operations/projects.md)
 and [edited-project round trip](../../operations/project-roundtrip.md). Export
