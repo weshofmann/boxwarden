@@ -36,6 +36,11 @@ import Darwin
     try script(checks + "\nprintf '%s\\n' '\(try encoded(fields))'\n")
     guard case .firstRunPlan(let plan) = try client.query(planCommand) else { fatalError("missing plan") }
     check(plan.canCreate && plan.configPath == config, "exact plain JSON plan accepted")
+    var blocked = fields; blocked["status"] = "insufficient_space"; blocked["expected_digest"] = ""
+    blocked["available_bytes"] = 24076132352; blocked["reserve_bytes"] = 30434484224
+    try script("printf '%s\\n' '\(try encoded(blocked))'\n")
+    guard case .firstRunPlan(let capacity) = try client.query(planCommand) else { fatalError("missing capacity plan") }
+    check(!capacity.canCreate && capacity.explanation.contains("22.42 GiB") && capacity.explanation.contains("28.34 GiB"), "blocked setup shows actual available and required capacity without integer truncation")
     for key in ["setup_id", "data_location", "package_root", "iso_path"] {
       var changed = fields; changed[key] = key == "setup_id" ? "22222222-2222-4222-8222-222222222222" : "/different"
       try script("printf '%s\\n' '\(try encoded(changed))'\n")

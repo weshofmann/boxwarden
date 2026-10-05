@@ -139,7 +139,7 @@ extension ProjectWindowController {
   func reviewFirstRun(_ plan: NativeFirstRunPlan) {
     guard !closing, !hasActiveOperation, plan.canCreate, let window else { return }
     let review = NSAlert(); review.messageText = "Create this Boxwarden setup?"
-    review.informativeText = "Configuration: \(plan.configPath)\nPrivate state: \(plan.stateRoot)\nData location: \(plan.dataLocation)\nMounted volume: \(plan.mountPoint)\nUbuntu installer: \(plan.isoPath)\nAvailable: \(plan.availableBytes >> 30) GiB · reserved: \(plan.reserveBytes >> 30) GiB\n\(plan.existingEntries) existing entries will be preserved\n\nThis creates the reviewed configuration and prepares project assets. Existing files at the data location are retained. Host tools must already be initialized."
+    review.informativeText = "Configuration: \(plan.configPath)\nPrivate state: \(plan.stateRoot)\nData location: \(plan.dataLocation)\nMounted volume: \(plan.mountPoint)\nUbuntu installer: \(plan.isoPath)\n\(plan.spaceSummary)\n\(plan.existingEntries) existing entries will be preserved\n\nThis creates the reviewed configuration and prepares project assets. Existing files at the data location are retained. Host tools must already be initialized."
     review.informativeText += "\n\n" + plan.prerequisites.joined(separator: "\n")
     review.addButton(withTitle: "Create Setup & Prepare"); review.addButton(withTitle: "Cancel")
     review.beginSheetModal(for: window) { [weak self] response in

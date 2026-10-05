@@ -41,7 +41,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   var lastRefreshFailure: String?
   let limitations = NSTextField(wrappingLabelWithString: "")
   let table = NSTableView()
-  let configLabel = NSTextField(labelWithString: "Choose an initialized Boxwarden configuration to begin.")
+  let configLabel = NSTextField(labelWithString: "Set up Boxwarden or use an existing configuration to begin.")
   let detail = NSTextField(wrappingLabelWithString: "Projects will appear here after a configuration is selected.")
   let setupLabel = NSTextField(wrappingLabelWithString: "")
   let statusLabel = NSTextField(wrappingLabelWithString: "No configuration selected.")

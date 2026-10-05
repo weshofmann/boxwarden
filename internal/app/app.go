@@ -94,8 +94,8 @@ type ClipboardTransfer interface {
 type ClipboardTransferFactory func(context.Context, config.Config, config.Domain) (ClipboardTransfer, error)
 
 type Options struct {
-	SetupFirstRunPlan              SetupFirstRunPlanFunc
-	SetupFirstRunCreate            SetupFirstRunCreateFunc
+	SetupFirstRunPlan             SetupFirstRunPlanFunc
+	SetupFirstRunCreate           SetupFirstRunCreateFunc
 	SetupPrepare                  SetupPrepareFunc
 	DomainSetupCheck              func(context.Context, config.Config, config.Domain) (bool, error)
 	ProjectSetupCheck             func(context.Context, config.Domain, projectx.Setup) error

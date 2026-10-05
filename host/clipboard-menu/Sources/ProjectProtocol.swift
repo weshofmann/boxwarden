@@ -46,7 +46,8 @@ struct NativeFirstRunPlan: Decodable {
   let status: String; let guidance: String; let expectedDigest: String; let existingEntries: Int
   let alternatives: [String]; let prerequisites: [String]; let nextActions: [String]; let diagnostic: String?
   var input: NativeFirstRunInput { NativeFirstRunInput(setupID: setupId, dataLocation: dataLocation, packageRoot: packageRoot, isoPath: isoPath) }
-  var explanation: String { ([guidance] + prerequisites + (diagnostic.map { [String($0.prefix(4096))] } ?? [])).joined(separator: "\n") }
+  var spaceSummary: String { String(format: "Available %.2f GiB · setup requires more than %.2f GiB", Double(availableBytes) / 1073741824, Double(reserveBytes) / 1073741824) }
+  var explanation: String { ([guidance] + (mountPoint.isEmpty ? [] : [spaceSummary]) + prerequisites + (diagnostic.map { [String($0.prefix(4096))] } ?? [])).joined(separator: "\n") }
   var canCreate: Bool { status == "ready" && expectedDigest.count == 64 && expectedDigest.allSatisfy { "0123456789abcdef".contains($0) } }
 }
 
