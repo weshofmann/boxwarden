@@ -15,6 +15,34 @@ import AppKit
     check(stock.limitations.stringValue.contains("gateway services"), "stock still explains gateway exposure")
     let controller = ProjectWindowController(executable: "/synthetic/boxwarden", networkPolicy: "unknown")
     check(controller.limitations.stringValue.contains("Network policy unidentified"), "missing or unknown policy cannot imply containment")
+    check(controller.window!.minSize.width <= 780 && controller.window!.minSize.height <= 540, "project window supports a smaller usable Mac window")
+    check(controller.setupLabel.stringValue.contains("setup"), "fresh launch explains the setup step in ordinary language")
+    func setupInspection(_ status: String, recipePreparationAvailable: Bool) throws -> SetupInspection {
+      let json = """
+      {"version":1,"scope":"alpha_project_setup","status":"\(status)","configPath":"/synthetic/config.json","configValid":true,"selectionAcceptable":true,"guidance":"Ready","nextActions":[],"recipePreparationAvailable":\(recipePreparationAvailable)}
+      """
+      return try JSONDecoder().decode(SetupInspection.self, from: Data(json.utf8))
+    }
+    controller.window!.setContentSize(NSSize(width: 760, height: 540))
+    controller.setupInspection = try setupInspection("ready", recipePreparationAvailable: true)
+    controller.render()
+    controller.window!.contentView!.layoutSubtreeIfNeeded()
+    let rootStack = controller.window!.contentView!.subviews.first as! NSStackView
+    let setupActions = rootStack.arrangedSubviews[3]
+    let body = rootStack.arrangedSubviews[4]
+    let readyGap = controller.setupLabel.frame.minY - body.frame.maxY
+    check(setupActions.isHidden && abs(readyGap - 8) < 1 && body.frame.height >= 235,
+      "ready setup collapses its empty action row and keeps the project body usable at minimum window size")
+    controller.setupInspection = try setupInspection("project_setup_missing", recipePreparationAvailable: true)
+    controller.render()
+    controller.window!.contentView!.layoutSubtreeIfNeeded()
+    let missingGap = setupActions.frame.minY - body.frame.maxY
+    check(!setupActions.isHidden && abs(missingGap - 8) < 1 && body.frame.height >= 235,
+      "missing setup keeps preparation actions adjacent to a usable project body at minimum window size")
+    controller.setupInspection = nil
+    controller.window!.setContentSize(NSSize(width: 960, height: 660))
+    controller.render()
+    controller.window!.contentView!.layoutSubtreeIfNeeded()
     let menu = NSMenu(title: "File")
     let newProject = NSMenuItem(title: "New Project", action: #selector(ProjectWindowController.createProject(_:)), keyEquivalent: "n")
     newProject.target = controller; menu.addItem(newProject); menu.update()
@@ -22,11 +50,74 @@ import AppKit
     controller.presentation.chooseConfiguration("/synthetic/config.json")
     let refresh = controller.presentation.beginRefresh()!
     controller.presentation.finishRefresh(refresh, names: ["one", "two"])
-    func project(_ state: String, actions: [String] = ["open", "stop"]) -> ProjectRecord {
+    func project(_ state: String, actions: [String] = ["open", "stop"], imported: Bool = false) -> ProjectRecord {
       ProjectRecord(name: "one", base: "base", sessionId: "session", backendObject: "backend", state: state, managementReady: false, diagnostic: "", observedState: state, backendRunning: state == "running",
         workspace: ProjectWorkspace(id: "workspace", filesystemUuid: "filesystem", sizeBytes: 64 << 20, mountPath: "/workspace", initialized: true),
-        software: ProjectSoftware(intentDigest: "intent", status: "complete", actions: []), importState: ProjectImport(status: "not_imported", id: "", guestPath: ""), replacementPending: false, availableActions: actions)
+        software: ProjectSoftware(intentDigest: "intent", status: "complete", actions: []), importState: ProjectImport(status: imported ? "complete" : "not_imported", id: imported ? "transaction" : "", guestPath: imported ? "/workspace/import" : ""), replacementPending: false, availableActions: actions)
     }
+    let layoutController = controller
+    let originalLayoutState = (layoutController.window!.contentView!.frame.size, layoutController.setupInspection, layoutController.setup, layoutController.projects, layoutController.snapshotAvailable, layoutController.recoveredBusy, layoutController.statusLabel.stringValue, layoutController.presentation.selectedName)
+    func descendants(of view: NSView) -> [NSView] {
+      view.subviews.flatMap { [$0] + descendants(of: $0) }
+    }
+    func assertRightColumnContained(_ state: String, size: NSSize, inspection: SetupInspection?, selected: ProjectRecord?) {
+      layoutController.window!.setContentSize(size)
+      layoutController.setupInspection = inspection
+      layoutController.setup = inspection?.status == "ready" ? ProjectSetup(status: "ready", guidance: "") : nil
+      layoutController.projects = selected.map { [$0] } ?? []
+      layoutController.snapshotAvailable = inspection != nil
+      layoutController.recoveredBusy = state.contains("recovered")
+      if layoutController.recoveredBusy { layoutController.statusLabel.stringValue = "preparation: qualifying" }
+      layoutController.presentation.select(selected?.name)
+      let content = layoutController.window!.contentView!
+      let root = content.subviews.first as! NSStackView
+      let body = root.arrangedSubviews[4] as! NSStackView
+      let right = body.arrangedSubviews[1] as! NSStackView
+      for _ in 0..<3 { layoutController.render(); content.layoutSubtreeIfNeeded() }
+      if selected?.importState.status == "complete" {
+        let guidance = layoutController.detail.stringValue.components(separatedBy: "\n").dropFirst().first ?? ""
+        check(guidance.contains("export") && !guidance.localizedCaseInsensitiveContains("import"),
+          "stopped completed-import guidance only describes its available export action")
+      }
+      if state.contains("recovered") {
+        let recoveryActions = right.arrangedSubviews.last!
+        check(recoveryActions.isHidden,
+          "recovered busy state removes the empty retry-action row from the right column")
+      }
+      let views = [right] + descendants(of: right)
+      let tolerance: CGFloat = 1
+      for (index, view) in views.enumerated() {
+        let bodyFrame = view.convert(view.bounds, to: body)
+        let contentFrame = view.convert(view.bounds, to: content)
+        check(body.bounds.insetBy(dx: -tolerance, dy: -tolerance).contains(bodyFrame),
+          "\(state) right-column view \(index) frame \(NSStringFromRect(bodyFrame)) escapes body \(NSStringFromRect(body.bounds)) at \(Int(size.width))×\(Int(size.height))")
+        check(content.bounds.insetBy(dx: -tolerance, dy: -tolerance).contains(contentFrame),
+          "\(state) right-column view \(index) frame \(NSStringFromRect(contentFrame)) escapes content \(NSStringFromRect(content.bounds)) at \(Int(size.width))×\(Int(size.height))")
+      }
+    }
+    layoutController.activity = ProjectActivity(id: UUID(), directory: URL(fileURLWithPath: "/private/tmp"), operation: "project.create", projectName: "synthetic-new-project", startedAt: Date(), status: .running, message: "preparation: installing")
+    layoutController.recoveredBusy = true
+    layoutController.render()
+    check(layoutController.setupLabel.stringValue.contains("Creating synthetic-new-project") && !layoutController.setupLabel.stringValue.contains("Create a project"),
+      "creation progress replaces the contradictory create-another-project guidance")
+    layoutController.activity = nil; layoutController.recoveredBusy = false
+    let readyInspection = try setupInspection("ready", recipePreparationAvailable: true)
+    for size in [NSSize(width: 960, height: 660), NSSize(width: 760, height: 540)] {
+      assertRightColumnContained("fresh", size: size, inspection: nil, selected: nil)
+      assertRightColumnContained("ready-empty", size: size, inspection: readyInspection, selected: nil)
+      assertRightColumnContained("ready-empty-recovered", size: size, inspection: readyInspection, selected: nil)
+      assertRightColumnContained("selected", size: size, inspection: readyInspection,
+        selected: project("stopped", actions: ["open", "stop", "export"], imported: true))
+    }
+    layoutController.setupInspection = originalLayoutState.1
+    layoutController.setup = originalLayoutState.2
+    layoutController.projects = originalLayoutState.3
+    layoutController.snapshotAvailable = originalLayoutState.4
+    layoutController.recoveredBusy = originalLayoutState.5
+    layoutController.statusLabel.stringValue = originalLayoutState.6
+    layoutController.presentation.select(originalLayoutState.7)
+    layoutController.window!.setContentSize(originalLayoutState.0)
+    layoutController.render()
     controller.projects = [project("running")]
     check(!controller.canReplaceSelectedProject, "running project must be stopped before replacement")
     controller.projects = [project("unknown")]
@@ -63,8 +154,14 @@ import AppKit
     let secondEnd = Date().addingTimeInterval(4)
     while controller.presentation.busy && Date() < secondEnd { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
     let feedbackCLI = root.appendingPathComponent("feedback-cli")
+    let inspectScript = """
+    if [ "$3" = setup ] && [ "$4" = inspect ]; then
+      printf '{"version":1,"scope":"alpha_project_setup","status":"ready","config_path":"%s","config_valid":true,"selection_acceptable":true,"guidance":"Ready","next_actions":[],"recipe_preparation_available":true}\\n' "$2"
+      exit 0
+    fi
+    """
     func feedbackScript(_ body: String) throws {
-      try Data(("#!/bin/sh\n" + body).utf8).write(to: feedbackCLI)
+      try Data(("#!/bin/sh\n" + inspectScript + "\n" + body).utf8).write(to: feedbackCLI)
       try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: feedbackCLI.path)
     }
     let failureEvent = #"{"version":1,"type":"error","operation":"project.list","message":"synthetic storage missing","data":{"uncertain":false}}"#
@@ -78,7 +175,7 @@ import AppKit
     feedback.client = try ProjectClient(executable: feedbackCLI.path, config: "/synthetic/broken.json", activityDirectory: root.appendingPathComponent("feedback-activity"))
     func waitForFeedback() {
       let deadline = Date().addingTimeInterval(5)
-      while (feedback.client?.config != feedback.presentation.configPath || feedback.presentation.refreshing) && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+      while (feedback.switchingConfiguration || feedback.client?.config != feedback.presentation.configPath || feedback.presentation.refreshing) && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
       check(!feedback.presentation.refreshing, "synthetic feedback refresh completed")
     }
     feedback.refreshProjects(nil); waitForFeedback()
@@ -195,6 +292,7 @@ import AppKit
     let switchCLI = root.appendingPathComponent("switch-cli"), switchStarted = root.appendingPathComponent("switch-started")
     let switchScript = """
     #!/bin/sh
+    \(inspectScript)
     if [ "$2" = /synthetic/old.json ]; then
       /usr/bin/touch '\(switchStarted.path)'
       trap '' TERM
@@ -217,7 +315,7 @@ import AppKit
     check(!oldStillRunning, "configuration replacement waits for old query reap before latest inventory starts")
     check(switching.client?.config == "/synthetic/new-24.json", "rapid configuration choices activate only the latest desired path")
     let switchStore = try ProjectActivityStore(root: root.appendingPathComponent("switch-activity"))
-    check(try switchStore.records().allSatisfy { ["/synthetic/old.json", "/synthetic/new-24.json"].contains($0.config) }, "coalescing never starts intermediate configuration queries")
+    check(try switchStore.records().filter { $0.operation != "setup.inspect" }.allSatisfy { ["/synthetic/old.json", "/synthetic/new-24.json"].contains($0.config) }, "coalescing never starts intermediate configuration queries")
     try FileManager.default.removeItem(at: switchStarted)
     switching.useConfiguration("/synthetic/old.json")
     spinUntil { FileManager.default.fileExists(atPath: switchStarted.path) }

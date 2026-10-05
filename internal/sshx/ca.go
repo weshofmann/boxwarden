@@ -534,3 +534,15 @@ func validUUID(raw string) bool {
 	}
 	return true
 }
+
+// CheckInitialized reports only whether the complete configured-domain check
+// admits the selected CA. It returns false without error only for wholly
+// absent state; partial, unsafe, copied, or duplicated state remains an error.
+// No private or public identity material crosses this onboarding boundary.
+func (s *CAStore) CheckInitialized(ctx context.Context, current Domain, configured []Domain) (bool, error) {
+	_, err := s.Check(ctx, current, configured)
+	if errors.Is(err, ErrCAMissing) {
+		return false, nil
+	}
+	return err == nil, err
+}

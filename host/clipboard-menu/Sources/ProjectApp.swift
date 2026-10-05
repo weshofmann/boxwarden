@@ -3,7 +3,7 @@ import AppKit
 #if !PROJECT_APP_TEST
 @main
 #endif
-final class ProjectManagerApp: NSObject, NSApplicationDelegate {
+final class ProjectManagerApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var controller: ProjectWindowController!
   private var statusItem: NSStatusItem!
   private var quitting = false
@@ -64,12 +64,27 @@ final class ProjectManagerApp: NSObject, NSApplicationDelegate {
     edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
     editItem.submenu = edit
     NSApp.mainMenu = main
-    statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    statusItem.button?.title = "Boxwarden"
-    let menu = NSMenu()
+    statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    statusItem.button?.image = ProjectStatusIcon.image()
+    statusItem.button?.toolTip = "Boxwarden"
+    statusItem.button?.setAccessibilityLabel("Boxwarden")
+    let menu = NSMenu(); menu.delegate = self
     let show = menu.addItem(withTitle: "Show Projects", action: #selector(showProjects(_:)), keyEquivalent: ""); show.target = self
+    menu.addItem(.separator())
+    let target = NSMenuItem(title: "Clipboard target: none", action: nil, keyEquivalent: ""); target.tag = 1; menu.addItem(target)
+    let push = menu.addItem(withTitle: "Host → Guest", action: #selector(ProjectWindowController.pushClipboard(_:)), keyEquivalent: ""); push.target = controller; push.tag = 2
+    let pull = menu.addItem(withTitle: "Guest → Host", action: #selector(ProjectWindowController.pullClipboard(_:)), keyEquivalent: ""); pull.target = controller; pull.tag = 3
+    menu.addItem(.separator())
     menu.addItem(withTitle: "Quit Boxwarden", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
     statusItem.menu = menu
+  }
+  func menuWillOpen(_ menu: NSMenu) {
+    // Only already observed target metadata is inspected here. Opening a menu
+    // never reads any pasteboard or performs a transfer/discovery command.
+    let target = controller.selectedProject?.name
+    menu.item(withTag: 1)?.title = "Clipboard target: " + (target ?? "none") + (controller.selectedClipboardTarget == nil && target != nil ? " — unavailable" : "")
+    menu.item(withTag: 2)?.isEnabled = controller.pushButton.isEnabled && controller.window?.attachedSheet == nil
+    menu.item(withTag: 3)?.isEnabled = controller.pullButton.isEnabled && controller.window?.attachedSheet == nil
   }
   @objc private func showProjects(_ sender: Any?) { controller.showWindow(nil); NSApp.activate(ignoringOtherApps: true) }
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showProjects(nil); return true }

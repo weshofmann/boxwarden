@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"syscall"
@@ -20,9 +21,11 @@ type OwnedScriptRunner interface {
 
 var ErrScriptReapUnproven = errors.New("owned script reap is unproven")
 
-type OSOwnedScriptRunner struct{}
+// Output receives merged actual stdout/stderr. No output is retained by the runner.
+// Output is bounded to 8 MiB and a write failure stops the owned process group.
+type OSOwnedScriptRunner struct{ Output io.Writer }
 
-func (OSOwnedScriptRunner) RunOwned(ctx context.Context, command execx.Command) (execx.Result, error) {
+func (runner OSOwnedScriptRunner) RunOwned(ctx context.Context, command execx.Command) (execx.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return execx.Result{}, err
 	}
@@ -34,28 +37,94 @@ func (OSOwnedScriptRunner) RunOwned(ctx context.Context, command execx.Command) 
 		return execx.Result{}, err
 	}
 	defer devNull.Close()
+	var outputRead, outputWrite *os.File
+	outputFile := devNull
+	if runner.Output != nil {
+		outputRead, outputWrite, err = os.Pipe()
+		if err != nil {
+			return execx.Result{}, err
+		}
+		defer outputRead.Close()
+		defer outputWrite.Close()
+		outputFile = outputWrite
+	}
 	process, err := os.StartProcess(command.Path, append([]string{command.Path}, command.Args...), &os.ProcAttr{
 		Env:   append([]string(nil), command.Env...),
-		Files: []*os.File{devNull, devNull, devNull},
+		Files: []*os.File{devNull, outputFile, outputFile},
 		Sys:   &syscall.SysProcAttr{Setpgid: true},
 	})
 	if err != nil {
 		return execx.Result{}, fmt.Errorf("start owned script: %w", err)
 	}
 	owned := &ownedScriptProcess{process: process, done: make(chan struct{}), signal: syscall.Kill, poll: pollScriptWait}
+
 	go owned.reap()
-	select {
-	case <-owned.done:
-		return execx.Result{}, owned.waitErr
-	case <-ctx.Done():
-		stopErr := owned.stop()
+	var drained chan error
+	if outputRead != nil {
+		_ = outputWrite.Close()
+		drained = make(chan error, 1)
+		go func() {
+			limited := &io.LimitedReader{R: outputRead, N: 8 << 20}
+			_, copyErr := io.Copy(runner.Output, limited)
+			if copyErr == nil && limited.N == 0 {
+				var extra [1]byte
+				n, readErr := outputRead.Read(extra[:])
+				if n != 0 {
+					copyErr = errors.New("owned script output exceeds 8 MiB")
+				} else if readErr != io.EOF {
+					copyErr = readErr
+				}
+			}
+			drained <- copyErr
+		}()
+	}
+	var outputErr error
+	reapTimeout := 30 * time.Second
+	if runner.Output != nil {
+		reapTimeout = 5 * time.Second
+	}
+	wait := func() error {
 		select {
 		case <-owned.done:
-			return execx.Result{}, errors.Join(ctx.Err(), stopErr, owned.waitErr)
-		case <-time.After(30 * time.Second):
-			return execx.Result{}, errors.Join(ctx.Err(), stopErr, ErrScriptReapUnproven)
+			return owned.waitErr
+		case <-ctx.Done():
+			stopErr := owned.stop()
+			select {
+			case <-owned.done:
+				return errors.Join(ctx.Err(), stopErr, owned.waitErr)
+			case <-time.After(reapTimeout):
+				return errors.Join(ctx.Err(), stopErr, ErrScriptReapUnproven)
+			}
 		}
 	}
+	var waitErr error
+	select {
+	case <-owned.done:
+		waitErr = owned.waitErr
+	case <-ctx.Done():
+		waitErr = wait()
+	case outputErr = <-drained:
+		drained = nil
+		if outputErr != nil {
+			stopErr := owned.stop()
+			select {
+			case <-owned.done:
+				waitErr = errors.Join(stopErr, owned.waitErr)
+			case <-time.After(reapTimeout):
+				waitErr = errors.Join(stopErr, ErrScriptReapUnproven)
+			}
+		} else {
+			waitErr = wait()
+		}
+	}
+	if drained != nil {
+		select {
+		case outputErr = <-drained:
+		case <-time.After(5 * time.Second):
+			outputErr = errors.New("owned script output drain is unproven")
+		}
+	}
+	return execx.Result{}, errors.Join(waitErr, outputErr, ctx.Err())
 }
 
 type ownedScriptProcess struct {

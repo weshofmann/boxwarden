@@ -2,18 +2,18 @@ import AppKit
 
 extension ProjectWindowController {
   @objc func createProject(_ sender: Any?) {
-    guard readyToAct, setup?.status == "ready", let window, window.attachedSheet == nil else { return }
+    guard readyToAct, createButton.isEnabled, setup?.status == "ready", let window, window.attachedSheet == nil else { return }
     let a = NSAlert(); a.messageText = "Create a project"
     a.informativeText = "Preparation can take several minutes. The workspace is independent of the disposable system disk. This window remains responsive while the CLI prepares and starts the desktop."
     let name = NSTextField(string: ""); name.placeholderString = "Project name, e.g. myproject"; name.setAccessibilityIdentifier("New project name")
-    let recipe = NSPopUpButton(); recipe.addItems(withTitles: ["desktop", "actions", "chatgpt"]); recipe.setAccessibilityIdentifier("Recipe")
+    let recipe = NSPopUpButton(); recipe.addItems(withTitles: ["Ubuntu desktop", "Desktop + action examples", "Desktop + ChatGPT client"]); recipe.setAccessibilityIdentifier("Recipe")
     let size = NSPopUpButton(); size.addItems(withTitles: ["64", "128", "256", "512", "1024", "2048", "4096"]); size.selectItem(withTitle: "512"); size.setAccessibilityIdentifier("Workspace MiB")
     let form = stack([NSTextField(labelWithString: "Name"), name, NSTextField(labelWithString: "Recipe"), recipe, NSTextField(labelWithString: "Workspace size (MiB)"), size], vertical: true)
     form.frame = NSRect(x: 0, y: 0, width: 380, height: 180); name.widthAnchor.constraint(equalToConstant: 380).isActive = true
     a.accessoryView = form; a.addButton(withTitle: "Create Project"); a.addButton(withTitle: "Cancel")
     a.beginSheetModal(for: window) { [weak self] response in
       guard response == .alertFirstButtonReturn, let self else { return }
-      guard ProjectCommand.validToken(name.stringValue), let recipeName = recipe.titleOfSelectedItem, let bytes = Int(size.titleOfSelectedItem ?? "") else { self.report("Use a name containing letters, digits, dots, underscores or hyphens; no spaces or leading hyphen."); return }
+      guard ProjectCommand.validToken(name.stringValue), let recipeName = ["desktop", "actions", "chatgpt"].dropFirst(recipe.indexOfSelectedItem).first, let bytes = Int(size.titleOfSelectedItem ?? "") else { self.report("Use a name containing letters, digits, dots, underscores or hyphens; no spaces or leading hyphen."); return }
       self.run(.create(name: name.stringValue, recipe: recipeName, sizeMiB: bytes))
     }
     window.attachedSheet?.makeFirstResponder(name)
@@ -55,7 +55,7 @@ extension ProjectWindowController {
   @objc func replaceSystem(_ sender: Any?) {
     guard readyToAct, canReplaceSelectedProject, let p = selectedProject, let window, window.attachedSheet == nil else { return }
     let a = NSAlert(); a.alertStyle = .warning; a.messageText = "Replace the system for \(p.name)?"
-    a.informativeText = "This discards system-local files, installed applications and running processes. The independent workspace \(p.workspace.id) and its files are retained. The project is stopped. Boxwarden prepares the selected recipe and starts its replacement. Export important work first."
+    a.informativeText = "This discards system-local files, installed applications and running processes. The independent workspace and its files are retained. The project is stopped. Boxwarden prepares the selected recipe and starts its replacement. Export important work first."
     let recipe = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 240, height: 28)); recipe.addItems(withTitles: ["desktop", "actions", "chatgpt"]); recipe.setAccessibilityIdentifier("Replacement recipe")
     a.accessoryView = recipe; a.addButton(withTitle: "Cancel"); a.addButton(withTitle: "Replace System")
     a.beginSheetModal(for: window) { [weak self] response in
@@ -136,12 +136,12 @@ final class ExportTransactionsController: NSWindowController {
   let retry: (String) -> Void
   var entries: [ProjectExportEntry] = []
   let choices = NSPopUpButton()
-  let detail = NSTextField(wrappingLabelWithString: "Loading public export transactions…")
+  let detail = NSTextField(wrappingLabelWithString: "Loading exports for this project…")
   let retryButton = NSButton(title: "Retry Selected Export…", target: nil, action: nil)
   let revealButton = NSButton(title: "Reveal Returned Files", target: nil, action: nil)
   init(project: String, client: ProjectClient, canRetry: Bool, retry: @escaping (String) -> Void) {
     self.project = project; self.client = client; self.canRetry = canRetry; self.retry = retry
-    let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 740, height: 330), styleMask: [.titled], backing: .buffered, defer: false); w.title = "Export Transactions — " + project
+    let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 740, height: 330), styleMask: [.titled], backing: .buffered, defer: false); w.title = "Exports & Recovery — " + project
     super.init(window: w)
     choices.target = self; choices.action = #selector(selected); choices.setAccessibilityIdentifier("Export transaction")
     retryButton.target = self; retryButton.action = #selector(retrySelected); retryButton.isEnabled = false

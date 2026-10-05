@@ -1,9 +1,14 @@
 package hostidentity
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 )
+
+// ErrConfigLocationInadmissible identifies configuration storage/ownership
+// defects separately from unavailable workspace backing storage.
+var ErrConfigLocationInadmissible = errors.New("configuration location inadmissible")
 
 // StorageExpectation is a trusted config declaration, kept on a different
 // filesystem from the workspace backing volume.
