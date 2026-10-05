@@ -96,6 +96,12 @@ mkdir -p "$app_support/bin" "$app_support/support"
 cp "$package/bin/boxwarden" "$app_support/bin/boxwarden"
 cp "$package/support/source/tools/private-beta/prepare-projects.sh" "$app_support/prepare-projects.sh"
 cp -R "$package/support/source" "$app_support/support/source"
+zstd_bin=${BOXWARDEN_SUPPORT_ZSTD:?set the actual absolute build-time zstd executable}
+if [[ "$zstd_bin" != /* || ! -f "$zstd_bin" || ! -x "$zstd_bin" || -L "$zstd_bin" || $(basename "$zstd_bin") != zstd ]]; then
+  echo 'BOXWARDEN_SUPPORT_ZSTD must be the actual absolute zstd executable, not a shim' >&2
+  exit 2
+fi
+export PATH="$(dirname "$go_bin"):$(dirname "$zstd_bin"):/usr/bin:/bin"
 bash "$app_support/support/source/tools/private-beta/build_support.sh" \
   "$app_support/support/source" "${BOXWARDEN_SUPPORT_ISO:?set the pinned build-time Ubuntu ARM64 ISO}" \
   "${BOXWARDEN_SUPPORT_CHECKER_DEB:?set the pinned build-time static checker deb}" "$app_support/support/resources"

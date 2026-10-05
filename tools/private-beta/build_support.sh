@@ -10,6 +10,9 @@ iso=$2
 checker=$3
 output=$4
 go=${GO_BIN:?set actual Go compiler for package construction}
+zstd_bin=${BOXWARDEN_SUPPORT_ZSTD:?set actual absolute build-time zstd executable}
+[[ "$zstd_bin" == /* && -f "$zstd_bin" && -x "$zstd_bin" && ! -L "$zstd_bin" && $(basename "$zstd_bin") == zstd ]] || { echo 'supply the actual zstd executable, not a shim' >&2;exit 2; }
+export PATH="$(dirname "$go"):$(dirname "$zstd_bin"):/usr/bin:/bin"
 [[ ! -e "$output" && ! -L "$output" ]] || { echo 'support output must not exist' >&2;exit 2; }
 [[ -z $(git -C "$source" status --porcelain --untracked-files=all) ]] || { echo 'support build requires the exact clean package source' >&2;exit 1; }
 # Verification precedes archive parsing and every compiler invocation.
