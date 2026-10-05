@@ -42,7 +42,10 @@ class BuildInterfaceTests(unittest.TestCase):
 
     def test_malformed_arguments_fail_before_build(self):
         for arguments in (["--unknown"], ["--cli"], ["--output"], ["--version"],
-                          ["--build"], ["--app", "unknown"], ["--version", "v0.2.0"],
+                          ["--build"], ["--bundle-id"], ["--bundle-id", "bad id"],
+                          ["--bundle-id", "../escape"], ["--bundle-id", "org..boxwarden"],
+                          ["--bundle-id", "org.test", "--bundle-id", "org.other"],
+                          ["--app", "unknown"], ["--version", "v0.2.0"],
                           ["--version", "0.02.0"], ["--version", "0.2"],
                           ["--build", "-1"], ["--build", "1.2"],
                           ["--output", "relative.app"], ["--cli", "relative-cli"]):
@@ -95,12 +98,18 @@ class BuildInterfaceTests(unittest.TestCase):
     def test_project_window_preserves_cli_on_case_insensitive_filesystem(self):
         self.check_packaged_cli("project-manager")
 
-    def check_packaged_cli(self, app_kind):
+    def test_isolated_project_bundle_keeps_default_identity_unchanged(self):
+        self.check_packaged_cli("project-manager", "org.boxwarden.project-manager.test-reliability")
+        with (self.script.parent / "ProjectInfo.plist").open("rb") as handle:
+            self.assertEqual(plistlib.load(handle)["CFBundleIdentifier"], "org.boxwarden.project-manager")
+
+    def check_packaged_cli(self, app_kind, bundle_id=None):
         cli = self.compiled_cli()
         original = cli.read_bytes()
         output = self.root / "New App.app"
         # No go exists in this path: supplied CLI packaging must not rebuild it.
-        result = subprocess.run(["/bin/bash", str(self.script), "--app", app_kind, "--cli", str(cli),
+        extra = ["--bundle-id", bundle_id] if bundle_id else []
+        result = subprocess.run(["/bin/bash", str(self.script), *extra, "--app", app_kind, "--cli", str(cli),
                                  "--output", str(output), "--version", "0.2.0-beta.1+fixture",
                                  "--build", "7"], env=dict(os.environ, PATH="/usr/bin:/bin"),
                                 capture_output=True, text=True)
@@ -112,6 +121,8 @@ class BuildInterfaceTests(unittest.TestCase):
             info = plistlib.load(handle)
         self.assertEqual(info["CFBundleShortVersionString"], "0.2.0-beta.1+fixture")
         self.assertEqual(info["CFBundleVersion"], "7")
+        if bundle_id:
+            self.assertEqual(info["CFBundleIdentifier"], bundle_id)
         self.assertNotEqual(info["CFBundleExecutable"].lower(), "boxwarden")
         subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(output)],
                        check=True, capture_output=True)

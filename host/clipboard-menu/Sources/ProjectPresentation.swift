@@ -34,6 +34,7 @@ final class ProjectPresentation {
     if selectedName == nil || !names.contains(selectedName!) { selectedName = names.first }
     return true
   }
+  func cancelRefresh() { refreshID = nil; refreshing = false }
   func select(_ name: String?) {
     guard !busy else { return }
     selectedName = name.flatMap { projectNames.contains($0) ? $0 : nil }

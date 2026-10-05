@@ -166,10 +166,15 @@ import Darwin
     check(cancelDone.wait(timeout: .now() + .seconds(4)) == .success, "cancelled child reaped")
     if case .unknown = cancelOutcome {} else { check(false, "interrupt does not claim backend rollback") }
     check(!client.cancelActiveActivity(cancelActivity.id), "reaped PID cannot be signalled")
+    try script("trap '' TERM\nexec /bin/sleep 60\n")
     let beforeTimeout = Date()
     do { _ = try client.query(.list, timeout: 0.15); check(false, "hanging query accepted") } catch {}
     check(Date().timeIntervalSince(beforeTimeout) < 2, "query has caller wall-clock bound")
-    usleep(200_000)
+    let remainingQueries = try client.recoverActivities().filter { $0.operation == "project.list" && $0.status == .running }
+    // Retain the failure while allowing the exact owned process to finish cleanup.
+    let timeoutReturnedBeforeReap = !remainingQueries.isEmpty
+    usleep(1_200_000)
+    check(!timeoutReturnedBeforeReap, "timed-out TERM-ignoring query must be reaped before query returns")
     let unknownForAck = try client.recoverActivities().first(where: { $0.projectName == "wrong-name" })!
     let foreignAck = try ProjectClient(executable: cli.path, config: "/opt/foreign config", activityDirectory: activity)
     do { try foreignAck.acknowledgeUnknownActivity(unknownForAck.id); check(false, "foreign configuration acknowledged unknown record") } catch {}

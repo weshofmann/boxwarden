@@ -3,8 +3,8 @@ import AppKit
 @main struct ProjectWindowTests {
   static func main() throws {
     _ = NSApplication.shared
-    func check(_ value: @autoclosure () -> Bool, _ message: String) {
-      guard value() else { fputs("FAIL: \(message)\n", stderr); exit(1) }
+    func check(_ value: @autoclosure () throws -> Bool, _ message: String) {
+      guard (try! value()) else { fputs("FAIL: \(message)\n", stderr); exit(1) }
     }
     func activity(_ name: String, _ status: ProjectActivityStatus) -> ProjectActivity {
       ProjectActivity(id: UUID(), directory: URL(fileURLWithPath: "/private/tmp"), operation: "project.open", projectName: name, startedAt: Date(), status: status, message: "synthetic")
@@ -73,7 +73,7 @@ import AppKit
     feedback.client = try ProjectClient(executable: feedbackCLI.path, config: "/synthetic/broken.json", activityDirectory: root.appendingPathComponent("feedback-activity"))
     func waitForFeedback() {
       let deadline = Date().addingTimeInterval(5)
-      while feedback.presentation.refreshing && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+      while (feedback.client?.config != feedback.presentation.configPath || feedback.presentation.refreshing) && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
       check(!feedback.presentation.refreshing, "synthetic feedback refresh completed")
     }
     feedback.refreshProjects(nil); waitForFeedback()
@@ -182,11 +182,52 @@ import AppKit
     race.run(.open(name: "one")); race.run(.open(name: "one"))
     spinUntil { !race.presentation.busy }
     try Data().write(to: releaseQuery)
-    spinUntil { FileManager.default.fileExists(atPath: queryEnded.path) && !race.presentation.refreshing }
+    spinUntil { !race.presentation.refreshing && (try? race.client?.recoverActivities().contains(where: { $0.operation == "project.list" && $0.status == .running })) == false }
     RunLoop.current.run(until: Date().addingTimeInterval(0.2))
     check(race.snapshotAvailable && race.statusLabel.stringValue == "synthetic effect failed" && !race.progressLines.contains(where: { $0.contains("late inventory failure") }), "late background query cannot overwrite completed operation outcome or validated inventory")
     let recordedMutations = try String(contentsOf: mutationCalls, encoding: .utf8)
     check(recordedMutations == "open\n", "repeated effect click during refresh starts exactly one command")
-    print("PASS: native activity controls, refresh feedback and background action availability")
+    let switchCLI = root.appendingPathComponent("switch-cli"), switchStarted = root.appendingPathComponent("switch-started")
+    let switchScript = """
+    #!/bin/sh
+    if [ "$2" = /synthetic/old.json ]; then
+      /usr/bin/touch '\(switchStarted.path)'
+      trap '' TERM
+      exec /bin/sleep 2
+    fi
+    if [ "$6" = targets ]; then printf '%s\\n' '{"targets":[]}'; exit 0; fi
+    printf '%s\\n' '\(successEvent)'
+    """
+    try Data(switchScript.utf8).write(to: switchCLI)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: switchCLI.path)
+    let switching = ProjectWindowController(executable: switchCLI.path, activityDirectory: root.appendingPathComponent("switch-activity"), defaults: feedbackDefaults)
+    switching.useConfiguration("/synthetic/old.json")
+    spinUntil { FileManager.default.fileExists(atPath: switchStarted.path) }
+    let oldClient = switching.client!
+    for index in 0..<25 { switching.useConfiguration("/synthetic/new-\(index).json") }
+    spinUntil { switching.snapshotAvailable }
+    let oldStillRunning = try oldClient.recoverActivities().contains { $0.status == .running }
+    // Let a red-run fixture naturally end before leaving disposable storage.
+    if oldStillRunning { RunLoop.current.run(until: Date().addingTimeInterval(2.2)) }
+    check(!oldStillRunning, "configuration replacement waits for old query reap before latest inventory starts")
+    check(switching.client?.config == "/synthetic/new-24.json", "rapid configuration choices activate only the latest desired path")
+    let switchStore = try ProjectActivityStore(root: root.appendingPathComponent("switch-activity"))
+    check(try switchStore.records().allSatisfy { ["/synthetic/old.json", "/synthetic/new-24.json"].contains($0.config) }, "coalescing never starts intermediate configuration queries")
+    try FileManager.default.removeItem(at: switchStarted)
+    switching.useConfiguration("/synthetic/old.json")
+    spinUntil { FileManager.default.fileExists(atPath: switchStarted.path) }
+    let retiring = switching.client!
+    switching.refreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in switching.refreshProjects(nil) }
+    switching.activityTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in switching.pollActivity() }
+    switching.useConfiguration("/synthetic/should-not-start.json")
+    var quitDrained = false
+    switching.shutdownQueries { quitDrained = true }
+    for _ in 0..<10 { switching.refreshProjects(nil); switching.pollActivity(); switching.useConfiguration("/synthetic/also-refused.json") }
+    check(switching.closing && switching.refreshTimer?.isValid == false && switching.activityTimer?.isValid == false && !switching.chooseButton.isEnabled, "quit invalidates timers and disables admission while drain stays asynchronous")
+    spinUntil { quitDrained }
+    check(switching.client == nil && !switching.snapshotAvailable, "quit during configuration retirement cannot activate a replacement or stale snapshot")
+    check(try retiring.recoverActivities().allSatisfy { $0.status != .running }, "quit completion follows owned query reap")
+    check(try switchStore.records().allSatisfy { !["/synthetic/should-not-start.json", "/synthetic/also-refused.json"].contains($0.config) }, "timer and config work cannot restart query children during quit")
+    print("PASS: native activity controls, refresh feedback, config coalescing and asynchronous query shutdown")
   }
 }

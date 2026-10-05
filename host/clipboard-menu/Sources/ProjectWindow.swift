@@ -12,6 +12,9 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   var preferredSelection: String?
   var client: ProjectClient?
   var clipboardClient: CLIClient?
+  private let queryRetirement = DispatchGroup()
+  private var switchingConfiguration = false
+  private(set) var closing = false
   var projects: [ProjectRecord] = []
   var setup: ProjectSetup?
   var clipboardTargets: [MenuTarget] = []
@@ -53,7 +56,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   var selectedProject: ProjectRecord? { projects.first { $0.name == presentation.selectedName } }
   var canReplaceSelectedProject: Bool { selectedProject?.observedState == "stopped" && selectedProject?.replacementPending == false && selectedProject?.availableActions.contains("inspect_session") == false }
   var hasActiveOperation: Bool { presentation.busy || recoveredBusy }
-  var readyToAct: Bool { !hasActiveOperation && snapshotAvailable }
+  var readyToAct: Bool { !closing && !switchingConfiguration && !hasActiveOperation && snapshotAvailable }
 
   init(executable: String, privatePasteboard: String? = nil, activityDirectory: URL? = nil, defaults: UserDefaults = .standard) {
     self.executable = executable; self.privatePasteboard = privatePasteboard
@@ -157,7 +160,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     }
   }
   @objc func chooseConfiguration(_ sender: Any?) {
-    guard !hasActiveOperation, let window, window.attachedSheet == nil else { return }
+    guard !closing, !hasActiveOperation, let window, window.attachedSheet == nil else { return }
     let panel = NSOpenPanel(); panel.title = "Choose Initialized Boxwarden Configuration"
     panel.canChooseDirectories = false; panel.canChooseFiles = true; panel.allowsMultipleSelection = false
     panel.allowedContentTypes = [.json]
@@ -166,34 +169,68 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     }
   }
   func useConfiguration(_ path: String) {
-    guard !hasActiveOperation else { return }
-    do {
-      let next = try ProjectClient(executable: executable, config: path, activityDirectory: activityDirectory)
-      presentation.chooseConfiguration(path)
-      client = next; clipboardClient = CLIClient(executable: executable, config: path, privateHostPasteboard: privatePasteboard)
-      projects = []; clipboardTargets = []; setup = nil; snapshotAvailable = false
-      lastExport = nil; activity = nil; recoveredActivities = []; preferredSelection = nil; allowUnknownRetry = false
-      lastRefreshFailure = nil; progressLines.removeAll(); progressText.string = ""
-      statusLabel.stringValue = "Refreshing selected configuration…"
-      unknownClipboard = pendingClipboard.request(config: path) != nil
-      if unknownClipboard { report("A previous explicit clipboard transfer has an unknown outcome. No payload was retained. Review the target before permitting another transfer.") }
-      defaults.set(path, forKey: "SelectedConfiguration")
-      configLabel.stringValue = "Configuration: " + path
-      try recoverActivity()
-      refreshProjects(nil)
-    } catch { report(error.localizedDescription) }
+    guard !closing, !hasActiveOperation, ProjectCommand.validPath(path) else { return }
+    presentation.chooseConfiguration(path)
+    projects = []; clipboardTargets = []; setup = nil; snapshotAvailable = false
+    lastExport = nil; activity = nil; recoveredActivities = []; preferredSelection = nil; allowUnknownRetry = false
+    lastRefreshFailure = nil; progressLines.removeAll(); progressText.string = ""
+    statusLabel.stringValue = "Refreshing selected configuration…"
+    configLabel.stringValue = "Configuration: " + path
+    render()
+    // A rapid sequence of selections changes only the desired path. At most one
+    // old pair of clients is retiring, and no replacement query starts early.
+    guard !switchingConfiguration else { return }
+    switchingConfiguration = true
+    let previous = client, previousClipboard = clipboardClient
+    client = nil; clipboardClient = nil
+    queryRetirement.enter()
+    drainQueries(project: previous, clipboard: previousClipboard) { [self] in
+      DispatchQueue.main.async { [self] in
+        defer { queryRetirement.leave() }
+        switchingConfiguration = false
+        guard !closing else { return }
+        let desired = presentation.configPath
+        do {
+          client = try ProjectClient(executable: executable, config: desired, activityDirectory: activityDirectory)
+          clipboardClient = CLIClient(executable: executable, config: desired, privateHostPasteboard: privatePasteboard)
+          unknownClipboard = pendingClipboard.request(config: desired) != nil
+          if unknownClipboard { report("A previous explicit clipboard transfer has an unknown outcome. No payload was retained. Review the target before permitting another transfer.") }
+          defaults.set(desired, forKey: "SelectedConfiguration")
+          try recoverActivity()
+          refreshProjects(nil)
+        } catch { report(error.localizedDescription) }
+        render()
+      }
+    }
   }
+  private func drainQueries(project: ProjectClient?, clipboard: CLIClient?, completion: @escaping () -> Void) {
+    let drain = DispatchGroup()
+    if let project { drain.enter(); project.disposeQueries { drain.leave() } }
+    if let clipboard { drain.enter(); clipboard.disposeQueries { drain.leave() } }
+    drain.notify(queue: .global(), execute: completion)
+  }
+  func shutdownQueries(_ completion: @escaping () -> Void) {
+    closing = true
+    refreshTimer?.invalidate(); activityTimer?.invalidate()
+    presentation.cancelRefresh()
+    queryRetirement.enter()
+    drainQueries(project: client, clipboard: clipboardClient) { [self] in queryRetirement.leave() }
+    queryRetirement.notify(queue: .main, execute: completion)
+    render()
+  }
+  private func cancelObservation() { client?.cancelQueries(); clipboardClient?.cancelQueries() }
   @objc func refreshProjects(_ sender: Any?) {
-    guard let client, let ticket = presentation.beginRefresh() else { return }
+    guard !closing, !switchingConfiguration, let client, let ticket = presentation.beginRefresh() else { return }
     render()
     let clipboardClient = self.clipboardClient
+    let queryToken = client.queryToken(), clipboardToken = clipboardClient?.queryToken()
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
       do {
-        let response = try client.query(.list)
+        let response = try client.query(.list, queryToken: queryToken)
         guard case .list(let list) = response else { throw ProjectClientError.invalidResponse("Expected project inventory") }
-        let targets = (try? clipboardClient?.discover(domain: "alpha")) ?? []
+        let targets = (try? clipboardClient?.discover(domain: "alpha", queryToken: clipboardToken)) ?? []
         DispatchQueue.main.async { [weak self] in
-          guard let self, self.presentation.finishRefresh(ticket, names: list.projects.map(\.name)) else { return }
+          guard let self, !self.closing, self.presentation.finishRefresh(ticket, names: list.projects.map(\.name)) else { return }
           self.projects = list.projects; self.setup = list.setup; self.clipboardTargets = targets
           self.snapshotAvailable = true
           if let failure = self.lastRefreshFailure {
@@ -208,7 +245,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
         }
       } catch {
         DispatchQueue.main.async { [weak self] in
-          guard let self, self.presentation.finishRefresh(ticket, names: []) else { return }
+          guard let self, !self.closing, self.presentation.finishRefresh(ticket, names: []) else { return }
           self.projects = []; self.clipboardTargets = []; self.snapshotAvailable = false; self.setup = nil
           self.table.reloadData()
           let message = "Configuration or storage unavailable. Mount the configured storage and verify this configuration was initialized. " + error.localizedDescription
@@ -238,17 +275,17 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     return clipboardTargets.first { $0.domain == "alpha" && $0.session == p.name && $0.sessionID == p.sessionId && $0.backendObject == p.backendObject && $0.available && $0.isValid }
   }
   func render() {
-    let idle = !hasActiveOperation
+    let idle = !closing && !hasActiveOperation
     chooseButton.isEnabled = idle
     createButton.isEnabled = readyToAct && setup?.status == "ready"
-    refreshButton.isEnabled = client != nil && !presentation.busy && !presentation.refreshing
+    refreshButton.isEnabled = !closing && client != nil && !presentation.busy && !presentation.refreshing
     table.isEnabled = idle
     let actions = Set(selectedProject?.availableActions ?? [])
     openButton.isEnabled = readyToAct && actions.contains("open")
     stopButton.isEnabled = readyToAct && actions.contains("stop")
     importButton.isEnabled = readyToAct && actions.contains("import")
     exportButton.isEnabled = readyToAct && actions.contains("export")
-    transactionsButton.isEnabled = client != nil && selectedProject != nil && snapshotAvailable
+    transactionsButton.isEnabled = !closing && client != nil && selectedProject != nil && snapshotAvailable
     replaceButton.isEnabled = readyToAct && canReplaceSelectedProject
     importRetryButton.isEnabled = readyToAct && actions.contains("import_retry")
     replaceRetryButton.isEnabled = readyToAct && actions.contains("rebuild_retry")
@@ -305,6 +342,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   }
   func run(_ command: ProjectCommand) {
     guard readyToAct, let client, let ticket = presentation.beginOperation() else { return }
+    cancelObservation()
     activity = nil
     statusLabel.stringValue = command.operation + " in progress"
     appendProgress("Starting " + command.operation + " for " + (command.projectName ?? "selection"))
@@ -362,7 +400,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     }
   }
   func pollActivity() {
-    guard client != nil, !presentation.busy else { return }
+    guard !closing, !switchingConfiguration, client != nil, !presentation.busy else { return }
     let wasBusy = recoveredBusy
     do {
       try recoverActivity()
@@ -378,6 +416,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   func transferClipboard(_ direction: TransferDirection) {
     guard readyToAct, !unknownClipboard, let target = selectedClipboardTarget,
           let clipboardClient, let ticket = presentation.beginOperation() else { return }
+    cancelObservation()
     let request = TransferRequest(id: UUID(), target: target, direction: direction)
     let requestConfig = presentation.configPath
     guard pendingClipboard.begin(config: requestConfig, metadata: ["request": request.id.uuidString,

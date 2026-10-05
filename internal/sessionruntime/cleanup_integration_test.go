@@ -58,8 +58,12 @@ func TestAbandonedSnapshotObservationDoesNotStarveExactStop(t *testing.T) {
 	}
 	snapshotDone := make(chan snapshotResult, 1)
 	snapshotStartedAt := time.Now()
+	// Keep this abandonment/queue-recovery fixture short independently of
+	// the default snapshot budget used by normal readiness observations.
+	snapshotCtx, cancelSnapshot := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelSnapshot()
 	go func() {
-		snapshot, err := client.Snapshot(context.Background(), f.request.Binding)
+		snapshot, err := client.Snapshot(snapshotCtx, f.request.Binding)
 		snapshotDone <- snapshotResult{snapshot: snapshot, err: err}
 	}()
 	select {

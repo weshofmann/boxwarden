@@ -110,8 +110,9 @@ final class ImportProjectController: NSWindowController, NSTextFieldDelegate {
     guard !pending else { return }; changed()
     let path = selection.source, excluded = selection.exclusions
     pending = true; previewButton.isEnabled = false; previewText.string = "Inspecting explicit selection…"
+    let token = client.queryToken()
     DispatchQueue.global(qos: .userInitiated).async { [weak self, client] in
-      let result = Result { try client.query(.importPreview(source: path, exclusions: excluded)) }
+      let result = Result { try client.query(.importPreview(source: path, exclusions: excluded), queryToken: token) }
       DispatchQueue.main.async { [weak self] in
         guard let self else { return }; self.pending = false; self.previewButton.isEnabled = true
         do {
@@ -157,8 +158,9 @@ final class ExportTransactionsController: NSWindowController {
   required init?(coder: NSCoder) { fatalError("Not supported") }
   var entry: ProjectExportEntry? { entries.indices.contains(choices.indexOfSelectedItem) ? entries[choices.indexOfSelectedItem] : nil }
   func load() {
+    let token = client.queryToken()
     DispatchQueue.global(qos: .userInitiated).async { [weak self, client, project] in
-      let result = Result { try client.query(.exportList(name: project)) }
+      let result = Result { try client.query(.exportList(name: project), queryToken: token) }
       DispatchQueue.main.async { [weak self] in
         guard let self else { return }
         do {

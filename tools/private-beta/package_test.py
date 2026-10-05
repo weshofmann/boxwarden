@@ -11,6 +11,17 @@ SCRIPT = pathlib.Path(__file__).with_name("build.sh")
 
 
 class PackageInputTests(unittest.TestCase):
+    def test_invalid_application_identifier_fails_before_staging(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            for identifier in ("../escape", "bad id", "org..test", "org." + "a" * 256):
+                output = pathlib.Path(temporary) / "new"
+                result = subprocess.run(["bash", str(SCRIPT), "0.2.0-beta.1", str(output)],
+                                        env=dict(os.environ, BOXWARDEN_APP_BUNDLE_ID=identifier),
+                                        capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("BOXWARDEN_APP_BUNDLE_ID", result.stderr)
+                self.assertFalse(output.exists())
+
     def test_existing_output_is_preserved(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = pathlib.Path(temporary) / "existing"

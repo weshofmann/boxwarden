@@ -19,13 +19,13 @@ claim download/Gatekeeper distribution acceptance; it does not bypass OS checks.
 ## Verify and configure once
 
 Verify the archive beside its checksum file with
-`shasum -a 256 -c boxwarden-0.2.0-beta.12-darwin-arm64.tar.gz.sha256`, then extract
+`shasum -a 256 -c boxwarden-0.2.0-beta.14-darwin-arm64.tar.gz.sha256`, then extract
 in a new private user-owned directory. In a **new terminal**, set these
 paths to your actual assets; no profile sourcing or private bindings is needed:
 
 ```sh
 umask 077
-PACKAGE=/absolute/boxwarden-0.2.0-beta.12-darwin-arm64
+PACKAGE=/absolute/boxwarden-0.2.0-beta.14-darwin-arm64
 cd "$PACKAGE"
 shasum -a 256 -c SHA256SUMS
 "$PACKAGE/bin/boxwarden" version
@@ -73,6 +73,14 @@ Run it once, before creating projects. Identical setup retries
 are safe; different saved asset locators are refused. Keep this package and its
 formatter in place. Do not reuse an older demo's state root or change its setup.
 
+For an isolated side-by-side test application, build with
+`BOXWARDEN_APP_BUNDLE_ID=org.boxwarden.project-manager.your-test` in addition to
+`GO_BIN`. `BUILD.json` records the application identifier. That app gets its own
+remembered configuration and command-activity directory; choose a fresh initialized
+configuration to isolate its guests as well. Omitting the identifier preserves the
+normal application identity and preferences. Keep an isolated package under its
+original identifier when reopening unfinished work.
+
 For an explicit side-by-side update of an existing private configuration, see
 [UPGRADING.md](UPGRADING.md). Retain the old package and assets; preparation with
 `--update` switches admitted asset locators and preserves previous setup bytes.
@@ -114,7 +122,8 @@ files and applications and retains the independent workspace. Select the intende
 recipe and confirm only after reviewing that loss. **Resume Replacement** continues
 an existing recorded replacement through the backend.
 
-Quitting closes the frontend while guests and active project commands continue.
+Quitting cancels temporary inventory and preview reads and waits briefly for their
+children to exit. Guests and intentional project operations continue independently.
 Reopen it to rediscover state. A process that finished after the frontend closed
 may have no retained exit receipt: the app reports an unknown outcome, rather than
 claiming success or replaying it. Refresh and inspect transactions before explicitly
@@ -274,7 +283,7 @@ stays disabled. Provider sign-in, cold-machine installation, power-loss
 recovery and complete network isolation are outside this walkthrough.
 
 To rebuild from a clean committed checkout on this Mac:
-`GO_BIN=/absolute/actual/go bash tools/private-beta/build.sh 0.2.0-beta.12 /absolute/new-output`.
+`GO_BIN=/absolute/actual/go bash tools/private-beta/build.sh 0.2.0-beta.14 /absolute/new-output`.
 This builds locally and publishes no release.
 
 ## Replace a disposable project system

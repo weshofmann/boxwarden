@@ -7,6 +7,7 @@ cli=""
 app_kind="clipboard"
 version=""
 build=""
+bundle_id=""
 fail() { echo "$*" >&2; exit 1; }
 while [[ $# -gt 0 ]]; do
   [[ $# -ge 2 && -n "$2" ]] || fail "expected a value for $1"
@@ -16,6 +17,7 @@ while [[ $# -gt 0 ]]; do
     --output) [[ "$custom_output" == false ]] || fail "duplicate --output"; output="$2"; custom_output=true ;;
     --version) [[ -z "$version" ]] || fail "duplicate --version"; version="$2" ;;
     --build) [[ -z "$build" ]] || fail "duplicate --build"; build="$2" ;;
+    --bundle-id) [[ -z "$bundle_id" ]] || fail "duplicate --bundle-id"; bundle_id="$2" ;;
     *) fail "unknown argument: $1" ;;
   esac
   shift 2
@@ -31,6 +33,7 @@ identifier='(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)'
 semver="^$number\\.$number\\.$number(-$identifier(\\.$identifier)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
 [[ -z "$version" || "$version" =~ $semver ]] || fail "--version requires SemVer without a v prefix"
 [[ -z "$build" || "$build" =~ ^[0-9]+$ ]] || fail "--build requires a numeric build number"
+[[ -z "$bundle_id" || ( ${#bundle_id} -le 255 && "$bundle_id" =~ ^[A-Za-z][A-Za-z0-9-]*(\.[A-Za-z0-9][A-Za-z0-9-]*)+$ ) ]] || fail "--bundle-id requires a reverse-DNS application identifier"
 [[ "$output" == /* && "$output" == *.app ]] || fail "--output requires an absolute .app path"
 if [[ "$custom_output" == true && ( -e "$output" || -L "$output" ) ]]; then
   fail "custom output already exists: $output"
@@ -46,6 +49,9 @@ trap 'rm -rf "$stage"' EXIT
 app="$stage/$app_name.app"
 mkdir -p "$app/Contents/MacOS"
 cp "$base/host/clipboard-menu/$plist" "$app/Contents/Info.plist"
+if [[ -n "$bundle_id" ]]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_id" "$app/Contents/Info.plist"
+fi
 if [[ -n "$version" ]]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$app/Contents/Info.plist"
 fi

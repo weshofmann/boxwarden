@@ -16,6 +16,13 @@ The app uses versioned project JSON; the Go backend remains responsible for
 admission, locks, lifecycle and recovery. Private command activity records allow
 reopening without implicitly canceling or replaying a request. Recovered PIDs
 are never signaled. Missing exit receipts are reported as unknown outcomes.
+Read-only queries are serialized per client, canceled when superseded, and
+reaped before a timeout returns or a configuration replacement starts. Quit
+drains only owned queries asynchronously; durable project commands and explicit
+clipboard transfers retain their independent lifetimes. A busy activity store
+fails visibly instead of waiting indefinitely on another frontend. Preferences
+and activity use the app bundle ID; a test build with a distinct bundle ID keeps
+its configuration selection and receipts separate from the normal beta app.
 The app manages `alpha`; the CLI and legacy clipboard utility retain their
 existing domain support.
 

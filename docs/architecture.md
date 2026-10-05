@@ -280,11 +280,23 @@ Admission, exact ownership, locks, lifecycle and recovery remain in Go.
 The frontend retains private command activity (argv, bounded JSONL output,
 process identity and exit receipt), not guest data or credentials. macOS ACL,
 ancestry, owner, symlink and mode checks protect that local metadata. A detached
-CLI survives frontend quit. Reopen observes its exact PID/start identity but
+mutation CLI survives frontend quit. Read-only queries retain ownership through
+TERM/KILL escalation and reaping, including timeout, supersession, configuration
+replacement and asynchronous application quit. Replacement coalesces rapid
+configuration choices and waits for old query children to drain. Cancellation
+generation tokens also cover deferred refresh stages. Activity-store contention
+returns a bounded busy error, preserving atomic duplicate-effect admission
+without waiting indefinitely on another frontend. App preferences and command
+activity are scoped to its bundle identifier, allowing an isolated test build.
+Reopen observes its exact PID/start identity but
 never signals a recovered PID; an absent exit receipt remains an unknown outcome.
 Explicit acknowledgement is recorded separately from that outcome, without
-rewriting backend state or automatically retrying. Only a live export child owned
-by the current frontend can receive an explicit interruption request.
+rewriting backend state or automatically retrying. Only a live export mutation child owned
+by the current frontend can receive an explicit interruption request; query
+cleanup never signals durable mutations or recovered identities.
+The supervisor gives fresh snapshot observations a separate five-second operation
+budget; the initial control frame remains capped at two seconds. Absolute expiry,
+reply reserve and rejection of late positive readiness remain in force.
 
 Import confirmation pins the displayed selection digest. Export and retry use
 public stopped-workspace operations and a new destination; revealing returned

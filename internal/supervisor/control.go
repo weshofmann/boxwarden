@@ -18,9 +18,12 @@ import (
 	"github.com/weshofmann/boxwarden/internal/importx"
 )
 
-// controlIOTimeout caps snapshot RPC expiry as well as bounded request/response
-// I/O; the client sends its possibly earlier operation deadline on the wire.
+// controlIOTimeout bounds the initial request frame before action admission.
 const controlIOTimeout = 2 * time.Second
+
+// Snapshot observation includes exact backend and guest readiness checks. Its
+// RPC budget includes the bounded reply reserve; caller expiry may be earlier.
+const snapshotTimeout = 5 * time.Second
 const lifecycleTimeout = 5 * time.Second
 
 // Stop has an additional bounded window for a cooperative guest shutdown.
@@ -35,6 +38,27 @@ const readyTimeout = 5 * time.Minute
 const inspectTimeout = 90 * time.Second
 const importTimeout = 11 * time.Minute
 const actionControlTimeout = 12 * time.Minute
+
+func controlActionTimeout(action string) time.Duration {
+	switch action {
+	case "snapshot":
+		return snapshotTimeout
+	case "bootstrap":
+		return bootstrapTimeout
+	case "ready":
+		return readyTimeout
+	case "stop":
+		return lifecycleTimeout + GuestShutdownRequestTimeout + gracefulStopTimeout + controlIOTimeout
+	case "inspect_packages", "inspect_identity":
+		return inspectTimeout
+	case "transfer_import":
+		return importTimeout
+	case "run_action", "retry_action":
+		return actionControlTimeout
+	default:
+		return controlIOTimeout
+	}
+}
 
 type controlRequest struct {
 	Version     int                       `json:"version"`
@@ -255,19 +279,7 @@ func handleControl(ctx context.Context, connection net.Conn, binding Binding, ow
 		handleClipboardControl(ctx, connection, binding, owner, request, acceptedAt)
 		return
 	}
-	if request.Action == "bootstrap" {
-		serverDeadline = acceptedAt.Add(bootstrapTimeout)
-	} else if request.Action == "ready" {
-		serverDeadline = acceptedAt.Add(readyTimeout)
-	} else if request.Action == "stop" {
-		serverDeadline = acceptedAt.Add(lifecycleTimeout + GuestShutdownRequestTimeout + gracefulStopTimeout + controlIOTimeout)
-	} else if request.Action == "inspect_packages" || request.Action == "inspect_identity" {
-		serverDeadline = acceptedAt.Add(inspectTimeout)
-	} else if request.Action == "transfer_import" {
-		serverDeadline = acceptedAt.Add(importTimeout)
-	} else if request.Action == "run_action" || request.Action == "retry_action" {
-		serverDeadline = acceptedAt.Add(actionControlTimeout)
-	}
+	serverDeadline = acceptedAt.Add(controlActionTimeout(request.Action))
 	now := time.Now()
 	if request.ExpiresAt.IsZero() || !request.ExpiresAt.After(now) || request.ExpiresAt.After(serverDeadline) {
 		return
@@ -687,22 +699,8 @@ func (c *Client) callRequest(ctx context.Context, binding Binding, requestBody c
 	if !validControlAction(requestBody) {
 		return response, fmt.Errorf("invalid control request")
 	}
-	timeout := controlIOTimeout
 	action := requestBody.Action
-	if action == "bootstrap" {
-		timeout = bootstrapTimeout
-	} else if action == "ready" {
-		timeout = readyTimeout
-	} else if action == "stop" {
-		timeout += lifecycleTimeout + GuestShutdownRequestTimeout + gracefulStopTimeout
-	} else if action == "inspect_packages" || action == "inspect_identity" {
-		timeout = inspectTimeout
-	} else if action == "transfer_import" {
-		timeout = importTimeout
-	} else if action == "run_action" || action == "retry_action" {
-		timeout = actionControlTimeout
-	}
-	operationCtx, cancel := context.WithTimeout(ctx, timeout)
+	operationCtx, cancel := context.WithTimeout(ctx, controlActionTimeout(action))
 	defer cancel()
 	connection, err := dialControl(operationCtx, filepath.Join(c.RuntimeDirectory, socketName))
 	if err != nil {
