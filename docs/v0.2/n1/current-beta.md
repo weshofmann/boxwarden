@@ -1,8 +1,9 @@
 # N1 in the current private beta
 
-Status: source and packaging integration. Live validation of this beta is pending
-separate operator approval. Historical N1 results in [matrix.md](matrix.md) do
-not qualify this package. PR #18's diagnostic mission is not a prerequisite.
+Status: source and packaging integration, with the bounded attended beta.15
+observations below. This is not default N1 promotion or complete network
+qualification. Historical N1 results in [matrix.md](matrix.md) do not qualify
+this package. PR #18's diagnostic mission is not a prerequisite.
 
 The normal launch, detached supervisor, installer and replacement paths already
 use the build-selected policy. `n1candidate` binds the exact N1 Softnet version
@@ -73,3 +74,54 @@ After the trial, stop the new guests and retain their workspace/evidence. Verify
 no recorded or live candidate consumer remains, then remove only the approved
 exact candidate digest tree with the attended checked removal procedure. Leave
 stock installation, operator group, all pre-existing VMs and settings unchanged.
+
+## Attended beta.15 observations (2026-10-04)
+
+Tested source: `d935f1bf7a1f5dd1764c458e88efb4d27f358820` (PR #36),
+stacked above PR #35. This results update does not rebuild or substitute the
+approved executables. Both exact-head CI checks passed before installation.
+The attended installation and independent inspection matched the approved
+artifact, manifest platform, ownership and modes; both doctors were healthy.
+
+- Host: Apple Silicon, macOS 27.0.1 / 26A434; Tart 2.32.1.
+- Candidate CLI SHA-256:
+  `ff4e97f071d40375e44396663b91339619f7336037d4a7eebf2c250636435fd3`.
+- Candidate Softnet: 0.19.0-boxwarden-n1.1, SHA-256
+  `064206d28d82b86093244114f44f726f4f5967575a9b298a7123bf0beb740ef0`.
+- Separate stock/candidate alpha configurations, fresh prepared-base clones,
+  independent 64 MiB workspaces and no provider credentials. Actual clone
+  bootstrap/clipboard/support-check digests and root-owned modes matched the
+  prepared inputs. Legacy-base software warnings were retained.
+
+| Observation | Actual result |
+| --- | --- |
+| Owned gateway service, TCP and UDP | Candidate root timed out in initial, ordinary restart and rebuilt-system intervals. Host and stock positives bracketed every attempt; each bounded, reaped listener counted four TCP and four UDP positive responses. |
+| Directly assigned private host address | Host controls passed; both guests denied it. This does not distinguish N1 from the existing private-address restriction. |
+| Required connectivity and management | Both guests passed DHCP, advertised gateway UDP/TCP DNS, truncated UDP DNSKEY with TCP fallback, public HTTPS and strict pinned management in all three phases. |
+| Explicit clipboard | Exact synthetic stdin/copy/redirected-paste equality in both guests in all three phases. Automatic Tart clipboard/audio remained disabled; no general Mac clipboard was accessed. |
+| Workspace lifecycle | An imported existing file was edited and a new file created; a reference file stayed unchanged. All three intended contents survived ordinary stop/start and public candidate system replacement. Workspace, filesystem, session and import bindings persisted; only that project's old system was retired. Fresh live candidate generations retained the N1 selector. |
+| Stopped export | Public project export passed its independent disk checks after a stop reporting cleanliness unverified. Host comparison matched the intended edited three-file project and confirmed the original two-file source unchanged. Pristine-import verification was not used as an edited-project check. |
+| Owned peer high-port TCP/UDP listener | **Unqualified.** Local peer controls passed, but direct host controls failed. Candidate timeouts cannot establish this row. The bounded fixture exited with two local responses per protocol. |
+| Candidate to stock SSH port 22 | Candidate root received `EHOSTUNREACH` (113), with an on-link route and FAILED neighbor, bracketed by successful same-generation strict host management. This is consistent with the inspected peer-ARP restriction and private-destination fallback before vmnet forwarding; it does not qualify arbitrary peer UDP services. |
+
+Two candidate import attempts were refused by the unchanged Data reserve plus
+stopping margin (25,584,461,414 bytes). Headroom recovered and the supported
+retained-selection retry succeeded; no capacity/admission check or host setting
+was changed. One stock status query returned unavailable supervisor-snapshot
+drift before a peer fixture started. Both READY snapshots returned on recheck,
+and the retried fixture ran. The original failure remains recorded; its cause
+is unexplained and it is not containment evidence.
+
+Both new projects and workspaces are stopped and retained. All 30 pre-existing
+Tart objects kept their stopped/data inventory; reading the approved base can
+advance its access metadata. Exact hash-checked cleanup `--check` passed using
+`/usr/bin/python3`; attended candidate removal and post-removal stock checks
+are pending. No merge, release or promotion occurred. After removal, the
+candidate cannot start without its exact admitted installation; no stock
+fallback or automatic reinstall is implied.
+
+For the public project workflow, use the [named-project guide](../../operations/projects.md)
+and [edited-project round trip](../../operations/project-roundtrip.md). Export
+uses a new private destination, prints `project files:` for immediate inspection,
+and `project export list NAME` locates retained exports. Treat returned files as
+data; never execute them automatically or overwrite an existing host project.
