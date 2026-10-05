@@ -15,6 +15,8 @@ import AppKit
     check(stock.limitations.stringValue.contains("gateway services"), "stock still explains gateway exposure")
     let controller = ProjectWindowController(executable: "/synthetic/boxwarden", networkPolicy: "unknown")
     check(controller.limitations.stringValue.contains("Network policy unidentified"), "missing or unknown policy cannot imply containment")
+    check(controller.window!.minSize.width <= 780 && controller.window!.minSize.height <= 540, "project window supports a smaller usable Mac window")
+    check(controller.setupLabel.stringValue.contains("setup"), "fresh launch explains the setup step in ordinary language")
     let menu = NSMenu(title: "File")
     let newProject = NSMenuItem(title: "New Project", action: #selector(ProjectWindowController.createProject(_:)), keyEquivalent: "n")
     newProject.target = controller; menu.addItem(newProject); menu.update()
@@ -63,8 +65,14 @@ import AppKit
     let secondEnd = Date().addingTimeInterval(4)
     while controller.presentation.busy && Date() < secondEnd { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
     let feedbackCLI = root.appendingPathComponent("feedback-cli")
+    let inspectScript = """
+    if [ "$3" = setup ] && [ "$4" = inspect ]; then
+      printf '{"version":1,"scope":"alpha_project_setup","status":"ready","config_path":"%s","config_valid":true,"selection_acceptable":true,"guidance":"Ready","next_actions":[],"recipe_preparation_available":true}\\n' "$2"
+      exit 0
+    fi
+    """
     func feedbackScript(_ body: String) throws {
-      try Data(("#!/bin/sh\n" + body).utf8).write(to: feedbackCLI)
+      try Data(("#!/bin/sh\n" + inspectScript + "\n" + body).utf8).write(to: feedbackCLI)
       try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: feedbackCLI.path)
     }
     let failureEvent = #"{"version":1,"type":"error","operation":"project.list","message":"synthetic storage missing","data":{"uncertain":false}}"#
@@ -78,7 +86,7 @@ import AppKit
     feedback.client = try ProjectClient(executable: feedbackCLI.path, config: "/synthetic/broken.json", activityDirectory: root.appendingPathComponent("feedback-activity"))
     func waitForFeedback() {
       let deadline = Date().addingTimeInterval(5)
-      while (feedback.client?.config != feedback.presentation.configPath || feedback.presentation.refreshing) && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+      while (feedback.switchingConfiguration || feedback.client?.config != feedback.presentation.configPath || feedback.presentation.refreshing) && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
       check(!feedback.presentation.refreshing, "synthetic feedback refresh completed")
     }
     feedback.refreshProjects(nil); waitForFeedback()
@@ -195,6 +203,7 @@ import AppKit
     let switchCLI = root.appendingPathComponent("switch-cli"), switchStarted = root.appendingPathComponent("switch-started")
     let switchScript = """
     #!/bin/sh
+    \(inspectScript)
     if [ "$2" = /synthetic/old.json ]; then
       /usr/bin/touch '\(switchStarted.path)'
       trap '' TERM
@@ -217,7 +226,7 @@ import AppKit
     check(!oldStillRunning, "configuration replacement waits for old query reap before latest inventory starts")
     check(switching.client?.config == "/synthetic/new-24.json", "rapid configuration choices activate only the latest desired path")
     let switchStore = try ProjectActivityStore(root: root.appendingPathComponent("switch-activity"))
-    check(try switchStore.records().allSatisfy { ["/synthetic/old.json", "/synthetic/new-24.json"].contains($0.config) }, "coalescing never starts intermediate configuration queries")
+    check(try switchStore.records().filter { $0.operation != "setup.inspect" }.allSatisfy { ["/synthetic/old.json", "/synthetic/new-24.json"].contains($0.config) }, "coalescing never starts intermediate configuration queries")
     try FileManager.default.removeItem(at: switchStarted)
     switching.useConfiguration("/synthetic/old.json")
     spinUntil { FileManager.default.fileExists(atPath: switchStarted.path) }

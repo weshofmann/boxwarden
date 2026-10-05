@@ -94,6 +94,8 @@ type ClipboardTransfer interface {
 type ClipboardTransferFactory func(context.Context, config.Config, config.Domain) (ClipboardTransfer, error)
 
 type Options struct {
+	SetupPrepare                  SetupPrepareFunc
+	DomainSetupCheck              func(context.Context, config.Config, config.Domain) (bool, error)
 	ProjectSetupCheck             func(context.Context, config.Domain, projectx.Setup) error
 	ClipboardTransferFactory      ClipboardTransferFactory
 	Input                         io.Reader
@@ -149,6 +151,12 @@ func DefaultConfigPath() (string, error) {
 // Run executes one Boxwarden command. Commands that own domain state require an
 // explicit domain; host-global commands deliberately do not select one.
 func Run(ctx context.Context, args []string, options Options) (runErr error) {
+	if handled, err := runSetupPrepare(ctx, args, options); handled {
+		return err
+	}
+	if handled, err := runSetupInspect(ctx, args, options); handled {
+		return err
+	}
 	if operation, jsonMode := projectJSONRequest(args); jsonMode && options.projectJSON == nil && options.Output != nil {
 		stream, ok := options.Output.(*projectJSON)
 		if !ok {

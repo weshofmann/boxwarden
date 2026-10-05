@@ -180,3 +180,10 @@ func TestEnrollmentObservationRequiresSeparateFSIDAndExpectedUUID(t *testing.T) 
 		t.Fatal("wrong APFS UUID accepted")
 	}
 }
+
+func TestStorageObservationsClassifiesConfigOnBackingFilesystem(t *testing.T) {
+	err := validateStorageObservations(StorageExpectation{}, syscall.Fsid{}, syscall.Fsid{}, "", "")
+	if !errors.Is(err, ErrConfigLocationInadmissible) {
+		t.Fatalf("configuration backing location lost typed classification: %v", err)
+	}
+}

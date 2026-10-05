@@ -264,6 +264,8 @@ private final class ProjectOwnedProcess: @unchecked Sendable {
             case .preview(let preview):
               guard let index = record.arguments.firstIndex(of: "--source"), index + 1 < record.arguments.count,
                     preview.source == record.arguments[index + 1] else { throw ProjectClientError.invalidResponse("Preview source does not match request") }
+            case .setup(let inspection):
+              guard inspection.version == 1, inspection.scope == "alpha_project_setup", SetupInspection.statuses.contains(inspection.status), inspection.configPath == record.config else { throw ProjectClientError.invalidResponse("Setup result does not match admitted request") }
             case .export: break
             }
           }

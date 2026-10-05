@@ -20,17 +20,17 @@ func checkStorage(expected StorageExpectation) error {
 	}
 	configInfo, err := os.Lstat(expected.ConfigPath)
 	if err != nil {
-		return fmt.Errorf("external workspace storage config is unavailable: %w", err)
+		return fmt.Errorf("external workspace storage config is unavailable: %w: %w", ErrConfigLocationInadmissible, err)
 	}
 	if err := privateStorageFile(configInfo); err != nil {
 		return err
 	}
 	if err := privateacl.Check(expected.ConfigPath, configInfo, privateacl.OSInspector{}); err != nil {
-		return fmt.Errorf("external workspace storage config ACL: %w", err)
+		return fmt.Errorf("external workspace storage config ACL: %w: %w", ErrConfigLocationInadmissible, err)
 	}
 	config, err := os.OpenFile(expected.ConfigPath, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
-		return fmt.Errorf("open external workspace storage config: %w", err)
+		return fmt.Errorf("open external workspace storage config: %w: %w", ErrConfigLocationInadmissible, err)
 	}
 	defer config.Close()
 	openedConfig, err := config.Stat()
@@ -41,7 +41,7 @@ func checkStorage(expected StorageExpectation) error {
 		return err
 	}
 	if err := privateacl.Check(expected.ConfigPath, openedConfig, privateacl.OSInspector{}); err != nil {
-		return fmt.Errorf("external workspace storage config ACL changed: %w", err)
+		return fmt.Errorf("external workspace storage config ACL changed: %w: %w", ErrConfigLocationInadmissible, err)
 	}
 	var configFS syscall.Statfs_t
 	if err := syscall.Fstatfs(int(config.Fd()), &configFS); err != nil {
@@ -109,11 +109,11 @@ func checkStorage(expected StorageExpectation) error {
 
 func privateStorageFile(info os.FileInfo) error {
 	if info == nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
-		return fmt.Errorf("workspace config must be a private regular file mode 0600")
+		return fmt.Errorf("workspace config must be a private regular file mode 0600: %w", ErrConfigLocationInadmissible)
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || stat.Nlink != 1 || int(stat.Uid) != os.Getuid() {
-		return fmt.Errorf("workspace config must have one link and current operator owner")
+		return fmt.Errorf("workspace config must have one link and current operator owner: %w", ErrConfigLocationInadmissible)
 	}
 	return nil
 }
@@ -131,7 +131,7 @@ func privateStorageDirectory(info os.FileInfo) error {
 
 func validateStorageObservations(expected StorageExpectation, configFS, backingFS syscall.Fsid, mountPoint, volumeUUID string) error {
 	if configFS == backingFS {
-		return fmt.Errorf("workspace storage config is on the backing filesystem")
+		return fmt.Errorf("workspace storage config is on the backing filesystem: %w", ErrConfigLocationInadmissible)
 	}
 	if mountPoint != expected.MountPoint {
 		return fmt.Errorf("workspace backing mount changed: got %q, expected %q", mountPoint, expected.MountPoint)

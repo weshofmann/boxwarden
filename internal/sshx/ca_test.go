@@ -446,3 +446,27 @@ func testDomain(t *testing.T, raw, root string) Domain {
 	}
 	return Domain{ID: id, StateRoot: root}
 }
+
+func TestCAStoreCheckInitializedClassifiesOnlyWhollyMissingState(t *testing.T) {
+	root := privateRoot(t)
+	selected := testDomain(t, "alpha", root)
+	store := NewCAStore(CAStoreOptions{Runner: newKeygenRunner(t), Identity: StaticIdentity{UID: 501, Name: "synthetic"}, NewUUID: func() (string, error) { return testUUID, nil }})
+	initialized, err := store.CheckInitialized(t.Context(), selected, []Domain{selected})
+	if initialized || err != nil {
+		t.Fatalf("absent CA: initialized=%v err=%v", initialized, err)
+	}
+	if _, err := store.Init(t.Context(), selected, []Domain{selected}); err != nil {
+		t.Fatal(err)
+	}
+	initialized, err = store.CheckInitialized(t.Context(), selected, []Domain{selected})
+	if !initialized || err != nil {
+		t.Fatalf("complete CA: initialized=%v err=%v", initialized, err)
+	}
+	if err := os.Remove(filepath.Join(root, "identity", "ssh-user-ca", "ca.pub")); err != nil {
+		t.Fatal(err)
+	}
+	initialized, err = store.CheckInitialized(t.Context(), selected, []Domain{selected})
+	if initialized || err == nil {
+		t.Fatalf("partial CA hidden: initialized=%v err=%v", initialized, err)
+	}
+}

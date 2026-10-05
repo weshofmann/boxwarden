@@ -45,6 +45,8 @@ func runInfo(args []string, out io.Writer) (bool, error) {
 
 boxwarden version
 boxwarden build-info --json
+boxwarden [--config /absolute/config.json] setup inspect --json
+boxwarden --config /absolute/config.json setup prepare --json --package ROOT --iso PATH --checker PATH --go PATH --zstd PATH --openssl PATH --xorriso PATH
 boxwarden --config /absolute/config.json doctor
 boxwarden --config /absolute/config.json --domain alpha project COMMAND
 

@@ -13,7 +13,18 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   var client: ProjectClient?
   var clipboardClient: CLIClient?
   private let queryRetirement = DispatchGroup()
-  private var switchingConfiguration = false
+  private(set) var switchingConfiguration = false
+  private var desiredConfiguration = ""
+  private var configurationChoice = UUID()
+  private var validationClient: ProjectClient?
+  var setupInspection: SetupInspection?
+  var preparationPickers: [PreparationPicker] = []
+  var preparationCompletion: PreparationCompletion?
+  var prepareButton: NSButton!
+  var helpButton: NSButton!
+  var diagnosticsButton: NSButton!
+  var diagnosticsViews: [NSView] = []
+  var diagnosticsVisible = false
   private(set) var closing = false
   var projects: [ProjectRecord] = []
   var setup: ProjectSetup?
@@ -55,7 +66,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   var allowUnknownRetry = false
   var unknownClipboard = false
   var selectedProject: ProjectRecord? { projects.first { $0.name == presentation.selectedName } }
-  var canReplaceSelectedProject: Bool { selectedProject?.observedState == "stopped" && selectedProject?.replacementPending == false && selectedProject?.availableActions.contains("inspect_session") == false }
+  var canReplaceSelectedProject: Bool { setupInspection?.recipePreparationAvailable != false && selectedProject?.observedState == "stopped" && selectedProject?.replacementPending == false && selectedProject?.availableActions.contains("inspect_session") == false }
   var hasActiveOperation: Bool { presentation.busy || recoveredBusy }
   var readyToAct: Bool { !closing && !switchingConfiguration && !hasActiveOperation && snapshotAvailable }
 
@@ -63,9 +74,9 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     self.executable = executable; self.privatePasteboard = privatePasteboard
     self.activityDirectory = activityDirectory; self.defaults = defaults
     self.pendingClipboard = ClipboardPending(defaults: defaults)
-    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1020, height: 790), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 660), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
     window.title = "Boxwarden Projects"
-    window.minSize = NSSize(width: 940, height: 740)
+    window.minSize = NSSize(width: 760, height: 540)
     window.center()
     super.init(window: window)
     let notice: String
@@ -96,58 +107,67 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     chooseButton = button("Choose Configuration…", #selector(chooseConfiguration(_:)))
     createButton = button("New Project…", #selector(createProject(_:)))
     refreshButton = button("Refresh", #selector(refreshProjects(_:)))
-    let header = stack([title, NSView(), createButton, refreshButton, chooseButton])
+    prepareButton = button("Prepare Project Assets…", #selector(prepareProjectAssets(_:)))
+    helpButton = button("Setup Help…", #selector(showSetupHelp(_:)))
+    diagnosticsButton = button("Show Details", #selector(toggleDiagnostics(_:)))
+    let header = stack([title, NSView(), createButton, refreshButton])
+    let configurationRow = stack([configLabel, NSView(), chooseButton])
     configLabel.lineBreakMode = .byTruncatingMiddle; configLabel.isSelectable = true
     configLabel.textColor = .secondaryLabelColor
-    setupLabel.textColor = .secondaryLabelColor
-    let name = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name")); name.title = "Project"; name.width = 160
-    let state = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("state")); state.title = "State"; state.width = 120
+    setupLabel.textColor = .labelColor
+    let setupActions = stack([prepareButton, helpButton])
+    let name = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name")); name.title = "Project"; name.width = 155
+    let state = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("state")); state.title = "State"; state.width = 80
     table.addTableColumn(name); table.addTableColumn(state)
     table.dataSource = self; table.delegate = self; table.rowHeight = 30
-    table.allowsMultipleSelection = false
-    table.setAccessibilityIdentifier("Projects")
-    let listScroll = NSScrollView(); listScroll.documentView = table; listScroll.hasVerticalScroller = true
-    listScroll.borderType = .bezelBorder
-    detail.isSelectable = true; detail.font = .systemFont(ofSize: 13)
+    table.allowsMultipleSelection = false; table.setAccessibilityIdentifier("Projects")
+    let listScroll = NSScrollView(); listScroll.documentView = table; listScroll.hasVerticalScroller = true; listScroll.borderType = .bezelBorder
+    detail.isSelectable = true; detail.font = .systemFont(ofSize: 14)
     openButton = button("Open Desktop", #selector(openProject(_:)))
     stopButton = button("Stop", #selector(stopProject(_:)))
-    importButton = button("Import Project…", #selector(importProject(_:)))
-    exportButton = button("Export Project…", #selector(exportProject(_:)))
-    transactionsButton = button("Export Transactions…", #selector(showTransactions(_:)))
+    importButton = button("Import Folder…", #selector(importProject(_:)))
+    exportButton = button("Export Files…", #selector(exportProject(_:)))
+    transactionsButton = button("Exports & Recovery…", #selector(showTransactions(_:)))
     replaceButton = button("Replace System…", #selector(replaceSystem(_:)))
     importRetryButton = button("Retry Import", #selector(retryImport(_:)))
     replaceRetryButton = button("Resume Replacement", #selector(retryReplacement(_:)))
-    pushButton = button("HOST → GUEST", #selector(pushClipboard(_:)))
-    pullButton = button("GUEST → HOST", #selector(pullClipboard(_:)))
-    let clipNote = NSTextField(wrappingLabelWithString: "Text transfers only when you click a direction. No automatic sharing.")
+    pushButton = button("Host → Guest", #selector(pushClipboard(_:)))
+    pullButton = button("Guest → Host", #selector(pullClipboard(_:)))
+    let clipNote = NSTextField(wrappingLabelWithString: "Text transfers only when you choose a direction. No automatic sharing.")
     clipNote.font = .systemFont(ofSize: 11); clipNote.textColor = .secondaryLabelColor
-    let right = stack([detail, stack([openButton, stopButton]), stack([importButton, exportButton]),
-      stack([transactionsButton, importRetryButton]), stack([replaceButton, replaceRetryButton]),
-      clipboardLabel, stack([pushButton, pullButton]), clipNote], vertical: true)
-    right.spacing = 8
+    let recovery = stack([importRetryButton, replaceRetryButton])
+    let right = stack([detail, stack([openButton, stopButton]), stack([importButton, exportButton]), transactionsButton,
+      clipboardLabel, stack([pushButton, pullButton]), clipNote, recovery], vertical: true)
     let body = stack([listScroll, right]); body.alignment = .top
-    listScroll.widthAnchor.constraint(equalToConstant: 285).isActive = true
-    listScroll.heightAnchor.constraint(equalToConstant: 365).isActive = true
-    right.widthAnchor.constraint(greaterThanOrEqualToConstant: 600).isActive = true
+    listScroll.widthAnchor.constraint(equalToConstant: 235).isActive = true
+    listScroll.heightAnchor.constraint(equalTo: body.heightAnchor).isActive = true
+    body.heightAnchor.constraint(greaterThanOrEqualToConstant: 235).isActive = true
+    right.widthAnchor.constraint(greaterThanOrEqualToConstant: 420).isActive = true
     detail.widthAnchor.constraint(equalTo: right.widthAnchor).isActive = true
-    detail.heightAnchor.constraint(greaterThanOrEqualToConstant: 125).isActive = true
     spinner.style = .spinning; spinner.controlSize = .small; spinner.isDisplayedWhenStopped = false
     cancelButton = button("Interrupt Export", #selector(interruptExport(_:)))
     inspectUnknownButton = button("Review Unknown Outcome…", #selector(reviewUnknown(_:)))
-    revealButton = button("Reveal Export in Finder", #selector(revealExport(_:)))
+    revealButton = button("Show Returned Files", #selector(revealExport(_:)))
     let progressHeader = stack([spinner, statusLabel, NSView(), cancelButton])
     progressText.isEditable = false; progressText.isSelectable = true
-    progressText.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-    progressText.textContainerInset = NSSize(width: 6, height: 6)
-    let log = NSScrollView(); log.documentView = progressText; log.hasVerticalScroller = true
-    log.borderType = .bezelBorder; log.heightAnchor.constraint(greaterThanOrEqualToConstant: 105).isActive = true
+    progressText.font = .monospacedSystemFont(ofSize: 11, weight: .regular); progressText.textContainerInset = NSSize(width: 6, height: 6)
+    let log = NSScrollView(); log.documentView = progressText; log.hasVerticalScroller = true; log.borderType = .bezelBorder
+    log.heightAnchor.constraint(equalToConstant: 100).isActive = true
+    let advanced = stack([replaceButton])
+    diagnosticsViews = [advanced, log]; diagnosticsViews.forEach { $0.isHidden = true }
     limitations.font = .systemFont(ofSize: 11); limitations.textColor = .secondaryLabelColor
-    let root = stack([header, configLabel, setupLabel, body, progressHeader, log,
-                      stack([revealButton, inspectUnknownButton]), limitations], vertical: true)
-    root.spacing = 8; root.translatesAutoresizingMaskIntoConstraints = false
+    let root = stack([header, configurationRow, setupLabel, setupActions, body, progressHeader,
+      stack([revealButton, inspectUnknownButton, diagnosticsButton]), advanced, log, limitations], vertical: true)
+    root.spacing = 8; root.detachesHiddenViews = true; root.translatesAutoresizingMaskIntoConstraints = false
     content.addSubview(root)
     NSLayoutConstraint.activate([root.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20), root.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20), root.topAnchor.constraint(equalTo: content.topAnchor, constant: 18), root.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -18)])
-    for v in [header, configLabel, setupLabel, body, progressHeader, log, limitations] { v.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true }
+    for v in [header, configurationRow, setupLabel, body, progressHeader, log, limitations] { v.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true }
+    window?.recalculateKeyViewLoop()
+  }
+  @objc func toggleDiagnostics(_ sender: Any?) {
+    diagnosticsVisible.toggle(); diagnosticsViews.forEach { $0.isHidden = !diagnosticsVisible }
+    diagnosticsButton.title = diagnosticsVisible ? "Hide Details" : "Show Details"
+    render()
   }
   func restoreConfiguration(override: String?) {
     if let path = override ?? defaults.string(forKey: "SelectedConfiguration"), ProjectCommand.validPath(path) { useConfiguration(path) }
@@ -163,12 +183,14 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     case #selector(createProject(_:)): return createButton.isEnabled
     case #selector(chooseConfiguration(_:)): return chooseButton.isEnabled
     case #selector(refreshProjects(_:)): return refreshButton.isEnabled
+    case #selector(pushClipboard(_:)): return pushButton.isEnabled
+    case #selector(pullClipboard(_:)): return pullButton.isEnabled
     default: return true
     }
   }
   @objc func chooseConfiguration(_ sender: Any?) {
     guard !closing, !hasActiveOperation, let window, window.attachedSheet == nil else { return }
-    let panel = NSOpenPanel(); panel.title = "Choose Initialized Boxwarden Configuration"
+    let panel = NSOpenPanel(); panel.title = "Choose Boxwarden Configuration"
     panel.canChooseDirectories = false; panel.canChooseFiles = true; panel.allowsMultipleSelection = false
     panel.allowedContentTypes = [.json]
     panel.beginSheetModal(for: window) { [weak self] response in
@@ -177,38 +199,79 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   }
   func useConfiguration(_ path: String) {
     guard !closing, !hasActiveOperation, ProjectCommand.validPath(path) else { return }
-    presentation.chooseConfiguration(path)
-    projects = []; clipboardTargets = []; setup = nil; snapshotAvailable = false
-    lastExport = nil; activity = nil; recoveredActivities = []; preferredSelection = nil; allowUnknownRetry = false
-    lastRefreshFailure = nil; progressLines.removeAll(); progressText.string = ""
-    statusLabel.stringValue = "Refreshing selected configuration…"
-    configLabel.stringValue = "Configuration: " + path
-    render()
-    // A rapid sequence of selections changes only the desired path. At most one
-    // old pair of clients is retiring, and no replacement query starts early.
-    guard !switchingConfiguration else { return }
+    desiredConfiguration = path
+    configurationChoice = UUID()
+    statusLabel.stringValue = "Checking selected configuration…"
+    progressLines.removeAll(); progressText.string = ""
+    if switchingConfiguration { validationClient?.cancelQueries(); return }
     switchingConfiguration = true
+    presentation.cancelRefresh()
     let previous = client, previousClipboard = clipboardClient
     client = nil; clipboardClient = nil
     queryRetirement.enter()
+    render()
     drainQueries(project: previous, clipboard: previousClipboard) { [self] in
-      DispatchQueue.main.async { [self] in
-        defer { queryRetirement.leave() }
-        switchingConfiguration = false
-        guard !closing else { return }
-        let desired = presentation.configPath
-        do {
-          client = try ProjectClient(executable: executable, config: desired, activityDirectory: activityDirectory)
-          clipboardClient = CLIClient(executable: executable, config: desired, privateHostPasteboard: privatePasteboard)
-          unknownClipboard = pendingClipboard.request(config: desired) != nil
-          if unknownClipboard { report("A previous explicit clipboard transfer has an unknown outcome. No payload was retained. Review the target before permitting another transfer.") }
-          defaults.set(desired, forKey: "SelectedConfiguration")
-          try recoverActivity()
-          refreshProjects(nil)
-        } catch { report(error.localizedDescription) }
-        render()
-      }
+      DispatchQueue.main.async { [self] in validateDesiredConfiguration() }
     }
+  }
+  private func validateDesiredConfiguration() {
+    guard !closing else { switchingConfiguration = false; queryRetirement.leave(); return }
+    let path = desiredConfiguration
+    let choice = configurationChoice
+    do {
+      let candidate = try ProjectClient(executable: executable, config: path, activityDirectory: activityDirectory)
+      validationClient = candidate
+      let token = candidate.queryToken()
+      DispatchQueue.global(qos: .userInitiated).async { [self] in
+        let result = Result { () throws -> SetupInspection in
+          guard case .setup(let inspection) = try candidate.query(.setupInspect, queryToken: token), inspection.configPath == path else { throw ProjectClientError.invalidResponse("Setup inspection did not match the selected configuration") }
+          return inspection
+        }
+        DispatchQueue.main.async { [self] in
+          // Query completion owns child retirement. A newer selection is inspected
+          // only after the older read-only client has fully reaped its child.
+          candidate.disposeQueries { [self] in
+            DispatchQueue.main.async { [self] in
+              validationClient = nil
+              if !closing && choice != configurationChoice { validateDesiredConfiguration(); return }
+              defer { switchingConfiguration = false; queryRetirement.leave(); render() }
+              guard !closing else { return }
+              do {
+                let inspection = try result.get()
+                if !inspection.selectionAcceptable {
+                  if presentation.configPath.isEmpty { setupInspection = inspection }
+                  try restoreActiveClients()
+                  report(inspection.title + ". " + inspection.guidance + (presentation.configPath.isEmpty ? "" : " The previous configuration is still selected."))
+                  return
+                }
+                presentation.chooseConfiguration(path)
+                projects = []; clipboardTargets = []; setup = nil; snapshotAvailable = false
+                setupInspection = inspection
+                lastExport = nil; activity = nil; recoveredActivities = []; preferredSelection = nil; allowUnknownRetry = false
+                lastRefreshFailure = nil
+                defaults.set(path, forKey: "SelectedConfiguration")
+                configLabel.stringValue = "Configuration: " + path
+                try restoreActiveClients()
+                statusLabel.stringValue = inspection.status == "ready" ? "Refreshing selected configuration…" : inspection.guidance
+                switchingConfiguration = false
+                if inspection.status == "ready" { refreshProjects(nil) }
+              } catch {
+                try? restoreActiveClients()
+                report("Unable to check this configuration. " + error.localizedDescription + (presentation.configPath.isEmpty ? "" : " The previous configuration is still selected."))
+              }
+            }
+          }
+        }
+      }
+    } catch { switchingConfiguration = false; queryRetirement.leave(); try? restoreActiveClients(); report(error.localizedDescription) }
+  }
+  private func restoreActiveClients() throws {
+    guard !presentation.configPath.isEmpty else { return }
+    let path = presentation.configPath
+    client = try ProjectClient(executable: executable, config: path, activityDirectory: activityDirectory)
+    clipboardClient = CLIClient(executable: executable, config: path, privateHostPasteboard: privatePasteboard)
+    unknownClipboard = pendingClipboard.request(config: path) != nil
+    try recoverActivity()
   }
   private func drainQueries(project: ProjectClient?, clipboard: CLIClient?, completion: @escaping () -> Void) {
     let drain = DispatchGroup()
@@ -220,6 +283,8 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     closing = true
     refreshTimer?.invalidate(); activityTimer?.invalidate()
     presentation.cancelRefresh()
+    snapshotAvailable = false
+    validationClient?.cancelQueries()
     queryRetirement.enter()
     drainQueries(project: client, clipboard: clipboardClient) { [self] in queryRetirement.leave() }
     queryRetirement.notify(queue: .main, execute: completion)
@@ -231,13 +296,32 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     render()
     let clipboardClient = self.clipboardClient
     let queryToken = client.queryToken(), clipboardToken = clipboardClient?.queryToken()
+    let inspectSetup = setupInspection != nil
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
       do {
+        let inspection: SetupInspection?
+        if inspectSetup {
+          guard case .setup(let current) = try client.query(.setupInspect, queryToken: queryToken) else { throw ProjectClientError.invalidResponse("Expected setup inspection") }
+          inspection = current
+          if current.status != "ready" {
+            DispatchQueue.main.async { [weak self] in
+              guard let self, !self.closing, self.presentation.finishRefresh(ticket, names: []) else { return }
+              self.setupInspection = current; self.setup = nil; self.snapshotAvailable = false
+              self.projects = []; self.clipboardTargets = []; self.table.reloadData()
+              let message = current.title + ". " + current.guidance
+              self.statusLabel.stringValue = message
+              if self.lastRefreshFailure != message { self.lastRefreshFailure = message; self.appendProgress(message) }
+              self.render()
+            }
+            return
+          }
+        } else { inspection = nil }
         let response = try client.query(.list, queryToken: queryToken)
         guard case .list(let list) = response else { throw ProjectClientError.invalidResponse("Expected project inventory") }
         let targets = (try? clipboardClient?.discover(domain: "alpha", queryToken: clipboardToken)) ?? []
         DispatchQueue.main.async { [weak self] in
           guard let self, !self.closing, self.presentation.finishRefresh(ticket, names: list.projects.map(\.name)) else { return }
+          if let inspection { self.setupInspection = inspection }
           self.projects = list.projects; self.setup = list.setup; self.clipboardTargets = targets
           self.snapshotAvailable = true
           if let failure = self.lastRefreshFailure {
@@ -255,7 +339,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
           guard let self, !self.closing, self.presentation.finishRefresh(ticket, names: []) else { return }
           self.projects = []; self.clipboardTargets = []; self.snapshotAvailable = false; self.setup = nil
           self.table.reloadData()
-          let message = "Configuration or storage unavailable. Mount the configured storage and verify this configuration was initialized. " + error.localizedDescription
+          let message = "Project inventory could not be refreshed. Choose the configuration again to recheck setup and storage. " + error.localizedDescription
           self.statusLabel.stringValue = message
           if self.lastRefreshFailure != message { self.lastRefreshFailure = message; self.appendProgress(message) }
           self.render()
@@ -284,7 +368,12 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   func render() {
     let idle = !closing && !hasActiveOperation
     chooseButton.isEnabled = idle
-    createButton.isEnabled = readyToAct && setup?.status == "ready"
+    createButton.isEnabled = readyToAct && setup?.status == "ready" && setupInspection?.recipePreparationAvailable != false
+    prepareButton.isEnabled = idle && !switchingConfiguration && setupInspection?.selectionAcceptable == true && ["domain_uninitialized", "project_setup_missing"].contains(setupInspection?.status ?? "")
+    prepareButton.isHidden = setupInspection?.status == "ready"
+    helpButton.isHidden = setupInspection?.status == "ready" && setupInspection?.recipePreparationAvailable != false
+    importRetryButton.isHidden = !(selectedProject?.availableActions.contains("import_retry") ?? false)
+    replaceRetryButton.isHidden = !(selectedProject?.availableActions.contains("rebuild_retry") ?? false)
     refreshButton.isEnabled = !closing && client != nil && !presentation.busy && !presentation.refreshing
     table.isEnabled = idle
     let actions = Set(selectedProject?.availableActions ?? [])
@@ -301,11 +390,19 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     cancelButton.isEnabled = presentation.busy && activity.map { ["project.export", "project.export.retry"].contains($0.operation) } == true
     revealButton.isEnabled = lastExport != nil
     inspectUnknownButton.isEnabled = idle && ((activity?.status == .unknown && activity?.acknowledgedAt == nil) || unknownClipboard)
-    if hasActiveOperation || presentation.refreshing { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
-    setupLabel.stringValue = setup.map { "Setup: \($0.status). \($0.guidance)" } ?? (client == nil ? "Select an existing initialized configuration. This app does not install host tools." : "Waiting for validated configuration and setup information.")
+    if switchingConfiguration || hasActiveOperation || presentation.refreshing { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
+    if let inspection = setupInspection {
+      setupLabel.stringValue = inspection.status == "ready" ? (inspection.recipePreparationAvailable == false ? "Existing project setup is ready. Recipe creation requires an explicit setup update; see Setup Help." : "Project setup is ready. Create a project or select one below.") : inspection.title + ". " + inspection.guidance
+    } else { setupLabel.stringValue = "Start setup: choose your Boxwarden configuration, then prepare project assets. Setup Help explains the first host initialization." }
     if let p = selectedProject {
-      let software = p.software.actions.map { "\($0.actionId): \($0.state)" }.joined(separator: ", ")
-      detail.stringValue = "\(p.name)\nObserved: \(p.observedState ?? p.state) · Management ready: \(p.managementReady ? "yes" : "no")\nSoftware: \(p.software.status)\(software.isEmpty ? "" : " — " + software)\nWorkspace: \(p.workspace.sizeBytes >> 20) MiB · \(p.workspace.id)\nImport: \(p.importState.status)\n\(p.importState.guestPath.isEmpty ? p.workspace.mountPath : p.importState.guestPath)\n\(p.diagnostic)"
+      let state = p.observedState ?? p.state
+      let next: String
+      if p.replacementPending { next = "System replacement is interrupted. Review Details or resume the recorded replacement." }
+      else if state == "stopped" { next = "Open Desktop starts this project again. You can import or export files while it is stopped." }
+      else if p.managementReady { next = "Desktop is running. Stop the project before exporting files or replacing its system." }
+      else { next = "The project is \(state). Management is not ready; refresh or inspect Details before continuing." }
+      detail.stringValue = "\(p.name)\n\(next)\nWorkspace: \(p.workspace.sizeBytes >> 20) MiB · files survive stop/start\n" + (p.importState.guestPath.isEmpty ? p.workspace.mountPath : "Imported files: " + p.importState.guestPath)
+      if diagnosticsVisible { detail.stringValue += "\nSystem: \(p.backendObject)\nWorkspace ID: \(p.workspace.id)\nSoftware: \(p.software.status)\n\(p.diagnostic)" }
       clipboardLabel.stringValue = "Clipboard target: alpha / \(p.name)" + (selectedClipboardTarget == nil ? " — unavailable" : " — ready") + (privatePasteboard == nil ? "" : " · synthetic private pasteboard")
     } else {
       detail.stringValue = projects.isEmpty && snapshotAvailable ? "No projects in this configuration. Create a project after setup is ready." : "Select a project to inspect its workspace and current state."
@@ -393,7 +490,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
   func recoverActivity() throws {
     guard let client else { return }
     let activities = try client.recoverActivities()
-    let relevant = activities.filter { !["project.list", "project.status", "project.import.preview", "project.export.list"].contains($0.operation) }
+    let relevant = activities.filter { !["setup.inspect", "project.list", "project.status", "project.import.preview", "project.export.list"].contains($0.operation) }
     recoveredActivities = relevant
     recoveredBusy = relevant.contains { $0.status == .running }
     if !presentation.busy { activity = chooseVisibleActivity() }

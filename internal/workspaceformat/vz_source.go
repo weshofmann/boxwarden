@@ -41,3 +41,9 @@ func cleanSourceCommit(ctx context.Context, root string) (string, error) {
 	}
 	return commit, nil
 }
+
+// InspectSourceCommit reuses formatter checkout admission for the explicit
+// package preparation boundary. It observes an exact clean Git top level.
+func InspectSourceCommit(ctx context.Context, root string) (string, error) {
+	return cleanSourceCommit(ctx, root)
+}

@@ -1,6 +1,38 @@
 import Foundation
 
+// Admission and recipe readiness belong to the CLI. Native code presents these
+// typed states and never infers them from human diagnostic text.
+struct SetupInspection: Decodable {
+  let version: Int
+  let scope: String
+  let status: String
+  let configPath: String
+  let configValid: Bool
+  let selectionAcceptable: Bool
+  let guidance: String
+  let nextActions: [String]
+  let diagnostic: String?
+  let setupVersion: Int?
+  let recipePreparationAvailable: Bool?
+  static let statuses: Set<String> = ["config_missing", "config_invalid", "config_location_inadmissible", "workspace_storage_unavailable", "host_tools_uninitialized", "host_tools_incompatible", "domain_uninitialized", "domain_incompatible", "project_setup_missing", "project_setup_invalid", "ready"]
+  var title: String {
+    switch status {
+    case "config_missing": return "Choose a configuration to begin setup"
+    case "config_invalid", "config_location_inadmissible": return "This configuration cannot be used"
+    case "workspace_storage_unavailable": return "Connect the workspace storage"
+    case "host_tools_uninitialized": return "Host tools need initialization"
+    case "host_tools_incompatible": return "Host tools need attention"
+    case "domain_uninitialized": return "Prepare your project setup"
+    case "domain_incompatible": return "The project domain needs attention"
+    case "project_setup_missing": return "Prepare project assets"
+    case "project_setup_invalid": return "Project assets need attention"
+    default: return "Project setup is ready"
+    }
+  }
+}
+
 enum ProjectCommand: Equatable {
+  case setupInspect, setupPrepare(inputs: [String])
   case list, create(name: String, recipe: String, sizeMiB: Int)
   case open(name: String), status(name: String), stop(name: String)
   case importPreview(source: String, exclusions: [String])
@@ -11,6 +43,8 @@ enum ProjectCommand: Equatable {
 
   var operation: String {
     switch self {
+    case .setupInspect: return "setup.inspect"
+    case .setupPrepare: return "setup.prepare"
     case .list: return "project.list"
     case .create: return "project.create"
     case .open: return "project.open"
@@ -28,22 +62,29 @@ enum ProjectCommand: Equatable {
   }
   var projectName: String? {
     switch self {
-    case .list, .importPreview: return nil
+    case .setupInspect, .setupPrepare, .list, .importPreview: return nil
     case .create(let n, _, _), .open(let n), .status(let n), .stop(let n),
          .importProject(let n, _, _, _), .importRetry(let n), .export(let n, _),
          .exportList(let n), .exportRetry(let n, _), .rebuild(let n, _), .rebuildRetry(let n): return n
     }
   }
   var isMutation: Bool {
-    switch self { case .list, .status, .importPreview, .exportList: return false; default: return true }
+    switch self { case .setupInspect, .list, .status, .importPreview, .exportList: return false; default: return true }
   }
   func arguments(config: String, domain: String) throws -> [String] {
     guard Self.validPath(config), Self.validToken(domain), projectName.map(Self.validToken) ?? true else {
       throw ProjectClientError.invalidRequest("Invalid configuration, domain, or project locator")
     }
+    if case .setupInspect = self { return ["--config", config, "setup", "inspect", "--json"] }
+    if case .setupPrepare(let inputs) = self {
+      guard inputs.count == 7, inputs.allSatisfy(Self.validPath) else { throw ProjectClientError.invalidRequest("Choose all seven setup inputs") }
+      let flags = ["--package", "--iso", "--checker", "--go", "--zstd", "--openssl", "--xorriso"]
+      return ["--config", config, "setup", "prepare", "--json"] + zip(flags, inputs).flatMap { [$0, $1] }
+    }
     let prefix = ["--config", config, "--domain", domain, "project"]
     var args: [String]
     switch self {
+    case .setupInspect, .setupPrepare: throw ProjectClientError.invalidRequest("Unexpected setup command")
     case .list: args = ["list", "--json"]
     case .create(let n, let recipe, let size):
       guard ["desktop", "actions", "chatgpt"].contains(recipe), size > 0 else { throw ProjectClientError.invalidRequest("Invalid recipe or workspace size") }
@@ -114,7 +155,7 @@ struct ProjectExportEntry: Decodable {
   let matchesCurrentBookmark: Bool; let retryAvailable: Bool
 }
 struct ProjectExportList: Decodable { let projectName: String; let exports: [ProjectExportEntry] }
-enum ProjectResponse { case list(ProjectList), project(ProjectRecord), preview(ProjectPreview), export(ProjectExportReceipt), exports(ProjectExportList) }
+enum ProjectResponse { case setup(SetupInspection), list(ProjectList), project(ProjectRecord), preview(ProjectPreview), export(ProjectExportReceipt), exports(ProjectExportList) }
 
 struct ProjectEvent: Decodable {
   let version: Int; let type: String; let operation: String; let message: String?; let response: ProjectResponse?; let uncertain: Bool
@@ -131,6 +172,7 @@ struct ProjectEvent: Decodable {
     uncertain = type == "error" ? (try c.decodeIfPresent(ErrorData.self, forKey: .data)?.uncertain ?? true) : false
     if type == "result" {
       switch operation {
+      case "setup.inspect", "setup.prepare": response = .setup(try c.decode(SetupInspection.self, forKey: .data))
       case "project.list": response = .list(try c.decode(ProjectList.self, forKey: .data))
       case "project.import.preview": response = .preview(try c.decode(ProjectPreview.self, forKey: .data))
       case "project.export", "project.export.retry": response = .export(try c.decode(ProjectExportReceipt.self, forKey: .data))
@@ -142,7 +184,14 @@ struct ProjectEvent: Decodable {
   }
   static func decode(_ data: Data, operation: String) throws -> ProjectEvent {
     let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
-    let event = try decoder.decode(ProjectEvent.self, from: data)
+    let event: ProjectEvent
+    if operation == "setup.inspect" {
+      let inspection = try decoder.decode(SetupInspection.self, from: data)
+      guard inspection.version == 1, inspection.scope == "alpha_project_setup", SetupInspection.statuses.contains(inspection.status) else { throw ProjectClientError.invalidResponse("Unsupported setup inspection") }
+      var envelope: [String: Any] = ["version": 1, "type": "result", "operation": operation]
+      envelope["data"] = try JSONSerialization.jsonObject(with: data)
+      event = try decoder.decode(ProjectEvent.self, from: JSONSerialization.data(withJSONObject: envelope))
+    } else { event = try decoder.decode(ProjectEvent.self, from: data) }
     guard event.operation == operation else { throw ProjectClientError.invalidResponse("JSON operation does not match request") }
     return event
   }

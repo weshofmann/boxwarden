@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,6 +20,11 @@ const (
 	version               = 2
 	maxConfigurationBytes = 1 << 20
 )
+
+// These narrow classifications preserve the original fail-closed admission.
+// They allow setup inspection to distinguish unavailable inputs without prose parsing.
+var ErrHostPrerequisites = errors.New("host prerequisites failed admission")
+var ErrWorkspaceStorageUnavailable = errors.New("enrolled workspace storage unavailable")
 
 type Config struct {
 	domains map[domain.ID]Domain
@@ -332,15 +338,15 @@ func decodeHost(decoder *json.Decoder) (Host, error) {
 	var err error
 	host.TartExecutable, err = canonicalRegularFile(host.TartExecutable)
 	if err != nil {
-		return Host{}, fmt.Errorf("host tart_executable: %w", err)
+		return Host{}, fmt.Errorf("host tart_executable: %w: %w", ErrHostPrerequisites, err)
 	}
 	host.TartHome, err = canonicalPrivateOperatorDirectory(host.TartHome)
 	if err != nil {
-		return Host{}, fmt.Errorf("host tart_home: %w", err)
+		return Host{}, fmt.Errorf("host tart_home: %w: %w", ErrHostPrerequisites, err)
 	}
 	host.SoftnetSource, err = canonicalRegularFile(host.SoftnetSource)
 	if err != nil {
-		return Host{}, fmt.Errorf("host softnet_source: %w", err)
+		return Host{}, fmt.Errorf("host softnet_source: %w: %w", ErrHostPrerequisites, err)
 	}
 	return host, nil
 }
@@ -448,6 +454,9 @@ func decodeDomain(decoder *json.Decoder, id domain.ID) (Domain, error) {
 	}
 	canonical, err := canonicalPrivateDirectory(root)
 	if err != nil {
+		if storage != nil && errors.Is(err, os.ErrNotExist) {
+			return Domain{}, fmt.Errorf("domain %q state_root: %w: %w", id, ErrWorkspaceStorageUnavailable, err)
+		}
 		return Domain{}, fmt.Errorf("domain %q state_root: %w", id, err)
 	}
 	return Domain{ID: id, StateRoot: canonical, WorkspaceStorage: storage}, nil

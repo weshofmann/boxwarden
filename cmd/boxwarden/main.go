@@ -67,7 +67,15 @@ func publicOptions(output io.Writer) app.Options {
 	hostInitializer := hostx.NewSystemInitializer()
 	hostDoctor := hostx.NewSystemDoctor()
 	return app.Options{
-		ProjectSetupCheck:        checkProjectSetup,
+		SetupPrepare:      prepareSetup,
+		ProjectSetupCheck: checkProjectSetup,
+		DomainSetupCheck: func(ctx context.Context, loaded config.Config, selected config.Domain) (bool, error) {
+			configured := make([]sshx.Domain, 0, len(loaded.Domains()))
+			for _, d := range loaded.Domains() {
+				configured = append(configured, sshx.Domain{ID: d.ID, StateRoot: d.StateRoot})
+			}
+			return caStore.CheckInitialized(ctx, sshx.Domain{ID: selected.ID, StateRoot: selected.StateRoot}, configured)
+		},
 		OutputTerminal:           clipboardTerminal(os.Stdout),
 		Pasteboard:               clipboardhost.New(),
 		PrivatePasteboardFactory: clipboardhost.NewPrivate,

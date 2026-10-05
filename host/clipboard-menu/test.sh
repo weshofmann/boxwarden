@@ -44,3 +44,14 @@ swiftc -D PROJECT_APP_TEST -parse-as-library -framework AppKit \
   "$base"/host/clipboard-menu/Sources/Project*.swift \
   "$base/host/clipboard-menu/Tests/ProjectWindowTests.swift" -o "$temporary/window-tests"
 "$temporary/window-tests"
+
+# Render the original template source at Retina and standard menu-bar scales.
+swiftc -warnings-as-errors -parse-as-library -framework AppKit \
+  "$base/host/clipboard-menu/Sources/ProjectStatusIcon.swift" \
+  "$base/host/clipboard-menu/Tests/ProjectStatusIconTests.swift" -o "$temporary/icon-tests"
+"$temporary/icon-tests"
+swiftc -warnings-as-errors -D PROJECT_APP_TEST -parse-as-library -framework AppKit \
+  "$base/host/clipboard-menu/Sources/MenuModel.swift" "$base/host/clipboard-menu/Sources/CLIClient.swift" \
+  "$base"/host/clipboard-menu/Sources/Project*.swift \
+  "$base/host/clipboard-menu/Tests/ProjectOnboardingTests.swift" -o "$temporary/onboarding-tests"
+"$temporary/onboarding-tests"
