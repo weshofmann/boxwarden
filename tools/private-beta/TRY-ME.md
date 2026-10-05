@@ -283,7 +283,7 @@ GO_BIN=/absolute/actual/go \
 BOXWARDEN_SUPPORT_ISO=/absolute/ubuntu-24.04.4-desktop-arm64.iso \
 BOXWARDEN_SUPPORT_CHECKER_DEB=/absolute/e2fsck-static.deb \
 BOXWARDEN_SUPPORT_ZSTD=/absolute/actual/zstd \
-bash tools/private-beta/build.sh 0.2.0-beta.20 /absolute/new-output stock
+bash tools/private-beta/build.sh 0.2.0-beta.21 /absolute/new-output stock
 ```
 
 This builds locally and publishes no release.

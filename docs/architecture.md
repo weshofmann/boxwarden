@@ -339,3 +339,10 @@ manifest. Source inventory, fixed kernel pins, byte-exact initrd prefix/entries,
 request, signatures, snapshot identity and post-stop checks remain enforced.
 Assembly needs system helpers, but no Go compiler, Swift compiler or zstd.
 No VM is started by support construction, admission or setup preparation.
+
+Darwin storage identity observes all distinct mounted APFS filesystems through
+search-only directory handles, checking descriptor filesystem identity before
+and after the volume UUID read. This avoids asking to read unrelated removable
+volume contents while retaining complete duplicate-UUID rejection and remount
+race checks. The chosen configuration/state anchors retain their normal pinned
+handles and admission checks.

@@ -257,3 +257,10 @@ no ACL or solely macOS's exact `group:everyone deny delete` entry. This denial
 grants no access; inherited flags, extra entries, any grants, writable modes,
 symlinks and foreign owners fail. Private anchors and files still permit no ACL.
 Go setup/formatter checks and native Swift admission enforce the same distinction.
+
+The Darwin APFS UUID inventory uses directory search-only (`O_SEARCH`) handles
+with `O_NOFOLLOW`, so inspecting volume identity does not request directory
+contents on unrelated mounted volumes. Every distinct APFS filesystem remains
+in the inventory; errors and duplicate UUIDs fail closed. Descriptor APFS/FSID
+checks bracket UUID observation. Selected storage anchors keep their existing
+access and admission requirements; no privacy permission is bypassed.

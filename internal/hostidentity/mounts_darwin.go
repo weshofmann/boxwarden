@@ -4,6 +4,7 @@ package hostidentity
 
 /*
 #include <sys/attr.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
 #include <stdint.h>
@@ -54,6 +55,13 @@ func requireUniqueMountedUUID(expected string, active syscall.Fsid, mounts []mou
 	return nil
 }
 
+// Inventory needs filesystem metadata, not directory contents. O_SEARCH uses
+// Darwin directory search authority; selected storage anchors remain read/write
+// handles admitted by their callers. Keep O_NOFOLLOW and fail closed on errors.
+func openMountedVolumeMetadata(path string) (*os.File, error) {
+	return os.OpenFile(path, int(C.O_SEARCH)|syscall.O_NOFOLLOW, 0)
+}
+
 func mountedAPFSVolumes() ([]mountedVolume, error) {
 	const mntNowait = 2
 	count, err := syscall.Getfsstat(nil, mntNowait)
@@ -73,7 +81,7 @@ func mountedAPFSVolumes() ([]mountedVolume, error) {
 		}
 		seen[entry.Fsid] = true
 		path := int8String(entry.Mntonname[:])
-		file, openErr := os.OpenFile(path, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+		file, openErr := openMountedVolumeMetadata(path)
 		if openErr != nil {
 			return nil, fmt.Errorf("open mounted APFS volume %q: %w", path, openErr)
 		}
@@ -88,9 +96,17 @@ func mountedAPFSVolumes() ([]mountedVolume, error) {
 		}
 		var uuid [16]byte
 		code := C.bw_mount_uuid(C.int(file.Fd()), (*C.uint8_t)(unsafe.Pointer(&uuid[0])))
+		var after syscall.Statfs_t
+		afterErr := syscall.Fstatfs(int(file.Fd()), &after)
 		closeErr := file.Close()
 		if code != 0 {
 			return nil, fmt.Errorf("read mounted APFS volume %q UUID: %w", path, syscall.Errno(code))
+		}
+		if afterErr != nil {
+			return nil, fmt.Errorf("recheck mounted APFS volume %q: %w", path, afterErr)
+		}
+		if !sameMountedFilesystem(opened, after) {
+			return nil, fmt.Errorf("mounted APFS path %q changed while reading UUID", path)
 		}
 		if closeErr != nil {
 			return nil, closeErr
